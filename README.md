@@ -1,240 +1,153 @@
 <a name="readme-top"></a>
 
-<!--
-!!! IMPORTANT !!!
-This README is an example of how you could professionally present your codebase. 
-Writing documentation is a crucial part of your work as a professional software developer and cannot be ignored. 
-
-You should modify this file to match your project and remove sections that don't apply.
-
-REQUIRED SECTIONS:
-- Table of Contents
-- About the Project
-  - Built With
-  - Live Demo
-- Getting Started
-- Authors
-- Future Features
-- Contributing
-- Show your support
-- Acknowledgements
-- License
-
-OPTIONAL SECTIONS:
-- FAQ
-
-After you're finished please remove all the comments and instructions!
-
-For more information on the importance of a professional README for your repositories: https://github.com/microverseinc/curriculum-transversal-skills/blob/main/documentation/articles/readme_best_practices.md
--->
-
 <div align="center">
-  <!-- You are encouraged to replace this logo with your own! Otherwise you can also remove it. -->
-  <img src="murple_logo.png" alt="logo" width="140"  height="auto" />
-  <br/>
-
-  <h3><b>Microverse README Template</b></h3>
-
+  <h1><b>Sync - School Management System</b></h1>
+  <p>A modern, mobile-first school management system for Zambian schools</p>
 </div>
-
-<!-- TABLE OF CONTENTS -->
 
 # 📗 Table of Contents
 
 - [📖 About the Project](#about-project)
   - [🛠 Built With](#built-with)
-    - [Tech Stack](#tech-stack)
-    - [Key Features](#key-features)
-  - [🚀 Live Demo](#live-demo)
+  - [Key Features](#key-features)
 - [💻 Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Setup](#setup)
-  - [Install](#install)
+  - [Installation](#installation)
   - [Usage](#usage)
-  - [Run tests](#run-tests)
-  - [Deployment](#deployment)
 - [👥 Authors](#authors)
 - [🔭 Future Features](#future-features)
 - [🤝 Contributing](#contributing)
 - [⭐️ Show your support](#support)
-- [🙏 Acknowledgements](#acknowledgements)
-- [❓ FAQ (OPTIONAL)](#faq)
 - [📝 License](#license)
 
-<!-- PROJECT DESCRIPTION -->
+# 📖 Sync School Management System <a name="about-project"></a>
 
-# 📖 [your_project_name] <a name="about-project"></a>
+**Sync** is a comprehensive school management system specifically designed for Zambian schools. It simplifies administrative tasks for non-technical teachers with an intuitive, mobile-first interface. The system handles student profiles, payment tracking, attendance management, and class administration.
 
-> Describe your project in 1 or 2 sentences.
-
-**[your_project__name]** is a...
+The system is optimized for the Zambian educational context with:
+- ZMW currency formatting
+- Local date formats (DD/MM/YYYY)
+- Class levels: Baby, Primary, and Secondary
+- Academic term structure (Term 1, 2, 3)
 
 ## 🛠 Built With <a name="built-with"></a>
 
-### Tech Stack <a name="tech-stack"></a>
+### Tech Stack
 
-> Describe the tech stack and include only the relevant sections that apply to your project.
-
-<details>
-  <summary>Client</summary>
-  <ul>
-    <li><a href="https://reactjs.org/">React.js</a></li>
-  </ul>
-</details>
-
-<details>
-  <summary>Server</summary>
-  <ul>
-    <li><a href="https://expressjs.com/">Express.js</a></li>
-  </ul>
-</details>
-
-<details>
-<summary>Database</summary>
-  <ul>
-    <li><a href="https://www.postgresql.org/">PostgreSQL</a></li>
-  </ul>
-</details>
-
-<!-- Features -->
+- **Frontend**: React.js with Vite
+- **Backend**: Node.js with Express.js
+- **Database**: MongoDB with Mongoose ODM
+- **Styling**: Custom CSS with mobile-first responsive design
 
 ### Key Features <a name="key-features"></a>
 
-> Describe between 1-3 key features of the application.
-
-- **[key_feature_1]**
-- **[key_feature_2]**
-- **[key_feature_3]**
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- LIVE DEMO -->
-
-## 🚀 Live Demo <a name="live-demo"></a>
-
-> Add a link to your deployed project.
-
-- [Live Demo Link](https://google.com)
+- **Student Profile Management**: Comprehensive student records with class assignments (Baby/Primary/Secondary)
+- **Payment Tracking System**: Monitor school fees with payment status badges and "Students Owing" dashboard
+- **One-Tap Attendance**: Quick and easy attendance marking system for teachers
+- **Class Management**: Organize classes with teacher assignments
+- **Mobile-First Design**: Optimized for smartphones and tablets used by teachers
+- **Zambian Localization**: ZMW currency, local date formats, and term structure
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- GETTING STARTED -->
 
 ## 💻 Getting Started <a name="getting-started"></a>
-
-> Describe how a new developer could make use of your project.
 
 To get a local copy up and running, follow these steps.
 
 ### Prerequisites
 
-In order to run this project you need:
-
-<!--
-Example command:
-
-```sh
- gem install rails
-```
- -->
+- Node.js (v14 or higher)
+- MongoDB (v4.4 or higher)
+- npm or yarn package manager
 
 ### Setup
 
-Clone this repository to your desired folder:
-
-<!--
-Example commands:
+Clone this repository:
 
 ```sh
-  cd my-folder
-  git clone git@github.com:myaccount/my-project.git
+git clone https://github.com/LYANGEND/Sync.git
+cd Sync
 ```
---->
 
-### Install
+### Installation
 
-Install this project with:
-
-<!--
-Example command:
+Install dependencies for both backend and frontend:
 
 ```sh
-  cd my-project
-  gem install
+# Install backend dependencies
+cd backend
+npm install
+
+# Install frontend dependencies
+cd ../frontend
+npm install
 ```
---->
+
+### Configuration
+
+Create a `.env` file in the backend directory:
+
+```sh
+cd backend
+cp .env.example .env
+```
+
+Update the `.env` file with your MongoDB connection string:
+
+```
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/sync-school-management
+NODE_ENV=development
+```
 
 ### Usage
 
-To run the project, execute the following command:
-
-<!--
-Example command:
+Run the backend server:
 
 ```sh
-  rails server
+cd backend
+npm run dev
 ```
---->
 
-### Run tests
+The backend will start on http://localhost:5000
 
-To run tests, run the following command:
-
-<!--
-Example command:
+In a new terminal, run the frontend:
 
 ```sh
-  bin/rails test test/models/article_test.rb
+cd frontend
+npm run dev
 ```
---->
 
-### Deployment
+The frontend will start on http://localhost:3000
 
-You can deploy this project using:
+### Default Setup
 
-<!--
-Example:
-
-```sh
-
-```
- -->
+The system comes with:
+- Empty database ready for data entry
+- RESTful API endpoints for all features
+- Mobile-responsive UI
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- AUTHORS -->
 
 ## 👥 Authors <a name="authors"></a>
 
-> Mention all of the collaborators of this project.
+👤 **LYANGEND**
 
-👤 **Author1**
-
-- GitHub: [@githubhandle](https://github.com/githubhandle)
-- Twitter: [@twitterhandle](https://twitter.com/twitterhandle)
-- LinkedIn: [LinkedIn](https://linkedin.com/in/linkedinhandle)
-
-👤 **Author2**
-
-- GitHub: [@githubhandle](https://github.com/githubhandle)
-- Twitter: [@twitterhandle](https://twitter.com/twitterhandle)
-- LinkedIn: [LinkedIn](https://linkedin.com/in/linkedinhandle)
+- GitHub: [@LYANGEND](https://github.com/LYANGEND)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- FUTURE FEATURES -->
 
 ## 🔭 Future Features <a name="future-features"></a>
 
-> Describe 1 - 3 features you will add to the project.
-
-- [ ] **[new_feature_1]**
-- [ ] **[new_feature_2]**
-- [ ] **[new_feature_3]**
+- [ ] **SMS Notifications** - Send automated SMS to parents for fee reminders and attendance alerts
+- [ ] **Report Generation** - Generate PDF reports for student performance and payment history
+- [ ] **Mobile App** - Native mobile applications for iOS and Android
+- [ ] **Biometric Attendance** - Fingerprint or face recognition for attendance marking
+- [ ] **Gradebook** - Track and manage student grades and performance
+- [ ] **Parent Portal** - Allow parents to view their child's progress and payments online
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- CONTRIBUTING -->
 
 ## 🤝 Contributing <a name="contributing"></a>
 
@@ -244,39 +157,9 @@ Feel free to check the [issues page](../../issues/).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<!-- SUPPORT -->
-
 ## ⭐️ Show your support <a name="support"></a>
 
-> Write a message to encourage readers to support your project
-
-If you like this project...
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- ACKNOWLEDGEMENTS -->
-
-## 🙏 Acknowledgments <a name="acknowledgements"></a>
-
-> Give credit to everyone who inspired your codebase.
-
-I would like to thank...
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- FAQ (optional) -->
-
-## ❓ FAQ (OPTIONAL) <a name="faq"></a>
-
-> Add at least 2 questions new developers would ask when they decide to use your project.
-
-- **[Question_1]**
-
-  - [Answer_1]
-
-- **[Question_2]**
-
-  - [Answer_2]
+If you like this project and find it useful for your school, please give it a ⭐️!
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
