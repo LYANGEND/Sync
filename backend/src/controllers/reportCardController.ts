@@ -4,144 +4,14 @@ import { z } from 'zod';
 
 const prisma = new PrismaClient();
 
-export const generateStudentReport = async (req: Request, res: Response) => {
-  try {
-    const { studentId, termId } = req.body;
-    
-    await generateSingleStudentReport(studentId, termId);
-
-    // Fetch the generated report to return it
-    const report = await prisma.studentTermReport.findUnique({
-      where: {
-        studentId_termId: {
-          studentId,
-          termId
-        }
-      },
-      include: {
-        student: true,
-        class: true,
-        term: true
-      }
-    });
-
-    const results = await prisma.termResult.findMany({
-      where: {
-        studentId,
-        termId
-      },
-      include: {
-        subject: true
-      }
-    });
-
-    // Calculate average
-    const totalScore = results.reduce((sum, r) => sum + Number(r.totalScore), 0);
-    const averageScore = results.length > 0 ? totalScore / results.length : 0;
-
-    res.json({ 
-      ...report, 
-      results: results.map(r => ({
-        ...r,
-        totalScore: Number(r.totalScore),
-        subjectName: r.subject?.name || 'Unknown Subject'
-      })),
-      totalScore,
-      averageScore
-    });
-
-  } catch (error) {
-    console.error('Generate report error:', error);
-    res.status(500).json({ error: 'Failed to generate report' });
-  }
-};
-
-export const getStudentReport = async (req: Request, res: Response) => {
-  try {
-    const { studentId, termId } = req.query;
-
-    if (!studentId || !termId) {
-      return res.status(400).json({ error: 'Student ID and Term ID are required' });
-    }
-
-    const report = await prisma.studentTermReport.findUnique({
-      where: {
-        studentId_termId: {
-          studentId: String(studentId),
-          termId: String(termId)
-        }
-      },
-      include: {
-        student: true,
-        class: true,
-        term: true
-      }
-    });
-
-    if (!report) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-
-    const results = await prisma.termResult.findMany({
-      where: {
-        studentId: String(studentId),
-        termId: String(termId)
-      },
-      include: {
-        subject: true
-      }
-    });
-
-    // Calculate average
-    const totalScore = results.reduce((sum, r) => sum + Number(r.totalScore), 0);
-    const averageScore = results.length > 0 ? totalScore / results.length : 0;
-
-    res.json({ 
-      ...report, 
-      results: results.map(r => ({
-        ...r,
-        totalScore: Number(r.totalScore),
-        subjectName: r.subject?.name || 'Unknown Subject'
-      })),
-      totalScore,
-      averageScore
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch report' });
-  }
-};
-
-export const generateClassReports = async (req: Request, res: Response) => {
-  // Bulk generation for a whole class
-  try {
-    const { classId, termId } = req.body;
-    
-    const students = await prisma.student.findMany({
-      where: { classId, status: 'ACTIVE' }
-    });
-
-    let count = 0;
-    for (const student of students) {
-      // Re-use the logic (refactoring would be better, but calling via internal helper is okay)
-      // For now, we will just call the internal logic if we extracted it, 
-      // but since we didn't extract it, I'll just loop and call a helper function.
-      await generateSingleStudentReport(student.id, termId);
-      count++;
-    }
-    
-    res.json({ count, message: `Generated reports for ${count} students` });
-  } catch (error) {
-    console.error('Batch generation error:', error);
-    res.status(500).json({ error: 'Failed to generate class reports' });
-  }
-};
-
-// Helper function to avoid code duplication
-const generateSingleStudentReport = async (studentId: string, termId: string) => {
+// Helper function to generate a single report
+const generateSingleStudentReportHelper = async (studentId: string, termId: string, schoolId: string) => {
     // 1. Fetch Student and Class
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
+    const student = await prisma.student.findFirst({
+      where: { 
+        id: studentId,
+        schoolId: schoolId
+      },
       include: { class: true }
     });
 
@@ -151,7 +21,10 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
     const assessments = await prisma.assessment.findMany({
       where: {
         classId: student.classId,
-        termId: termId
+        termId: termId,
+        class: {
+            schoolId: schoolId
+        }
       },
       include: {
         results: {
@@ -162,6 +35,7 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
 
     // 3. Fetch Grading Scales
     const gradingScales = await prisma.gradingScale.findMany({
+      where: { schoolId: schoolId },
       orderBy: { minScore: 'desc' }
     });
 
@@ -213,7 +87,7 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
       });
     }
 
-    // 5. Create/Update Report Card (Simplified for batch)
+    // 5. Create/Update Report Card
     await prisma.studentTermReport.upsert({
       where: {
         studentId_termId: {
@@ -234,16 +108,182 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
     });
 };
 
+export const generateStudentReport = async (req: Request, res: Response) => {
+  try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    const { studentId, termId } = req.body;
+    
+    if (!studentId || !termId) {
+        return res.status(400).json({ message: 'Student ID and Term ID are required' });
+    }
+
+    await generateSingleStudentReportHelper(studentId, termId, req.school.id);
+
+    // Fetch the generated report to return it
+    const report = await prisma.studentTermReport.findFirst({
+      where: {
+        studentId,
+        termId,
+        student: {
+            schoolId: req.school.id
+        }
+      },
+      include: {
+        student: true,
+        class: true,
+        term: true
+      }
+    });
+
+    if (!report) {
+        return res.status(404).json({ message: 'Report could not be generated' });
+    }
+
+    const results = await prisma.termResult.findMany({
+      where: {
+        studentId,
+        termId
+      },
+      include: {
+        subject: true
+      }
+    });
+
+    // Calculate average
+    const totalScore = results.reduce((sum, r) => sum + Number(r.totalScore), 0);
+    const averageScore = results.length > 0 ? totalScore / results.length : 0;
+
+    res.json({ 
+      ...report, 
+      results: results.map(r => ({
+        ...r,
+        totalScore: Number(r.totalScore),
+        subjectName: r.subject?.name || 'Unknown Subject'
+      })),
+      totalScore,
+      averageScore
+    });
+
+  } catch (error) {
+    console.error('Generate report error:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+};
+
+export const getStudentReport = async (req: Request, res: Response) => {
+  try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    const { studentId, termId } = req.query;
+
+    if (!studentId || !termId) {
+      return res.status(400).json({ error: 'Student ID and Term ID are required' });
+    }
+
+    const report = await prisma.studentTermReport.findFirst({
+      where: {
+        studentId: String(studentId),
+        termId: String(termId),
+        student: {
+            schoolId: req.school.id
+        }
+      },
+      include: {
+        student: true,
+        class: true,
+        term: true
+      }
+    });
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const results = await prisma.termResult.findMany({
+      where: {
+        studentId: String(studentId),
+        termId: String(termId)
+      },
+      include: {
+        subject: true
+      }
+    });
+
+    // Calculate average
+    const totalScore = results.reduce((sum, r) => sum + Number(r.totalScore), 0);
+    const averageScore = results.length > 0 ? totalScore / results.length : 0;
+
+    res.json({ 
+      ...report, 
+      results: results.map(r => ({
+        ...r,
+        totalScore: Number(r.totalScore),
+        subjectName: r.subject?.name || 'Unknown Subject'
+      })),
+      totalScore,
+      averageScore
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch report' });
+  }
+};
+
+export const generateClassReports = async (req: Request, res: Response) => {
+  // Bulk generation for a whole class
+  try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    const { classId, termId } = req.body;
+    
+    const students = await prisma.student.findMany({
+      where: { 
+        classId, 
+        status: 'ACTIVE',
+        schoolId: req.school.id
+      }
+    });
+
+    let count = 0;
+    for (const student of students) {
+      await generateSingleStudentReportHelper(student.id, termId, req.school.id);
+      count++;
+    }
+    
+    res.json({ count, message: `Generated reports for ${count} students` });
+  } catch (error) {
+    console.error('Batch generation error:', error);
+    res.status(500).json({ error: 'Failed to generate class reports' });
+  }
+};
+
 export const updateReportRemarks = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { studentId, termId, classTeacherRemark, principalRemark } = req.body;
 
-    const report = await prisma.studentTermReport.update({
-      where: {
-        studentId_termId: {
-          studentId,
-          termId
+    // Verify student belongs to school
+    const student = await prisma.student.findFirst({
+        where: {
+            id: studentId,
+            schoolId: req.school.id
         }
+    });
+
+    if (!student) {
+        return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const report = await prisma.studentTermReport.updateMany({
+      where: {
+        studentId,
+        termId
       },
       data: {
         classTeacherRemark,

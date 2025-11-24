@@ -18,7 +18,11 @@ const assignFeeSchema = z.object({
 
 export const getFeeTemplates = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const templates = await prisma.feeTemplate.findMany({
+      where: { schoolId: req.school.id },
       include: {
         academicTerm: true,
       },
@@ -36,10 +40,14 @@ export const getFeeTemplates = async (req: Request, res: Response) => {
 
 export const createFeeTemplate = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { name, amount, academicTermId, applicableGrade } = feeTemplateSchema.parse(req.body);
 
     const template = await prisma.feeTemplate.create({
       data: {
+        schoolId: req.school.id,
         name,
         amount,
         academicTermId,
@@ -58,20 +66,35 @@ export const createFeeTemplate = async (req: Request, res: Response) => {
 
 export const assignFeeToClass = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { feeTemplateId, classId } = assignFeeSchema.parse(req.body);
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
 
     // 1. Get the fee template to know the amount
     const feeTemplate = await prisma.feeTemplate.findUnique({
       where: { id: feeTemplateId },
     });
 
-    if (!feeTemplate) {
+    if (!feeTemplate || feeTemplate.schoolId !== req.school.id) {
       return res.status(404).json({ error: 'Fee template not found' });
     }
 
     // 2. Get all students in the class with their scholarship info
     const students = await prisma.student.findMany({
-      where: { classId: classId, status: 'ACTIVE' },
+      where: { classId: classId, status: 'ACTIVE', schoolId: req.school.id },
       include: { scholarship: true },
     });
 

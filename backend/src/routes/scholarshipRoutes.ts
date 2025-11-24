@@ -10,7 +10,7 @@ import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 const router = Router();
 
 router.use(authenticateToken);
-router.use(authorizeRole(['SUPER_ADMIN', 'BURSAR']));
+router.use(authorizeRole(['SUPER_ADMIN', 'BURSAR', 'SYSTEM_OWNER']));
 
 router.get('/', getScholarships);
 router.post('/', createScholarship);

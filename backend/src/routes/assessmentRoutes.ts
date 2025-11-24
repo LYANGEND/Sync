@@ -14,12 +14,12 @@ const router = Router();
 router.use(authenticateToken);
 
 // Assessment Management
-router.post('/', authorizeRole(['TEACHER', 'SUPER_ADMIN']), createAssessment);
+router.post('/', authorizeRole(['TEACHER', 'SUPER_ADMIN', 'SYSTEM_OWNER']), createAssessment);
 router.get('/', getAssessments);
 router.get('/:id', getAssessmentById);
 
 // Results Management
-router.post('/results', authorizeRole(['TEACHER', 'SUPER_ADMIN']), recordResults);
+router.post('/results', authorizeRole(['TEACHER', 'SUPER_ADMIN', 'SYSTEM_OWNER']), recordResults);
 router.get('/:id/results', getAssessmentResults);
 
 // Student specific

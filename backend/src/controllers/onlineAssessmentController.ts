@@ -18,12 +18,18 @@ const questionSchema = z.object({
 
 export const addQuestionsToAssessment = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { assessmentId } = req.params;
     const { questions } = req.body;
 
-    // Validate assessment exists
-    const assessment = await prisma.assessment.findUnique({
-      where: { id: assessmentId }
+    // Validate assessment exists and belongs to school (via Class)
+    const assessment = await prisma.assessment.findFirst({
+      where: { 
+        id: assessmentId,
+        class: { schoolId: req.school.id }
+      }
     });
 
     if (!assessment) {
@@ -72,12 +78,22 @@ export const addQuestionsToAssessment = async (req: Request, res: Response) => {
 
 export const getAssessmentQuestions = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { assessmentId } = req.params;
     
-    // Check if user is student or teacher
-    // If student, don't return correct answers or isCorrect flags
-    // For now, assuming teacher view or internal logic handles it
-    // But wait, if this is for taking the quiz, we must hide answers.
+    // Verify ownership
+    const assessment = await prisma.assessment.findFirst({
+      where: { 
+        id: assessmentId,
+        class: { schoolId: req.school.id }
+      }
+    });
+
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
     
     const questions = await prisma.question.findMany({
       where: { assessmentId },
@@ -102,10 +118,16 @@ export const getAssessmentQuestions = async (req: Request, res: Response) => {
 // For Students taking the quiz
 export const getQuizForStudent = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { assessmentId } = req.params;
     
-    const assessment = await prisma.assessment.findUnique({
-      where: { id: assessmentId },
+    const assessment = await prisma.assessment.findFirst({
+      where: { 
+        id: assessmentId,
+        class: { schoolId: req.school.id }
+      },
       include: {
         questions: {
           include: {
@@ -147,6 +169,9 @@ export const getQuizForStudent = async (req: Request, res: Response) => {
 
 export const submitQuiz = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { assessmentId } = req.params;
     const { studentId, responses } = req.body; // responses: { questionId: string, answer: string | optionId }[]
 
@@ -155,12 +180,23 @@ export const submitQuiz = async (req: Request, res: Response) => {
     
     // Check if this ID looks like a User ID (UUID) and try to find a student linked to it
     // Or just try to find a student with this userId
-    const studentProfile = await prisma.student.findUnique({
-      where: { userId: studentId }
+    const studentProfile = await prisma.student.findFirst({
+      where: { 
+        userId: studentId,
+        schoolId: req.school.id
+      }
     });
 
     if (studentProfile) {
       actualStudentId = studentProfile.id;
+    } else {
+        // Verify the studentId passed directly also belongs to the school
+        const student = await prisma.student.findFirst({
+            where: { id: studentId, schoolId: req.school.id }
+        });
+        if (!student) {
+             return res.status(404).json({ error: 'Student not found' });
+        }
     }
 
     // Start transaction
@@ -236,6 +272,9 @@ export const submitQuiz = async (req: Request, res: Response) => {
 
 export const getStudentAssessments = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     
     if (!userId) {
@@ -243,8 +282,11 @@ export const getStudentAssessments = async (req: Request, res: Response) => {
     }
 
     // Find student profile
-    const student = await prisma.student.findUnique({
-      where: { userId }
+    const student = await prisma.student.findFirst({
+      where: { 
+        userId,
+        schoolId: req.school.id
+      }
     });
 
     if (!student) {

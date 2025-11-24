@@ -7,6 +7,6 @@ const router = Router();
 router.use(authenticateToken);
 
 router.get('/', getAcademicTerms);
-router.post('/', authorizeRole(['SUPER_ADMIN']), createAcademicTerm);
+router.post('/', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), createAcademicTerm);
 
 export default router;

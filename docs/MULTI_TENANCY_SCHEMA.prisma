@@ -1,3 +1,7 @@
+// MULTI-TENANT SCHEMA PROPOSAL
+// This schema demonstrates how to transform the current single-tenant architecture
+// into a multi-tenant architecture where multiple schools coexist in the same database.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,15 +11,311 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------
+// NEW: TENANT ROOT MODEL
+// ---------------------------------------------------------
+
+model School {
+  id            String   @id @default(uuid())
+  slug          String   @unique // e.g. "st-marys" (used for subdomains: st-marys.app.com)
+  name          String
+  address       String?
+  phone         String?
+  email         String?
+  website       String?
+  logoUrl       String?
+  
+  isActive      Boolean  @default(true)
+  subscriptionPlan String @default("FREE") // FREE, PRO, ENTERPRISE
+  
+  // Settings (Merged from SchoolSettings)
+  currentTermId     String?  // No relation here to avoid circular dependency issues on creation, or keep it optional
+  
+  // Communication Config (Per School)
+  smtpHost          String?
+  smtpPort          Int?
+  smtpSecure        Boolean  @default(true)
+  smtpUser          String?
+  smtpPassword      String?
+  smtpFromEmail     String?
+  smtpFromName      String?
+
+  smsProvider       String?
+  smsApiKey         String?
+  smsApiSecret      String?
+  smsSenderId       String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // RELATIONS (Everything belongs to a School)
+  users         User[]
+  students      Student[]
+  classes       Class[]
+  subjects      Subject[]
+  academicTerms AcademicTerm[]
+  feeTemplates  FeeTemplate[]
+  notifications Notification[]
+  scholarships  Scholarship[]
+  gradingScales GradingScale[]
+  
+  @@map("schools")
+}
+
+// ---------------------------------------------------------
+// UPDATED MODELS
+// ---------------------------------------------------------
+
 enum Role {
-  SYSTEM_OWNER
-  SUPER_ADMIN
+  SUPER_ADMIN // Now "School Admin"
   BURSAR
   TEACHER
   SECRETARY
   PARENT
   STUDENT
+  // PLATFORM_ADMIN // Optional: New role for the SaaS owner
 }
+
+model User {
+  id            String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId      String
+  school        School   @relation(fields: [schoolId], references: [id])
+
+  email         String
+  passwordHash  String
+  fullName      String
+  role          Role
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations (Scoped to School via logic, but relations remain same)
+  classesManaged Class[]
+  paymentsRecorded Payment[]
+  attendanceRecorded Attendance[]
+  classMovementsRecorded ClassMovementLog[]
+  children Student[] @relation("ParentChildren")
+  assessmentsGraded AssessmentResult[]
+  studentProfile Student?
+  timetablePeriodsTaught TimetablePeriod[]
+  lessonPlans    LessonPlan[]
+  notifications  Notification[]
+  
+  conversationParticipants ConversationParticipant[]
+  messagesSent             Message[]
+
+  // Email must be unique PER SCHOOL (or globally if you want a single login for multiple schools)
+  // Usually for SaaS, email is unique per school, or unique globally with a mapping table.
+  // Simple approach: Unique per school.
+  @@unique([email, schoolId]) 
+  @@map("users")
+}
+
+model Student {
+  id              String        @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId        String
+  school          School        @relation(fields: [schoolId], references: [id])
+
+  admissionNumber String
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime
+  gender          Gender
+  guardianName    String
+  guardianPhone   String
+  address         String?
+  status          StudentStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  classId         String
+  class           Class         @relation(fields: [classId], references: [id])
+  
+  scholarshipId   String?
+  scholarship     Scholarship?  @relation(fields: [scholarshipId], references: [id])
+
+  payments        Payment[]
+  attendance      Attendance[]
+  feeStructures   StudentFeeStructure[]
+  classMovements  ClassMovementLog[]
+  
+  parentId        String?
+  parent          User?         @relation("ParentChildren", fields: [parentId], references: [id])
+  
+  userId          String?       @unique // One-to-one with User (who is also scoped to school)
+  user            User?         @relation(fields: [userId], references: [id])
+
+  assessmentResults AssessmentResult[]
+  termResults       TermResult[]
+  termReports       StudentTermReport[]
+  submissions     AssessmentSubmission[]
+
+  // Admission number unique ONLY within the school
+  @@unique([admissionNumber, schoolId])
+  @@map("students")
+}
+
+model Class {
+  id             String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId       String
+  school         School   @relation(fields: [schoolId], references: [id])
+
+  name           String
+  gradeLevel     Int
+  teacherId      String
+  teacher        User     @relation(fields: [teacherId], references: [id])
+  academicTermId String
+  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
+  
+  students       Student[]
+  attendance     Attendance[]
+  subjects       Subject[] @relation("ClassSubjects")
+  
+  incomingMovements ClassMovementLog[] @relation("ToClass")
+  outgoingMovements ClassMovementLog[] @relation("FromClass")
+  
+  assessments    Assessment[]
+  termResults    TermResult[]
+  termReports    StudentTermReport[]
+  timetablePeriods TimetablePeriod[]
+  topicProgress  TopicProgress[]
+  lessonPlans    LessonPlan[]
+
+  @@map("classes")
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+
+  name      String
+  code      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classes   Class[]  @relation("ClassSubjects")
+  assessments Assessment[]
+  termResults TermResult[]
+  timetablePeriods TimetablePeriod[]
+  topics          Topic[]
+  lessonPlans     LessonPlan[]
+
+  // Subject code unique per school
+  @@unique([code, schoolId])
+  @@map("subjects")
+}
+
+model AcademicTerm {
+  id        String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(false)
+
+  classes      Class[]
+  feeTemplates FeeTemplate[]
+  assessments  Assessment[]
+  termResults  TermResult[]
+  studentReports StudentTermReport[]
+  timetablePeriods TimetablePeriod[]
+  lessonPlans    LessonPlan[]
+  
+  @@map("academic_terms")
+}
+
+// SchoolSettings is REMOVED and merged into 'School' model
+// or kept as a 1:1 relation if preferred.
+
+model Notification {
+  id        String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  type      NotificationType @default(INFO)
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+model FeeTemplate {
+  id              String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId        String
+  school          School   @relation(fields: [schoolId], references: [id])
+
+  name            String
+  amount          Decimal  @db.Decimal(10, 2)
+  academicTermId  String
+  academicTerm    AcademicTerm @relation(fields: [academicTermId], references: [id])
+  applicableGrade Int
+
+  studentFeeStructures StudentFeeStructure[]
+
+  @@map("fee_templates")
+}
+
+model Scholarship {
+  id          String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id])
+
+  name        String
+  percentage  Decimal  @db.Decimal(5, 2)
+  description String?
+
+  students    Student[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("scholarships")
+}
+
+model GradingScale {
+  id        String   @id @default(uuid())
+  
+  // NEW: Tenant Foreign Key
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+
+  grade     String   
+  minScore  Int      
+  maxScore  Int      
+  remark    String?  
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("grading_scales")
+}
+
+// ---------------------------------------------------------
+// UNCHANGED ENUMS
+// ---------------------------------------------------------
 
 enum Gender {
   MALE
@@ -85,286 +385,14 @@ enum SubmissionStatus {
   GRADED
 }
 
-model School {
-  id            String   @id @default(uuid())
-  slug          String   @unique // e.g. "st-marys"
-  name          String
-  address       String?
-  phone         String?
-  email         String?
-  website       String?
-  logoUrl       String?
-  
-  isActive      Boolean  @default(true)
-  subscriptionPlan String @default("FREE")
-  
-  // Settings (Merged from SchoolSettings)
-  currentTermId     String?
-  currentTerm       AcademicTerm? @relation("CurrentTerm", fields: [currentTermId], references: [id])
-  
-  // Communication Config
-  smtpHost          String?
-  smtpPort          Int?
-  smtpSecure        Boolean  @default(true)
-  smtpUser          String?
-  smtpPassword      String?
-  smtpFromEmail     String?
-  smtpFromName      String?
-
-  smsProvider       String?
-  smsApiKey         String?
-  smsApiSecret      String?
-  smsSenderId       String?
-
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // RELATIONS
-  users         User[]
-  students      Student[]
-  classes       Class[]
-  subjects      Subject[]
-  academicTerms AcademicTerm[]
-  feeTemplates  FeeTemplate[]
-  notifications Notification[]
-  scholarships  Scholarship[]
-  gradingScales GradingScale[]
-  
-  @@map("schools")
-}
-
-model User {
-  id            String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Optional for SYSTEM_OWNER)
-  schoolId      String?
-  school        School?  @relation(fields: [schoolId], references: [id])
-
-  email         String
-  passwordHash  String
-  fullName      String
-  role          Role
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relations
-  classesManaged Class[]
-  paymentsRecorded Payment[]
-  attendanceRecorded Attendance[]
-  classMovementsRecorded ClassMovementLog[]
-  children Student[] @relation("ParentChildren")
-  assessmentsGraded AssessmentResult[]
-  studentProfile Student?
-  timetablePeriodsTaught TimetablePeriod[]
-  lessonPlans    LessonPlan[]
-  notifications  Notification[]
-  
-  // Chat Relations
-  conversationParticipants ConversationParticipant[]
-  messagesSent             Message[]
-
-  @@unique([email, schoolId])
-  @@map("users")
-}
-
-model Student {
-  id              String        @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId        String
-  school          School        @relation(fields: [schoolId], references: [id])
-
-  admissionNumber String
-  firstName       String
-  lastName        String
-  dateOfBirth     DateTime
-  gender          Gender
-  guardianName    String
-  guardianPhone   String
-  address         String?
-  status          StudentStatus @default(ACTIVE)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  // Relations
-  classId         String
-  class           Class         @relation(fields: [classId], references: [id])
-  
-  scholarshipId   String?
-  scholarship     Scholarship?  @relation(fields: [scholarshipId], references: [id])
-
-  payments        Payment[]
-  attendance      Attendance[]
-  feeStructures   StudentFeeStructure[]
-  classMovements  ClassMovementLog[]
-  
-  parentId        String?
-  parent          User?         @relation("ParentChildren", fields: [parentId], references: [id])
-  
-  userId          String?       @unique
-  user            User?         @relation(fields: [userId], references: [id])
-
-  assessmentResults AssessmentResult[]
-  termResults       TermResult[]
-  termReports       StudentTermReport[]
-  submissions     AssessmentSubmission[]
-
-  @@unique([admissionNumber, schoolId])
-  @@map("students")
-}
-
-model Class {
-  id             String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId       String
-  school         School   @relation(fields: [schoolId], references: [id])
-
-  name           String
-  gradeLevel     Int
-  teacherId      String
-  teacher        User     @relation(fields: [teacherId], references: [id])
-  academicTermId String
-  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
-  
-  students       Student[]
-  attendance     Attendance[]
-  subjects       Subject[] @relation("ClassSubjects")
-  
-  incomingMovements ClassMovementLog[] @relation("ToClass")
-  outgoingMovements ClassMovementLog[] @relation("FromClass")
-  
-  assessments    Assessment[]
-  termResults    TermResult[]
-  termReports    StudentTermReport[]
-  timetablePeriods TimetablePeriod[]
-  topicProgress  TopicProgress[]
-  lessonPlans    LessonPlan[]
-
-  @@map("classes")
-}
-
-model Subject {
-  id        String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id])
-
-  name      String
-  code      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  classes   Class[]  @relation("ClassSubjects")
-  assessments Assessment[]
-  termResults TermResult[]
-  timetablePeriods TimetablePeriod[]
-  topics          Topic[]
-  lessonPlans     LessonPlan[]
-
-  @@unique([code, schoolId])
-  @@map("subjects")
-}
-
-model AcademicTerm {
-  id        String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id])
-
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  isActive  Boolean  @default(false)
-
-  classes      Class[]
-  feeTemplates FeeTemplate[]
-  assessments  Assessment[]
-  termResults  TermResult[]
-  studentReports StudentTermReport[]
-  timetablePeriods TimetablePeriod[]
-  lessonPlans    LessonPlan[]
-  
-  schoolsCurrentTerm School[] @relation("CurrentTerm")
-
-  @@map("academic_terms")
-}
-
-model Notification {
-  id        String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id])
-
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  title     String
-  message   String
-  isRead    Boolean  @default(false)
-  type      NotificationType @default(INFO)
-  createdAt DateTime @default(now())
-
-  @@map("notifications")
-}
-
-model FeeTemplate {
-  id              String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId        String
-  school          School   @relation(fields: [schoolId], references: [id])
-
-  name            String
-  amount          Decimal  @db.Decimal(10, 2)
-  academicTermId  String
-  academicTerm    AcademicTerm @relation(fields: [academicTermId], references: [id])
-  applicableGrade Int
-
-  studentFeeStructures StudentFeeStructure[]
-
-  @@map("fee_templates")
-}
-
-model Scholarship {
-  id          String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId    String
-  school      School   @relation(fields: [schoolId], references: [id])
-
-  name        String
-  percentage  Decimal  @db.Decimal(5, 2) // 0-100
-  description String?
-
-  students    Student[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@map("scholarships")
-}
-
-model GradingScale {
-  id        String   @id @default(uuid())
-  
-  // Tenant Foreign Key (Required)
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id])
-
-  grade     String   // "A"
-  minScore  Int      // 80
-  maxScore  Int      // 100
-  remark    String?  // "Excellent"
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("grading_scales")
-}
+// ---------------------------------------------------------
+// DEPENDENT MODELS (Implicitly scoped via parent)
+// ---------------------------------------------------------
+// These models don't strictly NEED a schoolId if they are always accessed 
+// through a parent that has a schoolId, but adding it can help with 
+// performance and safety (Row Level Security).
+// For brevity, I'm omitting schoolId on these deep children, but 
+// in a strict multi-tenant system, you might add it everywhere.
 
 model StudentFeeStructure {
   id            String   @id @default(uuid())
@@ -437,7 +465,7 @@ model Assessment {
   term           AcademicTerm   @relation(fields: [termId], references: [id])
   
   totalMarks     Decimal        @db.Decimal(5, 2)
-  weight         Decimal        @db.Decimal(5, 2) // Percentage weight (e.g., 30 for 30%)
+  weight         Decimal        @db.Decimal(5, 2)
   date           DateTime
   
   results        AssessmentResult[]
@@ -464,7 +492,7 @@ model Question {
   type          QuestionType
   points        Int
   options       QuestionOption[]
-  correctAnswer String? // For auto-grading
+  correctAnswer String?
   
   responses     StudentResponse[]
   
@@ -571,8 +599,8 @@ model StudentTermReport {
   classId        String
   class          Class        @relation(fields: [classId], references: [id])
   
-  totalAttendance Int?        // Days present
-  totalDays       Int?        // Total school days
+  totalAttendance Int?
+  totalDays       Int?
   
   classTeacherRemark String?
   principalRemark    String?
@@ -593,8 +621,8 @@ model TimetablePeriod {
   teacherId      String
   teacher        User         @relation(fields: [teacherId], references: [id])
   dayOfWeek      DayOfWeek
-  startTime      String       // "08:00"
-  endTime        String       // "08:40"
+  startTime      String
+  endTime        String
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
 
@@ -610,7 +638,7 @@ model Topic {
   description String?
   subjectId   String
   subject     Subject  @relation(fields: [subjectId], references: [id])
-  gradeLevel  Int      // 1-12
+  gradeLevel  Int
   orderIndex  Int      @default(0)
 
   progress    TopicProgress[]
@@ -650,7 +678,7 @@ model LessonPlan {
   weekStartDate DateTime
   title         String
   content       String   @db.Text
-  fileUrl       String?  // For uploaded files
+  fileUrl       String?
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -3,10 +3,12 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-export const sendEmail = async (to: string, subject: string, html: string) => {
+export const sendEmail = async (schoolId: string, to: string, subject: string, html: string) => {
   try {
     // 1. Fetch SMTP settings
-    const settings = await prisma.schoolSettings.findFirst();
+    const settings = await prisma.school.findUnique({
+      where: { id: schoolId }
+    });
 
     if (!settings || !settings.smtpHost || !settings.smtpUser || !settings.smtpPassword) {
       console.warn('SMTP settings not configured. Email not sent.');

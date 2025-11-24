@@ -6,6 +6,11 @@ declare global {
       user?: {
         userId: string;
         role: string;
+        schoolId?: string;
+      };
+      school?: {
+        id: string;
+        slug: string;
       };
     }
   }

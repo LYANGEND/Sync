@@ -18,6 +18,9 @@ const processPromotionSchema = z.object({
 
 export const getPromotionCandidates = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId, termId } = req.query;
 
     if (!classId) {
@@ -29,6 +32,7 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
       where: {
         classId: classId as string,
         status: 'ACTIVE',
+        schoolId: req.school.id
       },
       include: {
         termResults: {
@@ -70,14 +74,20 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
 
 export const processPromotions = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { promotions } = processPromotionSchema.parse(req.body);
     const userId = (req as any).user?.userId;
 
     // Use a transaction to ensure data integrity
     await prisma.$transaction(async (tx) => {
       for (const promo of promotions) {
-        const student = await tx.student.findUnique({
-          where: { id: promo.studentId },
+        const student = await tx.student.findFirst({
+          where: { 
+            id: promo.studentId,
+            schoolId: req.school!.id
+          },
           select: { classId: true }
         });
 

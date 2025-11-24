@@ -16,11 +16,26 @@ const recordAttendanceSchema = z.object({
 
 export const recordAttendance = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId, date, records } = recordAttendanceSchema.parse(req.body);
     const userId = (req as any).user?.userId;
 
     if (!userId) {
       return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
     }
 
     const attendanceDate = new Date(date);
@@ -68,10 +83,25 @@ export const recordAttendance = async (req: Request, res: Response) => {
 
 export const getClassAttendance = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId, date } = req.query;
 
     if (!classId || typeof classId !== 'string') {
       return res.status(400).json({ message: 'Class ID is required' });
+    }
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
     }
 
     const whereClause: any = { classId };
@@ -115,7 +145,22 @@ export const getClassAttendance = async (req: Request, res: Response) => {
 
 export const getStudentAttendance = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { studentId } = req.params;
+
+    // Verify student belongs to school
+    const student = await prisma.student.findFirst({
+      where: {
+        id: studentId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
 
     const attendance = await prisma.attendance.findMany({
       where: { studentId },

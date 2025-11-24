@@ -16,11 +16,26 @@ const createPeriodSchema = z.object({
 
 export const getTimetableByClass = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId } = req.params;
     const { termId } = req.query;
 
     if (!termId) {
       return res.status(400).json({ message: 'Academic Term ID is required' });
+    }
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
     }
 
     const periods = await prisma.timetablePeriod.findMany({
@@ -51,11 +66,27 @@ export const getTimetableByClass = async (req: Request, res: Response) => {
 
 export const getTimetableByTeacher = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { teacherId } = req.params;
     const { termId } = req.query;
 
     if (!termId) {
       return res.status(400).json({ message: 'Academic Term ID is required' });
+    }
+
+    // Verify teacher belongs to school
+    const teacher = await prisma.user.findFirst({
+      where: {
+        id: teacherId,
+        schoolId: req.school.id,
+        role: 'TEACHER'
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
     }
 
     const periods = await prisma.timetablePeriod.findMany({
@@ -81,7 +112,35 @@ export const getTimetableByTeacher = async (req: Request, res: Response) => {
 
 export const createTimetablePeriod = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const data = createPeriodSchema.parse(req.body);
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: data.classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Verify teacher belongs to school
+    const teacher = await prisma.user.findFirst({
+      where: {
+        id: data.teacherId,
+        schoolId: req.school.id,
+        role: 'TEACHER'
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
 
     // 1. Check for Teacher Conflict
     const teacherConflict = await prisma.timetablePeriod.findFirst({
@@ -180,7 +239,25 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
 
 export const deleteTimetablePeriod = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify period belongs to a class in the school
+    const period = await prisma.timetablePeriod.findFirst({
+      where: {
+        id,
+        class: {
+          schoolId: req.school.id
+        }
+      }
+    });
+
+    if (!period) {
+      return res.status(404).json({ message: 'Timetable period not found' });
+    }
+
     await prisma.timetablePeriod.delete({
       where: { id },
     });

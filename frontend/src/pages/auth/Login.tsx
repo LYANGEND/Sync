@@ -19,7 +19,13 @@ const Login = () => {
 
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { token, user } = response.data;
+      const { token, user, tenantSlug } = response.data;
+      
+      // Store the tenant slug for future requests
+      if (tenantSlug) {
+        localStorage.setItem('tenantSlug', tenantSlug);
+      }
+      
       login(token, user);
       navigate('/');
     } catch (err: any) {

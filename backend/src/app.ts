@@ -2,6 +2,7 @@ import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { tenantMiddleware } from './middleware/tenantMiddleware';
 import authRoutes from './routes/authRoutes';
 import studentRoutes from './routes/studentRoutes';
 import paymentRoutes from './routes/paymentRoutes';
@@ -21,6 +22,7 @@ import promotionRoutes from './routes/promotionRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import communicationRoutes from './routes/communicationRoutes';
 import scholarshipRoutes from './routes/scholarshipRoutes';
+import schoolRoutes from './routes/schoolRoutes';
 
 const app: Application = express();
 
@@ -28,11 +30,18 @@ const app: Application = express();
 app.use(cors({
   origin: '*', // Allow all origins for development
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Slug']
 }));
 app.use(express.json());
 app.use(helmet());
 app.use(morgan('dev'));
+
+// Platform Routes (No Tenant Context Required)
+app.use('/api/v1/schools', schoolRoutes);
+
+// Apply Tenant Middleware to API routes
+// Note: We might exclude /health or specific public routes if needed
+app.use('/api/v1', tenantMiddleware);
 
 // Routes
 app.use('/api/v1/auth', authRoutes);

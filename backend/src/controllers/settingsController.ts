@@ -30,21 +30,19 @@ const updateSettingsSchema = z.object({
 
 export const getSettings = async (req: Request, res: Response) => {
   try {
-    let settings = await prisma.schoolSettings.findFirst({
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
+    const settings = await prisma.school.findUnique({
+      where: { id: req.school.id },
       include: {
         currentTerm: true
       }
     });
 
     if (!settings) {
-      settings = await prisma.schoolSettings.create({
-        data: {
-          schoolName: 'My School',
-        },
-        include: {
-          currentTerm: true
-        }
-      });
+      return res.status(404).json({ message: 'School not found' });
     }
 
     res.json(settings);
@@ -56,21 +54,16 @@ export const getSettings = async (req: Request, res: Response) => {
 
 export const updateSettings = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
     const data = updateSettingsSchema.parse(req.body);
 
-    const existing = await prisma.schoolSettings.findFirst();
-
-    let settings;
-    if (existing) {
-      settings = await prisma.schoolSettings.update({
-        where: { id: existing.id },
-        data,
-      });
-    } else {
-      settings = await prisma.schoolSettings.create({
-        data,
-      });
-    }
+    const settings = await prisma.school.update({
+      where: { id: req.school.id },
+      data,
+    });
 
     res.json(settings);
   } catch (error) {

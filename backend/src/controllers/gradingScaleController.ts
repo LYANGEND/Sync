@@ -13,7 +13,11 @@ const gradingScaleSchema = z.object({
 
 export const getGradingScales = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const scales = await prisma.gradingScale.findMany({
+      where: { schoolId: req.school.id },
       orderBy: { minScore: 'desc' },
     });
     res.json(scales);
@@ -24,11 +28,15 @@ export const getGradingScales = async (req: Request, res: Response) => {
 
 export const createGradingScale = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const data = gradingScaleSchema.parse(req.body);
     
     // Check for overlap
     const existing = await prisma.gradingScale.findFirst({
       where: {
+        schoolId: req.school.id,
         OR: [
           {
             AND: [
@@ -51,7 +59,10 @@ export const createGradingScale = async (req: Request, res: Response) => {
     }
 
     const scale = await prisma.gradingScale.create({
-      data,
+      data: {
+        ...data,
+        schoolId: req.school.id,
+      },
     });
     
     res.status(201).json(scale);
@@ -65,8 +76,20 @@ export const createGradingScale = async (req: Request, res: Response) => {
 
 export const updateGradingScale = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
     const data = gradingScaleSchema.parse(req.body);
+
+    // Verify ownership
+    const existing = await prisma.gradingScale.findFirst({
+      where: { id, schoolId: req.school.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Grading scale not found' });
+    }
 
     const scale = await prisma.gradingScale.update({
       where: { id },
@@ -84,7 +107,20 @@ export const updateGradingScale = async (req: Request, res: Response) => {
 
 export const deleteGradingScale = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify ownership
+    const existing = await prisma.gradingScale.findFirst({
+      where: { id, schoolId: req.school.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Grading scale not found' });
+    }
+
     await prisma.gradingScale.delete({
       where: { id },
     });

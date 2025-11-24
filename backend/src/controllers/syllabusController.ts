@@ -32,16 +32,31 @@ const createLessonPlanSchema = z.object({
 
 export const getTopics = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { subjectId, gradeLevel } = req.query;
 
-    if (!subjectId || !gradeLevel) {
-      return res.status(400).json({ message: 'Subject ID and Grade Level are required' });
+    if (!subjectId) {
+      return res.status(400).json({ message: 'Subject ID is required' });
+    }
+
+    // Verify subject belongs to school
+    const subject = await prisma.subject.findFirst({
+      where: {
+        id: subjectId as string,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
     }
 
     const topics = await prisma.topic.findMany({
       where: {
         subjectId: subjectId as string,
-        gradeLevel: Number(gradeLevel),
+        gradeLevel: gradeLevel ? Number(gradeLevel) : undefined,
       },
       orderBy: {
         orderIndex: 'asc',
@@ -55,29 +70,34 @@ export const getTopics = async (req: Request, res: Response) => {
   }
 };
 
-export const createTopic = async (req: Request, res: Response) => {
-  try {
-    const data = createTopicSchema.parse(req.body);
 
-    const topic = await prisma.topic.create({
-      data,
-    });
-
-    res.status(201).json(topic);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ errors: error.errors });
-    }
-    console.error('Create topic error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
 
 export const deleteTopic = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
-    await prisma.topic.delete({ where: { id } });
-    res.status(204).send();
+
+    // Verify topic belongs to a subject in the school
+    const topic = await prisma.topic.findFirst({
+      where: {
+        id,
+        subject: {
+          schoolId: req.school.id
+        }
+      }
+    });
+
+    if (!topic) {
+      return res.status(404).json({ message: 'Topic not found' });
+    }
+
+    await prisma.topic.delete({
+      where: { id },
+    });
+
+    res.json({ message: 'Topic deleted successfully' });
   } catch (error) {
     console.error('Delete topic error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -88,10 +108,25 @@ export const deleteTopic = async (req: Request, res: Response) => {
 
 export const getClassProgress = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId, subjectId } = req.query;
 
     if (!classId || !subjectId) {
       return res.status(400).json({ message: 'Class ID and Subject ID are required' });
+    }
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId as string,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
     }
 
     // 1. Get the class to know the grade level
@@ -137,8 +172,37 @@ export const getClassProgress = async (req: Request, res: Response) => {
 
 export const updateTopicProgress = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { topicId, classId } = req.params;
     const { status } = updateTopicProgressSchema.parse(req.body);
+
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Verify topic belongs to a subject in the school
+    const topic = await prisma.topic.findFirst({
+      where: {
+        id: topicId,
+        subject: {
+          schoolId: req.school.id
+        }
+      }
+    });
+
+    if (!topic) {
+      return res.status(404).json({ message: 'Topic not found' });
+    }
 
     const progress = await prisma.topicProgress.upsert({
       where: {
@@ -173,28 +237,36 @@ export const updateTopicProgress = async (req: Request, res: Response) => {
 
 export const getLessonPlans = async (req: Request, res: Response) => {
   try {
-    const { classId, subjectId } = req.query;
-
-    if (!classId || !subjectId) {
-      return res.status(400).json({ message: 'Class ID and Subject ID are required' });
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
     }
+    const { teacherId, classId, subjectId } = req.query;
 
-    const plans = await prisma.lessonPlan.findMany({
-      where: {
-        classId: classId as string,
-        subjectId: subjectId as string,
-      },
-      orderBy: {
-        weekStartDate: 'desc',
-      },
+    const where: any = {};
+    if (teacherId) where.teacherId = teacherId as string;
+    if (classId) where.classId = classId as string;
+    if (subjectId) where.subjectId = subjectId as string;
+
+    // Ensure we only fetch lesson plans for the current school
+    where.class = {
+        schoolId: req.school.id
+    };
+
+    const lessonPlans = await prisma.lessonPlan.findMany({
+      where,
       include: {
+        class: true,
+        subject: true,
         teacher: {
           select: { fullName: true },
         },
       },
+      orderBy: {
+        weekStartDate: 'desc',
+      },
     });
 
-    res.json(plans);
+    res.json(lessonPlans);
   } catch (error) {
     console.error('Get lesson plans error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -203,22 +275,75 @@ export const getLessonPlans = async (req: Request, res: Response) => {
 
 export const createLessonPlan = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const data = createLessonPlanSchema.parse(req.body);
-    const userId = (req as any).user?.userId;
 
-    const plan = await prisma.lessonPlan.create({
+    // Verify class belongs to school
+    const classExists = await prisma.class.findFirst({
+      where: {
+        id: data.classId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    const lessonPlan = await prisma.lessonPlan.create({
       data: {
         ...data,
-        teacherId: userId,
+        teacherId: (req as any).user?.userId, // Assuming teacher is creating it
       },
     });
 
-    res.status(201).json(plan);
+    res.status(201).json(lessonPlan);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
     console.error('Create lesson plan error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const createTopic = async (req: Request, res: Response) => {
+  try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    const data = createTopicSchema.parse(req.body);
+
+    // Verify subject belongs to school
+    const subject = await prisma.subject.findFirst({
+      where: {
+        id: data.subjectId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    const topic = await prisma.topic.create({
+      data: {
+        subjectId: data.subjectId,
+        title: data.title,
+        description: data.description,
+        gradeLevel: data.gradeLevel,
+        orderIndex: data.orderIndex,
+      },
+    });
+
+    res.status(201).json(topic);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Create topic error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

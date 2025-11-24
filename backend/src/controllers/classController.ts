@@ -14,7 +14,18 @@ const classSchema = z.object({
 
 export const getClasses = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    
+    const whereClause: any = {};
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
     const classes = await prisma.class.findMany({
+      where: whereClause,
       include: {
         teacher: {
           select: { fullName: true },
@@ -23,6 +34,7 @@ export const getClasses = async (req: Request, res: Response) => {
         _count: {
           select: { students: true },
         },
+        school: { select: { name: true } } // Include school name for global view
       },
       orderBy: { name: 'asc' },
     });
@@ -34,10 +46,16 @@ export const getClasses = async (req: Request, res: Response) => {
 
 export const createClass = async (req: Request, res: Response) => {
   try {
+    // Creating a class requires a school context.
+    // Even SYSTEM_OWNER must select a school to create a class in.
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing. Select a school first.' });
+    }
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
 
     const newClass = await prisma.class.create({
       data: {
+        schoolId: req.school.id,
         name,
         gradeLevel,
         teacherId,
@@ -62,8 +80,26 @@ export const createClass = async (req: Request, res: Response) => {
 
 export const updateClass = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
+
+    // Verify class belongs to school
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const classExists = await prisma.class.findFirst({
+      where: whereClause
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
 
     const updatedClass = await prisma.class.update({
       where: { id },
@@ -92,7 +128,26 @@ export const updateClass = async (req: Request, res: Response) => {
 
 export const deleteClass = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify class belongs to school
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const classExists = await prisma.class.findFirst({
+      where: whereClause
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
     await prisma.class.delete({
       where: { id },
     });
@@ -104,7 +159,26 @@ export const deleteClass = async (req: Request, res: Response) => {
 
 export const getClassStudents = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify class belongs to school
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const classExists = await prisma.class.findFirst({
+      where: whereClause
+    });
+
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
     const students = await prisma.student.findMany({
       where: { classId: id },
       orderBy: { lastName: 'asc' },
@@ -118,13 +192,37 @@ export const getClassStudents = async (req: Request, res: Response) => {
 
 export const addStudentsToClass = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
     const { studentIds } = z.object({ studentIds: z.array(z.string().uuid()) }).parse(req.body);
     const userId = (req as any).user?.userId;
 
-    const classExists = await prisma.class.findUnique({ where: { id } });
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const classExists = await prisma.class.findFirst({ 
+        where: whereClause 
+    });
     if (!classExists) {
       return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Verify students belong to school (or same school as class)
+    // If SYSTEM_OWNER, we must ensure students are in the same school as the class
+    const studentsCount = await prisma.student.count({
+        where: {
+            id: { in: studentIds },
+            schoolId: classExists.schoolId // Use class's schoolId
+        }
+    });
+
+    if (studentsCount !== studentIds.length) {
+        return res.status(400).json({ error: 'One or more students do not belong to the same school as the class' });
     }
 
     await prisma.student.updateMany({

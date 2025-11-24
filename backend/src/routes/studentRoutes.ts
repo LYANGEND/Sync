@@ -6,11 +6,11 @@ const router = Router();
 
 router.use(authenticateToken);
 
-router.get('/my-children', authorizeRole(['PARENT']), getMyChildren);
+router.get('/my-children', authorizeRole(['PARENT', 'SYSTEM_OWNER']), getMyChildren);
 router.get('/', getStudents);
 router.get('/:id', getStudentById);
-router.post('/', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), createStudent);
-router.put('/:id', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), updateStudent);
-router.delete('/:id', authorizeRole(['SUPER_ADMIN']), deleteStudent);
+router.post('/', authorizeRole(['SUPER_ADMIN', 'SECRETARY', 'SYSTEM_OWNER']), createStudent);
+router.put('/:id', authorizeRole(['SUPER_ADMIN', 'SECRETARY', 'SYSTEM_OWNER']), updateStudent);
+router.delete('/:id', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), deleteStudent);
 
 export default router;

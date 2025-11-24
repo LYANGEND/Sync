@@ -16,10 +16,13 @@ const sendAnnouncementSchema = z.object({
 
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendNotification } = sendAnnouncementSchema.parse(req.body);
 
     // 1. Find target users
-    const whereClause: any = { isActive: true };
+    const whereClause: any = { isActive: true, schoolId: req.school.id };
     if (targetRoles && targetRoles.length > 0) {
       whereClause.role = { in: targetRoles };
     }
@@ -38,7 +41,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 
     // 2. Send Notifications
     if (sendNotification) {
-      await broadcastNotification(userIds, subject, message, 'INFO');
+      await broadcastNotification(req.school.id, userIds, subject, message, 'INFO');
     }
 
     // 3. Send Emails (Async to not block response)
@@ -46,7 +49,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
       // Send individually or use BCC? For now, let's loop (simple but slow for large lists)
       // In production, use a queue (BullMQ)
       Promise.all(users.map(user => 
-        sendEmail(user.email, subject, `<p>Dear ${user.fullName},</p><p>${message}</p>`)
+        sendEmail(req.school!.id, user.email, subject, `<p>Dear ${user.fullName},</p><p>${message}</p>`)
       )).catch(err => console.error('Background email sending failed', err));
     }
 
@@ -62,9 +65,12 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 
 export const getMyNotifications = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     const notifications = await prisma.notification.findMany({
-      where: { userId },
+      where: { userId, schoolId: req.school.id },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -113,6 +119,9 @@ const sendMessageSchema = z.object({
 
 export const getConversations = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
@@ -178,6 +187,9 @@ export const getConversations = async (req: Request, res: Response) => {
 
 export const getMessages = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     const { conversationId } = req.params;
     
@@ -216,6 +228,9 @@ export const getMessages = async (req: Request, res: Response) => {
 
 export const sendMessage = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     const { conversationId, recipientId, content } = sendMessageSchema.parse(req.body);
 
@@ -224,6 +239,18 @@ export const sendMessage = async (req: Request, res: Response) => {
     if (!targetConversationId) {
       if (!recipientId) {
         return res.status(400).json({ message: 'Recipient ID is required for new conversation' });
+      }
+
+      // Verify recipient belongs to the same school
+      const recipient = await prisma.user.findFirst({
+        where: {
+          id: recipientId,
+          schoolId: req.school.id
+        }
+      });
+
+      if (!recipient) {
+        return res.status(404).json({ message: 'Recipient not found' });
       }
 
       const existing = await prisma.conversation.findFirst({
@@ -288,6 +315,10 @@ export const searchUsers = async (req: Request, res: Response) => {
     const { query } = req.query;
     const currentUserId = (req as any).user?.userId;
 
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
     if (!query || typeof query !== 'string' || query.length < 2) {
       return res.json([]);
     }
@@ -302,7 +333,8 @@ export const searchUsers = async (req: Request, res: Response) => {
             ]
           },
           { id: { not: currentUserId } },
-          { isActive: true }
+          { isActive: true },
+          { schoolId: req.school.id }
         ]
       },
       select: {

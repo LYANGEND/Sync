@@ -25,6 +25,9 @@ const updateStudentSchema = createStudentSchema.partial().extend({
 export const getStudents = async (req: Request, res: Response) => {
   try {
     const students = await prisma.student.findMany({
+      where: {
+        schoolId: req.school?.id
+      },
       include: {
         class: true,
       },
@@ -43,9 +46,14 @@ export const createStudent = async (req: Request, res: Response) => {
   try {
     const data = createStudentSchema.parse(req.body);
     
+    if (!req.school?.id) {
+      return res.status(400).json({ error: 'School context missing' });
+    }
+
     const student = await prisma.student.create({
       data: {
         ...data,
+        schoolId: req.school.id,
         status: 'ACTIVE',
       },
     });
@@ -61,9 +69,19 @@ export const createStudent = async (req: Request, res: Response) => {
 
 export const getStudentById = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
-    const student = await prisma.student.findUnique({
-      where: { id },
+    
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const student = await prisma.student.findFirst({
+      where: whereClause,
       include: {
         class: true,
         scholarship: true,
@@ -94,18 +112,42 @@ export const getStudentById = async (req: Request, res: Response) => {
 
 export const updateStudent = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
     const { reason, ...data } = updateStudentSchema.parse(req.body);
     const userId = (req as any).user?.userId;
 
-    // If class is changing, we need to log it
-    if (data.classId) {
-      const currentStudent = await prisma.student.findUnique({
-        where: { id },
-        select: { classId: true }
-      });
+    // Verify student belongs to school (if context exists)
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
 
-      if (currentStudent && currentStudent.classId !== data.classId) {
+    const currentStudent = await prisma.student.findFirst({
+      where: whereClause,
+      select: { classId: true, schoolId: true }
+    });
+
+    if (!currentStudent) {
+        return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // If class is changing, we need to log it
+    if (data.classId && currentStudent.classId !== data.classId) {
+        // Verify target class belongs to the SAME school as the student
+        const targetClass = await prisma.class.findFirst({
+            where: {
+                id: data.classId,
+                schoolId: currentStudent.schoolId // Use student's schoolId, not req.school.id (in case of global admin)
+            }
+        });
+        if (!targetClass) {
+            return res.status(400).json({ error: 'Target class not found in the student\'s school' });
+        }
+
         await prisma.classMovementLog.create({
           data: {
             studentId: id,
@@ -115,7 +157,6 @@ export const updateStudent = async (req: Request, res: Response) => {
             changedByUserId: userId
           }
         });
-      }
     }
 
     const student = await prisma.student.update({
@@ -134,7 +175,26 @@ export const updateStudent = async (req: Request, res: Response) => {
 
 export const deleteStudent = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify student belongs to school
+    const whereClause: any = { id };
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
+    const student = await prisma.student.findFirst({
+        where: whereClause
+    });
+  
+    if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+    }
+
     await prisma.student.delete({
       where: { id },
     });
@@ -146,11 +206,15 @@ export const deleteStudent = async (req: Request, res: Response) => {
 
 export const getMyChildren = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const userId = (req as any).user?.userId;
     
     const students = await prisma.student.findMany({
       where: {
-        parentId: userId
+        parentId: userId,
+        schoolId: req.school.id
       },
       include: {
         class: true,

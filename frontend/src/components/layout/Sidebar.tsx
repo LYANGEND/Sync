@@ -12,49 +12,55 @@ const Sidebar = () => {
       icon: LayoutDashboard, 
       label: 'Dashboard', 
       path: '/', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] 
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER'] 
+    },
+    {
+      icon: GraduationCap,
+      label: 'Schools',
+      path: '/schools',
+      roles: ['SYSTEM_OWNER']
     },
     { 
       icon: Users, 
       label: 'Students', 
       path: '/students', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] 
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER'] 
     },
     { 
       icon: BookOpen, 
       label: 'Academics', 
       path: '/academics', 
-      roles: ['SUPER_ADMIN', 'TEACHER'] 
+      roles: ['SUPER_ADMIN', 'TEACHER', 'SYSTEM_OWNER'] 
     },
     { 
       icon: CreditCard, 
       label: 'Finance', 
       path: '/finance', 
-      roles: ['SUPER_ADMIN', 'BURSAR'] 
+      roles: ['SUPER_ADMIN', 'BURSAR', 'SYSTEM_OWNER'] 
     },
     { 
       icon: CalendarCheck, 
       label: 'Attendance', 
       path: '/attendance', 
-      roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] 
+      roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER'] 
     },
     { 
       icon: UserCog, 
       label: 'Users', 
       path: '/users', 
-      roles: ['SUPER_ADMIN'] 
+      roles: ['SUPER_ADMIN', 'SYSTEM_OWNER'] 
     },
     { 
       icon: MessageSquare, 
       label: 'Communication', 
       path: '/communication', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] 
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'SYSTEM_OWNER'] 
     },
     { 
       icon: Settings, 
       label: 'Settings', 
       path: '/settings', 
-      roles: ['SUPER_ADMIN'] 
+      roles: ['SUPER_ADMIN', 'SYSTEM_OWNER'] 
     },
   ];
 

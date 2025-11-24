@@ -21,14 +21,14 @@ router.patch('/notifications/:id/read', markAsRead);
 router.patch('/notifications/read-all', markAllAsRead);
 
 // Chat routes
-const chatRoles = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'];
+const chatRoles = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'SYSTEM_OWNER'];
 router.get('/conversations', authorizeRole(chatRoles), getConversations);
 router.get('/conversations/:conversationId/messages', authorizeRole(chatRoles), getMessages);
 router.post('/messages', authorizeRole(chatRoles), sendMessage);
 router.get('/users/search', authorizeRole(chatRoles), searchUsers);
 
 // Announcement routes
-const announcementRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER'];
+const announcementRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'SYSTEM_OWNER'];
 router.post('/announcements', authorizeRole(announcementRoles), sendAnnouncement);
 
 export default router;

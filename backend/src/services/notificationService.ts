@@ -3,6 +3,7 @@ import { PrismaClient, NotificationType } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export const createNotification = async (
+  schoolId: string,
   userId: string,
   title: string,
   message: string,
@@ -11,6 +12,7 @@ export const createNotification = async (
   try {
     const notification = await prisma.notification.create({
       data: {
+        schoolId,
         userId,
         title,
         message,
@@ -25,6 +27,7 @@ export const createNotification = async (
 };
 
 export const broadcastNotification = async (
+  schoolId: string,
   userIds: string[],
   title: string,
   message: string,
@@ -34,6 +37,7 @@ export const broadcastNotification = async (
     // Use createMany for bulk insertion
     await prisma.notification.createMany({
       data: userIds.map(userId => ({
+        schoolId,
         userId,
         title,
         message,

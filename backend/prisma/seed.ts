@@ -6,80 +6,115 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Start seeding ...');
 
-  // 1. Create Users
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@school.com' },
-    update: {},
-    create: {
-      email: 'admin@school.com',
-      fullName: 'Super Admin',
-      role: Role.SUPER_ADMIN,
-      passwordHash,
-    },
+  // 1. Create System Owner (No School)
+  const systemOwnerEmail = 'owner@system.com';
+  let systemOwner = await prisma.user.findFirst({
+    where: { 
+      email: systemOwnerEmail,
+      schoolId: null
+    }
   });
 
-  const teacher = await prisma.user.upsert({
-    where: { email: 'teacher@school.com' },
+  if (!systemOwner) {
+    systemOwner = await prisma.user.create({
+      data: {
+        email: systemOwnerEmail,
+        fullName: 'System Owner',
+        role: Role.SYSTEM_OWNER,
+        passwordHash,
+        schoolId: null,
+      },
+    });
+  }
+  console.log('System Owner created.');
+
+  // 2. Create Demo School
+  const demoSchool = await prisma.school.upsert({
+    where: { slug: 'demo-school' },
     update: {},
     create: {
-      email: 'teacher@school.com',
-      fullName: 'John Teacher',
-      role: Role.TEACHER,
-      passwordHash,
-    },
-  });
-
-  const bursar = await prisma.user.upsert({
-    where: { email: 'bursar@school.com' },
-    update: {},
-    create: {
-      email: 'bursar@school.com',
-      fullName: 'Jane Bursar',
-      role: Role.BURSAR,
-      passwordHash,
-    },
-  });
-
-  const parent = await prisma.user.upsert({
-    where: { email: 'parent@school.com' },
-    update: {},
-    create: {
-      email: 'parent@school.com',
-      fullName: 'Mr. Banda',
-      role: Role.PARENT,
-      passwordHash,
-    },
-  });
-
-  console.log('Users created.');
-
-  // 2. Create Academic Term
-  const term = await prisma.academicTerm.create({
-    data: {
-      name: 'Term 1 2025',
-      startDate: new Date('2025-01-13'),
-      endDate: new Date('2025-04-11'),
+      name: 'Demo High School',
+      slug: 'demo-school',
+      address: '123 Education Lane, Lusaka',
+      phone: '0977123456',
+      email: 'info@demoschool.com',
       isActive: true,
     },
   });
+  console.log('Demo School created.');
 
-  console.log('Academic Term created.');
+  // 3. Create School Users
+  const upsertSchoolUser = async (email: string, fullName: string, role: Role) => {
+    return prisma.user.upsert({
+      where: {
+        email_schoolId: {
+          email,
+          schoolId: demoSchool.id
+        }
+      },
+      update: {},
+      create: {
+        email,
+        fullName,
+        role,
+        passwordHash,
+        schoolId: demoSchool.id,
+      },
+    });
+  };
 
-  // 3. Create Class
-  const grade10A = await prisma.class.create({
-    data: {
-      name: 'Grade 10 A',
-      gradeLevel: 10,
-      teacherId: teacher.id,
-      academicTermId: term.id,
-    },
+  const admin = await upsertSchoolUser('admin@demoschool.com', 'Super Admin', Role.SUPER_ADMIN);
+  const teacher = await upsertSchoolUser('teacher@demoschool.com', 'John Teacher', Role.TEACHER);
+  const bursar = await upsertSchoolUser('bursar@demoschool.com', 'Jane Bursar', Role.BURSAR);
+  const parent = await upsertSchoolUser('parent@demoschool.com', 'Mr. Banda', Role.PARENT);
+
+  console.log('School Users created.');
+
+  // 4. Create Academic Term
+  let term = await prisma.academicTerm.findFirst({
+    where: {
+      schoolId: demoSchool.id,
+      name: 'Term 1 2025'
+    }
   });
 
+  if (!term) {
+    term = await prisma.academicTerm.create({
+      data: {
+        schoolId: demoSchool.id,
+        name: 'Term 1 2025',
+        startDate: new Date('2025-01-13'),
+        endDate: new Date('2025-04-11'),
+        isActive: true,
+      },
+    });
+  }
+  console.log('Academic Term created.');
+
+  // 5. Create Class
+  let grade10A = await prisma.class.findFirst({
+    where: {
+      schoolId: demoSchool.id,
+      name: 'Grade 10 A'
+    }
+  });
+
+  if (!grade10A) {
+    grade10A = await prisma.class.create({
+      data: {
+        schoolId: demoSchool.id,
+        name: 'Grade 10 A',
+        gradeLevel: 10,
+        teacherId: teacher.id,
+        academicTermId: term.id,
+      },
+    });
+  }
   console.log('Class created.');
 
-  // 4. Create Students
+  // 6. Create Students
   const studentsData = [
     { firstName: 'Alice', lastName: 'Banda', gender: Gender.FEMALE, admissionNumber: '2025001' },
     { firstName: 'Brian', lastName: 'Phiri', gender: Gender.MALE, admissionNumber: '2025002' },
@@ -90,8 +125,16 @@ async function main() {
 
   const students = [];
   for (const s of studentsData) {
-    const student = await prisma.student.create({
-      data: {
+    const student = await prisma.student.upsert({
+      where: {
+        admissionNumber_schoolId: {
+          admissionNumber: s.admissionNumber,
+          schoolId: demoSchool.id
+        }
+      },
+      update: {},
+      create: {
+        schoolId: demoSchool.id,
         firstName: s.firstName,
         lastName: s.lastName,
         admissionNumber: s.admissionNumber,
@@ -108,51 +151,62 @@ async function main() {
 
   console.log('Students created.');
 
-  // 5. Create Payments
-  await prisma.payment.create({
-    data: {
-      studentId: students[0].id,
-      amount: 1500.00,
-      method: PaymentMethod.CASH,
-      recordedByUserId: bursar.id,
-      referenceNumber: 'REC001',
-    },
+  // 7. Create Payments
+  const existingPayments = await prisma.payment.count({
+      where: { studentId: students[0].id }
   });
 
-  await prisma.payment.create({
-    data: {
-      studentId: students[1].id,
-      amount: 2000.00,
-      method: PaymentMethod.MOBILE_MONEY,
-      recordedByUserId: bursar.id,
-      referenceNumber: 'MM123456',
-    },
+  if (existingPayments === 0) {
+      await prisma.payment.create({
+        data: {
+          studentId: students[0].id,
+          amount: 1500.00,
+          method: PaymentMethod.CASH,
+          recordedByUserId: bursar.id,
+          referenceNumber: 'REC001',
+        },
+      });
+
+      await prisma.payment.create({
+        data: {
+          studentId: students[1].id,
+          amount: 2000.00,
+          method: PaymentMethod.MOBILE_MONEY,
+          recordedByUserId: bursar.id,
+          referenceNumber: 'MM123456',
+        },
+      });
+      console.log('Payments created.');
+  }
+
+  // 8. Create Attendance
+  const existingAttendance = await prisma.attendance.count({
+      where: { studentId: students[0].id }
   });
 
-  console.log('Payments created.');
+  if (existingAttendance === 0) {
+      await prisma.attendance.create({
+        data: {
+          studentId: students[0].id,
+          classId: grade10A.id,
+          date: new Date(),
+          status: AttendanceStatus.PRESENT,
+          recordedByUserId: teacher.id,
+        },
+      });
 
-  // 6. Create Attendance
-  await prisma.attendance.create({
-    data: {
-      studentId: students[0].id,
-      classId: grade10A.id,
-      date: new Date(),
-      status: AttendanceStatus.PRESENT,
-      recordedByUserId: teacher.id,
-    },
-  });
+      await prisma.attendance.create({
+        data: {
+          studentId: students[1].id,
+          classId: grade10A.id,
+          date: new Date(),
+          status: AttendanceStatus.ABSENT,
+          recordedByUserId: teacher.id,
+        },
+      });
+      console.log('Attendance created.');
+  }
 
-  await prisma.attendance.create({
-    data: {
-      studentId: students[1].id,
-      classId: grade10A.id,
-      date: new Date(),
-      status: AttendanceStatus.ABSENT,
-      recordedByUserId: teacher.id,
-    },
-  });
-
-  console.log('Attendance created.');
   console.log('Seeding finished.');
 }
 

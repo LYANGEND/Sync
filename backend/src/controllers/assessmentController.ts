@@ -28,8 +28,22 @@ const recordResultsSchema = z.object({
 
 export const createAssessment = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const data = createAssessmentSchema.parse(req.body);
     
+    // Validate that Class, Subject, and Term belong to the current school
+    const [classExists, subjectExists, termExists] = await Promise.all([
+      prisma.class.findFirst({ where: { id: data.classId, schoolId: req.school.id } }),
+      prisma.subject.findFirst({ where: { id: data.subjectId, schoolId: req.school.id } }),
+      prisma.academicTerm.findFirst({ where: { id: data.termId, schoolId: req.school.id } })
+    ]);
+
+    if (!classExists || !subjectExists || !termExists) {
+      return res.status(400).json({ error: 'Invalid Class, Subject, or Term for this school' });
+    }
+
     const { date, ...restData } = data;
     const assessment = await prisma.assessment.create({
       data: {
@@ -50,9 +64,14 @@ export const createAssessment = async (req: Request, res: Response) => {
 
 export const getAssessments = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { classId, subjectId, termId } = req.query;
     
-    const where: any = {};
+    const where: any = {
+      class: { schoolId: req.school.id } // Ensure scoped by school
+    };
     if (classId) where.classId = String(classId);
     if (subjectId) where.subjectId = String(subjectId);
     if (termId) where.termId = String(termId);
@@ -78,9 +97,15 @@ export const getAssessments = async (req: Request, res: Response) => {
 
 export const getAssessmentById = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
+    const assessment = await prisma.assessment.findFirst({
+      where: { 
+        id,
+        class: { schoolId: req.school.id }
+      },
       include: {
         subject: true,
         class: true,

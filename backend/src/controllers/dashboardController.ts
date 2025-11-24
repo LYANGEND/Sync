@@ -5,6 +5,10 @@ const prisma = new PrismaClient();
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
     // 1. Total Revenue (Today)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -14,6 +18,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         paymentDate: {
           gte: today,
         },
+        student: {
+          schoolId: req.school.id
+        }
       },
       _sum: {
         amount: true,
@@ -24,12 +31,18 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const activeStudentsCount = await prisma.student.count({
       where: {
         status: 'ACTIVE',
+        schoolId: req.school.id
       },
     });
 
     // 3. Outstanding Fees
     // Calculate total amount due - total amount paid across all fee structures
     const feeStats = await prisma.studentFeeStructure.aggregate({
+      where: {
+        student: {
+          schoolId: req.school.id
+        }
+      },
       _sum: {
         amountDue: true,
         amountPaid: true,
@@ -40,6 +53,11 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     // 4. Recent Payments (Last 5)
     const recentPayments = await prisma.payment.findMany({
+      where: {
+        student: {
+          schoolId: req.school.id
+        }
+      },
       take: 5,
       orderBy: {
         createdAt: 'desc',

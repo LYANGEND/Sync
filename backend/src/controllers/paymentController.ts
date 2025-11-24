@@ -14,6 +14,9 @@ const createPaymentSchema = z.object({
 
 export const createPayment = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { studentId, amount, method, referenceNumber } = createPaymentSchema.parse(req.body);
     const userId = (req as any).user?.userId;
 
@@ -21,9 +24,12 @@ export const createPayment = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Check if student exists
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
+    // Check if student exists and belongs to school
+    const student = await prisma.student.findFirst({
+      where: {
+        id: studentId,
+        schoolId: req.school.id
+      },
     });
 
     if (!student) {
@@ -72,7 +78,15 @@ export const createPayment = async (req: Request, res: Response) => {
 
 export const getPayments = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const payments = await prisma.payment.findMany({
+      where: {
+        student: {
+          schoolId: req.school.id
+        }
+      },
       include: {
         student: {
           select: {
@@ -107,7 +121,22 @@ export const getPayments = async (req: Request, res: Response) => {
 
 export const getStudentPayments = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { studentId } = req.params;
+
+    // Verify student belongs to school
+    const student = await prisma.student.findFirst({
+      where: {
+        id: studentId,
+        schoolId: req.school.id
+      }
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
 
     const payments = await prisma.payment.findMany({
       where: { studentId },

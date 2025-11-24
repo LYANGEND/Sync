@@ -13,8 +13,20 @@ const termSchema = z.object({
 
 export const getAcademicTerms = async (req: Request, res: Response) => {
   try {
+    const userRole = (req as any).user?.role;
+    if (userRole !== 'SYSTEM_OWNER' && !req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+    
+    const whereClause: any = {};
+    if (req.school) {
+        whereClause.schoolId = req.school.id;
+    }
+
     const terms = await prisma.academicTerm.findMany({
+      where: whereClause,
       orderBy: { startDate: 'desc' },
+      include: { school: { select: { name: true } } }
     });
     res.json(terms);
   } catch (error) {
@@ -24,10 +36,14 @@ export const getAcademicTerms = async (req: Request, res: Response) => {
 
 export const createAcademicTerm = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing. Select a school first.' });
+    }
     const { name, startDate, endDate, isActive } = termSchema.parse(req.body);
 
     const term = await prisma.academicTerm.create({
       data: {
+        schoolId: req.school.id,
         name,
         startDate,
         endDate,

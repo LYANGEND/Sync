@@ -7,6 +7,7 @@ export interface AuthRequest extends Request {
   user?: {
     userId: string;
     role: string;
+    schoolId?: string;
   };
 }
 
@@ -22,6 +23,15 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
+
+    // Verify Tenant Context
+    // SYSTEM_OWNER can access any tenant context (or no context)
+    if (user.role !== 'SYSTEM_OWNER') {
+        if (req.school && user.schoolId && user.schoolId !== req.school.id) {
+            return res.status(403).json({ error: 'Access denied: Token belongs to a different school' });
+        }
+    }
+
     req.user = user;
     next();
   });

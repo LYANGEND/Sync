@@ -7,8 +7,8 @@ const router = Router();
 router.use(authenticateToken);
 
 router.get('/', getSubjects);
-router.post('/', authorizeRole(['SUPER_ADMIN']), createSubject);
-router.put('/:id', authorizeRole(['SUPER_ADMIN']), updateSubject);
-router.delete('/:id', authorizeRole(['SUPER_ADMIN']), deleteSubject);
+router.post('/', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), createSubject);
+router.put('/:id', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), updateSubject);
+router.delete('/:id', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), deleteSubject);
 
 export default router;

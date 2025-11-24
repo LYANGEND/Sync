@@ -7,6 +7,6 @@ const router = Router();
 router.use(authenticateToken);
 
 router.get('/', getSettings);
-router.put('/', authorizeRole(['SUPER_ADMIN']), updateSettings);
+router.put('/', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), updateSettings);
 
 export default router;

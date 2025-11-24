@@ -12,7 +12,11 @@ const scholarshipSchema = z.object({
 
 export const getScholarships = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const scholarships = await prisma.scholarship.findMany({
+      where: { schoolId: req.school.id },
       include: {
         _count: {
           select: { students: true }
@@ -30,10 +34,16 @@ export const getScholarships = async (req: Request, res: Response) => {
 
 export const createScholarship = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const data = scholarshipSchema.parse(req.body);
     
     const scholarship = await prisma.scholarship.create({
-      data,
+      data: {
+        ...data,
+        schoolId: req.school.id,
+      },
     });
     
     res.status(201).json(scholarship);
@@ -47,8 +57,20 @@ export const createScholarship = async (req: Request, res: Response) => {
 
 export const updateScholarship = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
     const data = scholarshipSchema.parse(req.body);
+
+    // Verify ownership
+    const existing = await prisma.scholarship.findFirst({
+      where: { id, schoolId: req.school.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Scholarship not found' });
+    }
 
     const scholarship = await prisma.scholarship.update({
       where: { id },
@@ -66,7 +88,20 @@ export const updateScholarship = async (req: Request, res: Response) => {
 
 export const deleteScholarship = async (req: Request, res: Response) => {
   try {
+    if (!req.school) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
     const { id } = req.params;
+
+    // Verify ownership
+    const existing = await prisma.scholarship.findFirst({
+      where: { id, schoolId: req.school.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Scholarship not found' });
+    }
+
     await prisma.scholarship.delete({
       where: { id },
     });

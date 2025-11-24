@@ -9,9 +9,9 @@ router.use(authenticateToken);
 router.get('/teachers', getTeachers);
 
 // User Management Routes (Super Admin only)
-router.get('/', authorizeRole(['SUPER_ADMIN']), getUsers);
-router.post('/', authorizeRole(['SUPER_ADMIN']), createUser);
-router.put('/:id', authorizeRole(['SUPER_ADMIN']), updateUser);
-router.patch('/:id/status', authorizeRole(['SUPER_ADMIN']), toggleUserStatus);
+router.get('/', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), getUsers);
+router.post('/', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), createUser);
+router.put('/:id', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), updateUser);
+router.patch('/:id/status', authorizeRole(['SUPER_ADMIN', 'SYSTEM_OWNER']), toggleUserStatus);
 
 export default router;

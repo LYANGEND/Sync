@@ -36,79 +36,79 @@ function App() {
             <Route element={<DashboardLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/student/assessments" element={
-                <RoleGuard allowedRoles={['STUDENT', 'SUPER_ADMIN']}>
+                <RoleGuard allowedRoles={['STUDENT', 'SUPER_ADMIN', 'SYSTEM_OWNER']}>
                   <StudentAssessments />
                 </RoleGuard>
               } />
               
               <Route path="/students" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER']}>
                   <Students />
                 </RoleGuard>
               } />
               <Route path="/students/:id" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER']}>
                   <StudentProfile />
                 </RoleGuard>
               } />
               
               <Route path="/finance" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'SYSTEM_OWNER']}>
                   <Finance />
                 </RoleGuard>
               } />
               
               <Route path="/attendance" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER']}>
                   <Attendance />
                 </RoleGuard>
               } />
               
               <Route path="/academics" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SYSTEM_OWNER']}>
                   <Academics />
                 </RoleGuard>
               } />
               <Route path="/academics/grading-scales" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SYSTEM_OWNER']}>
                   <GradingScales />
                 </RoleGuard>
               } />
               <Route path="/academics/report-cards" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SYSTEM_OWNER']}>
                   <ReportCards />
                 </RoleGuard>
               } />
               <Route path="/academics/timetable" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'STUDENT', 'PARENT']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'SYSTEM_OWNER']}>
                   <Timetable />
                 </RoleGuard>
               } />
               <Route path="/subjects" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SYSTEM_OWNER']}>
                   <Subjects />
                 </RoleGuard>
               } />
               <Route path="/classes" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY', 'SYSTEM_OWNER']}>
                   <Classes />
                 </RoleGuard>
               } />
               
               <Route path="/users" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'SYSTEM_OWNER']}>
                   <Users />
                 </RoleGuard>
               } />
 
               <Route path="/communication" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'SYSTEM_OWNER']}>
                   <Communication />
                 </RoleGuard>
               } />
 
               <Route path="/settings" element={
-                <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'SYSTEM_OWNER']}>
                   <Settings />
                 </RoleGuard>
               } />
