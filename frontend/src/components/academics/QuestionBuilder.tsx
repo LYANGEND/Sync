@@ -128,47 +128,48 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-bold text-gray-800">Question Builder</h2>
-        <div className="flex gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 sm:mb-6">
+        <h2 className="text-lg sm:text-xl font-bold text-gray-800">Question Builder</h2>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={onClose} className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
             Close
           </button>
           <button 
             onClick={handleSaveAll} 
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 active:scale-98"
           >
-            <Save size={20} />
-            {saving ? 'Saving...' : 'Save Questions'}
+            <Save size={18} />
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Left: Question Form */}
-        <div className="space-y-6 border-r border-gray-200 pr-6">
-          <h3 className="font-semibold text-gray-700">Add New Question</h3>
+        <div className="space-y-4 sm:space-y-6 lg:border-r lg:border-gray-200 lg:pr-6 order-1">
+          <h3 className="font-semibold text-gray-700 text-sm sm:text-base">Add New Question</h3>
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Question Text</label>
             <textarea
               value={newQuestion.text}
               onChange={e => setNewQuestion({ ...newQuestion, text: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-base"
               rows={3}
               placeholder="Enter question text..."
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
               <select
                 value={newQuestion.type}
                 onChange={e => setNewQuestion({ ...newQuestion, type: e.target.value as any })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-base"
               >
                 <option value="MULTIPLE_CHOICE">Multiple Choice</option>
                 <option value="TRUE_FALSE">True/False</option>
@@ -182,7 +183,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
                 min="1"
                 value={newQuestion.points}
                 onChange={e => setNewQuestion({ ...newQuestion, points: Number(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-base"
               />
             </div>
           </div>
@@ -198,18 +199,18 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
                     name="correctOption"
                     checked={option.isCorrect}
                     onChange={() => handleOptionChange(index, 'isCorrect', true)}
-                    className="w-4 h-4 text-blue-600"
+                    className="w-5 h-5 text-blue-600 flex-shrink-0"
                   />
                   <input
                     type="text"
                     value={option.text}
                     onChange={e => handleOptionChange(index, 'text', e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-base min-w-0"
                     placeholder={`Option ${index + 1}`}
                   />
                   <button 
                     onClick={() => handleRemoveOption(index)}
-                    className="text-red-500 hover:text-red-700"
+                    className="text-red-500 hover:text-red-700 p-2 flex-shrink-0"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -217,7 +218,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
               ))}
               <button
                 onClick={handleAddOption}
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 py-2"
               >
                 <Plus size={16} /> Add Option
               </button>
@@ -229,7 +230,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
              <div className="space-y-3">
              <label className="block text-sm font-medium text-gray-700">Correct Answer</label>
              <div className="flex gap-4">
-               <label className="flex items-center gap-2 cursor-pointer">
+               <label className="flex items-center gap-2 cursor-pointer p-2">
                  <input
                    type="radio"
                    name="tfCorrect"
@@ -243,11 +244,11 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
                        ]
                      });
                    }}
-                   className="w-4 h-4 text-blue-600"
+                   className="w-5 h-5 text-blue-600"
                  />
                  <span>True</span>
                </label>
-               <label className="flex items-center gap-2 cursor-pointer">
+               <label className="flex items-center gap-2 cursor-pointer p-2">
                  <input
                    type="radio"
                    name="tfCorrect"
@@ -261,7 +262,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
                        ]
                      });
                    }}
-                   className="w-4 h-4 text-blue-600"
+                   className="w-5 h-5 text-blue-600"
                  />
                  <span>False</span>
                </label>
@@ -271,31 +272,44 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
 
           <button
             onClick={handleAddQuestion}
-            className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            className="w-full py-3 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium active:scale-98"
           >
             Add Question to List
           </button>
         </div>
 
         {/* Right: Question List */}
-        <div className="space-y-4 max-h-[600px] overflow-y-auto">
-          <h3 className="font-semibold text-gray-700">Questions ({questions.length})</h3>
+        <div className="space-y-3 sm:space-y-4 max-h-[400px] lg:max-h-[600px] overflow-y-auto order-2 lg:order-2 border-t lg:border-t-0 pt-4 lg:pt-0">
+          <h3 className="font-semibold text-gray-700 text-sm sm:text-base">Questions ({questions.length})</h3>
           {questions.length === 0 && (
-            <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg">
+            <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg text-sm">
               No questions added yet.
             </div>
           )}
           {questions.map((q, i) => (
-            <div key={i} className="p-4 bg-gray-50 rounded-lg border border-gray-200 relative group">
-              <div className="flex justify-between items-start mb-2">
-                <span className="font-medium text-gray-900">Q{i + 1}. {q.text}</span>
-                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">{q.type}</span>
+            <div key={i} className="p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200 relative group">
+              <div className="flex justify-between items-start gap-2 mb-2">
+                <span className="font-medium text-gray-900 text-sm sm:text-base flex-1">Q{i + 1}. {q.text}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded hidden sm:inline">{q.type}</span>
+                  {!q.id && (
+                    <button 
+                      onClick={() => {
+                        const newQs = questions.filter((_, idx) => idx !== i);
+                        setQuestions(newQs);
+                      }}
+                      className="text-red-400 hover:text-red-600 p-1"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
               </div>
               
               {q.type === 'MULTIPLE_CHOICE' && (
-                <ul className="space-y-1 ml-4 mt-2">
+                <ul className="space-y-1 ml-2 sm:ml-4 mt-2">
                   {q.options?.map((opt, j) => (
-                    <li key={j} className={`text-sm flex items-center gap-2 ${opt.isCorrect ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
+                    <li key={j} className={`text-xs sm:text-sm flex items-center gap-2 ${opt.isCorrect ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
                       {opt.isCorrect ? <CheckCircle size={14} /> : <div className="w-3.5" />}
                       {opt.text}
                     </li>
@@ -304,20 +318,8 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
               )}
 
               <div className="mt-2 text-xs text-gray-500 text-right">
-                {q.points} points
+                {q.points} pts
               </div>
-              
-              {!q.id && (
-                <button 
-                  onClick={() => {
-                    const newQs = questions.filter((_, idx) => idx !== i);
-                    setQuestions(newQs);
-                  }}
-                  className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Trash2 size={16} />
-                </button>
-              )}
             </div>
           ))}
         </div>

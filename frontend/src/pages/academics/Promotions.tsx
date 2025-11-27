@@ -145,16 +145,17 @@ const Promotions = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Promotion Criteria Selection</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+    <div className="space-y-4 sm:space-y-6 p-4 sm:p-0">
+      {/* Selection Card */}
+      <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">
+        <h2 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Promotion Criteria</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Current Class</label>
             <select
               value={selectedClassId}
               onChange={(e) => setSelectedClassId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-base"
             >
               <option value="">Select Class</option>
               {classes.map(c => (
@@ -167,7 +168,7 @@ const Promotions = () => {
             <select
               value={selectedTermId}
               onChange={(e) => setSelectedTermId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-base"
             >
               <option value="">Select Term</option>
               {terms.map(t => (
@@ -175,88 +176,143 @@ const Promotions = () => {
               ))}
             </select>
           </div>
-          <button
-            onClick={fetchCandidates}
-            disabled={!selectedClassId || !selectedTermId || loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
-          >
-            {loading ? 'Loading...' : 'Fetch Candidates'}
-          </button>
+          <div className="sm:col-span-2 lg:col-span-1 flex items-end">
+            <button
+              onClick={fetchCandidates}
+              disabled={!selectedClassId || !selectedTermId || loading}
+              className="w-full px-4 py-3 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 active:scale-98"
+            >
+              {loading ? 'Loading...' : 'Fetch Candidates'}
+            </button>
+          </div>
         </div>
       </div>
 
       {candidates.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-            <h3 className="text-lg font-semibold text-gray-800">Promotion Candidates</h3>
-            <div className="flex items-center gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mr-2">Promote To:</label>
-                <select
-                  value={nextClassId}
-                  onChange={(e) => setNextClassId(e.target.value)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+          {/* Header with Actions */}
+          <div className="p-4 sm:p-6 border-b border-gray-100 space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800">Promotion Candidates</h3>
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Promote To:</label>
+                  <select
+                    value={nextClassId}
+                    onChange={(e) => setNextClassId(e.target.value)}
+                    className="flex-1 sm:flex-none px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  >
+                    <option value="">Select Class</option>
+                    {classes
+                      .filter(c => c.id !== selectedClassId)
+                      .map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <button
+                  onClick={handleProcessPromotions}
+                  disabled={processing || !nextClassId}
+                  className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300 active:scale-98"
                 >
-                  <option value="">Select Next Class</option>
-                  {classes
-                    .filter(c => c.id !== selectedClassId)
-                    .map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                </select>
+                  <Save size={18} />
+                  {processing ? 'Processing...' : 'Save'}
+                </button>
               </div>
-              <button
-                onClick={handleProcessPromotions}
-                disabled={processing || !nextClassId}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300"
-              >
-                <Save size={18} />
-                {processing ? 'Processing...' : 'Save Changes'}
-              </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Card View */}
+          <div className="sm:hidden divide-y divide-gray-100">
+            {candidates.map((candidate) => (
+              <div key={candidate.studentId} className="p-4 space-y-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-medium text-gray-900">{candidate.studentName}</div>
+                    <div className="text-xs text-gray-500">{candidate.admissionNumber}</div>
+                  </div>
+                  <span className={`text-lg font-bold ${candidate.averageScore >= 50 ? 'text-green-600' : 'text-red-600'}`}>
+                    {candidate.averageScore.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {candidate.recommendedAction === 'PROMOTE' ? (
+                    <span className="flex items-center gap-1 text-green-600 text-xs font-medium bg-green-50 px-2 py-1 rounded">
+                      <CheckCircle size={12} /> Recommend: Promote
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-red-600 text-xs font-medium bg-red-50 px-2 py-1 rounded">
+                      <XCircle size={12} /> Recommend: Retain
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleDecisionChange(candidate.studentId, 'PROMOTE')}
+                    className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                      decisions[candidate.studentId]?.action === 'PROMOTE'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    Promote
+                  </button>
+                  <button
+                    onClick={() => handleDecisionChange(candidate.studentId, 'RETAIN')}
+                    className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                      decisions[candidate.studentId]?.action === 'RETAIN'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    Retain
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Student</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Average Score</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Recommendation</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
+                  <th className="px-4 sm:px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Student</th>
+                  <th className="px-4 sm:px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Avg Score</th>
+                  <th className="px-4 sm:px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Recommendation</th>
+                  <th className="px-4 sm:px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {candidates.map((candidate) => (
                   <tr key={candidate.studentId} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-gray-900">{candidate.studentName}</div>
+                    <td className="px-4 sm:px-6 py-4">
+                      <div className="font-medium text-gray-900 text-sm">{candidate.studentName}</div>
                       <div className="text-xs text-gray-500">{candidate.admissionNumber}</div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <span className={`font-medium ${candidate.averageScore >= 50 ? 'text-green-600' : 'text-red-600'}`}>
                         {candidate.averageScore.toFixed(1)}%
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-2">
                         {candidate.recommendedAction === 'PROMOTE' ? (
-                          <span className="flex items-center gap-1 text-green-600 text-sm font-medium bg-green-50 px-2 py-1 rounded">
+                          <span className="flex items-center gap-1 text-green-600 text-xs font-medium bg-green-50 px-2 py-1 rounded">
                             <CheckCircle size={14} /> Promote
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-red-600 text-sm font-medium bg-red-50 px-2 py-1 rounded">
+                          <span className="flex items-center gap-1 text-red-600 text-xs font-medium bg-red-50 px-2 py-1 rounded">
                             <XCircle size={14} /> Retain
                           </span>
                         )}
-                        <span className="text-xs text-gray-400">({candidate.reason})</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleDecisionChange(candidate.studentId, 'PROMOTE')}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                             decisions[candidate.studentId]?.action === 'PROMOTE'
                               ? 'bg-green-600 text-white'
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -266,7 +322,7 @@ const Promotions = () => {
                         </button>
                         <button
                           onClick={() => handleDecisionChange(candidate.studentId, 'RETAIN')}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                             decisions[candidate.studentId]?.action === 'RETAIN'
                               ? 'bg-red-600 text-white'
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

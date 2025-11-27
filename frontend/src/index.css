@@ -102,6 +102,20 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  
+  /* Hide scrollbar utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Active scale for touch feedback */
+  .active\:scale-98:active {
+    transform: scale(0.98);
+  }
 }
 
 /* Print styles */
