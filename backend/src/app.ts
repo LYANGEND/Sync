@@ -21,6 +21,7 @@ import promotionRoutes from './routes/promotionRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import communicationRoutes from './routes/communicationRoutes';
 import scholarshipRoutes from './routes/scholarshipRoutes';
+import pushRoutes from './routes/pushRoutes';
 
 const app: Application = express();
 
@@ -54,6 +55,7 @@ app.use('/api/v1/promotions', promotionRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/communication', communicationRoutes);
 app.use('/api/v1/scholarships', scholarshipRoutes);
+app.use('/api/v1/push', pushRoutes);
 
 // Basic Route
 app.get('/', (req: Request, res: Response) => {

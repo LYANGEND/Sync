@@ -89,6 +89,7 @@ model User {
   // Chat Relations
   conversationParticipants ConversationParticipant[]
   messagesSent             Message[]
+  pushSubscriptions        PushSubscription[]
 
   @@map("users")
 }
@@ -628,4 +629,16 @@ model Scholarship {
   updatedAt   DateTime @updatedAt
 
   @@map("scholarships")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@map("push_subscriptions")
 }
