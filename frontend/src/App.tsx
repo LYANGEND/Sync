@@ -19,6 +19,7 @@ import Users from './pages/users/Users';
 import Settings from './pages/settings/Settings';
 import Communication from './pages/communication/Communication';
 import Profile from './pages/profile/Profile';
+import Reports from './pages/reports/Reports';
 import DashboardLayout from './components/layout/DashboardLayout';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import RoleGuard from './components/layout/RoleGuard';
@@ -114,6 +115,13 @@ function App() {
               <Route path="/settings" element={
                 <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                   <Settings />
+                </RoleGuard>
+              } />
+
+              {/* Reports */}
+              <Route path="/reports" element={
+                <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']}>
+                  <Reports />
                 </RoleGuard>
               } />
 

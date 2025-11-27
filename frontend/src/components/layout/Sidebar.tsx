@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, 
-  LogOut, BookOpen, UserCog, MessageSquare, X, GraduationCap, BookMarked
+  LogOut, BookOpen, UserCog, MessageSquare, X, GraduationCap, BookMarked, FileText
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -23,6 +23,7 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
     { icon: CalendarCheck, label: 'Attendance', path: '/attendance', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
     { icon: GraduationCap, label: 'Classes', path: '/classes', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
     { icon: BookMarked, label: 'Subjects', path: '/subjects', roles: ['SUPER_ADMIN', 'TEACHER'] },
+    { icon: FileText, label: 'Reports', path: '/reports', roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] },
     { icon: UserCog, label: 'Users', path: '/users', roles: ['SUPER_ADMIN'] },
     { icon: MessageSquare, label: 'Messages', path: '/communication', roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] },
     { icon: Settings, label: 'Settings', path: '/settings', roles: ['SUPER_ADMIN'] },
