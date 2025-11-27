@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Users, AlertCircle } from 'lucide-react';
+import { TrendingUp, Users, AlertCircle, ChevronRight, Plus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
 
 interface DashboardStats {
@@ -48,84 +48,116 @@ const Dashboard = () => {
   }
 
   if (loading) {
-    return <div className="p-4 sm:p-6">Loading dashboard...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Dashboard Overview</h1>
-        <p className="text-sm text-gray-500">Welcome back, here's what's happening today.</p>
+    <div className="space-y-4 sm:space-y-6">
+      {/* Welcome Section - Mobile */}
+      <div className="lg:hidden">
+        <h1 className="text-lg font-bold text-gray-800">Welcome back, {user?.fullName?.split(' ')[0]}!</h1>
+        <p className="text-sm text-gray-500">Here's your school overview</p>
+      </div>
+
+      {/* Desktop Welcome */}
+      <div className="hidden lg:block">
+        <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1>
+        <p className="text-gray-500">Welcome back, here's what's happening today.</p>
+      </div>
+
+      {/* Quick Actions - Mobile Only */}
+      <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 lg:hidden hide-scrollbar">
+        <Link to="/students" className="flex-shrink-0 flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-full text-sm font-medium touch-btn">
+          <Plus size={16} />
+          <span>New Student</span>
+        </Link>
+        <Link to="/finance" className="flex-shrink-0 flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-full text-sm font-medium touch-btn">
+          <Plus size={16} />
+          <span>Record Payment</span>
+        </Link>
+        <Link to="/attendance" className="flex-shrink-0 flex items-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-full text-sm font-medium touch-btn">
+          <span>Mark Attendance</span>
+        </Link>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-        <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-3 sm:mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
+        <div className="stat-card touch-card">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
             <div className="p-2 bg-green-100 text-green-600 rounded-lg">
-              <TrendingUp size={20} className="sm:w-6 sm:h-6" />
+              <TrendingUp size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">Today</span>
+            <span className="text-[10px] sm:text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Today</span>
           </div>
-          <h3 className="text-gray-500 text-xs sm:text-sm font-medium">Today's Collection</h3>
-          <p className="text-xl sm:text-2xl font-bold text-gray-900">ZMW {stats?.dailyRevenue.toLocaleString() || '0'}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 font-medium">Collection</p>
+          <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">
+            <span className="text-sm sm:text-base">ZMW</span> {stats?.dailyRevenue.toLocaleString() || '0'}
+          </p>
         </div>
 
-        <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <div className="stat-card touch-card">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
             <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-              <AlertCircle size={20} className="sm:w-6 sm:h-6" />
+              <AlertCircle size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full">Total</span>
+            <span className="text-[10px] sm:text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">Pending</span>
           </div>
-          <h3 className="text-gray-500 text-xs sm:text-sm font-medium">Outstanding Fees</h3>
-          <p className="text-xl sm:text-2xl font-bold text-gray-900">ZMW {stats?.outstandingFees.toLocaleString() || '0'}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 font-medium">Outstanding</p>
+          <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">
+            <span className="text-sm sm:text-base">ZMW</span> {stats?.outstandingFees.toLocaleString() || '0'}
+          </p>
         </div>
 
-        <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100 sm:col-span-2 lg:col-span-1">
-          <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <div className="stat-card touch-card col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
             <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
-              <Users size={20} className="sm:w-6 sm:h-6" />
+              <Users size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">Active</span>
+            <span className="text-[10px] sm:text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Active</span>
           </div>
-          <h3 className="text-gray-500 text-xs sm:text-sm font-medium">Active Students</h3>
-          <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats?.activeStudents || '0'}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 font-medium">Students</p>
+          <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">{stats?.activeStudents || '0'}</p>
         </div>
       </div>
 
-      {/* Recent Activity Section */}
+      {/* Recent Payments */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-4 sm:p-6 border-b border-gray-100">
-          <h2 className="text-base sm:text-lg font-bold text-gray-800">Recent Payments</h2>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-800">Recent Payments</h2>
+          <Link to="/finance" className="text-blue-600 text-sm font-medium flex items-center">
+            View all <ChevronRight size={16} />
+          </Link>
         </div>
         
-        {/* Mobile Card View */}
-        <div className="block sm:hidden divide-y divide-gray-100">
+        {/* Mobile List View */}
+        <div className="lg:hidden divide-y divide-gray-100">
           {stats?.recentPayments.length === 0 ? (
-            <div className="p-6 text-center text-gray-500 text-sm">No recent payments found</div>
+            <div className="p-8 text-center text-gray-500 text-sm">No recent payments</div>
           ) : (
-            stats?.recentPayments.map((payment) => (
-              <div key={payment.id} className="p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-medium text-gray-900 text-sm">
-                      {payment.student.firstName} {payment.student.lastName}
-                    </p>
-                    <p className="text-xs text-gray-500">{payment.student.class?.name || 'N/A'}</p>
+            stats?.recentPayments.slice(0, 5).map((payment) => (
+              <div key={payment.id} className="mobile-list-item">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 font-semibold text-sm">
+                      {payment.student.firstName.charAt(0)}{payment.student.lastName.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">
+                        {payment.student.firstName} {payment.student.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">{payment.student.class?.name || 'N/A'}</p>
+                    </div>
                   </div>
-                  <span className="text-sm font-bold text-gray-900">ZMW {Number(payment.amount).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-medium
-                    ${payment.method === 'CASH' ? 'bg-green-100 text-green-800' : 
-                      payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800' : 
-                      'bg-blue-100 text-blue-800'}`}>
-                    {payment.method.replace('_', ' ')}
-                  </span>
-                  <span className="text-gray-400">
-                    {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  <div className="text-right">
+                    <p className="font-semibold text-gray-900 text-sm">ZMW {Number(payment.amount).toLocaleString()}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
                 </div>
               </div>
             ))
@@ -133,41 +165,42 @@ const Dashboard = () => {
         </div>
 
         {/* Desktop Table View */}
-        <div className="hidden sm:block overflow-x-auto">
+        <div className="hidden lg:block overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-600">
             <thead className="bg-gray-50 text-gray-700 font-medium">
               <tr>
-                <th className="px-4 lg:px-6 py-3">Student</th>
-                <th className="px-4 lg:px-6 py-3">Class</th>
-                <th className="px-4 lg:px-6 py-3">Amount</th>
-                <th className="px-4 lg:px-6 py-3">Method</th>
-                <th className="px-4 lg:px-6 py-3">Time</th>
-                <th className="px-4 lg:px-6 py-3">Status</th>
+                <th className="px-6 py-3">Student</th>
+                <th className="px-6 py-3">Class</th>
+                <th className="px-6 py-3">Amount</th>
+                <th className="px-6 py-3">Method</th>
+                <th className="px-6 py-3">Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {stats?.recentPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">No recent payments found</td>
+                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">No recent payments</td>
                 </tr>
               ) : (
                 stats?.recentPayments.map((payment) => (
                   <tr key={payment.id} className="hover:bg-gray-50">
-                    <td className="px-4 lg:px-6 py-4 font-medium text-gray-900">
+                    <td className="px-6 py-4 font-medium text-gray-900">
                       {payment.student.firstName} {payment.student.lastName}
                     </td>
-                    <td className="px-4 lg:px-6 py-4">{payment.student.class?.name || 'N/A'}</td>
-                    <td className="px-4 lg:px-6 py-4">ZMW {Number(payment.amount).toLocaleString()}</td>
-                    <td className="px-4 lg:px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                        ${payment.method === 'CASH' ? 'bg-green-100 text-green-800' : 
-                          payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800' : 
-                          'bg-blue-100 text-blue-800'}`}>
+                    <td className="px-6 py-4">{payment.student.class?.name || 'N/A'}</td>
+                    <td className="px-6 py-4 font-medium">ZMW {Number(payment.amount).toLocaleString()}</td>
+                    <td className="px-6 py-4">
+                      <span className={`status-badge ${
+                        payment.method === 'CASH' ? 'bg-green-100 text-green-800' : 
+                        payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-blue-100 text-blue-800'
+                      }`}>
                         {payment.method.replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="px-4 lg:px-6 py-4">{new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                    <td className="px-4 lg:px-6 py-4"><span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">Completed</span></td>
+                    <td className="px-6 py-4 text-gray-500">
+                      {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </td>
                   </tr>
                 ))
               )}
