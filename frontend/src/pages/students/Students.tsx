@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
 import { Plus, Search, Filter, Edit2, Trash2, Eye, X, ChevronRight } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface Student {
   id: string;
@@ -22,12 +23,16 @@ interface Class { id: string; name: string; }
 
 const Students = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [classes, setClasses] = useState<Class[]>([]);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  
+  // BURSAR can only view students, not create/edit/delete
+  const canManageStudents = user?.role !== 'BURSAR';
   
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', admissionNumber: '', dateOfBirth: '',
@@ -96,13 +101,15 @@ const Students = () => {
       <div className="hidden lg:flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Students</h1>
-          <p className="text-gray-500">Manage student records and admissions</p>
+          <p className="text-gray-500">{canManageStudents ? 'Manage student records and admissions' : 'View student records'}</p>
         </div>
-        <button onClick={() => { resetForm(); setShowModal(true); }}
-          className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-          <Plus size={20} />
-          <span>Add Student</span>
-        </button>
+        {canManageStudents && (
+          <button onClick={() => { resetForm(); setShowModal(true); }}
+            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+            <Plus size={20} />
+            <span>Add Student</span>
+          </button>
+        )}
       </div>
 
       {/* Search Bar */}
@@ -210,8 +217,14 @@ const Students = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end space-x-1">
                         <button onClick={() => navigate(`/students/${student.id}`)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"><Eye size={18} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); openEditModal(student); }} className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg"><Edit2 size={18} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(student.id); }} className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"><Trash2 size={18} /></button>
+                        {canManageStudents && (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); openEditModal(student); }} className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg"><Edit2 size={18} /></button>
+                            {user?.role === 'SUPER_ADMIN' && (
+                              <button onClick={(e) => { e.stopPropagation(); handleDelete(student.id); }} className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"><Trash2 size={18} /></button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -222,10 +235,12 @@ const Students = () => {
         </div>
       </div>
 
-      {/* Floating Action Button - Mobile */}
-      <button onClick={() => { resetForm(); setShowModal(true); }} className="fab">
-        <Plus size={24} />
-      </button>
+      {/* Floating Action Button - Mobile (only for users who can manage students) */}
+      {canManageStudents && (
+        <button onClick={() => { resetForm(); setShowModal(true); }} className="fab">
+          <Plus size={24} />
+        </button>
+      )}
 
       {/* Modal - Full screen on mobile */}
       {showModal && (
