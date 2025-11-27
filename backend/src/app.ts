@@ -22,6 +22,7 @@ import settingsRoutes from './routes/settingsRoutes';
 import communicationRoutes from './routes/communicationRoutes';
 import scholarshipRoutes from './routes/scholarshipRoutes';
 import pushRoutes from './routes/pushRoutes';
+import reportsRoutes from './routes/reportsRoutes';
 
 const app: Application = express();
 
@@ -56,6 +57,7 @@ app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/communication', communicationRoutes);
 app.use('/api/v1/scholarships', scholarshipRoutes);
 app.use('/api/v1/push', pushRoutes);
+app.use('/api/v1/reports-hub', reportsRoutes);
 
 // Basic Route
 app.get('/', (req: Request, res: Response) => {
