@@ -27,6 +27,6 @@ router.get('/attendance/absenteeism', authorizeRole(['SUPER_ADMIN', 'TEACHER']),
 
 // Student Reports - All staff
 router.get('/students/roster', authorizeRole(['SUPER_ADMIN', 'TEACHER', 'SECRETARY', 'BURSAR']), getClassRoster);
-router.get('/students/enrollment', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), getEnrollmentStats);
+router.get('/students/enrollment', authorizeRole(['SUPER_ADMIN', 'TEACHER', 'SECRETARY', 'BURSAR']), getEnrollmentStats);
 
 export default router;
