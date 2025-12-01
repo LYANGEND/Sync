@@ -320,3 +320,33 @@ export const searchUsers = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Failed to search users' });
   }
 };
+
+export const subscribeToPush = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const subscription = req.body;
+
+    if (!userId || !subscription || !subscription.endpoint) {
+      return res.status(400).json({ message: 'Invalid subscription data' });
+    }
+
+    // Upsert subscription
+    await prisma.pushSubscription.upsert({
+      where: { endpoint: subscription.endpoint },
+      update: {
+        userId,
+        keys: subscription.keys,
+      },
+      create: {
+        userId,
+        endpoint: subscription.endpoint,
+        keys: subscription.keys,
+      },
+    });
+
+    res.status(201).json({ message: 'Push subscription saved' });
+  } catch (error) {
+    console.error('Push subscription error:', error);
+    res.status(500).json({ message: 'Failed to save subscription' });
+  }
+};

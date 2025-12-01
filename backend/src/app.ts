@@ -21,6 +21,8 @@ import promotionRoutes from './routes/promotionRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import communicationRoutes from './routes/communicationRoutes';
 import scholarshipRoutes from './routes/scholarshipRoutes';
+import profileRoutes from './routes/profileRoutes';
+import path from 'path';
 
 const app: Application = express();
 
@@ -31,11 +33,17 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow serving images
+}));
 app.use(morgan('dev'));
+
+// Serve static files (uploaded images)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/students', studentRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);

@@ -7,13 +7,17 @@ import {
   getConversations,
   getMessages,
   sendMessage,
-  searchUsers
+  searchUsers,
+  subscribeToPush
 } from '../controllers/communicationController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
 router.use(authenticateToken);
+
+// Push Notification routes
+router.post('/push/subscribe', subscribeToPush);
 
 // User routes
 router.get('/notifications', getMyNotifications);

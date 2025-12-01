@@ -15,6 +15,7 @@ import Subjects from './pages/subjects/Subjects';
 import Classes from './pages/classes/Classes';
 import Users from './pages/users/Users';
 import Settings from './pages/settings/Settings';
+import Profile from './pages/profile/Profile';
 import Communication from './pages/communication/Communication';
 import DashboardLayout from './components/layout/DashboardLayout';
 import ProtectedRoute from './components/layout/ProtectedRoute';
@@ -35,6 +36,7 @@ function App() {
             
             <Route element={<DashboardLayout />}>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/student/assessments" element={
                 <RoleGuard allowedRoles={['STUDENT', 'SUPER_ADMIN']}>
                   <StudentAssessments />

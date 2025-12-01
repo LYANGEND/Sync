@@ -1,4 +1,5 @@
 import { PrismaClient, NotificationType } from '@prisma/client';
+import { sendPushNotification } from './pushService';
 
 const prisma = new PrismaClient();
 
@@ -17,6 +18,23 @@ export const createNotification = async (
         type,
       },
     });
+
+    // Send Push Notification
+    const subscriptions = await prisma.pushSubscription.findMany({
+      where: { userId },
+    });
+
+    const payload = {
+      title,
+      body: message,
+      icon: '/pwa-192x192.png',
+      data: { url: '/notifications' }
+    };
+
+    subscriptions.forEach(sub => {
+      sendPushNotification(sub, payload);
+    });
+
     return notification;
   } catch (error) {
     console.error('Error creating notification:', error);
@@ -40,6 +58,23 @@ export const broadcastNotification = async (
         type,
       })),
     });
+
+    // Send Push Notifications
+    const subscriptions = await prisma.pushSubscription.findMany({
+      where: { userId: { in: userIds } },
+    });
+
+    const payload = {
+      title,
+      body: message,
+      icon: '/pwa-192x192.png',
+      data: { url: '/notifications' }
+    };
+
+    subscriptions.forEach(sub => {
+      sendPushNotification(sub, payload);
+    });
+
     return true;
   } catch (error) {
     console.error('Error broadcasting notification:', error);

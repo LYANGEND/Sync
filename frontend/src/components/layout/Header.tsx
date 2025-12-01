@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Check, X } from 'lucide-react';
+import { Bell, Search, Check, X, BellRing } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { subscribeToPushNotifications } from '../../utils/push';
 
 interface Notification {
   id: string;
@@ -67,6 +68,15 @@ const Header = () => {
     }
   };
 
+  const handleEnablePush = async () => {
+    const success = await subscribeToPushNotifications();
+    if (success) {
+      alert('Push notifications enabled!');
+    } else {
+      alert('Failed to enable push notifications. Please check your browser settings.');
+    }
+  };
+
   return (
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-6 fixed top-0 right-0 left-0 md:left-64 z-10 transition-all duration-300">
       <div className="flex items-center bg-gray-100 rounded-lg px-3 py-2 w-full max-w-[200px] md:max-w-sm md:w-96 mr-2 md:mr-0">
@@ -79,6 +89,15 @@ const Header = () => {
       </div>
 
       <div className="flex items-center space-x-2 md:space-x-4 flex-shrink-0">
+        <button 
+          onClick={handleEnablePush}
+          className="hidden md:flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded-full"
+          title="Enable Push Notifications"
+        >
+          <BellRing size={14} />
+          <span>Enable Push</span>
+        </button>
+
         <div className="relative" ref={notificationRef}>
           <button 
             onClick={() => setShowNotifications(!showNotifications)}
