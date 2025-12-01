@@ -59,6 +59,52 @@ export const createStudent = async (req: Request, res: Response) => {
   }
 };
 
+export const bulkCreateStudents = async (req: Request, res: Response) => {
+  try {
+    const studentsData = z.array(createStudentSchema).parse(req.body);
+    
+    // We use a transaction to ensure all or nothing, though createMany is also atomic for the batch
+    // However, createMany doesn't return the created records in all databases/prisma versions easily if we need them back
+    // But usually for bulk import, just knowing count is enough.
+    
+    const result = await prisma.student.createMany({
+      data: studentsData.map(s => ({
+        ...s,
+        status: 'ACTIVE'
+      })),
+      skipDuplicates: true, // Optional: skip if admission number exists? 
+      // Note: skipDuplicates is not supported on all databases with Prisma (e.g. SQL Server), but works on Postgres/MySQL
+    });
+    
+    res.status(201).json({ message: `Successfully imported ${result.count} students`, count: result.count });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Bulk create error:', error);
+    res.status(500).json({ error: 'Failed to import students' });
+  }
+};
+
+export const bulkDeleteStudents = async (req: Request, res: Response) => {
+  try {
+    const { ids } = z.object({ ids: z.array(z.string()) }).parse(req.body);
+    
+    const result = await prisma.student.deleteMany({
+      where: {
+        id: {
+          in: ids
+        }
+      }
+    });
+    
+    res.json({ message: `Successfully deleted ${result.count} students`, count: result.count });
+  } catch (error) {
+    console.error('Bulk delete error:', error);
+    res.status(500).json({ error: 'Failed to delete students' });
+  }
+};
+
 export const getStudentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

@@ -54,15 +54,15 @@ const Dashboard = () => {
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1>
-        <p className="text-gray-500">Welcome back, here's what's happening today.</p>
+    <div className="p-4 md:p-6">
+      <div className="mb-6 md:mb-8">
+        <h1 className="text-xl md:text-2xl font-bold text-gray-800">Dashboard Overview</h1>
+        <p className="text-sm md:text-base text-gray-500">Welcome back, here's what's happening today.</p>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
+        <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-green-100 text-green-600 rounded-lg">
               <TrendingUp size={24} />
@@ -73,7 +73,7 @@ const Dashboard = () => {
           <p className="text-2xl font-bold text-gray-900">ZMW {stats?.dailyRevenue.toLocaleString() || '0'}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-red-100 text-red-600 rounded-lg">
               <AlertCircle size={24} />
@@ -84,7 +84,7 @@ const Dashboard = () => {
           <p className="text-2xl font-bold text-gray-900">ZMW {stats?.outstandingFees.toLocaleString() || '0'}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
               <Users size={24} />
@@ -98,10 +98,12 @@ const Dashboard = () => {
 
       {/* Recent Activity Section */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+        <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center">
           <h2 className="text-lg font-bold text-gray-800">Recent Payments</h2>
         </div>
-        <div className="overflow-x-auto">
+        
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-600">
             <thead className="bg-gray-50 text-gray-700 font-medium">
               <tr>
@@ -141,6 +143,38 @@ const Dashboard = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile List View */}
+        <div className="md:hidden">
+          {stats?.recentPayments.length === 0 ? (
+            <div className="p-6 text-center text-gray-500">No recent payments found</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {stats?.recentPayments.map((payment) => (
+                <div key={payment.id} className="p-4 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-medium text-gray-900">{payment.student.firstName} {payment.student.lastName}</p>
+                      <p className="text-sm text-gray-500">{payment.student.class?.name || 'N/A'}</p>
+                    </div>
+                    <span className="font-bold text-gray-900">ZMW {Number(payment.amount).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                      ${payment.method === 'CASH' ? 'bg-green-100 text-green-800' : 
+                        payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-blue-100 text-blue-800'}`}>
+                      {payment.method.replace('_', ' ')}
+                    </span>
+                    <span className="text-gray-500">
+                      {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

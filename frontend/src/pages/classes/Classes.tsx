@@ -361,7 +361,7 @@ const Classes = () => {
               </select>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto pb-safe">
               {syllabusSubjectId ? (
                 <ClassSyllabus classId={syllabusClass.id} subjectId={syllabusSubjectId} />
               ) : (
@@ -393,7 +393,7 @@ const Classes = () => {
                 <div className="bg-gray-50 p-3 border-b font-medium text-gray-700">
                   Current Students ({classStudents.length})
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-safe">
                   {classStudents.length === 0 ? (
                     <p className="text-gray-400 text-center py-4">No students in this class</p>
                   ) : (
@@ -437,7 +437,7 @@ const Classes = () => {
                     />
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-safe">
                   {availableStudents.length === 0 ? (
                     <p className="text-gray-400 text-center py-4">No students found</p>
                   ) : (
@@ -466,8 +466,8 @@ const Classes = () => {
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl my-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto pb-safe">
+          <div className="bg-white rounded-xl p-6 w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto pb-safe">
             <h2 className="text-xl font-bold mb-4">{editingClass ? 'Edit Class' : 'Add Class'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

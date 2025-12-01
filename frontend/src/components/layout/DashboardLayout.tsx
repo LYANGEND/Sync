@@ -13,7 +13,7 @@ const DashboardLayout = () => {
     <div className="min-h-screen bg-gray-50">
       <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
       <Header />
-      <main className="md:pl-64 pt-16 min-h-screen pb-20 md:pb-0 transition-all duration-300">
+      <main className="md:pl-64 min-h-screen transition-all duration-300 pt-header-safe pb-nav-safe md:pb-0">
         <div className="p-4 md:p-6 max-w-7xl mx-auto">
           <AnimatePresence mode="wait">
             <motion.div

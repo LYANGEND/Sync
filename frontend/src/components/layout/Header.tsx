@@ -78,94 +78,101 @@ const Header = () => {
   };
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-6 fixed top-0 right-0 left-0 md:left-64 z-10 transition-all duration-300">
-      <div className="flex items-center bg-gray-100 rounded-lg px-3 py-2 w-full max-w-[200px] md:max-w-sm md:w-96 mr-2 md:mr-0">
-        <Search size={20} className="text-gray-400 flex-shrink-0" />
-        <input
-          type="text"
-          placeholder="Search..."
-          className="bg-transparent border-none focus:outline-none ml-2 w-full text-sm text-gray-700 min-w-0"
-        />
-      </div>
+    <header 
+      className="bg-white border-b border-gray-200 fixed top-0 right-0 left-0 md:left-64 z-10 transition-all duration-300"
+      style={{ 
+        paddingTop: 'env(safe-area-inset-top)',
+      }}
+    >
+      <div className="h-16 px-4 md:px-6 flex items-center justify-between">
+        <div className="flex items-center bg-gray-100 rounded-lg px-3 py-2 w-full max-w-[200px] md:max-w-sm md:w-96 mr-2 md:mr-0">
+          <Search size={20} className="text-gray-400 flex-shrink-0" />
+          <input
+            type="text"
+            placeholder="Search..."
+            className="bg-transparent border-none focus:outline-none ml-2 w-full text-sm text-gray-700 min-w-0"
+          />
+        </div>
 
-      <div className="flex items-center space-x-2 md:space-x-4 flex-shrink-0">
-        <button 
-          onClick={handleEnablePush}
-          className="hidden md:flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded-full"
-          title="Enable Push Notifications"
-        >
-          <BellRing size={14} />
-          <span>Enable Push</span>
-        </button>
-
-        <div className="relative" ref={notificationRef}>
+        <div className="flex items-center space-x-2 md:space-x-4 flex-shrink-0">
           <button 
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+            onClick={handleEnablePush}
+            className="hidden md:flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded-full"
+            title="Enable Push Notifications"
           >
-            <Bell size={20} />
-            {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-            )}
+            <BellRing size={14} />
+            <span>Enable Push</span>
           </button>
 
-          {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
-              <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                <h3 className="font-semibold text-gray-700">Notifications</h3>
-                {unreadCount > 0 && (
-                  <button 
-                    onClick={markAllAsRead}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    Mark all read
-                  </button>
-                )}
-              </div>
-              <div className="max-h-96 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500 text-sm">
-                    No notifications
-                  </div>
-                ) : (
-                  notifications.map(notification => (
-                    <div 
-                      key={notification.id} 
-                      className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
+          <div className="relative" ref={notificationRef}>
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+                <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                  <h3 className="font-semibold text-gray-700">Notifications</h3>
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={markAllAsRead}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                     >
-                      <div className="flex justify-between items-start">
-                        <h4 className={`text-sm font-medium ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
-                          {notification.title}
-                        </h4>
-                        {!notification.isRead && (
-                          <button 
-                            onClick={() => markAsRead(notification.id)}
-                            className="text-gray-400 hover:text-blue-600"
-                            title="Mark as read"
-                          >
-                            <Check size={14} />
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">{notification.message}</p>
-                      <span className="text-[10px] text-gray-400 mt-2 block">
-                        {new Date(notification.createdAt).toLocaleString()}
-                      </span>
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-96 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500 text-sm">
+                      No notifications
                     </div>
-                  ))
-                )}
+                  ) : (
+                    notifications.map(notification => (
+                      <div 
+                        key={notification.id} 
+                        className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <h4 className={`text-sm font-medium ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
+                            {notification.title}
+                          </h4>
+                          {!notification.isRead && (
+                            <button 
+                              onClick={() => markAsRead(notification.id)}
+                              className="text-gray-400 hover:text-blue-600"
+                              title="Mark as read"
+                            >
+                              <Check size={14} />
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{notification.message}</p>
+                        <span className="text-[10px] text-gray-400 mt-2 block">
+                          {new Date(notification.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="flex items-center space-x-3 pl-4 border-l border-gray-200">
-          <div className="text-right hidden md:block">
-            <p className="text-sm font-medium text-gray-700">{user?.fullName || 'User'}</p>
-            <p className="text-xs text-gray-500">{user?.role?.replace('_', ' ') || 'Role'}</p>
+            )}
           </div>
-          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-            {user?.fullName?.charAt(0) || 'U'}
+          
+          <div className="flex items-center space-x-3 pl-4 border-l border-gray-200">
+            <div className="text-right hidden md:block">
+              <p className="text-sm font-medium text-gray-700">{user?.fullName || 'User'}</p>
+              <p className="text-xs text-gray-500">{user?.role?.replace('_', ' ') || 'Role'}</p>
+            </div>
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+              {user?.fullName?.charAt(0) || 'U'}
+            </div>
           </div>
         </div>
       </div>

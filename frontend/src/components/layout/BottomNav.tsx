@@ -43,7 +43,14 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
   );
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-2 flex justify-around items-center z-40 pb-safe h-16">
+    <div 
+      className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 flex justify-around items-center z-40 transition-all duration-300"
+      style={{ 
+        paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
+        paddingTop: '0.5rem',
+        height: 'auto'
+      }}
+    >
       {filteredItems.map((item) => {
         const isActive = location.pathname === item.path;
         return (
