@@ -188,3 +188,65 @@ export const getStudentPayments = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+export const getFinanceStats = async (req: Request, res: Response) => {
+  try {
+    // 1. Total Revenue (Sum of all payments)
+    const totalRevenueAgg = await prisma.payment.aggregate({
+      _sum: { amount: true },
+      _count: { id: true },
+    });
+    const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
+    const totalTransactions = totalRevenueAgg._count.id;
+
+    // 2. Total Fees Assigned (Sum of all fee structures)
+    const totalFeesAgg = await prisma.studentFeeStructure.aggregate({
+      _sum: { amountDue: true },
+    });
+    const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
+
+    // 3. Pending Fees
+    const pendingFees = Math.max(0, totalFeesAssigned - totalRevenue);
+
+    // 4. Overdue Students Count
+    // Get total due per student
+    const feesByStudent = await prisma.studentFeeStructure.groupBy({
+      by: ['studentId'],
+      _sum: { amountDue: true },
+    });
+
+    // Get total paid per student
+    const paymentsByStudent = await prisma.payment.groupBy({
+      by: ['studentId'],
+      _sum: { amount: true },
+    });
+
+    // Create a map for quick lookup
+    const paymentsMap = new Map<string, number>();
+    paymentsByStudent.forEach(p => {
+      paymentsMap.set(p.studentId, Number(p._sum.amount || 0));
+    });
+
+    let overdueCount = 0;
+    feesByStudent.forEach(f => {
+      const studentId = f.studentId;
+      const due = Number(f._sum.amountDue || 0);
+      const paid = paymentsMap.get(studentId) || 0;
+      
+      if (due > paid) {
+        overdueCount++;
+      }
+    });
+
+    res.json({
+      totalRevenue,
+      totalTransactions,
+      pendingFees,
+      overdueStudentsCount: overdueCount
+    });
+
+  } catch (error) {
+    console.error('Get finance stats error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

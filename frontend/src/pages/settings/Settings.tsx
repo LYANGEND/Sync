@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server } from 'lucide-react';
+import { useTheme } from '../../context/ThemeContext';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -10,6 +11,11 @@ interface SettingsData {
   schoolWebsite: string;
   currentTermId: string;
   
+  // Theme
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+
   // SMTP
   smtpHost: string;
   smtpPort: number | '';
@@ -34,6 +40,7 @@ interface Term {
 }
 
 const Settings = () => {
+  const { refreshSettings } = useTheme();
   const [settings, setSettings] = useState<SettingsData>({
     schoolName: '',
     schoolAddress: '',
@@ -42,6 +49,10 @@ const Settings = () => {
     schoolWebsite: '',
     currentTermId: '',
     
+    primaryColor: '#2563eb',
+    secondaryColor: '#475569',
+    accentColor: '#f59e0b',
+
     smtpHost: '',
     smtpPort: '',
     smtpSecure: true,
@@ -58,7 +69,7 @@ const Settings = () => {
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme'>('general');
 
   useEffect(() => {
     fetchData();
@@ -79,6 +90,10 @@ const Settings = () => {
         schoolWebsite: settingsRes.data.schoolWebsite || '',
         currentTermId: settingsRes.data.currentTermId || '',
         
+        primaryColor: settingsRes.data.primaryColor || '#2563eb',
+        secondaryColor: settingsRes.data.secondaryColor || '#475569',
+        accentColor: settingsRes.data.accentColor || '#f59e0b',
+
         smtpHost: settingsRes.data.smtpHost || '',
         smtpPort: settingsRes.data.smtpPort || '',
         smtpSecure: settingsRes.data.smtpSecure ?? true,
@@ -110,6 +125,7 @@ const Settings = () => {
         smtpPort: settings.smtpPort === '' ? null : Number(settings.smtpPort),
       };
       await api.put('/settings', payload);
+      await refreshSettings();
       alert('Settings saved successfully');
     } catch (error: any) {
       console.error('Failed to save settings', error.response?.data || error);
@@ -137,6 +153,12 @@ const Settings = () => {
           className={`pb-2 px-1 ${activeTab === 'academic' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
         >
           Academic
+        </button>
+        <button
+          onClick={() => setActiveTab('theme')}
+          className={`pb-2 px-1 ${activeTab === 'theme' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          Theme & Branding
         </button>
         <button
           onClick={() => setActiveTab('communication')}
@@ -246,6 +268,78 @@ const Settings = () => {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+        )}
+
+        {/* Theme Configuration */}
+        {activeTab === 'theme' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center gap-2 mb-4 border-b pb-2">
+              <Palette className="text-blue-600" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800">Theme & Branding</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="color"
+                    value={settings.primaryColor}
+                    onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
+                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={settings.primaryColor}
+                    onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Used for buttons, links, and active states.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Color</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="color"
+                    value={settings.secondaryColor}
+                    onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
+                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={settings.secondaryColor}
+                    onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Used for text, borders, and backgrounds.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Accent Color</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="color"
+                    value={settings.accentColor}
+                    onChange={(e) => setSettings({ ...settings, accentColor: e.target.value })}
+                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={settings.accentColor}
+                    onChange={(e) => setSettings({ ...settings, accentColor: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Used for highlights and special indicators.</p>
+              </div>
             </div>
           </div>
         )}

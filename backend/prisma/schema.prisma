@@ -219,6 +219,11 @@ model SchoolSettings {
   schoolWebsite     String?
   logoUrl           String?
   
+  // Theme Settings
+  primaryColor      String   @default("#2563eb") // blue-600
+  secondaryColor    String   @default("#475569") // slate-600
+  accentColor       String   @default("#f59e0b") // amber-500
+
   // System Configuration
   currentTermId     String?  @unique
   currentTerm       AcademicTerm? @relation(fields: [currentTermId], references: [id])

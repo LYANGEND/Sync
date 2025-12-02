@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -11,6 +12,7 @@ interface SidebarProps {
 const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
   const location = useLocation();
   const { logout, user } = useAuth();
+  const { settings } = useTheme();
 
   const menuItems = [
     { 
@@ -90,7 +92,7 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       `}>
         <div className="p-6 border-b border-slate-800 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-blue-400">Sync</h1>
+            <h1 className="text-2xl font-bold text-blue-400" style={{ color: 'var(--primary-color)' }}>{settings.schoolName}</h1>
             <p className="text-xs text-slate-400">School Management</p>
           </div>
           <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white">
@@ -108,7 +110,7 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                 onClick={onClose}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-primary text-white'
                     : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                 }`}
               >

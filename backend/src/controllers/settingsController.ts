@@ -12,6 +12,11 @@ const updateSettingsSchema = z.object({
   schoolWebsite: z.string().url().optional().or(z.literal('')),
   currentTermId: z.string().uuid().optional().nullable(),
   
+  // Theme
+  primaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+  secondaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+  accentColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+
   // SMTP
   smtpHost: z.string().optional().or(z.literal('')),
   smtpPort: z.number().optional().nullable(),
@@ -78,6 +83,34 @@ export const updateSettings = async (req: Request, res: Response) => {
       return res.status(400).json({ errors: error.errors });
     }
     console.error('Update settings error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getPublicSettings = async (req: Request, res: Response) => {
+  try {
+    const settings = await prisma.schoolSettings.findFirst({
+      select: {
+        schoolName: true,
+        logoUrl: true,
+        primaryColor: true,
+        secondaryColor: true,
+        accentColor: true,
+      }
+    });
+
+    if (!settings) {
+      return res.json({
+        schoolName: 'My School',
+        primaryColor: '#2563eb',
+        secondaryColor: '#475569',
+        accentColor: '#f59e0b',
+      });
+    }
+
+    res.json(settings);
+  } catch (error) {
+    console.error('Get public settings error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

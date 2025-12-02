@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const timetableController_1 = require("../controllers/timetableController");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const router = (0, express_1.Router)();
+router.use(authMiddleware_1.authenticateToken);
+router.get('/class/:classId', timetableController_1.getTimetableByClass);
+router.get('/teacher/:teacherId', timetableController_1.getTimetableByTeacher);
+router.post('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'TEACHER']), timetableController_1.createTimetablePeriod);
+router.delete('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'TEACHER']), timetableController_1.deleteTimetablePeriod);
+exports.default = router;

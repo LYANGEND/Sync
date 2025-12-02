@@ -62,6 +62,12 @@ const Finance = () => {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [classFilter, setClassFilter] = useState<string>('ALL');
+  const [stats, setStats] = useState({
+    totalRevenue: 0,
+    totalTransactions: 0,
+    pendingFees: 0,
+    overdueStudentsCount: 0
+  });
 
   // Form states
   const [newFee, setNewFee] = useState({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
@@ -79,7 +85,17 @@ const Finance = () => {
     fetchAcademicTerms();
     fetchClasses();
     fetchStudents();
+    fetchStats();
   }, []);
+
+  const fetchStats = async () => {
+    try {
+      const response = await api.get('/payments/stats');
+      setStats(response.data);
+    } catch (error) {
+      console.error('Error fetching finance stats:', error);
+    }
+  };
 
   const fetchPayments = async () => {
     try {
@@ -195,8 +211,6 @@ const Finance = () => {
     return matchesSearch && matchesMethod && matchesClass && matchesDate;
   });
 
-  const totalRevenue = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -273,8 +287,8 @@ const Finance = () => {
                 </div>
                 <span className="text-sm text-slate-500">Total Revenue</span>
               </div>
-              <h3 className="text-2xl font-bold text-slate-800">ZMW {totalRevenue.toLocaleString()}</h3>
-              <p className="text-sm text-green-600 mt-1">+12% from last month</p>
+              <h3 className="text-2xl font-bold text-slate-800">ZMW {stats.totalRevenue.toLocaleString()}</h3>
+              <p className="text-sm text-green-600 mt-1">All time revenue</p>
             </div>
 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -284,8 +298,8 @@ const Finance = () => {
                 </div>
                 <span className="text-sm text-slate-500">Transactions</span>
               </div>
-              <h3 className="text-2xl font-bold text-slate-800">{payments.length}</h3>
-              <p className="text-sm text-slate-500 mt-1">Recorded this term</p>
+              <h3 className="text-2xl font-bold text-slate-800">{stats.totalTransactions}</h3>
+              <p className="text-sm text-slate-500 mt-1">Total transactions</p>
             </div>
 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -295,8 +309,8 @@ const Finance = () => {
                 </div>
                 <span className="text-sm text-slate-500">Pending Fees</span>
               </div>
-              <h3 className="text-2xl font-bold text-slate-800">ZMW 45,200</h3>
-              <p className="text-sm text-red-500 mt-1">15 students overdue</p>
+              <h3 className="text-2xl font-bold text-slate-800">ZMW {stats.pendingFees.toLocaleString()}</h3>
+              <p className="text-sm text-red-500 mt-1">{stats.overdueStudentsCount} students overdue</p>
             </div>
           </div>
 

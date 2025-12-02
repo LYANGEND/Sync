@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const paymentController_1 = require("../controllers/paymentController");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const router = (0, express_1.Router)();
+router.use(authMiddleware_1.authenticateToken);
+router.get('/stats', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), paymentController_1.getFinanceStats);
+router.post('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), paymentController_1.createPayment);
+router.get('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), paymentController_1.getPayments);
+router.get('/student/:studentId', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR', 'TEACHER']), paymentController_1.getStudentPayments);
+exports.default = router;

@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const scholarshipController_1 = require("../controllers/scholarshipController");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const router = (0, express_1.Router)();
+router.use(authMiddleware_1.authenticateToken);
+router.use((0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']));
+router.get('/', scholarshipController_1.getScholarships);
+router.post('/', scholarshipController_1.createScholarship);
+router.put('/:id', scholarshipController_1.updateScholarship);
+router.delete('/:id', scholarshipController_1.deleteScholarship);
+exports.default = router;

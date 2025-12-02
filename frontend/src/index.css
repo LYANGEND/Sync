@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --primary-color: #2563eb;
+  --secondary-color: #475569;
+  --accent-color: #f59e0b;
+}
+
 /* Mobile App Feel Optimizations */
 @layer base {
   html {

@@ -1,6 +1,6 @@
 import api from './api';
 
-const VAPID_PUBLIC_KEY = 'BE2-OUTXmwT7zc2m2efNQCecKxbJcl5-cFJ4qDnHaSArZtYllkYnn65VkGA2AaXgbCR6m9gUGIFkOjdBhTsWtJw';
+const VAPID_PUBLIC_KEY = 'BB7DzC7jdgpf0PtthMK1CCHNPTuNa9Roecz5Ajx3hYLZ3rTRl8NtlxlkfJ5zDSTauJY7rnZemuYQLo4yevp5qns';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
