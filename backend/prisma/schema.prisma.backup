@@ -91,12 +91,6 @@ model User {
   conversationParticipants ConversationParticipant[]
   messagesSent             Message[]
   pushSubscriptions        PushSubscription[]
-  
-  // Online Classes Relations
-  teacherSessions ClassSession[] @relation("TeacherSessions")
-  classParticipants ClassParticipant[]
-  uploadedMaterials ClassMaterial[]
-  uploadedVideos VideoLesson[]
 
   @@map("users")
 }
@@ -148,11 +142,6 @@ model Student {
   termResults       TermResult[]
   termReports       StudentTermReport[]
   submissions     AssessmentSubmission[]
-  
-  // Voice Tutor & Video Relations
-  voiceSessions VoiceSession[]
-  tutorContext  TutorContext?
-  videoProgress VideoProgress[]
 
   @@map("students")
 }
@@ -179,9 +168,6 @@ model Class {
   timetablePeriods TimetablePeriod[]
   topicProgress  TopicProgress[]
   lessonPlans    LessonPlan[]
-  
-  // Online Classes Relations
-  sessions ClassSession[]
 
   @@map("classes")
 }
@@ -199,12 +185,6 @@ model Subject {
   timetablePeriods TimetablePeriod[]
   topics          Topic[]
   lessonPlans     LessonPlan[]
-  
-  // Voice Tutor & Online Classes Relations
-  voiceSessions VoiceSession[]
-  aiContent     AIContent[]
-  sessions      ClassSession[]
-  videoLessons  VideoLesson[]
 
   @@map("subjects")
 }
@@ -223,9 +203,6 @@ model AcademicTerm {
   studentReports StudentTermReport[]
   timetablePeriods TimetablePeriod[]
   lessonPlans    LessonPlan[]
-  
-  // Online Classes Relations
-  sessions ClassSession[]
   
   activeInSettings SchoolSettings?
 
@@ -572,11 +549,6 @@ model Topic {
   orderIndex  Int      @default(0)
 
   progress    TopicProgress[]
-  
-  // Voice Tutor & Video Relations
-  voiceSessions VoiceSession[]
-  aiContent     AIContent[]
-  videoLessons  VideoLesson[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -911,4 +883,46 @@ model VideoProgress {
   @@map("video_progress")
 }
 
+// ============================================
+// Update existing models with new relations
+// ============================================
 
+// Add to User model relations
+model User {
+  teacherSessions ClassSession[] @relation("TeacherSessions")
+  classParticipants ClassParticipant[]
+  uploadedMaterials ClassMaterial[]
+  uploadedVideos VideoLesson[]
+}
+
+// Add to Student model relations
+model Student {
+  voiceSessions VoiceSession[]
+  tutorContext  TutorContext?
+  videoProgress VideoProgress[]
+}
+
+// Add to Class model relations
+model Class {
+  sessions ClassSession[]
+}
+
+// Add to Subject model relations
+model Subject {
+  voiceSessions VoiceSession[]
+  aiContent     AIContent[]
+  sessions      ClassSession[]
+  videoLessons  VideoLesson[]
+}
+
+// Add to AcademicTerm model relations
+model AcademicTerm {
+  sessions ClassSession[]
+}
+
+// Add to Topic model relations
+model Topic {
+  voiceSessions VoiceSession[]
+  aiContent     AIContent[]
+  videoLessons  VideoLesson[]
+}
