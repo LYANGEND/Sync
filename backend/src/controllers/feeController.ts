@@ -8,7 +8,7 @@ const feeTemplateSchema = z.object({
   name: z.string().min(2),
   amount: z.number().positive(),
   academicTermId: z.string().uuid(),
-  applicableGrade: z.number().int().min(1).max(12), // Assuming grades 1-12
+  applicableGrade: z.number().int().min(-3).max(12), // -3: Baby, -2: Middle, -1: Reception, 0: Pre-Unit, 1-12: Grades
 });
 
 const assignFeeSchema = z.object({

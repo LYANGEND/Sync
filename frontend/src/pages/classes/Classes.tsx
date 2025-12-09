@@ -32,6 +32,16 @@ interface Student {
   classId: string;
 }
 
+const getGradeLabel = (grade: number) => {
+  switch (grade) {
+    case -3: return 'Baby Class';
+    case -2: return 'Middle Class';
+    case -1: return 'Reception';
+    case 0: return 'Pre-Unit';
+    default: return `Grade ${grade}`;
+  }
+};
+
 const Classes = () => {
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -39,7 +49,7 @@ const Classes = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
-  
+
   // Student Management
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [managingClass, setManagingClass] = useState<Class | null>(null);
@@ -62,8 +72,8 @@ const Classes = () => {
     subjectIds: [] as string[],
   });
 
-  const [teachers, setTeachers] = useState<{id: string, fullName: string}[]>([]);
-  const [terms, setTerms] = useState<{id: string, name: string}[]>([]);
+  const [teachers, setTeachers] = useState<{ id: string, fullName: string }[]>([]);
+  const [terms, setTerms] = useState<{ id: string, name: string }[]>([]);
 
   useEffect(() => {
     fetchClasses();
@@ -150,7 +160,7 @@ const Classes = () => {
 
   const handleAddStudents = async () => {
     if (!managingClass || selectedStudentIds.length === 0) return;
-    
+
     try {
       await api.post(`/classes/${managingClass.id}/students`, {
         studentIds: selectedStudentIds
@@ -166,8 +176,8 @@ const Classes = () => {
   };
 
   const toggleStudentSelection = (studentId: string) => {
-    setSelectedStudentIds(prev => 
-      prev.includes(studentId) 
+    setSelectedStudentIds(prev =>
+      prev.includes(studentId)
         ? prev.filter(id => id !== studentId)
         : [...prev, studentId]
     );
@@ -179,7 +189,7 @@ const Classes = () => {
       // For demo purposes, we need valid teacherId and academicTermId
       // If the form is empty, we might fail. 
       // In a real scenario, we'd have dropdowns populated from API.
-      
+
       const payload = {
         ...formData,
         gradeLevel: Number(formData.gradeLevel),
@@ -251,22 +261,22 @@ const Classes = () => {
     });
   };
 
-  const filteredClasses = classes.filter(cls => 
+  const filteredClasses = classes.filter(cls =>
     cls.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const availableStudents = allStudents.filter(s => 
-    s.classId !== managingClass?.id && 
-    (s.firstName.toLowerCase().includes(studentSearchTerm.toLowerCase()) || 
-     s.lastName.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
-     s.admissionNumber.includes(studentSearchTerm))
+  const availableStudents = allStudents.filter(s =>
+    s.classId !== managingClass?.id &&
+    (s.firstName.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
+      s.lastName.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
+      s.admissionNumber.includes(studentSearchTerm))
   );
 
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-lg font-semibold text-gray-800">Class Sections</h2>
-        <button 
+        <button
           onClick={openAddModal}
           className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
         >
@@ -290,7 +300,7 @@ const Classes = () => {
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">{cls.name}</h3>
-                  <p className="text-sm text-gray-500">Grade {cls.gradeLevel} • {cls._count.students} Students</p>
+                  <p className="text-sm text-gray-500">{getGradeLabel(cls.gradeLevel)} • {cls._count.students} Students</p>
                 </div>
                 <div className="flex space-x-2">
                   <button onClick={() => openSyllabusModal(cls)} className="text-gray-400 hover:text-purple-600" title="Syllabus & Plans">
@@ -307,7 +317,7 @@ const Classes = () => {
                   </button>
                 </div>
               </div>
-              
+
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-2 flex items-center">
                   <BookOpen size={16} className="mr-2" />
@@ -413,14 +423,13 @@ const Classes = () => {
               <div className="flex flex-col border rounded-lg overflow-hidden">
                 <div className="bg-gray-50 p-3 border-b font-medium text-gray-700 flex justify-between items-center">
                   <span>Add Students</span>
-                  <button 
+                  <button
                     onClick={handleAddStudents}
                     disabled={selectedStudentIds.length === 0}
-                    className={`text-xs px-3 py-1 rounded ${
-                      selectedStudentIds.length > 0 
-                        ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    className={`text-xs px-3 py-1 rounded ${selectedStudentIds.length > 0
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    }`}
+                      }`}
                   >
                     Add Selected ({selectedStudentIds.length})
                   </button>
@@ -484,15 +493,21 @@ const Classes = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Grade Level</label>
-                  <input
-                    type="number"
+                  <select
                     required
-                    min="1"
-                    max="12"
                     value={formData.gradeLevel}
                     onChange={(e) => setFormData({ ...formData, gradeLevel: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                  />
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  >
+                    <option value="">Select Grade</option>
+                    <option value="-3">Baby Class</option>
+                    <option value="-2">Middle Class</option>
+                    <option value="-1">Reception</option>
+                    <option value="0">Pre-Unit</option>
+                    {[...Array(12)].map((_, i) => (
+                      <option key={i + 1} value={i + 1}>Grade {i + 1}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Teacher</label>
@@ -552,14 +567,14 @@ const Classes = () => {
               </div>
 
               <div className="flex justify-end space-x-3 mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
