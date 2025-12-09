@@ -113,8 +113,8 @@ model Student {
   lastName        String
   dateOfBirth     DateTime
   gender          Gender
-  guardianName    String
-  guardianPhone   String
+  guardianName    String?
+  guardianPhone   String?
   guardianEmail   String?
   address         String?
   status          StudentStatus @default(ACTIVE)

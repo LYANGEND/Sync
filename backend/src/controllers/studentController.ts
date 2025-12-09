@@ -12,8 +12,8 @@ const createStudentSchema = z.object({
   admissionNumber: z.string().optional(),
   dateOfBirth: z.string().transform((str) => new Date(str)),
   gender: z.enum(['MALE', 'FEMALE']),
-  guardianName: z.string(),
-  guardianPhone: z.string(),
+  guardianName: z.string().optional(),
+  guardianPhone: z.string().optional(),
   guardianEmail: z.string().email().optional(),
   address: z.string().optional(),
   classId: z.string().uuid(),
@@ -103,7 +103,7 @@ export const createStudent = async (req: Request, res: Response) => {
           const newParent = await prisma.user.create({
             data: {
               email: data.guardianEmail,
-              fullName: data.guardianName,
+              fullName: data.guardianName || 'Guardian',
               role: 'PARENT',
               passwordHash: hashedPassword,
             }
@@ -116,7 +116,7 @@ export const createStudent = async (req: Request, res: Response) => {
           const emailBody = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #2563eb;">Welcome to Sync School Management</h2>
-              <p>Dear ${data.guardianName},</p>
+              <p>Dear ${data.guardianName || 'Parent'},</p>
               <p>A parent account has been automatically created for you to track your child's progress.</p>
               <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0; font-weight: bold;">Your Login Credentials:</p>

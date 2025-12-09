@@ -71,7 +71,7 @@ export const createPayment = async (req: Request, res: Response) => {
 
     // Send Email Notification
     const parentEmail = payment.student.parent?.email || payment.student.guardianEmail;
-    const parentName = payment.student.parent?.fullName || payment.student.guardianName;
+    const parentName = payment.student.parent?.fullName || payment.student.guardianName || 'Parent';
 
     if (parentEmail) {
       console.log(`DEBUG: Sending payment receipt to ${parentEmail}`);
