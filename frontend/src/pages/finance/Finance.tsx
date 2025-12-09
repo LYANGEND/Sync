@@ -45,6 +45,11 @@ interface Class {
   name: string;
 }
 
+const getGradeLabel = (grade: number) => {
+  if (grade === 0) return 'Nursery';
+  return `Grade ${grade}`;
+};
+
 const Finance = () => {
   const [activeTab, setActiveTab] = useState<'payments' | 'fees' | 'scholarships'>('payments');
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -475,7 +480,7 @@ const Finance = () => {
                 <div className="flex-1">
                   <h3 className="text-lg font-bold text-slate-800 mb-1">{template.name}</h3>
                   <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                    Grade {template.applicableGrade}
+                    {getGradeLabel(template.applicableGrade)}
                   </span>
                 </div>
                 <div className="flex space-x-2">
@@ -652,6 +657,7 @@ const Finance = () => {
                     onChange={(e) => setNewFee({ ...newFee, applicableGrade: e.target.value })}
                   >
                     <option value="">Select Grade</option>
+                    <option value="0">Nursery</option>
                     {[...Array(12)].map((_, i) => (
                       <option key={i + 1} value={i + 1}>Grade {i + 1}</option>
                     ))}
