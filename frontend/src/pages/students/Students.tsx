@@ -39,7 +39,7 @@ const Students = () => {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [isImporting, setIsImporting] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -148,7 +148,7 @@ const Students = () => {
   };
 
   const toggleSelection = (id: string) => {
-    setSelectedIds(prev => 
+    setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
   };
@@ -178,14 +178,14 @@ const Students = () => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setImportFile(file);
-      
+
       // Simple CSV Parse
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
         const lines = text.split('\n');
         const headers = lines[0].split(',').map(h => h.trim());
-        
+
         const data = lines.slice(1).filter(l => l.trim()).map(line => {
           const values = line.split(',');
           const obj: any = {};
@@ -209,10 +209,10 @@ const Students = () => {
       // For simplicity, let's assume the CSV contains valid data or we map it here
       // In a real app, we'd have a mapping step.
       // Here we'll assume the CSV has: firstName,lastName,admissionNumber,dateOfBirth,gender,guardianName,guardianPhone,classId
-      
+
       const formattedData = importPreview.map(row => {
         let classId = row.classId;
-        
+
         // Try to map class name to ID if ID is missing but name is present
         if (!classId && row.className) {
           const matchedClass = classes.find(c => c.name.toLowerCase() === row.className.toLowerCase());
@@ -255,7 +255,7 @@ const Students = () => {
     document.body.removeChild(link);
   };
 
-  const filteredStudents = students.filter(student => 
+  const filteredStudents = students.filter(student =>
     student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     student.admissionNumber.includes(searchTerm) ||
@@ -270,14 +270,14 @@ const Students = () => {
           <p className="text-gray-500">Manage student records and admissions</p>
         </div>
         <div className="flex space-x-2 w-full md:w-auto">
-          <button 
+          <button
             onClick={() => setShowImportModal(true)}
             className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <Upload size={20} />
             <span>Import</span>
           </button>
-          <button 
+          <button
             onClick={openAddModal}
             className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
@@ -302,7 +302,7 @@ const Students = () => {
           </div>
           <div className="flex items-center space-x-2">
             {selectedIds.length > 0 && (
-              <button 
+              <button
                 onClick={handleBulkDelete}
                 className="flex items-center space-x-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
               >
@@ -376,31 +376,30 @@ const Students = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        student.status === 'ACTIVE' 
-                          ? 'bg-green-100 text-green-700' 
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'ACTIVE'
+                          ? 'bg-green-100 text-green-700'
                           : 'bg-yellow-100 text-yellow-700'
-                      }`}>
+                        }`}>
                         {student.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end space-x-2">
-                        <button 
+                        <button
                           onClick={() => navigate(`/students/${student.id}`)}
                           className="text-gray-600 hover:text-gray-800 p-1"
                           title="View Profile"
                         >
                           <Eye size={18} />
                         </button>
-                        <button 
+                        <button
                           onClick={() => openEditModal(student)}
                           className="text-blue-600 hover:text-blue-800 p-1"
                           title="Edit"
                         >
                           <Edit2 size={18} />
                         </button>
-                        <button 
+                        <button
                           onClick={() => handleDelete(student.id)}
                           className="text-red-600 hover:text-red-800 p-1"
                           title="Delete"
@@ -431,15 +430,14 @@ const Students = () => {
                       <h3 className="font-medium text-gray-900">{student.lastName}, {student.firstName}</h3>
                       <p className="text-xs text-gray-500 font-mono">{student.admissionNumber}</p>
                     </div>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      student.status === 'ACTIVE' 
-                        ? 'bg-green-100 text-green-700' 
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'ACTIVE'
+                        ? 'bg-green-100 text-green-700'
                         : 'bg-yellow-100 text-yellow-700'
-                    }`}>
+                      }`}>
                       {student.status}
                     </span>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
                     <div>
                       <span className="text-xs text-gray-400 block">Class</span>
@@ -452,21 +450,21 @@ const Students = () => {
                   </div>
 
                   <div className="flex justify-end space-x-3 pt-2 border-t border-gray-50">
-                    <button 
+                    <button
                       onClick={() => navigate(`/students/${student.id}`)}
                       className="flex items-center space-x-1 text-gray-600 hover:text-gray-800 text-sm"
                     >
                       <Eye size={16} />
                       <span>View</span>
                     </button>
-                    <button 
+                    <button
                       onClick={() => openEditModal(student)}
                       className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
                     >
                       <Edit2 size={16} />
                       <span>Edit</span>
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleDelete(student.id)}
                       className="flex items-center space-x-1 text-red-600 hover:text-red-800 text-sm"
                     >
@@ -479,7 +477,7 @@ const Students = () => {
             </div>
           )}
         </div>
-        
+
         {/* Pagination (Static for now) */}
         <div className="p-4 border-t border-gray-100 flex items-center justify-between text-sm text-gray-500">
           <span>Showing {filteredStudents.length} of {students.length} students</span>
@@ -505,7 +503,7 @@ const Students = () => {
                 <h3 className="font-medium text-blue-800 mb-2">Instructions</h3>
                 <ul className="list-disc list-inside text-sm text-blue-700 space-y-1">
                   <li>Upload a CSV file with student details.</li>
-                  <li>Required columns: firstName, lastName, admissionNumber, className (or classId).</li>
+                  <li>Required columns: firstName, lastName, dateOfBirth, gender, className (or classId).</li>
                   <li>Dates should be in YYYY-MM-DD format.</li>
                   <li>
                     <button onClick={downloadTemplate} className="underline font-medium hover:text-blue-900">
@@ -577,13 +575,13 @@ const Students = () => {
               )}
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
-                <button 
+                <button
                   onClick={() => setShowImportModal(false)}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   onClick={handleImport}
                   disabled={!importFile || isImporting}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
@@ -685,7 +683,6 @@ const Students = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Name</label>
                   <input
                     type="text"
-                    required
                     value={formData.guardianName}
                     onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
@@ -695,7 +692,6 @@ const Students = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Phone</label>
                   <input
                     type="tel"
-                    required
                     value={formData.guardianPhone}
                     onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
@@ -738,14 +734,14 @@ const Students = () => {
               </div>
 
               <div className="flex justify-end space-x-3 mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
