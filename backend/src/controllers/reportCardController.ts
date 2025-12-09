@@ -112,6 +112,80 @@ export const getStudentReport = async (req: Request, res: Response) => {
   }
 };
 
+export const getClassReports = async (req: Request, res: Response) => {
+  try {
+    const { classId, termId } = req.query;
+
+    if (!classId || !termId) {
+      return res.status(400).json({ error: 'Class ID and Term ID are required' });
+    }
+
+    // 1. Get all students in class
+    const students = await prisma.student.findMany({
+      where: { classId: String(classId), status: 'ACTIVE' },
+      include: {
+        class: true,
+      },
+      orderBy: { lastName: 'asc' }
+    });
+
+    const reports = [];
+
+    // 2. Fetch report for each student
+    // Optimized: Fetch all reports and results in bulk
+    const studentIds = students.map(s => s.id);
+
+    const termReports = await prisma.studentTermReport.findMany({
+      where: {
+        studentId: { in: studentIds },
+        termId: String(termId)
+      },
+      include: {
+        term: true
+      }
+    });
+
+    const allResults = await prisma.termResult.findMany({
+      where: {
+        studentId: { in: studentIds },
+        termId: String(termId)
+      },
+      include: {
+        subject: true
+      }
+    });
+
+    // 3. Assemble data
+    for (const student of students) {
+      const report = termReports.find(r => r.studentId === student.id);
+      const results = allResults.filter(r => r.studentId === student.id);
+      
+      if (report) {
+         const totalScore = results.reduce((sum, r) => sum + Number(r.totalScore), 0);
+         const averageScore = results.length > 0 ? totalScore / results.length : 0;
+
+         reports.push({
+           ...report,
+           student,
+           class: student.class,
+           results: results.map(r => ({
+             ...r,
+             totalScore: Number(r.totalScore),
+             subjectName: r.subject?.name || 'Unknown Subject'
+           })),
+           totalScore,
+           averageScore
+         });
+      }
+    }
+
+    res.json(reports);
+  } catch (error) {
+    console.error('Get class reports error:', error);
+    res.status(500).json({ error: 'Failed to fetch class reports' });
+  }
+};
+
 export const generateClassReports = async (req: Request, res: Response) => {
   // Bulk generation for a whole class
   try {

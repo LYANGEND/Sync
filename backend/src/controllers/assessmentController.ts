@@ -98,6 +98,34 @@ export const getAssessmentById = async (req: Request, res: Response) => {
   }
 };
 
+
+export const deleteAssessment = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await prisma.assessment.delete({ where: { id } });
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete assessment' });
+  }
+};
+
+export const bulkDeleteAssessments = async (req: Request, res: Response) => {
+  try {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()) }).parse(req.body);
+    
+    await prisma.assessment.deleteMany({
+      where: { id: { in: ids } }
+    });
+    
+    res.json({ message: `Successfully deleted ${ids.length} assessments` });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to delete assessments' });
+  }
+};
+
 export const recordResults = async (req: Request, res: Response) => {
   try {
     const { assessmentId, results } = recordResultsSchema.parse(req.body);

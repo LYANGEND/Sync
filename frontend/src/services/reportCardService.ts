@@ -84,6 +84,11 @@ export const reportCardService = {
     return response.data;
   },
 
+  getClassReports: async (classId: string, termId: string) => {
+    const response = await api.get<StudentReport[]>('/reports/class', { params: { classId, termId } });
+    return response.data;
+  },
+
   updateReportRemarks: async (studentId: string, termId: string, remarks: { classTeacherRemark?: string, principalRemark?: string }) => {
     const response = await api.put<StudentReport>('/reports/remarks', { studentId, termId, ...remarks });
     return response.data;

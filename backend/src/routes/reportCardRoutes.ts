@@ -9,7 +9,8 @@ import {
   generateStudentReport, 
   getStudentReport, 
   generateClassReports,
-  updateReportRemarks
+  updateReportRemarks,
+  getClassReports
 } from '../controllers/reportCardController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -28,5 +29,6 @@ router.post('/generate', authorizeRole(['TEACHER', 'SUPER_ADMIN']), generateStud
 router.post('/generate-bulk', authorizeRole(['TEACHER', 'SUPER_ADMIN']), generateClassReports);
 router.put('/remarks', authorizeRole(['TEACHER', 'SUPER_ADMIN']), updateReportRemarks);
 router.get('/student', getStudentReport);
+router.get('/class', getClassReports);
 
 export default router;
