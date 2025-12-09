@@ -40,9 +40,9 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-white">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-white md:overflow-hidden">
       {/* Left Panel - Branding & Information */}
-      <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-8 md:p-16 flex-col justify-between relative overflow-hidden">
+      <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-8 md:p-16 flex-col justify-between relative h-full">
         {/* Decorative Circle (Optional subtle gradient effect) */}
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-600 to-blue-800 opacity-50 z-0"></div>
 
@@ -93,7 +93,7 @@ const Login = () => {
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="md:w-1/2 flex items-center justify-center p-8 md:p-16 bg-white">
+      <div className="md:w-1/2 flex items-center justify-center p-8 md:p-16 bg-white md:h-full md:overflow-y-auto">
         <div className="w-full max-w-md space-y-8">
           <div className="space-y-2">
             {/* Mobile Logo */}
