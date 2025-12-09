@@ -42,12 +42,12 @@ const Login = () => {
   return (
     <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-white md:overflow-hidden">
       {/* Left Panel - Branding & Information */}
-      <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-8 md:p-16 flex-col justify-between relative h-full">
+      <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-6 md:p-12 flex-col justify-between relative h-full">
         {/* Decorative Circle (Optional subtle gradient effect) */}
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-600 to-blue-800 opacity-50 z-0"></div>
 
         <div className="relative z-10">
-          <div className="flex items-center space-x-3 mb-12">
+          <div className="flex items-center space-x-3 mb-8">
             <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
               <GraduationCap size={28} className="text-white" />
             </div>
@@ -63,7 +63,7 @@ const Login = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mt-12 max-w-lg">
+          <div className="grid grid-cols-2 gap-4 mt-8 max-w-lg">
             <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
               <BookOpen className="mb-3 text-blue-200" size={24} />
               <h3 className="font-semibold">Grades</h3>
@@ -93,8 +93,8 @@ const Login = () => {
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="md:w-1/2 flex items-center justify-center p-8 md:p-16 bg-white md:h-full md:overflow-y-auto">
-        <div className="w-full max-w-md space-y-8">
+      <div className="md:w-1/2 flex items-center justify-center p-6 md:p-12 bg-white md:h-full md:overflow-y-auto">
+        <div className="w-full max-w-md space-y-6">
           <div className="space-y-2">
             {/* Mobile Logo */}
             <div className="flex items-center space-x-2 md:hidden mb-6">
@@ -108,14 +108,14 @@ const Login = () => {
             <p className="text-gray-500">Sign in to access your dashboard</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100 flex items-center">
                 {error}
               </div>
             )}
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                   Email or ID
@@ -126,7 +126,7 @@ const Login = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  className="block w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   placeholder="student@school.edu"
                 />
               </div>
@@ -147,7 +147,7 @@ const Login = () => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10"
+                    className="block w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10"
                     placeholder="Enter your password"
                   />
                   <button
@@ -176,7 +176,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-[#0056b3] hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-[#0056b3] hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {loading ? (
                 <Loader2 size={20} className="animate-spin" />
