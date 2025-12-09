@@ -1,0 +1,81 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 102.37.128.242 >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          # Create deployment directory
+          ssh Misheck@102.37.128.242 "mkdir -p ~/app/backend ~/app/frontend ~/app/nginx"
+          
+          # Copy backend files (excluding node_modules)
+          rsync -avz --exclude 'node_modules' --exclude '.env' ./backend/ Misheck@102.37.128.242:~/app/backend/
+          
+          # Copy frontend files (excluding node_modules and dist)
+          rsync -avz --exclude 'node_modules' --exclude 'dist' ./frontend/ Misheck@102.37.128.242:~/app/frontend/
+          
+          # Copy nginx config
+          rsync -avz ./nginx/ Misheck@102.37.128.242:~/app/nginx/
+          
+          # Copy docker-compose
+          scp docker-compose.prod.yml Misheck@102.37.128.242:~/app/
+          
+          # Copy other necessary files
+          scp create-admin.js Misheck@102.37.128.242:~/app/ || true
+
+      - name: Setup environment and deploy
+        run: |
+          ssh Misheck@102.37.128.242 << 'EOF'
+            cd ~/app
+            
+            # Create .env file if it doesn't exist
+            if [ ! -f backend/.env ]; then
+              cat > backend/.env << 'ENVEOF'
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          PORT=3000
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          NODE_ENV=production
+          AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT_NAME=${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
+          AZURE_OPENAI_WHISPER_DEPLOYMENT=${{ secrets.AZURE_OPENAI_WHISPER_DEPLOYMENT }}
+          AZURE_OPENAI_TTS_DEPLOYMENT=${{ secrets.AZURE_OPENAI_TTS_DEPLOYMENT }}
+          ENVEOF
+            fi
+            
+            # Pull latest images and rebuild
+            docker-compose -f docker-compose.prod.yml pull
+            docker-compose -f docker-compose.prod.yml up -d --build
+            
+            # Run database migrations
+            docker exec sync_backend npx prisma migrate deploy || true
+            
+            # Show status
+            docker-compose -f docker-compose.prod.yml ps
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          curl -f https://sync.livingii.com || echo "Site not responding yet"
