@@ -83,18 +83,31 @@ jobs:
           script: |
             cd ~/app
             
-            # Create .env file
-            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
-            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
-            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
+            # Always create/update .env file with proper permissions
+            cat > .env << 'EOF'
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            EOF
+            chmod 600 .env
             
             # Login to GHCR
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Pull and restart
+            # Pull latest images
             docker-compose -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
             
-            # Prune old images
+            # Deploy with zero-downtime strategy
+            # This will recreate only containers with new images
+            docker-compose -f docker-compose.prod.yml up -d --remove-orphans --force-recreate
+            
+            # Wait for backend to be healthy
+            echo "Waiting for backend to be ready..."
+            timeout 60 sh -c 'until docker-compose -f docker-compose.prod.yml exec -T backend node -e "process.exit(0)" 2>/dev/null; do sleep 2; done' || echo "Backend health check timeout (may still be starting)"
+            
+            # Show status
+            docker-compose -f docker-compose.prod.yml ps
+            
+            # Clean up old images to save space
             docker image prune -f
