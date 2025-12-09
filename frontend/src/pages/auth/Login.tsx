@@ -2,11 +2,21 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
-import { Lock, Mail, Loader2 } from 'lucide-react';
+import {
+  Loader2,
+  Eye,
+  EyeOff,
+  GraduationCap,
+  BookOpen,
+  Users,
+  Calendar,
+  FileBarChart
+} from 'lucide-react';
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -30,74 +40,151 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 pt-safe pb-safe">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-        <div className="bg-blue-600 p-8 text-center">
-          <h1 className="text-3xl font-bold text-white mb-2">Sync</h1>
-          <p className="text-blue-100">School Management System</p>
-        </div>
-        
-        <div className="p-8">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-6 text-center">Welcome Back</h2>
-          
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100">
-              {error}
-            </div>
-          )}
+    <div className="min-h-screen flex flex-col md:flex-row bg-white">
+      {/* Left Panel - Branding & Information */}
+      <div className="md:w-1/2 bg-[#0056b3] text-white p-8 md:p-16 flex flex-col justify-between relative overflow-hidden">
+        {/* Decorative Circle (Optional subtle gradient effect) */}
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-600 to-blue-800 opacity-50 z-0"></div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail size={18} className="text-gray-400" />
-                </div>
+        <div className="relative z-10">
+          <div className="flex items-center space-x-3 mb-12">
+            <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
+              <GraduationCap size={28} className="text-white" />
+            </div>
+            <span className="text-2xl font-bold tracking-tight">Sync Portal</span>
+          </div>
+
+          <div className="space-y-6 max-w-lg">
+            <h1 className="text-4xl md:text-5xl font-bold leading-tight">
+              Empowering Education Through Technology
+            </h1>
+            <p className="text-blue-100 text-lg leading-relaxed opacity-90">
+              Manage students, track attendance, monitor grades, and streamline your school operations all in one place.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mt-12 max-w-lg">
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
+              <BookOpen className="mb-3 text-blue-200" size={24} />
+              <h3 className="font-semibold">Grades</h3>
+              <p className="text-sm text-blue-100 opacity-80">Track academic progress</p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
+              <Users className="mb-3 text-blue-200" size={24} />
+              <h3 className="font-semibold">Students</h3>
+              <p className="text-sm text-blue-100 opacity-80">Manage enrollment</p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
+              <Calendar className="mb-3 text-blue-200" size={24} />
+              <h3 className="font-semibold">Schedule</h3>
+              <p className="text-sm text-blue-100 opacity-80">Organize timetables</p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
+              <FileBarChart className="mb-3 text-blue-200" size={24} />
+              <h3 className="font-semibold">Reports</h3>
+              <p className="text-sm text-blue-100 opacity-80">Generate Insights</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 mt-12 md:mt-0 text-sm text-blue-200 opacity-60">
+          © {new Date().getFullYear()} Sync Portal. All rights reserved.
+        </div>
+      </div>
+
+      {/* Right Panel - Login Form */}
+      <div className="md:w-1/2 flex items-center justify-center p-8 md:p-16 bg-white">
+        <div className="w-full max-w-md space-y-8">
+          <div className="space-y-2">
+            <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
+            <p className="text-gray-500">Sign in to access your dashboard</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100 flex items-center">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                  Email or ID
+                </label>
                 <input
+                  id="email"
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  placeholder="admin@school.com"
+                  className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  placeholder="student@school.edu"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                    Password
+                  </label>
+                  <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-500">
+                    Forgot password?
+                  </a>
+                </div>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="block w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10"
+                    placeholder="Enter your password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock size={18} className="text-gray-400" />
-                </div>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  placeholder="••••••••"
-                />
-              </div>
+            <div className="flex items-center">
+              <input
+                id="remember-me"
+                name="remember-me"
+                type="checkbox"
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600">
+                Keep me signed in
+              </label>
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-[#0056b3] hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {loading ? (
                 <Loader2 size={20} className="animate-spin" />
               ) : (
-                'Sign In'
+                'Sign in'
               )}
             </button>
           </form>
 
-          <div className="mt-6 text-center">
-            <a href="#" className="text-sm text-blue-600 hover:text-blue-500 font-medium">
-              Forgot your password?
-            </a>
+          <div className="text-center">
+            <p className="text-sm text-gray-500">
+              Need help?{' '}
+              <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
+                Contact IT Support
+              </a>
+            </p>
           </div>
         </div>
       </div>
