@@ -173,4 +173,4 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
     );
 };
 
-export default StudentReportCard;
+export default StudentReportCard; 
