@@ -40,6 +40,13 @@ const Students = () => {
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [isImporting, setIsImporting] = useState(false);
 
+  // Pagination and Filters
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(25);
+  const [classFilter, setClassFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -255,12 +262,30 @@ const Students = () => {
     document.body.removeChild(link);
   };
 
-  const filteredStudents = students.filter(student =>
-    student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.admissionNumber.includes(searchTerm) ||
-    student.guardianName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Apply all filters
+  const filteredStudents = students.filter(student => {
+    const matchesSearch =
+      student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      student.admissionNumber.includes(searchTerm) ||
+      student.guardianName.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesClass = !classFilter || student.classId === classFilter;
+    const matchesStatus = !statusFilter || student.status === statusFilter;
+
+    return matchesSearch && matchesClass && matchesStatus;
+  });
+
+  // Pagination
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedStudents = filteredStudents.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, classFilter, statusFilter]);
 
   return (
     <div className="p-4 md:p-6">
@@ -310,12 +335,69 @@ const Students = () => {
                 <span className="hidden sm:inline">Delete ({selectedIds.length})</span>
               </button>
             )}
-            <button className="flex-1 md:flex-none flex items-center justify-center space-x-2 px-3 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex-1 md:flex-none flex items-center justify-center space-x-2 px-3 py-2 border rounded-lg transition-colors ${classFilter || statusFilter
+                  ? 'border-blue-500 bg-blue-50 text-blue-600'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+            >
               <Filter size={18} />
               <span>Filter</span>
+              {(classFilter || statusFilter) && (
+                <span className="ml-1 px-1.5 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                  {[classFilter, statusFilter].filter(Boolean).length}
+                </span>
+              )}
             </button>
           </div>
         </div>
+
+        {/* Filters Panel */}
+        {showFilters && (
+          <div className="p-4 bg-gray-50 border-b border-gray-100">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <select
+                  value={classFilter}
+                  onChange={(e) => setClassFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                >
+                  <option value="">All Classes</option>
+                  {classes.map(cls => (
+                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="TRANSFERRED">Transferred</option>
+                  <option value="GRADUATED">Graduated</option>
+                  <option value="DROPPED_OUT">Dropped Out</option>
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    setClassFilter('');
+                    setStatusFilter('');
+                  }}
+                  className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Clear Filters
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Desktop Table */}
         <div className="hidden md:block overflow-x-auto">
@@ -344,12 +426,12 @@ const Students = () => {
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">Loading students...</td>
                 </tr>
-              ) : filteredStudents.length === 0 ? (
+              ) : paginatedStudents.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">No students found</td>
                 </tr>
               ) : (
-                filteredStudents.map((student) => (
+                paginatedStudents.map((student) => (
                   <tr key={student.id} className={`hover:bg-gray-50 transition-colors ${selectedIds.includes(student.id) ? 'bg-blue-50' : ''}`}>
                     <td className="px-6 py-4">
                       <button onClick={() => toggleSelection(student.id)} className="text-gray-500 hover:text-gray-700">
@@ -377,8 +459,8 @@ const Students = () => {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-yellow-100 text-yellow-700'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-yellow-100 text-yellow-700'
                         }`}>
                         {student.status}
                       </span>
@@ -419,11 +501,11 @@ const Students = () => {
         <div className="md:hidden">
           {loading ? (
             <div className="p-6 text-center text-gray-500">Loading students...</div>
-          ) : filteredStudents.length === 0 ? (
+          ) : paginatedStudents.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No students found</div>
           ) : (
             <div className="divide-y divide-gray-100">
-              {filteredStudents.map((student) => (
+              {paginatedStudents.map((student) => (
                 <div key={student.id} className="p-4 space-y-3">
                   <div className="flex justify-between items-start">
                     <div>
@@ -431,8 +513,8 @@ const Students = () => {
                       <p className="text-xs text-gray-500 font-mono">{student.admissionNumber}</p>
                     </div>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'ACTIVE'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-yellow-100 text-yellow-700'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-yellow-100 text-yellow-700'
                       }`}>
                       {student.status}
                     </span>
@@ -478,12 +560,55 @@ const Students = () => {
           )}
         </div>
 
-        {/* Pagination (Static for now) */}
-        <div className="p-4 border-t border-gray-100 flex items-center justify-between text-sm text-gray-500">
-          <span>Showing {filteredStudents.length} of {students.length} students</span>
-          <div className="flex space-x-2">
-            <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Previous</button>
-            <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Next</button>
+        {/* Pagination */}
+        <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
+          <span>
+            Showing {startIndex + 1}-{Math.min(endIndex, filteredStudents.length)} of {filteredStudents.length} students
+            {(classFilter || statusFilter || searchTerm) && (
+              <span className="text-gray-400"> (filtered from {students.length} total)</span>
+            )}
+          </span>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <div className="flex space-x-1">
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let pageNum;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`px-3 py-1 border rounded transition-colors ${currentPage === pageNum
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
           </div>
         </div>
       </div>
