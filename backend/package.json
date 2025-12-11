@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "nodemon src/server.ts",
+    "migrate": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
     "test": "jest"
@@ -30,7 +31,10 @@
     "nodemailer": "^7.0.10",
     "socket.io": "^4.8.1",
     "web-push": "^3.6.7",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "ts-node": "^10.9.2",
+    "prisma": "^5.22.0",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -41,9 +45,6 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^20.11.24",
     "@types/web-push": "^3.6.4",
-    "nodemon": "^3.1.11",
-    "prisma": "^5.22.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "nodemon": "^3.1.11"
   }
 }

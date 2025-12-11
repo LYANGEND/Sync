@@ -11,6 +11,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   backend:
     image: ghcr.io/lyangend/sync/backend:master
@@ -22,7 +27,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   frontend:
     image: ghcr.io/lyangend/sync/frontend:master
