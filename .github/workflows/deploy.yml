@@ -106,6 +106,14 @@ jobs:
             echo "Waiting for backend to be ready..."
             timeout 60 sh -c 'until docker-compose -f docker-compose.prod.yml exec -T backend node -e "process.exit(0)" 2>/dev/null; do sleep 2; done' || echo "Backend health check timeout (may still be starting)"
             
+            # Run database migrations
+            echo "Running database migrations..."
+            docker-compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy || echo "Migration failed or no migrations to run"
+            
+            # Run database seeds
+            echo "Running database seeds..."
+            docker-compose -f docker-compose.prod.yml exec -T backend npx prisma db seed || echo "Seed failed or already seeded"
+            
             # Show status
             docker-compose -f docker-compose.prod.yml ps
             
