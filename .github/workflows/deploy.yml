@@ -107,6 +107,9 @@ jobs:
             # Stop and remove containers
             docker-compose -f docker-compose.prod.yml down --remove-orphans
             
+            # Explicitly remove old frontend container if it exists
+            docker rm -f sync_frontend 2>/dev/null || true
+            
             # Run migrations on host PostgreSQL
             echo "🚀 Running database migrations..."
             docker-compose -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy || {
@@ -137,6 +140,21 @@ jobs:
             
             # Configure system nginx
             echo "🔧 Configuring system nginx..."
+            
+            # Create frontend directory
+            sudo mkdir -p /var/www/sync/frontend
+            
+            # Extract frontend files from Docker image
+            CONTAINER_ID=$(docker create ghcr.io/lyangend/sync/frontend:master)
+            docker cp $CONTAINER_ID:/usr/share/nginx/html/. /tmp/frontend-build/
+            docker rm $CONTAINER_ID
+            
+            # Copy to nginx directory
+            sudo cp -r /tmp/frontend-build/* /var/www/sync/frontend/
+            sudo chown -R www-data:www-data /var/www/sync/frontend
+            rm -rf /tmp/frontend-build
+            
+            # Install nginx config
             sudo cp ~/app/nginx-system.conf /etc/nginx/sites-available/sync
             sudo ln -sf /etc/nginx/sites-available/sync /etc/nginx/sites-enabled/sync
             sudo rm -f /etc/nginx/sites-enabled/default
