@@ -28,7 +28,6 @@ students-cleaned.csv
 scripts/setup_db.sh
 clean-student-data.js
 cleaning-errors.txt
-create-final-import-file.js
 import-students-to-db.js
 create-import-csv.js
 .gitignore

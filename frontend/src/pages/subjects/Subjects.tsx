@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../utils/api';
-import { Plus, Search, Trash2, Edit2, BookOpen, List } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, BookOpen, List, Upload } from 'lucide-react';
 import SyllabusDefinition from '../../components/academics/SyllabusDefinition';
+import BulkImportModal from '../../components/BulkImportModal';
 
 interface Subject {
   id: string;
@@ -17,6 +18,7 @@ const Subjects = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
   const [formData, setFormData] = useState({ name: '', code: '' });
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     fetchSubjects();
@@ -74,7 +76,7 @@ const Subjects = () => {
     setShowModal(true);
   };
 
-  const filteredSubjects = subjects.filter(subject => 
+  const filteredSubjects = subjects.filter(subject =>
     subject.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     subject.code.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -89,22 +91,20 @@ const Subjects = () => {
         <div className="flex border-b border-gray-200">
           <button
             onClick={() => setActiveTab('list')}
-            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${
-              activeTab === 'list'
+            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'list'
                 ? 'border-b-2 border-blue-600 text-blue-600'
                 : 'text-gray-500 hover:text-gray-700'
-            }`}
+              }`}
           >
             <List size={18} />
             Subject List
           </button>
           <button
             onClick={() => setActiveTab('syllabus')}
-            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${
-              activeTab === 'syllabus'
+            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'syllabus'
                 ? 'border-b-2 border-blue-600 text-blue-600'
                 : 'text-gray-500 hover:text-gray-700'
-            }`}
+              }`}
           >
             <BookOpen size={18} />
             Syllabus Definition
@@ -124,13 +124,22 @@ const Subjects = () => {
                   className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              <button 
-                onClick={openAddModal}
-                className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus size={20} />
-                <span>Add Subject</span>
-              </button>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <Upload size={20} />
+                  <span>Import Subjects</span>
+                </button>
+                <button
+                  onClick={openAddModal}
+                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Plus size={20} />
+                  <span>Add Subject</span>
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto border border-gray-100 rounded-lg">
@@ -158,13 +167,13 @@ const Subjects = () => {
                         <td className="px-6 py-4 font-medium text-gray-900">{subject.name}</td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex justify-end space-x-2">
-                            <button 
+                            <button
                               onClick={() => openEditModal(subject)}
                               className="text-blue-600 hover:text-blue-800 p-1"
                             >
                               <Edit2 size={18} />
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDelete(subject.id)}
                               className="text-red-600 hover:text-red-800 p-1"
                             >
@@ -214,14 +223,14 @@ const Subjects = () => {
                 />
               </div>
               <div className="flex justify-end space-x-3 mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
@@ -232,6 +241,20 @@ const Subjects = () => {
           </div>
         </div>
       )}
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        entityName="Subjects"
+        apiEndpoint="/api/v1/subjects/bulk"
+        templateFields={['name', 'code']}
+        onSuccess={fetchSubjects}
+        instructions={[
+          'Upload a CSV file with subject details.',
+          'Required columns: name, code.',
+          'Code should be a unique identifier (e.g., MATH, ENG, SCI).',
+        ]}
+      />
     </div>
   );
 };

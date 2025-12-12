@@ -75,3 +75,25 @@ export const deleteSubject = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete subject' });
   }
 };
+
+export const bulkCreateSubjects = async (req: Request, res: Response) => {
+  try {
+    const subjectsData = z.array(subjectSchema).parse(req.body);
+
+    const result = await prisma.subject.createMany({
+      data: subjectsData,
+      skipDuplicates: true,
+    });
+
+    res.status(201).json({
+      message: `Successfully imported ${result.count} subjects`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Bulk create subjects error:', error);
+    res.status(500).json({ error: 'Failed to import subjects' });
+  }
+};

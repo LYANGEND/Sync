@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../utils/api';
-import { Plus, Search, Trash2, Edit2, BookOpen, Users, FileText } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, BookOpen, Users, FileText, Upload } from 'lucide-react';
 import ClassSyllabus from '../../components/academics/ClassSyllabus';
+import BulkImportModal from '../../components/BulkImportModal';
 
 interface Subject {
   id: string;
@@ -44,6 +45,7 @@ const Classes = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Student Management
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -271,13 +273,22 @@ const Classes = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-lg font-semibold text-gray-800">Class Sections</h2>
-        <button
-          onClick={openAddModal}
-          className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={20} />
-          <span>Add Class</span>
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <Upload size={20} />
+            <span>Import Classes</span>
+          </button>
+          <button
+            onClick={openAddModal}
+            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={20} />
+            <span>Add Class</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -577,6 +588,20 @@ const Classes = () => {
           </div>
         </div>
       )}
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        entityName="Classes"
+        apiEndpoint="/api/v1/classes/bulk"
+        templateFields={['name', 'gradeLevel']}
+        onSuccess={fetchClasses}
+        instructions={[
+          'Upload a CSV file with class details.',
+          'Required columns: name, gradeLevel.',
+          'Grade level should be a number (-2 for Baby Class, -1 for Middle, 0 for Nursery, 1-12 for grades).',
+        ]}
+      />
     </div>
   );
 };
