@@ -6,7 +6,8 @@ import {
   assignFeeToClass, 
   getFeeTemplateById, 
   updateFeeTemplate, 
-  deleteFeeTemplate 
+  deleteFeeTemplate,
+  bulkCreateFeeTemplates
 } from '../controllers/feeController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -16,6 +17,7 @@ router.use(authenticateToken);
 
 router.get('/templates', getFeeTemplates);
 router.post('/templates', authorizeRole(['SUPER_ADMIN', 'BURSAR']), createFeeTemplate);
+router.post('/templates/bulk', authorizeRole(['SUPER_ADMIN', 'BURSAR']), bulkCreateFeeTemplates);
 
 router.get('/templates/:id', getFeeTemplateById);
 router.put('/templates/:id', authorizeRole(['SUPER_ADMIN', 'BURSAR']), updateFeeTemplate);

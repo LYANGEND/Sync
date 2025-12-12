@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, GraduationCap } from 'lucide-react';
+import { Plus, Edit2, Trash2, GraduationCap, Upload } from 'lucide-react';
 import api from '../../utils/api';
+import BulkImportModal from '../../components/BulkImportModal';
 
 interface Scholarship {
   id: string;
@@ -22,6 +23,7 @@ const Scholarships = () => {
     percentage: '',
     description: ''
   });
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     fetchScholarships();
@@ -87,17 +89,26 @@ const Scholarships = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-semibold text-slate-800">Scholarship Programs</h2>
-        <button 
-          onClick={() => {
-            setEditingId(null);
-            setFormData({ name: '', percentage: '', description: '' });
-            setShowModal(true);
-          }}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={20} />
-          <span>Add Scholarship</span>
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
+          >
+            <Upload size={20} />
+            <span>Import Scholarships</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setFormData({ name: '', percentage: '', description: '' });
+              setShowModal(true);
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={20} />
+            <span>Add Scholarship</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -108,13 +119,13 @@ const Scholarships = () => {
                 <GraduationCap size={24} />
               </div>
               <div className="flex space-x-2">
-                <button 
+                <button
                   onClick={() => handleEdit(scholarship)}
                   className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   <Edit2 size={16} />
                 </button>
-                <button 
+                <button
                   onClick={() => handleDelete(scholarship.id)}
                   className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
@@ -122,13 +133,13 @@ const Scholarships = () => {
                 </button>
               </div>
             </div>
-            
+
             <h3 className="text-lg font-bold text-slate-800 mb-1">{scholarship.name}</h3>
             <div className="flex items-baseline mb-4">
               <span className="text-2xl font-bold text-purple-600">{scholarship.percentage}%</span>
               <span className="text-sm text-slate-500 ml-2">Discount</span>
             </div>
-            
+
             <p className="text-sm text-slate-500 mb-4 min-h-[40px]">
               {scholarship.description || 'No description provided'}
             </p>
@@ -194,14 +205,14 @@ const Scholarships = () => {
                 />
               </div>
               <div className="flex justify-end space-x-3 mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
@@ -212,6 +223,21 @@ const Scholarships = () => {
           </div>
         </div>
       )}
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        entityName="Scholarships"
+        apiEndpoint="/api/v1/scholarships/bulk"
+        templateFields={['name', 'percentage', 'description']}
+        onSuccess={fetchScholarships}
+        instructions={[
+          'Upload a CSV file with scholarship details.',
+          'Required columns: name, percentage.',
+          'Optional column: description.',
+          'Percentage should be a number between 0 and 100.',
+        ]}
+      />
     </div>
   );
 };

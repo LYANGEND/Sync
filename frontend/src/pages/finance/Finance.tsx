@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Check, GraduationCap, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Check, GraduationCap, Edit2, Trash2, Upload } from 'lucide-react';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
+import BulkImportModal from '../../components/BulkImportModal';
 
 interface Payment {
   id: string;
@@ -85,6 +86,7 @@ const Finance = () => {
     method: 'CASH',
     referenceNumber: ''
   });
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     fetchPayments();
@@ -272,17 +274,26 @@ const Finance = () => {
         </div>
         <div className="flex space-x-3">
           {activeTab === 'fees' && (
-            <button
-              onClick={() => {
-                setEditingTemplate(null);
-                setNewFee({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
-                setShowCreateFeeModal(true);
-              }}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
-            >
-              <Plus size={20} />
-              <span>Create Fee Template</span>
-            </button>
+            <>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
+              >
+                <Upload size={20} />
+                <span>Import Fee Templates</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditingTemplate(null);
+                  setNewFee({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
+                  setShowCreateFeeModal(true);
+                }}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+              >
+                <Plus size={20} />
+                <span>Create Fee Template</span>
+              </button>
+            </>
           )}
           {activeTab === 'payments' && (
             <button
@@ -761,6 +772,22 @@ const Finance = () => {
           </div>
         )
       }
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        entityName="Fee Templates"
+        apiEndpoint="/api/v1/fees/templates/bulk"
+        templateFields={['name', 'amount', 'applicableGrade']}
+        onSuccess={fetchFeeTemplates}
+        instructions={[
+          'Upload a CSV file with fee template details.',
+          'Required columns: name, amount, applicableGrade.',
+          'Amount should be a positive number.',
+          'Applicable grade: -2 (Baby Class), -1 (Middle), 0 (Nursery), 1-12 (Grades).',
+          'Academic term will be set to the current active term automatically.',
+        ]}
+      />
     </div >
   );
 };

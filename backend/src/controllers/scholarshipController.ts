@@ -75,3 +75,25 @@ export const deleteScholarship = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete scholarship' });
   }
 };
+
+export const bulkCreateScholarships = async (req: Request, res: Response) => {
+  try {
+    const scholarshipsData = z.array(scholarshipSchema).parse(req.body);
+
+    const result = await prisma.scholarship.createMany({
+      data: scholarshipsData,
+      skipDuplicates: true,
+    });
+
+    res.status(201).json({
+      message: `Successfully imported ${result.count} scholarships`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Bulk create scholarships error:', error);
+    res.status(500).json({ error: 'Failed to import scholarships' });
+  }
+};

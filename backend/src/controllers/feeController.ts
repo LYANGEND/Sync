@@ -215,3 +215,49 @@ export const deleteFeeTemplate = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete fee template' });
   }
 };
+
+const bulkFeeTemplateSchema = z.object({
+  name: z.string().min(2),
+  amount: z.number().positive(),
+  academicTermId: z.string().uuid().optional(),
+  applicableGrade: z.number().int().min(-2).max(12),
+});
+
+export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
+  try {
+    const templatesData = z.array(bulkFeeTemplateSchema).parse(req.body);
+
+    // Get current academic term if not provided
+    const currentTerm = await prisma.academicTerm.findFirst({
+      where: { isActive: true },
+      orderBy: { startDate: 'desc' }
+    });
+
+    if (!currentTerm) {
+      return res.status(400).json({ error: 'No active academic term found' });
+    }
+
+    const dataToCreate = templatesData.map(t => ({
+      name: t.name,
+      amount: t.amount,
+      academicTermId: t.academicTermId || currentTerm.id,
+      applicableGrade: t.applicableGrade,
+    }));
+
+    const result = await prisma.feeTemplate.createMany({
+      data: dataToCreate,
+      skipDuplicates: true,
+    });
+
+    res.status(201).json({
+      message: `Successfully imported ${result.count} fee templates`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Bulk create fee templates error:', error);
+    res.status(500).json({ error: 'Failed to import fee templates' });
+  }
+};
