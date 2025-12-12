@@ -129,7 +129,7 @@ jobs:
               fi
               if [ $i -eq 30 ]; then
                 echo "⚠️ Backend health check timeout (checking logs...)"
-                docker-compose -f docker-compose.prod.yml logs backend --tail=20
+                docker logs sync_backend --tail=50
                 exit 1
               fi
               sleep 3
@@ -161,7 +161,7 @@ jobs:
             # Create database backup (optional)
             echo "💾 Creating database backup..."
             BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql"
-            docker-compose -f docker-compose.prod.yml exec -T postgres pg_dump -U ${{ secrets.POSTGRES_USER }} ${{ secrets.POSTGRES_DB }} > "$BACKUP_FILE" 2>/dev/null && \
+            PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} pg_dump -h localhost -U ${{ secrets.POSTGRES_USER }} ${{ secrets.POSTGRES_DB }} > "$BACKUP_FILE" 2>/dev/null && \
             echo "✅ Backup created: $BACKUP_FILE" || \
             echo "⚠️ Backup skipped or failed"
             
