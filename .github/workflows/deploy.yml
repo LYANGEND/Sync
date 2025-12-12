@@ -104,8 +104,18 @@ jobs:
             # Pull latest images
             docker-compose -f docker-compose.prod.yml pull
             
-            # Stop and remove old containers (preserving volumes)
+            # Stop and remove ALL containers (including orphans)
             docker-compose -f docker-compose.prod.yml down --remove-orphans
+            
+            # Force remove any lingering containers
+            docker ps -a | grep -E 'sync_|postgres' | awk '{print $1}' | xargs -r docker rm -f || true
+            
+            # Check if port 5432 is in use and kill the process
+            if lsof -Pi :5432 -sTCP:LISTEN -t >/dev/null 2>&1; then
+              echo "⚠️ Port 5432 is in use, attempting to free it..."
+              lsof -ti:5432 | xargs -r kill -9 || true
+              sleep 2
+            fi
             
             # Run migrations BEFORE starting new backend
             echo "🚀 Running database migrations..."
