@@ -1,6 +1,8 @@
 {
   "dependencies": {
+    "@prisma/client": "^7.1.0",
     "jspdf": "^3.0.4",
-    "jspdf-autotable": "^5.0.2"
+    "jspdf-autotable": "^5.0.2",
+    "xlsx": "^0.18.5"
   }
 }

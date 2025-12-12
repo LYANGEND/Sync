@@ -174,6 +174,43 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
   try {
     const studentsData = z.array(createStudentSchema).parse(req.body);
     
+    // Get current academic term (most recent or active)
+    const currentTerm = await prisma.academicTerm.findFirst({
+      orderBy: { startDate: 'desc' }
+    });
+
+    if (!currentTerm) {
+      return res.status(400).json({ error: 'No academic term found. Please create an academic term first.' });
+    }
+
+    // Get a default teacher (first teacher or super admin)
+    const defaultTeacher = await prisma.user.findFirst({
+      where: { role: { in: ['TEACHER', 'SUPER_ADMIN'] } }
+    });
+
+    if (!defaultTeacher) {
+      return res.status(400).json({ error: 'No teacher found. Please create at least one teacher or admin user first.' });
+    }
+
+    // Collect unique class IDs from the import data
+    const uniqueClassIds = [...new Set(studentsData.map(s => s.classId))];
+    
+    // Fetch existing classes
+    const existingClasses = await prisma.class.findMany({
+      where: { id: { in: uniqueClassIds } }
+    });
+    
+    const existingClassIds = new Set(existingClasses.map(c => c.id));
+    const missingClassIds = uniqueClassIds.filter(id => !existingClassIds.has(id));
+
+    // If there are missing classes, we need to check if they're being provided by name
+    // For now, we'll just report which class IDs are missing
+    if (missingClassIds.length > 0) {
+      return res.status(400).json({ 
+        error: `The following class IDs do not exist: ${missingClassIds.join(', ')}. Please create these classes first or provide valid class IDs.` 
+      });
+    }
+    
     // Generate admission numbers for those missing
     const year = new Date().getFullYear();
     
@@ -214,7 +251,11 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
       skipDuplicates: true, 
     });
     
-    res.status(201).json({ message: `Successfully imported ${result.count} students`, count: result.count });
+    res.status(201).json({ 
+      message: `Successfully imported ${result.count} students`, 
+      count: result.count,
+      term: currentTerm.name 
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });

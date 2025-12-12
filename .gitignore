@@ -22,3 +22,27 @@ yarn-error.log*
 /frontend/src/config/localConfig.ts
 
 # Ignore generated Prisma client
+package-lock.json
+robbie.xlsx
+students-cleaned.csv
+scripts/setup_db.sh
+clean-student-data.js
+cleaning-errors.txt
+create-final-import-file.js
+import-students-to-db.js
+create-import-csv.js
+.gitignore
+.gitignore
+import-cleaned-students.js
+import-students.js
+import-to-production.js
+robbie.xlsxZone.Identifier
+students-cleaned.xlsx
+students-ready-to-import.csv
+students-ready-to-import.xlsx
+frontend/package-lock.json
+package-lock.json
+.gitignore
+frontend/package-lock.json
+package-lock.json
+package-lock.json
