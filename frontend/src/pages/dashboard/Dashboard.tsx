@@ -88,6 +88,10 @@ const Dashboard = () => {
     return <div className="p-6">Loading dashboard...</div>;
   }
 
+  if (!data) {
+    return <div className="p-6">Failed to load dashboard data.</div>;
+  }
+
   // --- TEACHER VIEW ---
   if (data?.role === 'TEACHER') {
     const stats = (data as TeacherStats).stats;
@@ -220,7 +224,7 @@ const Dashboard = () => {
             <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">Today</span>
           </div>
           <h3 className="text-gray-500 text-sm font-medium">Today's Collection</h3>
-          <p className="text-2xl font-bold text-gray-900">ZMW {stats?.dailyRevenue.toLocaleString() || '0'}</p>
+          <p className="text-2xl font-bold text-gray-900">ZMW {stats?.dailyRevenue?.toLocaleString() || '0'}</p>
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
@@ -231,7 +235,7 @@ const Dashboard = () => {
             <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full">Total</span>
           </div>
           <h3 className="text-gray-500 text-sm font-medium">Outstanding Fees</h3>
-          <p className="text-2xl font-bold text-gray-900">ZMW {stats?.outstandingFees.toLocaleString() || '0'}</p>
+          <p className="text-2xl font-bold text-gray-900">ZMW {stats?.outstandingFees?.toLocaleString() || '0'}</p>
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">

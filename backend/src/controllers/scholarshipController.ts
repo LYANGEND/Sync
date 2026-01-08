@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -10,9 +11,12 @@ const scholarshipSchema = z.object({
   description: z.string().optional(),
 });
 
-export const getScholarships = async (req: Request, res: Response) => {
+export const getScholarships = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const scholarships = await prisma.scholarship.findMany({
+      where: { tenantId },
       include: {
         _count: {
           select: { students: true }
@@ -24,31 +28,44 @@ export const getScholarships = async (req: Request, res: Response) => {
     });
     res.json(scholarships);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch scholarships' });
+    handleControllerError(res, error, 'getScholarships');
   }
 };
 
-export const createScholarship = async (req: Request, res: Response) => {
+export const createScholarship = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const data = scholarshipSchema.parse(req.body);
-    
+
     const scholarship = await prisma.scholarship.create({
-      data,
+      data: {
+        tenantId,
+        ...data
+      },
     });
-    
+
     res.status(201).json(scholarship);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to create scholarship' });
+    handleControllerError(res, error, 'createScholarship');
   }
 };
 
-export const updateScholarship = async (req: Request, res: Response) => {
+export const updateScholarship = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
     const data = scholarshipSchema.parse(req.body);
+
+    // Verify scholarship belongs to this tenant
+    const existing = await prisma.scholarship.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Scholarship not found' });
+    }
 
     const scholarship = await prisma.scholarship.update({
       where: { id },
@@ -60,28 +77,42 @@ export const updateScholarship = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to update scholarship' });
+    handleControllerError(res, error, 'updateScholarship');
   }
 };
 
-export const deleteScholarship = async (req: Request, res: Response) => {
+export const deleteScholarship = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    // Verify scholarship belongs to this tenant
+    const existing = await prisma.scholarship.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Scholarship not found' });
+    }
+
     await prisma.scholarship.delete({
       where: { id },
     });
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete scholarship' });
+    handleControllerError(res, error, 'deleteScholarship');
   }
 };
 
-export const bulkCreateScholarships = async (req: Request, res: Response) => {
+export const bulkCreateScholarships = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const scholarshipsData = z.array(scholarshipSchema).parse(req.body);
 
+    // Add tenantId to each scholarship
+    const dataWithTenant = scholarshipsData.map(s => ({ ...s, tenantId }));
+
     const result = await prisma.scholarship.createMany({
-      data: scholarshipsData,
+      data: dataWithTenant,
       skipDuplicates: true,
     });
 
@@ -93,7 +124,6 @@ export const bulkCreateScholarships = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Bulk create scholarships error:', error);
-    res.status(500).json({ error: 'Failed to import scholarships' });
+    handleControllerError(res, error, 'bulkCreateScholarships');
   }
 };

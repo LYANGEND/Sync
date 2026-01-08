@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -14,8 +15,9 @@ const createPeriodSchema = z.object({
   academicTermId: z.string().uuid(),
 });
 
-export const getTimetableByClass = async (req: Request, res: Response) => {
+export const getTimetableByClass = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { classId } = req.params;
     const { termId } = req.query;
 
@@ -23,8 +25,17 @@ export const getTimetableByClass = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Academic Term ID is required' });
     }
 
+    // Verify class belongs to this tenant
+    const classData = await prisma.class.findFirst({
+      where: { id: classId, tenantId }
+    });
+    if (!classData) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
     const periods = await prisma.timetablePeriod.findMany({
       where: {
+        tenantId,
         classId,
         academicTermId: termId as string,
       },
@@ -44,13 +55,13 @@ export const getTimetableByClass = async (req: Request, res: Response) => {
 
     res.json(periods);
   } catch (error) {
-    console.error('Get class timetable error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getTimetableByClass');
   }
 };
 
-export const getTimetableByTeacher = async (req: Request, res: Response) => {
+export const getTimetableByTeacher = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { teacherId } = req.params;
     const { termId } = req.query;
 
@@ -58,8 +69,17 @@ export const getTimetableByTeacher = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Academic Term ID is required' });
     }
 
+    // Verify teacher belongs to this tenant
+    const teacher = await prisma.user.findFirst({
+      where: { id: teacherId, tenantId }
+    });
+    if (!teacher) {
+      return res.status(404).json({ error: 'Teacher not found' });
+    }
+
     const periods = await prisma.timetablePeriod.findMany({
       where: {
+        tenantId,
         teacherId,
         academicTermId: termId as string,
       },
@@ -74,18 +94,32 @@ export const getTimetableByTeacher = async (req: Request, res: Response) => {
 
     res.json(periods);
   } catch (error) {
-    console.error('Get teacher timetable error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getTimetableByTeacher');
   }
 };
 
-export const createTimetablePeriod = async (req: Request, res: Response) => {
+export const createTimetablePeriod = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const data = createPeriodSchema.parse(req.body);
+
+    // Verify all references belong to this tenant
+    const [classData, subject, teacher, term] = await Promise.all([
+      prisma.class.findFirst({ where: { id: data.classId, tenantId } }),
+      prisma.subject.findFirst({ where: { id: data.subjectId, tenantId } }),
+      prisma.user.findFirst({ where: { id: data.teacherId, tenantId } }),
+      prisma.academicTerm.findFirst({ where: { id: data.academicTermId, tenantId } }),
+    ]);
+
+    if (!classData) return res.status(404).json({ error: 'Class not found' });
+    if (!subject) return res.status(404).json({ error: 'Subject not found' });
+    if (!teacher) return res.status(404).json({ error: 'Teacher not found' });
+    if (!term) return res.status(404).json({ error: 'Academic term not found' });
 
     // 1. Check for Teacher Conflict
     const teacherConflict = await prisma.timetablePeriod.findFirst({
       where: {
+        tenantId,
         teacherId: data.teacherId,
         dayOfWeek: data.dayOfWeek,
         academicTermId: data.academicTermId,
@@ -113,15 +147,16 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
     });
 
     if (teacherConflict) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         message: 'Teacher is already booked for this time slot',
-        conflict: teacherConflict 
+        conflict: teacherConflict
       });
     }
 
     // 2. Check for Class Conflict
     const classConflict = await prisma.timetablePeriod.findFirst({
       where: {
+        tenantId,
         classId: data.classId,
         dayOfWeek: data.dayOfWeek,
         academicTermId: data.academicTermId,
@@ -149,14 +184,17 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
     });
 
     if (classConflict) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         message: 'Class already has a period in this time slot',
-        conflict: classConflict 
+        conflict: classConflict
       });
     }
 
     const period = await prisma.timetablePeriod.create({
-      data,
+      data: {
+        tenantId,
+        ...data
+      },
       include: {
         subject: true,
         teacher: {
@@ -173,20 +211,28 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    console.error('Create timetable period error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'createTimetablePeriod');
   }
 };
 
-export const deleteTimetablePeriod = async (req: Request, res: Response) => {
+export const deleteTimetablePeriod = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    // Verify period belongs to this tenant
+    const existing = await prisma.timetablePeriod.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Period not found' });
+    }
+
     await prisma.timetablePeriod.delete({
       where: { id },
     });
     res.status(204).send();
   } catch (error) {
-    console.error('Delete timetable period error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'deleteTimetablePeriod');
   }
 };

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, getUserId } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -16,18 +17,28 @@ const processPromotionSchema = z.object({
 
 // --- Controllers ---
 
-export const getPromotionCandidates = async (req: Request, res: Response) => {
+export const getPromotionCandidates = async (req: TenantRequest, res: Response) => {
   try {
     const { classId, termId } = req.query;
+    const tenantId = getTenantId(req);
 
     if (!classId) {
       return res.status(400).json({ message: 'Class ID is required' });
+    }
+
+    // Verify class belongs to tenant
+    const classExists = await prisma.class.findFirst({
+      where: { id: classId as string, tenantId }
+    });
+    if (!classExists) {
+      return res.status(404).json({ message: 'Class not found' });
     }
 
     // 1. Fetch students in the class
     const students = await prisma.student.findMany({
       where: {
         classId: classId as string,
+        tenantId, // Safe check
         status: 'ACTIVE',
       },
       include: {
@@ -41,7 +52,7 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
     const candidates = students.map(student => {
       const results = student.termResults;
       let averageScore = 0;
-      
+
       if (results.length > 0) {
         const totalScore = results.reduce((sum, result) => sum + Number(result.totalScore), 0);
         averageScore = totalScore / results.length;
@@ -68,16 +79,18 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
   }
 };
 
-export const processPromotions = async (req: Request, res: Response) => {
+export const processPromotions = async (req: TenantRequest, res: Response) => {
   try {
     const { promotions } = processPromotionSchema.parse(req.body);
-    const userId = (req as any).user?.userId;
+    const userId = getUserId(req);
+    const tenantId = getTenantId(req);
 
     // Use a transaction to ensure data integrity
     await prisma.$transaction(async (tx) => {
       for (const promo of promotions) {
-        const student = await tx.student.findUnique({
-          where: { id: promo.studentId },
+        // Verify student ownership
+        const student = await tx.student.findFirst({
+          where: { id: promo.studentId, tenantId },
           select: { classId: true }
         });
 

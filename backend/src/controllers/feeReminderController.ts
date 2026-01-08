@@ -5,6 +5,7 @@ import {
     generatePaymentReceiptEmail,
     generateFeeReminderEmail
 } from '../services/notificationService';
+import { TenantRequest, getTenantId } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -14,12 +15,16 @@ type StudentWithFees = Student & {
 };
 
 // Send payment receipt notification
-export const sendPaymentReceipt = async (req: Request, res: Response) => {
+export const sendPaymentReceipt = async (req: TenantRequest, res: Response) => {
     try {
         const { paymentId } = req.params;
+        const tenantId = getTenantId(req);
 
-        const payment = await prisma.payment.findUnique({
-            where: { id: paymentId },
+        const payment = await prisma.payment.findFirst({
+            where: {
+                id: paymentId,
+                tenantId // Ensure ownership
+            },
             include: {
                 student: true,
             },
@@ -29,9 +34,7 @@ export const sendPaymentReceipt = async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'Payment not found' });
         }
 
-        const settings = await prisma.schoolSettings.findFirst();
-        const schoolName = settings?.schoolName || 'School';
-
+        const schoolName = req.tenant?.name || 'School';
         const guardianName = payment.student.guardianName || 'Parent';
 
         const { subject, text, html, sms } = generatePaymentReceiptEmail(
@@ -45,6 +48,7 @@ export const sendPaymentReceipt = async (req: Request, res: Response) => {
         );
 
         const result = await sendNotification(
+            tenantId,
             payment.student.guardianEmail ?? undefined,
             payment.student.guardianPhone ?? undefined,
             subject,
@@ -66,12 +70,12 @@ export const sendPaymentReceipt = async (req: Request, res: Response) => {
 };
 
 // Send fee reminders to students with outstanding fees
-export const sendFeeReminders = async (req: Request, res: Response) => {
+export const sendFeeReminders = async (req: TenantRequest, res: Response) => {
     try {
         const { studentIds, isOverdue = false } = req.body;
+        const tenantId = getTenantId(req);
 
-        const settings = await prisma.schoolSettings.findFirst();
-        const schoolName = settings?.schoolName || 'School';
+        const schoolName = req.tenant?.name || 'School';
 
         // Get students with outstanding fees
         let studentsWithFees: StudentWithFees[];
@@ -81,11 +85,13 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
             studentsWithFees = await prisma.student.findMany({
                 where: {
                     id: { in: studentIds },
+                    tenantId, // Filter by tenant
                     status: 'ACTIVE',
                 },
                 include: {
                     class: true,
                     feeStructures: {
+                        // Filter by tenant implicitly via student relation
                         include: {
                             feeTemplate: true,
                         },
@@ -97,10 +103,12 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
             studentsWithFees = await prisma.student.findMany({
                 where: {
                     status: 'ACTIVE',
+                    tenantId, // Filter by tenant
                 },
                 include: {
                     class: true,
                     feeStructures: {
+                        // Filter by tenant implicitly via student relation
                         include: {
                             feeTemplate: true,
                         },
@@ -149,6 +157,7 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
 
             try {
                 const result = await sendNotification(
+                    tenantId,
                     student.guardianEmail ?? undefined,
                     student.guardianPhone ?? undefined,
                     subject,
@@ -177,15 +186,19 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
 };
 
 // Get students with outstanding fees for reminder preview
-export const getStudentsWithOutstandingFees = async (req: Request, res: Response) => {
+export const getStudentsWithOutstandingFees = async (req: TenantRequest, res: Response) => {
     try {
+        const tenantId = getTenantId(req);
+
         const students = await prisma.student.findMany({
             where: {
                 status: 'ACTIVE',
+                tenantId // Filter by tenant
             },
             include: {
                 class: true,
                 feeStructures: {
+                    // Filter by tenant implicitly via student relation
                     include: {
                         feeTemplate: true,
                     },
@@ -230,21 +243,22 @@ export const getStudentsWithOutstandingFees = async (req: Request, res: Response
 };
 
 // Test notification settings
-export const testNotification = async (req: Request, res: Response) => {
+export const testNotification = async (req: TenantRequest, res: Response) => {
     try {
         const { channel, recipient } = req.body;
+        const tenantId = getTenantId(req);
 
         if (!channel || !recipient) {
             return res.status(400).json({ error: 'Channel and recipient are required' });
         }
 
-        const settings = await prisma.schoolSettings.findFirst();
-        const schoolName = settings?.schoolName || 'School';
+        const schoolName = req.tenant?.name || 'School';
 
         let result = { emailSent: false, smsSent: false };
 
         if (channel === 'email') {
             result = await sendNotification(
+                tenantId,
                 recipient,
                 undefined,
                 `Test Email from ${schoolName}`,
@@ -252,6 +266,7 @@ export const testNotification = async (req: Request, res: Response) => {
             );
         } else if (channel === 'sms') {
             result = await sendNotification(
+                tenantId,
                 undefined,
                 recipient,
                 '',

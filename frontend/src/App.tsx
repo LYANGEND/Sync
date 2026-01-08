@@ -16,6 +16,7 @@ import Subjects from './pages/subjects/Subjects';
 import Classes from './pages/classes/Classes';
 import Users from './pages/users/Users';
 import Settings from './pages/settings/Settings';
+import Subscription from './pages/subscription/Subscription';
 import Profile from './pages/profile/Profile';
 import Communication from './pages/communication/Communication';
 import MyChildren from './pages/parents/MyChildren';
@@ -28,6 +29,7 @@ import StudentQuiz from './pages/student/StudentQuiz';
 import StudentAssessments from './pages/student/StudentAssessments';
 import AttendanceRegister from './pages/academics/AttendanceRegister';
 import TeacherGradebook from './pages/academics/TeacherGradebook';
+import PlatformAdmin from './pages/platform/PlatformAdmin';
 import { Toaster } from 'react-hot-toast';
 
 function App() {
@@ -38,6 +40,7 @@ function App() {
           <Toaster position="top-right" />
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/ops" element={<PlatformAdmin />} />
 
             <Route element={<ProtectedRoute />}>
               <Route path="/student/quiz/:assessmentId" element={<StudentQuiz />} />
@@ -144,6 +147,11 @@ function App() {
                 <Route path="/settings" element={
                   <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                     <Settings />
+                  </RoleGuard>
+                } />
+                <Route path="/subscription" element={
+                  <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                    <Subscription />
                   </RoleGuard>
                 } />
               </Route>

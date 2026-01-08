@@ -1,7 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AuthRequest } from '../middleware/authMiddleware';
+import { TenantRequest, getTenantId, getUserId, handleControllerError } from '../utils/tenantContext';
 import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
 
 const prisma = new PrismaClient();
@@ -13,18 +13,15 @@ const createPaymentSchema = z.object({
   referenceNumber: z.string().optional(),
 });
 
-export const createPayment = async (req: Request, res: Response) => {
+export const createPayment = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
     const { studentId, amount, method, referenceNumber } = createPaymentSchema.parse(req.body);
-    const userId = (req as any).user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
-
-    // Check if student exists
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
+    // Check if student exists in this tenant
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, tenantId },
     });
 
     if (!student) {
@@ -33,6 +30,7 @@ export const createPayment = async (req: Request, res: Response) => {
 
     const payment = await prisma.payment.create({
       data: {
+        tenantId,
         studentId,
         amount,
         method,
@@ -72,9 +70,9 @@ export const createPayment = async (req: Request, res: Response) => {
 
     // Send Notification (Email & SMS) via Notification Service
     try {
-      // Fetch school settings for the name
-      const settings = await prisma.schoolSettings.findFirst();
-      const schoolName = settings?.schoolName || 'School';
+      // Fetch tenant settings for the name
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      const schoolName = tenant?.name || 'School';
 
       const parentEmail = payment.student.parent?.email || payment.student.guardianEmail;
       const parentPhone = payment.student.guardianPhone;
@@ -93,6 +91,7 @@ export const createPayment = async (req: Request, res: Response) => {
 
         // Send via service handling both channels based on settings
         sendNotification(
+          tenantId,
           parentEmail || undefined,
           parentPhone || undefined,
           subject,
@@ -113,14 +112,16 @@ export const createPayment = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    console.error('Create payment error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'createPayment');
   }
 };
 
-export const getPayments = async (req: Request, res: Response) => {
+export const getPayments = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const payments = await prisma.payment.findMany({
+      where: { tenantId },
       include: {
         student: {
           select: {
@@ -148,17 +149,25 @@ export const getPayments = async (req: Request, res: Response) => {
 
     res.json(payments);
   } catch (error) {
-    console.error('Get payments error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getPayments');
   }
 };
 
-export const getStudentPayments = async (req: Request, res: Response) => {
+export const getStudentPayments = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { studentId } = req.params;
 
+    // Verify student belongs to this tenant
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, tenantId }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
     const payments = await prisma.payment.findMany({
-      where: { studentId },
+      where: { tenantId, studentId },
       include: {
         recordedBy: {
           select: {
@@ -173,23 +182,33 @@ export const getStudentPayments = async (req: Request, res: Response) => {
 
     res.json(payments);
   } catch (error) {
-    console.error('Get student payments error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getStudentPayments');
   }
 };
 
-export const getFinanceStats = async (req: Request, res: Response) => {
+export const getFinanceStats = async (req: TenantRequest, res: Response) => {
   try {
-    // 1. Total Revenue (Sum of all payments)
+    const tenantId = getTenantId(req);
+
+    // 1. Total Revenue (Sum of all payments for this tenant)
     const totalRevenueAgg = await prisma.payment.aggregate({
+      where: { tenantId },
       _sum: { amount: true },
       _count: { id: true },
     });
     const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
     const totalTransactions = totalRevenueAgg._count.id;
 
-    // 2. Total Fees Assigned (Sum of all fee structures)
+    // 2. Get student IDs for this tenant
+    const students = await prisma.student.findMany({
+      where: { tenantId },
+      select: { id: true }
+    });
+    const studentIds = students.map(s => s.id);
+
+    // 2. Total Fees Assigned (Sum of all fee structures for tenant's students)
     const totalFeesAgg = await prisma.studentFeeStructure.aggregate({
+      where: { studentId: { in: studentIds } },
       _sum: { amountDue: true },
     });
     const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
@@ -198,19 +217,18 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     const pendingFees = Math.max(0, totalFeesAssigned - totalRevenue);
 
     // 4. Overdue Students Count
-    // Get total due per student
     const feesByStudent = await prisma.studentFeeStructure.groupBy({
       by: ['studentId'],
+      where: { studentId: { in: studentIds } },
       _sum: { amountDue: true },
     });
 
-    // Get total paid per student
     const paymentsByStudent = await prisma.payment.groupBy({
       by: ['studentId'],
+      where: { tenantId },
       _sum: { amount: true },
     });
 
-    // Create a map for quick lookup
     const paymentsMap = new Map<string, number>();
     paymentsByStudent.forEach(p => {
       paymentsMap.set(p.studentId, Number(p._sum.amount || 0));
@@ -235,13 +253,13 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    console.error('Get finance stats error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getFinanceStats');
   }
 };
 
-export const getFinancialReport = async (req: Request, res: Response) => {
+export const getFinancialReport = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const today = new Date();
     const startOfYear = new Date(today.getFullYear(), 0, 1);
     const endOfYear = new Date(today.getFullYear(), 11, 31);
@@ -249,13 +267,14 @@ export const getFinancialReport = async (req: Request, res: Response) => {
     // 1. Monthly Revenue (Current Year)
     const monthlyPayments = await prisma.payment.groupBy({
       by: ['paymentDate'],
-      _sum: { amount: true },
       where: {
+        tenantId,
         paymentDate: {
           gte: startOfYear,
           lte: endOfYear
         }
-      }
+      },
+      _sum: { amount: true },
     });
 
     // Process into months array [Jan, Feb, ...]
@@ -268,13 +287,14 @@ export const getFinancialReport = async (req: Request, res: Response) => {
     // 2. Payment Methods Distribution
     const methodsStats = await prisma.payment.groupBy({
       by: ['method'],
+      where: { tenantId },
       _count: { id: true },
       _sum: { amount: true }
     });
 
     // 3. Collection by Class
-    // This is complex, so we'll do an aggregation
     const classes = await prisma.class.findMany({
+      where: { tenantId },
       select: {
         id: true,
         name: true,
@@ -319,7 +339,6 @@ export const getFinancialReport = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    console.error('Financial report error:', error);
-    res.status(500).json({ message: 'Failed to generate financial report' });
+    handleControllerError(res, error, 'getFinancialReport');
   }
 };

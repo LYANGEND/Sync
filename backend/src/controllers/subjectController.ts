@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -9,23 +10,28 @@ const subjectSchema = z.object({
   code: z.string().min(2),
 });
 
-export const getSubjects = async (req: Request, res: Response) => {
+export const getSubjects = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const subjects = await prisma.subject.findMany({
+      where: { tenantId },
       orderBy: { name: 'asc' },
     });
     res.json(subjects);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch subjects' });
+    handleControllerError(res, error, 'getSubjects');
   }
 };
 
-export const createSubject = async (req: Request, res: Response) => {
+export const createSubject = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { name, code } = subjectSchema.parse(req.body);
 
-    const existingSubject = await prisma.subject.findUnique({
-      where: { code },
+    // Check if subject code exists in THIS tenant
+    const existingSubject = await prisma.subject.findFirst({
+      where: { tenantId, code },
     });
 
     if (existingSubject) {
@@ -33,7 +39,7 @@ export const createSubject = async (req: Request, res: Response) => {
     }
 
     const subject = await prisma.subject.create({
-      data: { name, code },
+      data: { tenantId, name, code },
     });
 
     res.status(201).json(subject);
@@ -41,14 +47,33 @@ export const createSubject = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to create subject' });
+    handleControllerError(res, error, 'createSubject');
   }
 };
 
-export const updateSubject = async (req: Request, res: Response) => {
+export const updateSubject = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
     const { name, code } = subjectSchema.parse(req.body);
+
+    // Verify subject belongs to this tenant
+    const existing = await prisma.subject.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
+    // Check if new code conflicts with another subject
+    if (code !== existing.code) {
+      const codeConflict = await prisma.subject.findFirst({
+        where: { tenantId, code, id: { not: id } }
+      });
+      if (codeConflict) {
+        return res.status(400).json({ error: 'Subject with this code already exists' });
+      }
+    }
 
     const subject = await prisma.subject.update({
       where: { id },
@@ -60,28 +85,42 @@ export const updateSubject = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to update subject' });
+    handleControllerError(res, error, 'updateSubject');
   }
 };
 
-export const deleteSubject = async (req: Request, res: Response) => {
+export const deleteSubject = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    // Verify subject belongs to this tenant
+    const existing = await prisma.subject.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
     await prisma.subject.delete({
       where: { id },
     });
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete subject' });
+    handleControllerError(res, error, 'deleteSubject');
   }
 };
 
-export const bulkCreateSubjects = async (req: Request, res: Response) => {
+export const bulkCreateSubjects = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const subjectsData = z.array(subjectSchema).parse(req.body);
 
+    // Add tenantId to each subject
+    const dataWithTenant = subjectsData.map(s => ({ ...s, tenantId }));
+
     const result = await prisma.subject.createMany({
-      data: subjectsData,
+      data: dataWithTenant,
       skipDuplicates: true,
     });
 
@@ -93,7 +132,6 @@ export const bulkCreateSubjects = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Bulk create subjects error:', error);
-    res.status(500).json({ error: 'Failed to import subjects' });
+    handleControllerError(res, error, 'bulkCreateSubjects');
   }
 };

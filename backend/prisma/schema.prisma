@@ -64,9 +64,558 @@ enum TopicStatus {
   COMPLETED
 }
 
-model User {
+// ==========================================
+// MULTI-TENANT ENUMS
+// ==========================================
+
+enum SubscriptionTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum PlatformRole {
+  PLATFORM_SUPERADMIN
+  PLATFORM_SUPPORT
+  PLATFORM_SALES
+}
+
+// ==========================================
+// TENANT (SCHOOL) - Core Multi-Tenant Model
+// ==========================================
+
+model Tenant {
+  id              String   @id @default(uuid())
+  name            String   // "Lusaka Academy"
+  slug            String   @unique // "lusaka-academy" (for subdomain)
+  domain          String?  @unique // custom domain support
+  
+  // Branding
+  logoUrl         String?
+  primaryColor    String   @default("#2563eb")
+  secondaryColor  String   @default("#475569")
+  accentColor     String   @default("#f59e0b")
+  
+  // Contact Info
+  email           String
+  phone           String?
+  address         String?
+  city            String?
+  country         String   @default("ZM")
+  website         String?
+  
+  // Subscription & Billing
+  tier            SubscriptionTier @default(FREE)
+  status          SubscriptionStatus @default(TRIAL)
+  trialEndsAt     DateTime?
+  subscriptionStartedAt DateTime?
+  subscriptionEndsAt    DateTime?
+  
+  // Feature Limits (based on tier, can be overridden)
+  maxStudents     Int      @default(50)
+  maxTeachers     Int      @default(5)
+  maxUsers        Int      @default(10)
+  maxClasses      Int      @default(5)
+  maxStorageGB    Int      @default(1)
+  
+  // Feature Flags (what's enabled for this tenant)
+  smsEnabled              Boolean @default(false)
+  emailEnabled            Boolean @default(true)
+  onlineAssessmentsEnabled Boolean @default(false)
+  parentPortalEnabled     Boolean @default(false)
+  reportCardsEnabled      Boolean @default(true)
+  attendanceEnabled       Boolean @default(true)
+  feeManagementEnabled    Boolean @default(true)
+  chatEnabled             Boolean @default(false)
+  advancedReportsEnabled  Boolean @default(false)
+  apiAccessEnabled        Boolean @default(false)
+  timetableEnabled        Boolean @default(true)
+  syllabusEnabled         Boolean @default(false)
+  
+  // SMTP Settings (per-tenant email configuration)
+  smtpHost        String?
+  smtpPort        Int?
+  smtpSecure      Boolean  @default(true)
+  smtpUser        String?
+  smtpPassword    String?
+  smtpFromEmail   String?
+  smtpFromName    String?
+  
+  // SMS Settings (per-tenant)
+  smsProvider     String?  // 'TWILIO', 'AFRICASTALKING'
+  smsApiKey       String?
+  smsApiSecret    String?
+  smsSenderId     String?
+  
+  // Usage Tracking
+  currentStudentCount  Int @default(0)
+  currentTeacherCount  Int @default(0)
+  currentUserCount     Int @default(0)
+  currentStorageUsedMB Int @default(0)
+  
+  // Current Term Reference
+  currentTermId   String?
+  
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations to all tenant-scoped entities
+  users           User[]
+  students        Student[]
+  classes         Class[]
+  subjects        Subject[]
+  academicTerms   AcademicTerm[]
+  feeTemplates    FeeTemplate[]
+  payments        Payment[]
+  attendance      Attendance[]
+  assessments     Assessment[]
+  gradingScales   GradingScale[]
+  scholarships    Scholarship[]
+  timetablePeriods TimetablePeriod[]
+  topics          Topic[]
+  lessonPlans     LessonPlan[]
+  notifications   Notification[]
+  conversations   Conversation[]
+  subscriptionPayments SubscriptionPayment[]
+  
+  @@index([slug])
+  @@index([status])
+  @@map("tenants")
+}
+
+// ==========================================
+// PLATFORM USER (Super Admin for all schools)
+// ==========================================
+
+model PlatformUser {
   id            String   @id @default(uuid())
   email         String   @unique
+  passwordHash  String
+  fullName      String
+  role          PlatformRole @default(PLATFORM_SUPPORT)
+  isActive      Boolean  @default(true)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // CRM Relations
+  assignedLeads Lead[]    @relation("AssignedLeads")
+  ownedDeals    Deal[]    @relation("OwnedDeals")
+  activities    Activity[] @relation("PerformedActivities")
+  assignedTasks Task[]    @relation("AssignedTasks")
+  createdTasks  Task[]    @relation("CreatedTasks")
+  
+  @@map("platform_users")
+}
+
+// ==========================================
+// PLATFORM SETTINGS (Centralized Config)
+// ==========================================
+
+model PlatformSettings {
+  id              String   @id @default("default")
+  
+  // SMS Gateway Configuration (centralized)
+  smsProvider     String   @default("zamtel") // "zamtel", "mtn", "airtel", "twilio", "africastalking"
+  smsApiUrl       String?  // API endpoint
+  smsApiKey       String?  // API key
+  smsApiSecret    String?  // API secret/password
+  smsDefaultSenderId String? @default("SYNC") // Default sender ID if tenant doesn't have one
+  smsBalanceUnits Int      @default(0) // SMS credits balance
+  smsCostPerUnit  Decimal  @db.Decimal(10, 4) @default(0.15) // Cost per SMS in ZMW
+  
+  // Email Gateway Configuration (centralized)
+  emailProvider   String   @default("smtp") // "smtp", "sendgrid", "ses"
+  emailApiKey     String?
+  emailFromAddress String?
+  emailFromName   String?  @default("Sync School Management")
+  
+  // Platform Branding
+  platformName    String   @default("Sync School Management")
+  platformLogoUrl String?
+  supportEmail    String?
+  supportPhone    String?
+  
+  // Feature Toggles
+  allowTenantCustomSms Boolean @default(false) // Allow tenants to use their own SMS credentials
+  allowTenantCustomEmail Boolean @default(false)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("platform_settings")
+}
+
+// ==========================================
+// CRM ENUMS
+// ==========================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum LeadSource {
+  WEBSITE
+  REFERRAL
+  COLD_CALL
+  SOCIAL_MEDIA
+  TRADE_SHOW
+  EMAIL_CAMPAIGN
+  PARTNER
+  OTHER
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  DEMO
+  FOLLOW_UP
+  PROPOSAL_SENT
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ==========================================
+// CRM MODELS
+// ==========================================
+
+// Lead - Potential school/customer before becoming a tenant
+model Lead {
+  id              String   @id @default(uuid())
+  
+  // School/Organization Info
+  schoolName      String
+  schoolType      String?  // Primary, Secondary, International, etc.
+  website         String?
+  
+  // Contact Person
+  contactName     String
+  contactEmail    String
+  contactPhone    String?
+  contactRole     String?  // Principal, Admin, IT Manager, etc.
+  
+  // Location
+  city            String?
+  province        String?
+  country         String   @default("Zambia")
+  address         String?
+  
+  // Lead Info
+  status          LeadStatus @default(NEW)
+  source          LeadSource @default(WEBSITE)
+  estimatedStudents Int?     // Estimated student count
+  estimatedValue  Decimal?   @db.Decimal(12, 2) // Potential deal value
+  interestedTier  SubscriptionTier?
+  
+  // Assignment
+  assignedToId    String?
+  assignedTo      PlatformUser? @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  
+  // Tracking
+  lastContactedAt DateTime?
+  nextFollowUpAt  DateTime?
+  notes           String?   @db.Text
+  
+  // Conversion
+  convertedToTenantId String? @unique
+  convertedAt     DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  activities      Activity[]
+  tasks           Task[]
+  deals           Deal[]
+  
+  @@index([status])
+  @@index([assignedToId])
+  @@index([source])
+  @@map("crm_leads")
+}
+
+// Deal - Sales opportunity with a lead
+model Deal {
+  id              String   @id @default(uuid())
+  
+  // Deal Info
+  name            String   // e.g., "Lusaka Academy - Professional Plan"
+  value           Decimal  @db.Decimal(12, 2)
+  currency        String   @default("ZMW")
+  
+  // Pipeline Stage
+  stage           String   @default("prospecting") // prospecting, qualification, proposal, negotiation, closed_won, closed_lost
+  probability     Int      @default(10) // 0-100%
+  
+  // Related
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id])
+  
+  // Plan Info
+  proposedTier    SubscriptionTier
+  proposedBillingCycle String @default("ANNUAL") // MONTHLY, ANNUAL
+  
+  // Dates
+  expectedCloseDate DateTime?
+  actualCloseDate DateTime?
+  
+  // Assignment
+  ownerId         String?
+  owner           PlatformUser? @relation("OwnedDeals", fields: [ownerId], references: [id])
+  
+  // Outcome
+  wonReason       String?
+  lostReason      String?
+  competitorName  String?
+  
+  notes           String?   @db.Text
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([stage])
+  @@index([ownerId])
+  @@index([leadId])
+  @@map("crm_deals")
+}
+
+// Activity - Calls, emails, meetings tracked for leads
+model Activity {
+  id              String   @id @default(uuid())
+  
+  type            ActivityType
+  subject         String
+  description     String?  @db.Text
+  
+  // Related
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id])
+  
+  // Performed by
+  performedById   String
+  performedBy     PlatformUser @relation("PerformedActivities", fields: [performedById], references: [id])
+  
+  // Timing
+  activityDate    DateTime @default(now())
+  durationMinutes Int?
+  
+  // For calls
+  callOutcome     String?  // connected, voicemail, no_answer, busy
+  
+  // For meetings
+  meetingLocation String?
+  attendees       String?  // Comma-separated names
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([leadId])
+  @@index([type])
+  @@index([activityDate])
+  @@map("crm_activities")
+}
+
+// Task - Follow-ups and to-dos for sales team
+model Task {
+  id              String   @id @default(uuid())
+  
+  title           String
+  description     String?  @db.Text
+  
+  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus @default(PENDING)
+  
+  dueDate         DateTime?
+  completedAt     DateTime?
+  
+  // Related
+  leadId          String?
+  lead            Lead?    @relation(fields: [leadId], references: [id])
+  
+  // Assignment
+  assignedToId    String
+  assignedTo      PlatformUser @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  
+  createdById     String
+  createdBy       PlatformUser @relation("CreatedTasks", fields: [createdById], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([status])
+  @@index([assignedToId])
+  @@index([dueDate])
+  @@map("crm_tasks")
+}
+
+// ==========================================
+// SUBSCRIPTION PLANS
+// ==========================================
+
+model SubscriptionPlan {
+  id              String   @id @default(uuid())
+  name            String   // "Starter", "Professional"
+  tier            SubscriptionTier
+  description     String?
+  
+  // Pricing (ZMW is anchor currency)
+  monthlyPriceZMW Decimal  @db.Decimal(10, 2)  // Base monthly price in ZMW
+  yearlyPriceZMW  Decimal  @db.Decimal(10, 2)  // Yearly price in ZMW (discounted)
+  monthlyPriceUSD Decimal  @db.Decimal(10, 2)  // USD equivalent
+  yearlyPriceUSD  Decimal  @db.Decimal(10, 2)  // USD equivalent yearly
+  
+  // Per-student overage pricing
+  pricePerStudentZMW Decimal @db.Decimal(10, 2) @default(20) // K20/student
+  pricePerStudentUSD Decimal @db.Decimal(10, 2) @default(0.74) // ~$0.74/student
+  
+  // Included limits (students above this incur per-student charges)
+  includedStudents Int      // Students included in base price
+  maxStudents      Int      // Hard cap (0 = unlimited)
+  maxTeachers      Int
+  maxUsers         Int
+  maxClasses       Int
+  maxStorageGB     Int
+  
+  // SMS/Email limits per month
+  includedSmsPerMonth   Int @default(0)
+  includedEmailsPerMonth Int @default(100)
+  
+  // Features included (JSON array of feature keys)
+  features        String[] // ["sms", "parent_portal", "api_access", "online_assessments"]
+  
+  isActive        Boolean  @default(true)
+  isPopular       Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  subscriptionPayments SubscriptionPayment[]
+  
+  @@map("subscription_plans")
+}
+
+// ==========================================
+// SUBSCRIPTION PAYMENTS
+// ==========================================
+
+model SubscriptionPayment {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  planId          String
+  plan            SubscriptionPlan @relation(fields: [planId], references: [id])
+  
+  // Payment details
+  baseAmount      Decimal  @db.Decimal(10, 2)  // Base plan price
+  studentCount    Int      // Number of students at time of payment
+  overageStudents Int      @default(0)         // Students above included limit
+  overageAmount   Decimal  @db.Decimal(10, 2) @default(0) // Extra student charges
+  totalAmount     Decimal  @db.Decimal(10, 2)  // Final amount charged
+  currency        String   @default("ZMW")
+  
+  // Payment method & reference
+  paymentMethod   String   // "mtn_momo", "airtel_money", "bank_transfer", "card"
+  externalRef     String?  // Payment gateway reference
+  receiptNumber   String?  @unique
+  
+  // Billing period
+  billingCycle    BillingCycle @default(MONTHLY)
+  periodStart     DateTime
+  periodEnd       DateTime
+  
+  // Status
+  status          PaymentStatus @default(PENDING)
+  paidAt          DateTime?
+  failureReason   String?
+  
+  // Metadata
+  invoiceUrl      String?
+  notes           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+  @@map("subscription_payments")
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+// ==========================================
+// CONTACT FORM SUBMISSIONS (from website)
+// ==========================================
+
+model ContactSubmission {
+  id          String   @id @default(uuid())
+  name        String
+  email       String
+  phone       String?
+  schoolName  String?
+  message     String
+  isRead      Boolean  @default(false)
+  notes       String?  // Internal notes from sales team
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("contact_submissions")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  email         String   
   passwordHash  String
   fullName      String
   role          Role
@@ -92,6 +641,9 @@ model User {
   messagesSent             Message[]
   pushSubscriptions        PushSubscription[]
 
+  // Email is unique within a tenant (same email can exist in different schools)
+  @@unique([tenantId, email])
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -108,7 +660,12 @@ model PushSubscription {
 
 model Student {
   id              String        @id @default(uuid())
-  admissionNumber String        @unique
+  
+  // Multi-tenant relation
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  admissionNumber String        
   firstName       String
   lastName        String
   dateOfBirth     DateTime
@@ -144,11 +701,19 @@ model Student {
   termReports       StudentTermReport[]
   submissions     AssessmentSubmission[]
 
+  // Admission number unique per tenant
+  @@unique([tenantId, admissionNumber])
+  @@index([tenantId])
   @@map("students")
 }
 
 model Class {
   id             String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name           String
   gradeLevel     Int
   teacherId      String
@@ -170,13 +735,19 @@ model Class {
   topicProgress  TopicProgress[]
   lessonPlans    LessonPlan[]
 
+  @@index([tenantId])
   @@map("classes")
 }
 
 model Subject {
   id        String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name      String
-  code      String   @unique
+  code      String   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -187,11 +758,19 @@ model Subject {
   topics          Topic[]
   lessonPlans     LessonPlan[]
 
+  // Subject code unique per tenant
+  @@unique([tenantId, code])
+  @@index([tenantId])
   @@map("subjects")
 }
 
 model AcademicTerm {
   id        String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name      String
   startDate DateTime
   endDate   DateTime
@@ -204,12 +783,13 @@ model AcademicTerm {
   studentReports StudentTermReport[]
   timetablePeriods TimetablePeriod[]
   lessonPlans    LessonPlan[]
-  
-  activeInSettings SchoolSettings?
 
+  @@index([tenantId])
   @@map("academic_terms")
 }
 
+// NOTE: SchoolSettings is DEPRECATED - use Tenant model instead
+// Keeping for backward compatibility during migration
 model SchoolSettings {
   id                String   @id @default(uuid())
   schoolName        String   @default("My School")
@@ -220,38 +800,12 @@ model SchoolSettings {
   logoUrl           String?
   
   // Theme Settings
-  primaryColor      String   @default("#2563eb") // blue-600
-  secondaryColor    String   @default("#475569") // slate-600
-  accentColor       String   @default("#f59e0b") // amber-500
+  primaryColor      String   @default("#2563eb")
+  secondaryColor    String   @default("#475569")
+  accentColor       String   @default("#f59e0b")
 
-  // System Configuration
+  // System Configuration (DEPRECATED - use Tenant.currentTermId)
   currentTermId     String?  @unique
-  currentTerm       AcademicTerm? @relation(fields: [currentTermId], references: [id])
-  
-  // Notification Channel Toggles
-  emailNotificationsEnabled  Boolean @default(true)
-  smsNotificationsEnabled    Boolean @default(false)
-  
-  // Fee Reminder Settings
-  feeReminderEnabled         Boolean @default(true)
-  feeReminderDaysBefore      Int     @default(7)  // Days before due date to send reminder
-  overdueReminderEnabled     Boolean @default(true)
-  overdueReminderFrequency   Int     @default(7)  // Days between overdue reminders
-
-  // Communication Settings (SMTP)
-  smtpHost          String?
-  smtpPort          Int?
-  smtpSecure        Boolean  @default(true)
-  smtpUser          String?
-  smtpPassword      String?
-  smtpFromEmail     String?
-  smtpFromName      String?
-
-  // Communication Settings (SMS)
-  smsProvider       String?  // e.g., 'TWILIO', 'AFRICASTALKING'
-  smsApiKey         String?
-  smsApiSecret      String?
-  smsSenderId       String?
 
   updatedAt         DateTime @updatedAt
 
@@ -267,6 +821,11 @@ enum NotificationType {
 
 model Notification {
   id        String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   title     String
@@ -275,11 +834,17 @@ model Notification {
   type      NotificationType @default(INFO)
   createdAt DateTime @default(now())
 
+  @@index([tenantId])
   @@map("notifications")
 }
 
 model FeeTemplate {
   id              String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name            String
   amount          Decimal  @db.Decimal(10, 2)
   academicTermId  String
@@ -288,6 +853,7 @@ model FeeTemplate {
 
   studentFeeStructures StudentFeeStructure[]
 
+  @@index([tenantId])
   @@map("fee_templates")
 }
 
@@ -309,6 +875,11 @@ model StudentFeeStructure {
 
 model Payment {
   id              String        @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   studentId       String
   student         Student       @relation(fields: [studentId], references: [id])
   amount          Decimal       @db.Decimal(10, 2)
@@ -319,20 +890,28 @@ model Payment {
   recordedBy      User          @relation(fields: [recordedByUserId], references: [id])
   createdAt       DateTime      @default(now())
 
+  @@index([tenantId])
   @@map("payments")
 }
 
 model Attendance {
   id               String           @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId         String
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   studentId        String
   student          Student          @relation(fields: [studentId], references: [id])
   classId          String
   class            Class            @relation(fields: [classId], references: [id])
   date             DateTime
   status           AttendanceStatus
+  reason           String?          // Reason for absence/lateness
   recordedByUserId String
   recordedBy       User             @relation(fields: [recordedByUserId], references: [id])
 
+  @@index([tenantId])
   @@map("attendance")
 }
 
@@ -354,6 +933,11 @@ model ClassMovementLog {
 
 model Assessment {
   id             String         @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId       String
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   title          String
   type           AssessmentType
   description    String?
@@ -506,6 +1090,11 @@ model TermResult {
 
 model GradingScale {
   id        String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   grade     String   // "A"
   minScore  Int      // 80
   maxScore  Int      // 100
@@ -514,6 +1103,7 @@ model GradingScale {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([tenantId])
   @@map("grading_scales")
 }
 
@@ -541,6 +1131,11 @@ model StudentTermReport {
 
 model TimetablePeriod {
   id             String       @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   classId        String
   class          Class        @relation(fields: [classId], references: [id])
   subjectId      String
@@ -556,11 +1151,17 @@ model TimetablePeriod {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  @@index([tenantId])
   @@map("timetable_periods")
 }
 
 model Topic {
   id          String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   title       String
   description String?
   subjectId   String
@@ -573,6 +1174,7 @@ model Topic {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([tenantId])
   @@map("topics")
 }
 
@@ -593,6 +1195,11 @@ model TopicProgress {
 
 model LessonPlan {
   id            String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   teacherId     String
   teacher       User     @relation(fields: [teacherId], references: [id])
   classId       String
@@ -610,17 +1217,24 @@ model LessonPlan {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@index([tenantId])
   @@map("lesson_plans")
 }
 
 model Conversation {
   id        String    @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   
   participants ConversationParticipant[]
   messages     Message[]
 
+  @@index([tenantId])
   @@map("conversations")
 }
 
@@ -651,6 +1265,11 @@ model Message {
 
 model Scholarship {
   id          String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name        String
   percentage  Decimal  @db.Decimal(5, 2) // 0-100
   description String?
@@ -660,5 +1279,6 @@ model Scholarship {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([tenantId])
   @@map("scholarships")
 }

@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -8,7 +9,7 @@ const feeTemplateSchema = z.object({
   name: z.string().min(2),
   amount: z.number().positive(),
   academicTermId: z.string().uuid(),
-  applicableGrade: z.number().int().min(0).max(12), // 0: Nursery, 1-12: Grades
+  applicableGrade: z.number().int().min(0).max(12),
 });
 
 const assignFeeSchema = z.object({
@@ -16,9 +17,12 @@ const assignFeeSchema = z.object({
   classId: z.string().uuid(),
 });
 
-export const getFeeTemplates = async (req: Request, res: Response) => {
+export const getFeeTemplates = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const templates = await prisma.feeTemplate.findMany({
+      where: { tenantId },
       include: {
         academicTerm: true,
       },
@@ -30,16 +34,26 @@ export const getFeeTemplates = async (req: Request, res: Response) => {
     });
     res.json(templates);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch fee templates' });
+    handleControllerError(res, error, 'getFeeTemplates');
   }
 };
 
-export const createFeeTemplate = async (req: Request, res: Response) => {
+export const createFeeTemplate = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { name, amount, academicTermId, applicableGrade } = feeTemplateSchema.parse(req.body);
+
+    // Verify term belongs to this tenant
+    const term = await prisma.academicTerm.findFirst({
+      where: { id: academicTermId, tenantId }
+    });
+    if (!term) {
+      return res.status(404).json({ error: 'Academic term not found' });
+    }
 
     const template = await prisma.feeTemplate.create({
       data: {
+        tenantId,
         name,
         amount,
         academicTermId,
@@ -52,18 +66,19 @@ export const createFeeTemplate = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to create fee template' });
+    handleControllerError(res, error, 'createFeeTemplate');
   }
 };
 
-export const assignFeeToClass = async (req: Request, res: Response) => {
+export const assignFeeToClass = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { feeTemplateId, classId } = assignFeeSchema.parse(req.body);
     const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
 
-    // 1. Get the fee template to know the amount
-    const feeTemplate = await prisma.feeTemplate.findUnique({
-      where: { id: feeTemplateId },
+    // 1. Get the fee template
+    const feeTemplate = await prisma.feeTemplate.findFirst({
+      where: { id: feeTemplateId, tenantId },
       include: { academicTerm: true },
     });
 
@@ -71,13 +86,21 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Fee template not found' });
     }
 
-    // 2. Get all students in the class with their scholarship info
+    // 2. Verify class belongs to this tenant
+    const classData = await prisma.class.findFirst({
+      where: { id: classId, tenantId }
+    });
+    if (!classData) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // 3. Get all students in the class with their scholarship info
     const students = await prisma.student.findMany({
-      where: { classId: classId, status: 'ACTIVE' },
+      where: { tenantId, classId, status: 'ACTIVE' },
       include: {
         scholarship: true,
         feeStructures: {
-          where: { feeTemplateId: feeTemplateId }
+          where: { feeTemplateId }
         }
       },
     });
@@ -86,7 +109,7 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'No active students found in this class' });
     }
 
-    // 3. Filter out students who already have this fee assigned
+    // 4. Filter out students who already have this fee assigned
     const studentsToAssign = students.filter(student => student.feeStructures.length === 0);
 
     if (studentsToAssign.length === 0) {
@@ -96,7 +119,7 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
       });
     }
 
-    // 4. Create StudentFeeStructure records for students who don't have it yet
+    // 5. Create StudentFeeStructure records
     const createdRecords = [];
     const errors = [];
 
@@ -147,16 +170,17 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Error assigning fee:', error);
-    res.status(500).json({ error: 'Failed to assign fee to class' });
+    handleControllerError(res, error, 'assignFeeToClass');
   }
 };
 
-export const getFeeTemplateById = async (req: Request, res: Response) => {
+export const getFeeTemplateById = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
-    const template = await prisma.feeTemplate.findUnique({
-      where: { id },
+
+    const template = await prisma.feeTemplate.findFirst({
+      where: { id, tenantId },
       include: {
         academicTerm: true,
       }
@@ -168,14 +192,23 @@ export const getFeeTemplateById = async (req: Request, res: Response) => {
 
     res.json(template);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch fee template' });
+    handleControllerError(res, error, 'getFeeTemplateById');
   }
 };
 
-export const updateFeeTemplate = async (req: Request, res: Response) => {
+export const updateFeeTemplate = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
     const data = feeTemplateSchema.partial().parse(req.body);
+
+    // Verify template belongs to this tenant
+    const existing = await prisma.feeTemplate.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Fee template not found' });
+    }
 
     const template = await prisma.feeTemplate.update({
       where: { id },
@@ -187,13 +220,22 @@ export const updateFeeTemplate = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to update fee template' });
+    handleControllerError(res, error, 'updateFeeTemplate');
   }
 };
 
-export const deleteFeeTemplate = async (req: Request, res: Response) => {
+export const deleteFeeTemplate = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    // Verify template belongs to this tenant
+    const existing = await prisma.feeTemplate.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Fee template not found' });
+    }
 
     // Check if it's in use
     const usageCount = await prisma.studentFeeStructure.count({
@@ -202,7 +244,7 @@ export const deleteFeeTemplate = async (req: Request, res: Response) => {
 
     if (usageCount > 0) {
       return res.status(400).json({
-        error: 'Cannot delete fee template as it has already been assigned to students. Consider archiving or modifying it instead.'
+        error: 'Cannot delete fee template as it has already been assigned to students.'
       });
     }
 
@@ -212,7 +254,7 @@ export const deleteFeeTemplate = async (req: Request, res: Response) => {
 
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete fee template' });
+    handleControllerError(res, error, 'deleteFeeTemplate');
   }
 };
 
@@ -223,13 +265,14 @@ const bulkFeeTemplateSchema = z.object({
   applicableGrade: z.number().int().min(-2).max(12),
 });
 
-export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
+export const bulkCreateFeeTemplates = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const templatesData = z.array(bulkFeeTemplateSchema).parse(req.body);
 
-    // Get current academic term if not provided
+    // Get current academic term for this tenant
     const currentTerm = await prisma.academicTerm.findFirst({
-      where: { isActive: true },
+      where: { tenantId, isActive: true },
       orderBy: { startDate: 'desc' }
     });
 
@@ -238,6 +281,7 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
     }
 
     const dataToCreate = templatesData.map(t => ({
+      tenantId,
       name: t.name,
       amount: t.amount,
       academicTermId: t.academicTermId || currentTerm.id,
@@ -257,22 +301,23 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Bulk create fee templates error:', error);
-    res.status(500).json({ error: 'Failed to import fee templates' });
+    handleControllerError(res, error, 'bulkCreateFeeTemplates');
   }
 };
 
-export const getStudentStatement = async (req: Request, res: Response) => {
+export const getStudentStatement = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { studentId } = req.params;
 
-    // 1. Get School Info
-    const settings = await prisma.schoolSettings.findFirst();
+    // 1. Get Tenant Info (replaces SchoolSettings)
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId }
+    });
 
     // 2. Get Student Info
-    // 2. Get Student Info
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, tenantId },
       include: {
         class: true,
       }
@@ -283,13 +328,12 @@ export const getStudentStatement = async (req: Request, res: Response) => {
     }
 
     // SECURITY: Access Control
-    const user = (req as any).user;
-    if (user.role === 'PARENT' && student.parentId !== user.userId) {
+    const user = req.user;
+    if (user?.role === 'PARENT' && student.parentId !== user.userId) {
       return res.status(403).json({ error: 'Unauthorized: This student does not belong to your account.' });
     }
 
-    // Restrict other roles if necessary (e.g. STUDENT shouldn't see this)
-    if (!['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'PARENT'].includes(user.role)) {
+    if (!['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'PARENT'].includes(user?.role || '')) {
       return res.status(403).json({ error: 'Unauthorized access' });
     }
 
@@ -305,7 +349,7 @@ export const getStudentStatement = async (req: Request, res: Response) => {
 
     // 4. Get Payments (Credits)
     const payments = await prisma.payment.findMany({
-      where: { studentId },
+      where: { tenantId, studentId },
       orderBy: { paymentDate: 'asc' }
     });
 
@@ -313,7 +357,7 @@ export const getStudentStatement = async (req: Request, res: Response) => {
     const transactions = [
       ...fees.map(f => ({
         id: f.id,
-        date: f.createdAt, // Or dueDate if preferred
+        date: f.createdAt,
         type: 'DEBIT',
         description: f.feeTemplate.name,
         term: f.feeTemplate.academicTerm.name,
@@ -325,7 +369,7 @@ export const getStudentStatement = async (req: Request, res: Response) => {
         date: p.paymentDate,
         type: 'CREDIT',
         description: `Payment (${p.method.replace('_', ' ')})`,
-        term: '-', // Could infer term based on date
+        term: '-',
         amount: Number(p.amount),
         ref: p.referenceNumber || '-'
       }))
@@ -333,10 +377,10 @@ export const getStudentStatement = async (req: Request, res: Response) => {
 
     res.json({
       school: {
-        name: settings?.schoolName || 'School Name',
-        address: settings?.schoolAddress || '',
-        email: settings?.schoolEmail || '',
-        logoUrl: settings?.logoUrl || ''
+        name: tenant?.name || 'School Name',
+        address: tenant?.address || '',
+        email: tenant?.email || '',
+        logoUrl: tenant?.logoUrl || ''
       },
       student: {
         name: `${student.firstName} ${student.lastName}`,
@@ -348,7 +392,6 @@ export const getStudentStatement = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    console.error('Get student statement error:', error);
-    res.status(500).json({ error: 'Failed to generate statement' });
+    handleControllerError(res, error, 'getStudentStatement');
   }
 };

@@ -1,8 +1,8 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, getUserId, handleControllerError } from '../utils/tenantContext';
 
-// Prisma Client should be generated. If you see errors here, try reloading the window.
 const prisma = new PrismaClient();
 
 const createAssessmentSchema = z.object({
@@ -26,13 +26,26 @@ const recordResultsSchema = z.object({
   })),
 });
 
-export const createAssessment = async (req: Request, res: Response) => {
+export const createAssessment = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const data = createAssessmentSchema.parse(req.body);
+
+    // Verify class, subject, and term belong to this tenant
+    const [classData, subject, term] = await Promise.all([
+      prisma.class.findFirst({ where: { id: data.classId, tenantId } }),
+      prisma.subject.findFirst({ where: { id: data.subjectId, tenantId } }),
+      prisma.academicTerm.findFirst({ where: { id: data.termId, tenantId } }),
+    ]);
+
+    if (!classData) return res.status(404).json({ error: 'Class not found' });
+    if (!subject) return res.status(404).json({ error: 'Subject not found' });
+    if (!term) return res.status(404).json({ error: 'Term not found' });
 
     const { date, ...restData } = data;
     const assessment = await prisma.assessment.create({
       data: {
+        tenantId,
         ...restData,
         date: new Date(date),
       },
@@ -43,16 +56,16 @@ export const createAssessment = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Create assessment error:', error);
-    res.status(500).json({ error: 'Failed to create assessment' });
+    handleControllerError(res, error, 'createAssessment');
   }
 };
 
-export const getAssessments = async (req: Request, res: Response) => {
+export const getAssessments = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { classId, subjectId, termId } = req.query;
 
-    const where: any = {};
+    const where: any = { tenantId };
     if (classId) where.classId = String(classId);
     if (subjectId) where.subjectId = String(subjectId);
     if (termId) where.termId = String(termId);
@@ -71,16 +84,17 @@ export const getAssessments = async (req: Request, res: Response) => {
 
     res.json(assessments);
   } catch (error) {
-    console.error('Get assessments error:', error);
-    res.status(500).json({ error: 'Failed to fetch assessments' });
+    handleControllerError(res, error, 'getAssessments');
   }
 };
 
-export const getAssessmentById = async (req: Request, res: Response) => {
+export const getAssessmentById = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
+
+    const assessment = await prisma.assessment.findFirst({
+      where: { id, tenantId },
       include: {
         subject: true,
         class: true,
@@ -94,27 +108,39 @@ export const getAssessmentById = async (req: Request, res: Response) => {
 
     res.json(assessment);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch assessment' });
+    handleControllerError(res, error, 'getAssessmentById');
   }
 };
 
-
-export const deleteAssessment = async (req: Request, res: Response) => {
+export const deleteAssessment = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    const existing = await prisma.assessment.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
     await prisma.assessment.delete({ where: { id } });
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete assessment' });
+    handleControllerError(res, error, 'deleteAssessment');
   }
 };
 
-export const bulkDeleteAssessments = async (req: Request, res: Response) => {
+export const bulkDeleteAssessments = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { ids } = z.object({ ids: z.array(z.string().uuid()) }).parse(req.body);
 
     await prisma.assessment.deleteMany({
-      where: { id: { in: ids } }
+      where: {
+        id: { in: ids },
+        tenantId  // Only delete from this tenant
+      }
     });
 
     res.json({ message: `Successfully deleted ${ids.length} assessments` });
@@ -122,22 +148,19 @@ export const bulkDeleteAssessments = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to delete assessments' });
+    handleControllerError(res, error, 'bulkDeleteAssessments');
   }
 };
 
-export const recordResults = async (req: Request, res: Response) => {
+export const recordResults = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
     const { assessmentId, results } = recordResultsSchema.parse(req.body);
-    const userId = (req as any).user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
-
-    // Verify assessment exists
-    const assessment = await prisma.assessment.findUnique({
-      where: { id: assessmentId }
+    // Verify assessment belongs to this tenant
+    const assessment = await prisma.assessment.findFirst({
+      where: { id: assessmentId, tenantId }
     });
 
     if (!assessment) {
@@ -175,14 +198,22 @@ export const recordResults = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Record results error:', error);
-    res.status(500).json({ error: 'Failed to record results' });
+    handleControllerError(res, error, 'recordResults');
   }
 };
 
-export const getAssessmentResults = async (req: Request, res: Response) => {
+export const getAssessmentResults = async (req: TenantRequest, res: Response) => {
   try {
-    const { id } = req.params; // assessmentId
+    const tenantId = getTenantId(req);
+    const { id } = req.params;
+
+    // Verify assessment belongs to this tenant
+    const assessment = await prisma.assessment.findFirst({
+      where: { id, tenantId }
+    });
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
 
     const results = await prisma.assessmentResult.findMany({
       where: { assessmentId: id },
@@ -203,15 +234,23 @@ export const getAssessmentResults = async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Get results error:', error);
-    res.status(500).json({ error: 'Failed to fetch results' });
+    handleControllerError(res, error, 'getAssessmentResults');
   }
 };
 
-export const getStudentResults = async (req: Request, res: Response) => {
+export const getStudentResults = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { studentId } = req.params;
     const { termId } = req.query;
+
+    // Verify student belongs to this tenant
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, tenantId }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
 
     const where: any = { studentId };
     if (termId) {
@@ -234,22 +273,23 @@ export const getStudentResults = async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Get student results error:', error);
-    res.status(500).json({ error: 'Failed to fetch student results' });
+    handleControllerError(res, error, 'getStudentResults');
   }
 };
 
-export const getGradebook = async (req: Request, res: Response) => {
+export const getGradebook = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { classId, subjectId, termId } = req.query;
 
     if (!classId || !subjectId || !termId) {
       return res.status(400).json({ error: 'Class, Subject and Term IDs are required' });
     }
 
-    // 1. Get Assessments
+    // 1. Get Assessments for this tenant
     const assessments = await prisma.assessment.findMany({
       where: {
+        tenantId,
         classId: String(classId),
         subjectId: String(subjectId),
         termId: String(termId)
@@ -257,9 +297,9 @@ export const getGradebook = async (req: Request, res: Response) => {
       orderBy: { date: 'asc' }
     });
 
-    // 2. Get Students (using specific ID/String casting to be safe)
+    // 2. Get Students
     const students = await prisma.student.findMany({
-      where: { classId: String(classId) },
+      where: { tenantId, classId: String(classId), status: 'ACTIVE' },
       orderBy: { lastName: 'asc' },
       select: {
         id: true,
@@ -277,7 +317,6 @@ export const getGradebook = async (req: Request, res: Response) => {
 
     res.json({ assessments, students, results });
   } catch (error) {
-    console.error('Get gradebook error:', error);
-    res.status(500).json({ error: 'Failed to fetch gradebook data' });
+    handleControllerError(res, error, 'getGradebook');
   }
 };

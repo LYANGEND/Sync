@@ -1,7 +1,8 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient, Role } from '@prisma/client';
 import { z } from 'zod';
 import { hashPassword } from '../utils/auth';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -19,11 +20,12 @@ const updateUserSchema = z.object({
   password: z.string().min(6).optional(),
 });
 
-export const getUsers = async (req: Request, res: Response) => {
+export const getUsers = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { role } = req.query;
-    
-    const whereClause: any = {};
+
+    const whereClause: any = { tenantId };
     if (role) {
       whereClause.role = role as Role;
     }
@@ -37,6 +39,7 @@ export const getUsers = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         createdAt: true,
+        profilePictureUrl: true,
       },
       orderBy: {
         createdAt: 'desc',
@@ -44,14 +47,17 @@ export const getUsers = async (req: Request, res: Response) => {
     });
     res.json(users);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch users' });
+    handleControllerError(res, error, 'getUsers');
   }
 };
 
-export const getTeachers = async (req: Request, res: Response) => {
+export const getTeachers = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const teachers = await prisma.user.findMany({
       where: {
+        tenantId,
         role: Role.TEACHER,
         isActive: true,
       },
@@ -66,36 +72,64 @@ export const getTeachers = async (req: Request, res: Response) => {
     });
     res.json(teachers);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch teachers' });
+    handleControllerError(res, error, 'getTeachers');
   }
 };
 
-export const createUser = async (req: Request, res: Response) => {
+export const createUser = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { email, password, fullName, role } = createUserSchema.parse(req.body);
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    // Check if user exists in THIS tenant
+    const existingUser = await prisma.user.findFirst({
+      where: { email, tenantId }
+    });
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
+    // Check tenant user limits
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (tenant && tenant.maxUsers !== -1 && tenant.currentUserCount >= tenant.maxUsers) {
+      return res.status(403).json({
+        error: 'User limit reached',
+        message: `Maximum of ${tenant.maxUsers} users allowed. Please upgrade your plan.`
+      });
+    }
+
     const passwordHash = await hashPassword(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        fullName,
-        role,
-      },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
+    // Create user and update counts
+    const user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          tenantId,
+          email,
+          passwordHash,
+          fullName,
+          role,
+        },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+        },
+      });
+
+      // Update tenant counts
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: {
+          currentUserCount: { increment: 1 },
+          ...(role === 'TEACHER' ? { currentTeacherCount: { increment: 1 } } : {}),
+        }
+      });
+
+      return newUser;
     });
 
     res.status(201).json(user);
@@ -103,30 +137,62 @@ export const createUser = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to create user' });
+    handleControllerError(res, error, 'createUser');
   }
 };
 
-export const updateUser = async (req: Request, res: Response) => {
+export const updateUser = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
     const { email, fullName, role, password } = updateUserSchema.parse(req.body);
+
+    // Verify user belongs to this tenant
+    const existingUser = await prisma.user.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     const data: any = { email, fullName, role };
     if (password) {
       data.passwordHash = await hashPassword(password);
     }
 
-    const user = await prisma.user.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        role: true,
-        isActive: true,
-      },
+    // Handle teacher count changes
+    const oldRole = existingUser.role;
+    const newRole = role;
+
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          isActive: true,
+        },
+      });
+
+      // Update teacher count if role changed
+      if (newRole && oldRole !== newRole) {
+        if (oldRole === 'TEACHER' && newRole !== 'TEACHER') {
+          await tx.tenant.update({
+            where: { id: tenantId },
+            data: { currentTeacherCount: { decrement: 1 } }
+          });
+        } else if (oldRole !== 'TEACHER' && newRole === 'TEACHER') {
+          await tx.tenant.update({
+            where: { id: tenantId },
+            data: { currentTeacherCount: { increment: 1 } }
+          });
+        }
+      }
+
+      return updated;
     });
 
     res.json(user);
@@ -134,15 +200,18 @@ export const updateUser = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to update user' });
+    handleControllerError(res, error, 'updateUser');
   }
 };
 
-export const toggleUserStatus = async (req: Request, res: Response) => {
+export const toggleUserStatus = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
-    
-    const user = await prisma.user.findUnique({ where: { id } });
+
+    const user = await prisma.user.findFirst({
+      where: { id, tenantId }
+    });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -158,6 +227,6 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
 
     res.json(updatedUser);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to toggle user status' });
+    handleControllerError(res, error, 'toggleUserStatus');
   }
 };

@@ -3,6 +3,7 @@ import { PrismaClient, Role } from '@prisma/client';
 import { z } from 'zod';
 import { sendEmail } from '../services/emailService';
 import { broadcastNotification, createNotification } from '../services/notificationService';
+import { TenantRequest, getTenantId } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -14,8 +15,9 @@ const sendAnnouncementSchema = z.object({
   sendNotification: z.boolean().default(true),
 });
 
-export const sendAnnouncement = async (req: Request, res: Response) => {
+export const sendAnnouncement = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendNotification } = sendAnnouncementSchema.parse(req.body);
 
     // 1. Find target users
@@ -38,7 +40,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 
     // 2. Send Notifications
     if (sendNotification) {
-      await broadcastNotification(userIds, subject, message, 'INFO');
+      await broadcastNotification(tenantId, userIds, subject, message, 'INFO');
     }
 
     // 3. Send Emails (Async to not block response)
@@ -214,7 +216,7 @@ export const getMessages = async (req: Request, res: Response) => {
   }
 };
 
-export const sendMessage = async (req: Request, res: Response) => {
+export const sendMessage = async (req: TenantRequest, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
     const { conversationId, recipientId, content } = sendMessageSchema.parse(req.body);
@@ -238,8 +240,11 @@ export const sendMessage = async (req: Request, res: Response) => {
       if (existing) {
         targetConversationId = existing.id;
       } else {
+        const userId = (req as any).user?.userId;
+        const tenantId = getTenantId(req);
         const newConv = await prisma.conversation.create({
           data: {
+            tenantId,
             participants: {
               create: [
                 { userId: userId! },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, Crown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -73,6 +73,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: Settings,
       label: 'Settings',
       path: '/settings',
+      roles: ['SUPER_ADMIN']
+    },
+    {
+      icon: Crown,
+      label: 'Subscription',
+      path: '/subscription',
       roles: ['SUPER_ADMIN']
     },
     {

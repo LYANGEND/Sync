@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { sendEmail } from '../services/emailService';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { TenantRequest, getTenantId } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -31,22 +33,31 @@ const updateStudentSchema = baseStudentSchema.partial().extend({
   reason: z.string().optional(), // For audit trail
 });
 
-export const getStudents = async (req: Request, res: Response) => {
+export const getStudents = async (req: AuthRequest, res: Response) => {
   try {
-    const userRole = (req as any).user?.role;
-    const userId = (req as any).user?.userId;
+    const userRole = req.user?.role;
+    const userId = req.user?.userId;
+    const tenantId = req.user?.tenantId;
 
-    let whereClause = {};
+    // Ensure tenantId is available (multi-tenant requirement)
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant context required' });
+    }
 
+    // Base filter: always filter by tenant
+    let whereClause: any = { tenantId };
+
+    // Teachers only see their own classes
     if (userRole === 'TEACHER') {
       const myClasses = await prisma.class.findMany({
-        where: { teacherId: userId },
+        where: { teacherId: userId, tenantId },
         select: { id: true }
       });
 
       const classIds = myClasses.map(c => c.id);
 
       whereClause = {
+        tenantId,
         classId: { in: classIds }
       };
     }
@@ -67,9 +78,25 @@ export const getStudents = async (req: Request, res: Response) => {
   }
 };
 
-export const createStudent = async (req: Request, res: Response) => {
+export const createStudent = async (req: AuthRequest, res: Response) => {
   try {
     const data = createStudentSchema.parse(req.body);
+    const tenantId = req.user?.tenantId;
+
+    // Ensure tenantId is available (multi-tenant requirement)
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Tenant context required' });
+    }
+
+    // Check tenant student limits
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (tenant && tenant.maxStudents !== -1 && tenant.currentStudentCount >= tenant.maxStudents) {
+      return res.status(403).json({
+        error: 'Student limit reached',
+        message: `Maximum of ${tenant.maxStudents} students allowed. Please upgrade your plan.`,
+        upgradeUrl: '/settings/billing'
+      });
+    }
 
     let parentId: string | null = null;
 
@@ -77,9 +104,10 @@ export const createStudent = async (req: Request, res: Response) => {
     let admissionNumber = data.admissionNumber;
     if (!admissionNumber) {
       const year = new Date().getFullYear();
-      // Find the last student created this year to increment the number
+      // Find the last student created this year IN THIS TENANT to increment the number
       const lastStudent = await prisma.student.findFirst({
         where: {
+          tenantId, // Filter by tenant
           admissionNumber: {
             startsWith: `${year}-`
           }
@@ -106,8 +134,8 @@ export const createStudent = async (req: Request, res: Response) => {
     // If guardian email is provided, try to link or create a parent account
     if (data.guardianEmail) {
       console.log('DEBUG: Processing guardian email:', data.guardianEmail);
-      const existingParent = await prisma.user.findUnique({
-        where: { email: data.guardianEmail }
+      const existingParent = await prisma.user.findFirst({
+        where: { tenantId, email: data.guardianEmail }
       });
 
       if (existingParent) {
@@ -127,6 +155,7 @@ export const createStudent = async (req: Request, res: Response) => {
         try {
           const newParent = await prisma.user.create({
             data: {
+              tenantId,
               email: data.guardianEmail,
               fullName: data.guardianName || 'Guardian',
               role: 'PARENT',
@@ -161,8 +190,8 @@ export const createStudent = async (req: Request, res: Response) => {
           // Handle race condition where user was created between findUnique and create
           if (createError.code === 'P2002') {
             console.log('DEBUG: Race condition detected - parent created by another request');
-            const retryParent = await prisma.user.findUnique({
-              where: { email: data.guardianEmail }
+            const retryParent = await prisma.user.findFirst({
+              where: { tenantId, email: data.guardianEmail }
             });
             if (retryParent) {
               parentId = retryParent.id;
@@ -234,6 +263,7 @@ export const createStudent = async (req: Request, res: Response) => {
         // Create the class
         const newClass = await prisma.class.create({
           data: {
+            tenantId,
             name: normalizedName,
             gradeLevel,
             teacherId: defaultTeacher.id,
@@ -255,6 +285,7 @@ export const createStudent = async (req: Request, res: Response) => {
 
     const student = await prisma.student.create({
       data: {
+        tenantId,
         ...studentData,
         classId: finalClassId,
         admissionNumber,
@@ -273,12 +304,14 @@ export const createStudent = async (req: Request, res: Response) => {
   }
 };
 
-export const bulkCreateStudents = async (req: Request, res: Response) => {
+export const bulkCreateStudents = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const studentsData = z.array(createStudentSchema).parse(req.body);
 
-    // Get current academic term (most recent or active)
+    // Get current academic term for this tenant (most recent or active)
     const currentTerm = await prisma.academicTerm.findFirst({
+      where: { tenantId },
       orderBy: { startDate: 'desc' }
     });
 
@@ -337,6 +370,7 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
 
             const newClass = await prisma.class.create({
               data: {
+                tenantId,
                 name: normalizedName,
                 gradeLevel,
                 teacherId: defaultTeacher.id,
@@ -362,9 +396,9 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
     // Generate admission numbers for those missing
     const year = new Date().getFullYear();
 
-    // Find last admission number to start incrementing
+    // Find last admission number to start incrementing for THIS TENANT
     const lastStudent = await prisma.student.findFirst({
-      where: { admissionNumber: { startsWith: `${year}-` } },
+      where: { tenantId, admissionNumber: { startsWith: `${year}-` } },
       orderBy: { admissionNumber: 'desc' }
     });
 
@@ -392,6 +426,7 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
       }
 
       return {
+        tenantId,
         ...studentData,
         classId: classId as string,
         admissionNumber: admissionNumber!,

@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient, TopicStatus } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, getUserId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -22,7 +23,7 @@ const createLessonPlanSchema = z.object({
   classId: z.string().uuid(),
   subjectId: z.string().uuid(),
   termId: z.string().uuid(),
-  weekStartDate: z.string().datetime(), // ISO Date string
+  weekStartDate: z.string().datetime(),
   title: z.string().min(3),
   content: z.string().min(10),
   fileUrl: z.string().url().optional().or(z.literal('')),
@@ -30,16 +31,26 @@ const createLessonPlanSchema = z.object({
 
 // --- Topics (Syllabus) ---
 
-export const getTopics = async (req: Request, res: Response) => {
+export const getTopics = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { subjectId, gradeLevel } = req.query;
 
     if (!subjectId || !gradeLevel) {
       return res.status(400).json({ message: 'Subject ID and Grade Level are required' });
     }
 
+    // Verify subject belongs to this tenant
+    const subject = await prisma.subject.findFirst({
+      where: { id: subjectId as string, tenantId }
+    });
+    if (!subject) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
     const topics = await prisma.topic.findMany({
       where: {
+        tenantId,
         subjectId: subjectId as string,
         gradeLevel: Number(gradeLevel),
       },
@@ -50,17 +61,28 @@ export const getTopics = async (req: Request, res: Response) => {
 
     res.json(topics);
   } catch (error) {
-    console.error('Get topics error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getTopics');
   }
 };
 
-export const createTopic = async (req: Request, res: Response) => {
+export const createTopic = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const data = createTopicSchema.parse(req.body);
 
+    // Verify subject belongs to this tenant
+    const subject = await prisma.subject.findFirst({
+      where: { id: data.subjectId, tenantId }
+    });
+    if (!subject) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
     const topic = await prisma.topic.create({
-      data,
+      data: {
+        tenantId,
+        ...data
+      },
     });
 
     res.status(201).json(topic);
@@ -68,26 +90,34 @@ export const createTopic = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    console.error('Create topic error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'createTopic');
   }
 };
 
-export const deleteTopic = async (req: Request, res: Response) => {
+export const deleteTopic = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    const existing = await prisma.topic.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Topic not found' });
+    }
+
     await prisma.topic.delete({ where: { id } });
     res.status(204).send();
   } catch (error) {
-    console.error('Delete topic error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'deleteTopic');
   }
 };
 
 // --- Topic Progress ---
 
-export const getClassProgress = async (req: Request, res: Response) => {
+export const getClassProgress = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { classId, subjectId } = req.query;
 
     if (!classId || !subjectId) {
@@ -95,8 +125,8 @@ export const getClassProgress = async (req: Request, res: Response) => {
     }
 
     // 1. Get the class to know the grade level
-    const classInfo = await prisma.class.findUnique({
-      where: { id: classId as string },
+    const classInfo = await prisma.class.findFirst({
+      where: { id: classId as string, tenantId },
     });
 
     if (!classInfo) {
@@ -106,6 +136,7 @@ export const getClassProgress = async (req: Request, res: Response) => {
     // 2. Get all topics for this subject and grade
     const topics = await prisma.topic.findMany({
       where: {
+        tenantId,
         subjectId: subjectId as string,
         gradeLevel: classInfo.gradeLevel,
       },
@@ -130,15 +161,24 @@ export const getClassProgress = async (req: Request, res: Response) => {
 
     res.json(formattedTopics);
   } catch (error) {
-    console.error('Get class progress error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getClassProgress');
   }
 };
 
-export const updateTopicProgress = async (req: Request, res: Response) => {
+export const updateTopicProgress = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { topicId, classId } = req.params;
     const { status } = updateTopicProgressSchema.parse(req.body);
+
+    // Verify topic and class belong to this tenant
+    const [topic, classData] = await Promise.all([
+      prisma.topic.findFirst({ where: { id: topicId, tenantId } }),
+      prisma.class.findFirst({ where: { id: classId, tenantId } }),
+    ]);
+
+    if (!topic) return res.status(404).json({ error: 'Topic not found' });
+    if (!classData) return res.status(404).json({ error: 'Class not found' });
 
     const progress = await prisma.topicProgress.upsert({
       where: {
@@ -164,15 +204,15 @@ export const updateTopicProgress = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    console.error('Update topic progress error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'updateTopicProgress');
   }
 };
 
 // --- Lesson Plans ---
 
-export const getLessonPlans = async (req: Request, res: Response) => {
+export const getLessonPlans = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { classId, subjectId } = req.query;
 
     if (!classId || !subjectId) {
@@ -181,6 +221,7 @@ export const getLessonPlans = async (req: Request, res: Response) => {
 
     const plans = await prisma.lessonPlan.findMany({
       where: {
+        tenantId,
         classId: classId as string,
         subjectId: subjectId as string,
       },
@@ -196,18 +237,30 @@ export const getLessonPlans = async (req: Request, res: Response) => {
 
     res.json(plans);
   } catch (error) {
-    console.error('Get lesson plans error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'getLessonPlans');
   }
 };
 
-export const createLessonPlan = async (req: Request, res: Response) => {
+export const createLessonPlan = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
     const data = createLessonPlanSchema.parse(req.body);
-    const userId = (req as any).user?.userId;
+
+    // Verify references belong to this tenant
+    const [classData, subject, term] = await Promise.all([
+      prisma.class.findFirst({ where: { id: data.classId, tenantId } }),
+      prisma.subject.findFirst({ where: { id: data.subjectId, tenantId } }),
+      prisma.academicTerm.findFirst({ where: { id: data.termId, tenantId } }),
+    ]);
+
+    if (!classData) return res.status(404).json({ error: 'Class not found' });
+    if (!subject) return res.status(404).json({ error: 'Subject not found' });
+    if (!term) return res.status(404).json({ error: 'Term not found' });
 
     const plan = await prisma.lessonPlan.create({
       data: {
+        tenantId,
         ...data,
         teacherId: userId,
       },
@@ -218,7 +271,6 @@ export const createLessonPlan = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    console.error('Create lesson plan error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    handleControllerError(res, error, 'createLessonPlan');
   }
 };

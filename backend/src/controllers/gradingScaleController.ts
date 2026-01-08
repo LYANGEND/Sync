@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
@@ -11,24 +12,29 @@ const gradingScaleSchema = z.object({
   remark: z.string().optional(),
 });
 
-export const getGradingScales = async (req: Request, res: Response) => {
+export const getGradingScales = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
+
     const scales = await prisma.gradingScale.findMany({
+      where: { tenantId },
       orderBy: { minScore: 'desc' },
     });
     res.json(scales);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch grading scales' });
+    handleControllerError(res, error, 'getGradingScales');
   }
 };
 
-export const createGradingScale = async (req: Request, res: Response) => {
+export const createGradingScale = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const data = gradingScaleSchema.parse(req.body);
-    
-    // Check for overlap
+
+    // Check for overlap within this tenant
     const existing = await prisma.gradingScale.findFirst({
       where: {
+        tenantId,
         OR: [
           {
             AND: [
@@ -51,22 +57,34 @@ export const createGradingScale = async (req: Request, res: Response) => {
     }
 
     const scale = await prisma.gradingScale.create({
-      data,
+      data: {
+        tenantId,
+        ...data
+      },
     });
-    
+
     res.status(201).json(scale);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to create grading scale' });
+    handleControllerError(res, error, 'createGradingScale');
   }
 };
 
-export const updateGradingScale = async (req: Request, res: Response) => {
+export const updateGradingScale = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
     const data = gradingScaleSchema.parse(req.body);
+
+    // Verify scale belongs to this tenant
+    const existing = await prisma.gradingScale.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Grading scale not found' });
+    }
 
     const scale = await prisma.gradingScale.update({
       where: { id },
@@ -78,18 +96,57 @@ export const updateGradingScale = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    res.status(500).json({ error: 'Failed to update grading scale' });
+    handleControllerError(res, error, 'updateGradingScale');
   }
 };
 
-export const deleteGradingScale = async (req: Request, res: Response) => {
+export const deleteGradingScale = async (req: TenantRequest, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const { id } = req.params;
+
+    // Verify scale belongs to this tenant
+    const existing = await prisma.gradingScale.findFirst({
+      where: { id, tenantId }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Grading scale not found' });
+    }
+
     await prisma.gradingScale.delete({
       where: { id },
     });
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete grading scale' });
+    handleControllerError(res, error, 'deleteGradingScale');
+  }
+};
+
+export const bulkCreateGradingScales = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const scalesData = z.array(gradingScaleSchema).parse(req.body);
+
+    // Add tenantId to each scale
+    const dataWithTenant = scalesData.map(s => ({ ...s, tenantId }));
+
+    // Clear existing scales for this tenant first
+    await prisma.gradingScale.deleteMany({
+      where: { tenantId }
+    });
+
+    const result = await prisma.gradingScale.createMany({
+      data: dataWithTenant,
+    });
+
+    res.status(201).json({
+      message: `Successfully created ${result.count} grading scales`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    handleControllerError(res, error, 'bulkCreateGradingScales');
   }
 };

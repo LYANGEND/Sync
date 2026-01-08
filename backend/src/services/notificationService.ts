@@ -33,18 +33,38 @@ interface NotificationSettings {
 }
 
 // Get school settings for notifications
-async function getNotificationSettings(): Promise<NotificationSettings | null> {
-  const settings = await prisma.schoolSettings.findFirst();
-  return settings as NotificationSettings | null;
+async function getNotificationSettings(tenantId: string): Promise<NotificationSettings | null> {
+  const settings = await prisma.tenant.findUnique({
+    where: { id: tenantId }
+  });
+
+  if (!settings) return null;
+
+  return {
+    emailNotificationsEnabled: settings.emailEnabled,
+    smsNotificationsEnabled: settings.smsEnabled,
+    smtpHost: settings.smtpHost,
+    smtpPort: settings.smtpPort,
+    smtpSecure: settings.smtpSecure,
+    smtpUser: settings.smtpUser,
+    smtpPassword: settings.smtpPassword,
+    smtpFromEmail: settings.smtpFromEmail,
+    smtpFromName: settings.smtpFromName,
+    smsProvider: settings.smsProvider,
+    smsApiKey: settings.smsApiKey,
+    smsApiSecret: settings.smsApiSecret,
+    smsSenderId: settings.smsSenderId,
+    schoolName: settings.name,
+  };
 }
 
 // Send Email Notification
-export async function sendEmail(options: NotificationOptions): Promise<boolean> {
+export async function sendEmail(tenantId: string, options: NotificationOptions): Promise<boolean> {
   try {
-    const settings = await getNotificationSettings();
+    const settings = await getNotificationSettings(tenantId);
 
     if (!settings) {
-      console.log('No settings found');
+      console.log('No settings found for tenant:', tenantId);
       return false;
     }
 
@@ -88,9 +108,9 @@ export async function sendEmail(options: NotificationOptions): Promise<boolean> 
 }
 
 // Send SMS Notification
-export async function sendSms(options: SmsOptions): Promise<boolean> {
+export async function sendSms(tenantId: string, options: SmsOptions): Promise<boolean> {
   try {
-    const settings = await getNotificationSettings();
+    const settings = await getNotificationSettings(tenantId);
 
     if (!settings) {
       console.log('No settings found');
@@ -188,6 +208,7 @@ async function sendTwilioSms(to: string, message: string, settings: Notification
 
 // Send notification via both channels (based on settings)
 export async function sendNotification(
+  tenantId: string,
   email: string | undefined,
   phone: string | undefined,
   subject: string,
@@ -199,7 +220,7 @@ export async function sendNotification(
   let smsSent = false;
 
   if (email) {
-    emailSent = await sendEmail({
+    emailSent = await sendEmail(tenantId, {
       to: email,
       subject,
       text: message,
@@ -210,7 +231,7 @@ export async function sendNotification(
   if (phone) {
     // Use provided SMS message or fallback to truncated email text
     const finalSmsMessage = smsMessage || message.substring(0, 160);
-    smsSent = await sendSms({
+    smsSent = await sendSms(tenantId, {
       to: phone,
       message: finalSmsMessage,
     });
@@ -551,6 +572,7 @@ ${schoolName}
 
 // Create a single notification in the database
 export async function createNotification(
+  tenantId: string,
   userId: string,
   title: string,
   message: string,
@@ -559,6 +581,7 @@ export async function createNotification(
   try {
     await prisma.notification.create({
       data: {
+        tenantId,
         userId,
         title,
         message,
@@ -575,6 +598,7 @@ export async function createNotification(
 
 // Broadcast notification to multiple users
 export async function broadcastNotification(
+  tenantId: string,
   userIds: string[],
   title: string,
   message: string,
@@ -583,6 +607,7 @@ export async function broadcastNotification(
   try {
     const result = await prisma.notification.createMany({
       data: userIds.map((userId) => ({
+        tenantId,
         userId,
         title,
         message,

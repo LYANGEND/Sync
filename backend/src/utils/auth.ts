@@ -3,8 +3,14 @@ import bcrypt from 'bcryptjs';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
-export const generateToken = (userId: string, role: string) => {
-  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '24h' });
+/**
+ * Generate JWT token with user info
+ * @param userId - User's unique ID
+ * @param tenantId - Tenant (school) ID for multi-tenancy
+ * @param role - User's role
+ */
+export const generateToken = (userId: string, tenantId: string, role: string) => {
+  return jwt.sign({ userId, tenantId, role }, JWT_SECRET, { expiresIn: '24h' });
 };
 
 export const hashPassword = async (password: string) => {

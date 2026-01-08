@@ -1,17 +1,28 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { TenantRequest, getTenantId } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
-export const generateStudentReport = async (req: Request, res: Response) => {
+export const generateStudentReport = async (req: TenantRequest, res: Response) => {
   try {
     const { studentId, termId } = req.body;
+    const tenantId = getTenantId(req);
 
-    await generateSingleStudentReport(studentId, termId);
+    // Verify student belongs to tenant
+    const studentExists = await prisma.student.findFirst({
+      where: { id: studentId, tenantId }
+    });
+    if (!studentExists) {
+      return res.status(404).json({ error: 'Student not found in this tenant' });
+    }
 
-    // Fetch School Settings
-    const settings = await prisma.schoolSettings.findFirst();
+    await generateSingleStudentReport(studentId, termId, tenantId);
+
+    // Fetch Tenant Settings (for school info)
+    // resolveTenant middleware populates req.tenant
+    const schoolSettings = req.tenant;
 
     // Fetch the generated report to return it
     const report = await prisma.studentTermReport.findUnique({
@@ -51,7 +62,7 @@ export const generateStudentReport = async (req: Request, res: Response) => {
       })),
       totalScore,
       averageScore,
-      school: settings
+      school: schoolSettings
     });
 
   } catch (error) {
@@ -60,15 +71,25 @@ export const generateStudentReport = async (req: Request, res: Response) => {
   }
 };
 
-export const getStudentReport = async (req: Request, res: Response) => {
+export const getStudentReport = async (req: TenantRequest, res: Response) => {
   try {
     const { studentId, termId } = req.query;
-
-    const settings = await prisma.schoolSettings.findFirst();
+    const tenantId = getTenantId(req);
 
     if (!studentId || !termId) {
       return res.status(400).json({ error: 'Student ID and Term ID are required' });
     }
+
+    // Verify student ownership
+    const student = await prisma.student.findFirst({
+      where: { id: String(studentId), tenantId }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Fetch Tenant Settings
+    const schoolSettings = req.tenant;
 
     const report = await prisma.studentTermReport.findUnique({
       where: {
@@ -111,7 +132,7 @@ export const getStudentReport = async (req: Request, res: Response) => {
       })),
       totalScore,
       averageScore,
-      school: settings
+      school: schoolSettings
     });
 
   } catch (error) {
@@ -119,18 +140,30 @@ export const getStudentReport = async (req: Request, res: Response) => {
   }
 };
 
-export const getClassReports = async (req: Request, res: Response) => {
+export const getClassReports = async (req: TenantRequest, res: Response) => {
   try {
     const { classId, termId } = req.query;
-    const settings = await prisma.schoolSettings.findFirst();
+    const tenantId = getTenantId(req);
 
     if (!classId || !termId) {
       return res.status(400).json({ error: 'Class ID and Term ID are required' });
     }
 
-    // 1. Get all students in class
+    // Verify class ownership
+    const classExists = await prisma.class.findFirst({
+      where: { id: String(classId), tenantId }
+    });
+    if (!classExists) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // 1. Get all students in class (tenant scoped by class, but safe to add tenantId check)
     const students = await prisma.student.findMany({
-      where: { classId: String(classId), status: 'ACTIVE' },
+      where: {
+        classId: String(classId),
+        tenantId,
+        status: 'ACTIVE'
+      },
       include: {
         class: true,
       },
@@ -194,21 +227,28 @@ export const getClassReports = async (req: Request, res: Response) => {
   }
 };
 
-export const generateClassReports = async (req: Request, res: Response) => {
+export const generateClassReports = async (req: TenantRequest, res: Response) => {
   // Bulk generation for a whole class
   try {
     const { classId, termId } = req.body;
+    const tenantId = getTenantId(req);
+
+    // Verify class ownership
+    const classExists = await prisma.class.findFirst({
+      where: { id: classId, tenantId }
+    });
+    if (!classExists) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
 
     const students = await prisma.student.findMany({
-      where: { classId, status: 'ACTIVE' }
+      where: { classId, tenantId, status: 'ACTIVE' }
     });
 
     let count = 0;
     for (const student of students) {
-      // Re-use the logic (refactoring would be better, but calling via internal helper is okay)
-      // For now, we will just call the internal logic if we extracted it, 
-      // but since we didn't extract it, I'll just loop and call a helper function.
-      await generateSingleStudentReport(student.id, termId);
+      // Pass tenantId to helper
+      await generateSingleStudentReport(student.id, termId, tenantId);
       count++;
     }
 
@@ -220,16 +260,17 @@ export const generateClassReports = async (req: Request, res: Response) => {
 };
 
 // Helper function to avoid code duplication
-const generateSingleStudentReport = async (studentId: string, termId: string) => {
-  // 0. Fetch Term for dates
-  const term = await prisma.academicTerm.findUnique({
-    where: { id: termId }
+const generateSingleStudentReport = async (studentId: string, termId: string, tenantId: string) => {
+  // 0. Fetch Term for dates - Verify tenant ownership implicitly via subsequent queries or Explicitly?
+  // Term should belong to tenant.
+  const term = await prisma.academicTerm.findFirst({
+    where: { id: termId, tenantId }
   });
   if (!term) return;
 
   // 1. Fetch Student and Class
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, tenantId },
     include: { class: true }
   });
 
@@ -239,7 +280,8 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
   const assessments = await prisma.assessment.findMany({
     where: {
       classId: student.classId,
-      termId: termId
+      termId: termId,
+      tenantId // Ensure assessments belong to tenant
     },
     include: {
       results: {
@@ -250,6 +292,7 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
 
   // 3. Fetch Grading Scales
   const gradingScales = await prisma.gradingScale.findMany({
+    where: { tenantId }, // Filter by tenant
     orderBy: { minScore: 'desc' }
   });
 
@@ -305,6 +348,7 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
   const attendanceCount = await prisma.attendance.count({
     where: {
       studentId,
+      tenantId, // Filter by tenant (if model has it)
       date: {
         gte: term.startDate,
         lte: term.endDate
@@ -317,6 +361,7 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
     by: ['date'],
     where: {
       classId: student.classId,
+      tenantId, // Filter by tenant
       date: {
         gte: term.startDate,
         lte: term.endDate
@@ -348,9 +393,18 @@ const generateSingleStudentReport = async (studentId: string, termId: string) =>
   });
 };
 
-export const updateReportRemarks = async (req: Request, res: Response) => {
+export const updateReportRemarks = async (req: TenantRequest, res: Response) => {
   try {
     const { studentId, termId, classTeacherRemark, principalRemark } = req.body;
+    const tenantId = getTenantId(req);
+
+    // Verify student ownership
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, tenantId }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
 
     const report = await prisma.studentTermReport.update({
       where: {

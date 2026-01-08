@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
 import {
   Loader2,
@@ -20,6 +21,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { refreshSettings } = useTheme();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,6 +33,10 @@ const Login = () => {
       const response = await api.post('/auth/login', { email, password });
       const { token, user } = response.data;
       login(token, user);
+
+      // Refresh theme settings to get tenant-specific branding
+      await refreshSettings();
+
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to login. Please check your credentials.');

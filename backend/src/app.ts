@@ -2,6 +2,7 @@ import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { resolveTenant } from './middleware/tenantMiddleware';
 import authRoutes from './routes/authRoutes';
 import studentRoutes from './routes/studentRoutes';
 import paymentRoutes from './routes/paymentRoutes';
@@ -23,6 +24,9 @@ import communicationRoutes from './routes/communicationRoutes';
 import scholarshipRoutes from './routes/scholarshipRoutes';
 import profileRoutes from './routes/profileRoutes';
 import feeReminderRoutes from './routes/feeReminderRoutes';
+import subscriptionRoutes from './routes/subscriptionRoutes';
+import platformAdminRoutes from './routes/platformAdminRoutes';
+import crmRoutes from './routes/crmRoutes';
 import path from 'path';
 
 const app: Application = express();
@@ -31,7 +35,7 @@ const app: Application = express();
 app.use(cors({
   origin: '*', // Allow all origins for development
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID']
 }));
 app.use(express.json({ limit: '50mb' })); // Increased limit for bulk imports
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -39,6 +43,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" } // Allow serving images
 }));
 app.use(morgan('dev'));
+app.use(resolveTenant);
 
 // Serve static files (uploaded images)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -65,6 +70,11 @@ app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/communication', communicationRoutes);
 app.use('/api/v1/scholarships', scholarshipRoutes);
 app.use('/api/v1/fee-reminders', feeReminderRoutes);
+app.use('/api/v1/subscription', subscriptionRoutes);
+
+// Platform Admin Routes (separate admin portal)
+app.use('/api/platform', platformAdminRoutes);
+app.use('/api/platform/crm', crmRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

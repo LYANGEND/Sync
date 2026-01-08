@@ -1,17 +1,19 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { TenantRequest, getTenantId, getUserId, getUserRole, handleControllerError } from '../utils/tenantContext';
 
 const prisma = new PrismaClient();
 
-export const getDashboardStats = async (req: Request, res: Response) => {
+export const getDashboardStats = async (req: TenantRequest, res: Response) => {
   try {
-    const userRole = (req as any).user?.role;
-    const userId = (req as any).user?.userId;
+    const tenantId = getTenantId(req);
+    const userRole = getUserRole(req);
+    const userId = getUserId(req);
 
     if (userRole === 'TEACHER') {
       // 1. My Classes
       const myClasses = await prisma.class.findMany({
-        where: { teacherId: userId },
+        where: { tenantId, teacherId: userId },
         include: { _count: { select: { students: true } } }
       });
 
@@ -23,6 +25,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
       const todaySchedule = await prisma.timetablePeriod.findMany({
         where: {
+          tenantId,
           teacherId: userId,
           dayOfWeek: todayDay as any
         },
@@ -37,6 +40,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       const classIds = myClasses.map(c => c.id);
       const recentAssessments = await prisma.assessment.findMany({
         where: {
+          tenantId,
           classId: { in: classIds }
         },
         take: 5,
@@ -61,7 +65,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       });
     }
 
-    // --- ADMIN / BURSAR View (Existing) ---
+    // --- ADMIN / BURSAR View ---
 
     // 1. Total Revenue (Today)
     const today = new Date();
@@ -69,6 +73,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     const todayPayments = await prisma.payment.aggregate({
       where: {
+        tenantId,
         paymentDate: {
           gte: today,
         },
@@ -81,13 +86,21 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     // 2. Active Students
     const activeStudentsCount = await prisma.student.count({
       where: {
+        tenantId,
         status: 'ACTIVE',
       },
     });
 
-    // 3. Outstanding Fees
-    // Calculate total amount due - total amount paid across all fee structures
+    // 3. Get student IDs for this tenant for fee calculations
+    const students = await prisma.student.findMany({
+      where: { tenantId },
+      select: { id: true }
+    });
+    const studentIds = students.map(s => s.id);
+
+    // 4. Outstanding Fees
     const feeStats = await prisma.studentFeeStructure.aggregate({
+      where: { studentId: { in: studentIds } },
       _sum: {
         amountDue: true,
         amountPaid: true,
@@ -96,8 +109,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     const totalOutstanding = (Number(feeStats._sum.amountDue) || 0) - (Number(feeStats._sum.amountPaid) || 0);
 
-    // 4. Recent Payments (Last 5)
+    // 5. Recent Payments (Last 5)
     const recentPayments = await prisma.payment.findMany({
+      where: { tenantId },
       take: 5,
       orderBy: {
         createdAt: 'desc',
@@ -117,15 +131,22 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       },
     });
 
+    // 6. Additional stats for admin
+    const totalClasses = await prisma.class.count({ where: { tenantId } });
+    const totalTeachers = await prisma.user.count({ where: { tenantId, role: 'TEACHER', isActive: true } });
+
     res.json({
       role: 'ADMIN',
-      dailyRevenue: Number(todayPayments._sum.amount) || 0,
-      activeStudents: activeStudentsCount,
-      outstandingFees: totalOutstanding,
+      stats: {
+        dailyRevenue: Number(todayPayments._sum.amount) || 0,
+        activeStudents: activeStudentsCount,
+        outstandingFees: totalOutstanding,
+        totalClasses,
+        totalTeachers,
+      },
       recentPayments,
     });
   } catch (error) {
-    console.error('Dashboard stats error:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+    handleControllerError(res, error, 'getDashboardStats');
   }
 };
