@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -88,6 +88,11 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme'>('general');
 
+  // Logo upload state
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -131,11 +136,51 @@ const Settings = () => {
         smsApiSecret: settingsRes.data.smsApiSecret || '',
         smsSenderId: settingsRes.data.smsSenderId || '',
       });
+      setLogoUrl(settingsRes.data.logoUrl || null);
       setTerms(termsRes.data);
     } catch (error) {
       console.error('Failed to fetch settings', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Logo upload handlers
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append('logo', file);
+
+      const response = await api.post('/settings/logo', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      setLogoUrl(response.data.logoUrl);
+      refreshSettings(); // Update theme context
+    } catch (error) {
+      console.error('Failed to upload logo', error);
+      alert('Failed to upload logo. Please try again.');
+    } finally {
+      setUploadingLogo(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    if (!confirm('Are you sure you want to delete the school logo?')) return;
+
+    try {
+      await api.delete('/settings/logo');
+      setLogoUrl(null);
+      refreshSettings();
+    } catch (error) {
+      console.error('Failed to delete logo', error);
     }
   };
 
@@ -211,6 +256,58 @@ const Settings = () => {
                   onChange={(e) => setSettings({ ...settings, schoolName: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+
+              {/* School Logo Upload */}
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">School Logo</label>
+                <div className="flex items-center gap-4">
+                  {/* Logo Preview */}
+                  <div className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 overflow-hidden">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl.startsWith('http') ? logoUrl : `${window.location.origin}${logoUrl}`}
+                        alt="School Logo"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <Image size={32} className="text-gray-400" />
+                    )}
+                  </div>
+
+                  {/* Upload Controls */}
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                      id="logo-upload"
+                    />
+                    <label
+                      htmlFor="logo-upload"
+                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploadingLogo
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                    >
+                      <Upload size={16} />
+                      {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                    </label>
+                    {logoUrl && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteLogo}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 size={16} />
+                        Remove
+                      </button>
+                    )}
+                    <p className="text-xs text-gray-500">PNG, JPG up to 2MB. Recommended: 200x200px</p>
+                  </div>
+                </div>
               </div>
 
               <div>

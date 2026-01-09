@@ -52,8 +52,8 @@ const Academics = () => {
               key={tab.id}
               onClick={() => setView(tab.id as any)}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all whitespace-nowrap ${view === tab.id
-                  ? 'bg-blue-100 text-blue-700 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                ? 'bg-blue-100 text-blue-700 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
             >
               {tab.label}

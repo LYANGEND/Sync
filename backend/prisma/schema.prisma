@@ -77,7 +77,8 @@ model User {
 
   // Relations
   classesManaged Class[]
-  paymentsRecorded Payment[]
+  paymentsRecorded Payment[] @relation("RecordedPayments")
+  paymentsVoided   Payment[] @relation("VoidedPayments")
   attendanceRecorded Attendance[]
   classMovementsRecorded ClassMovementLog[]
   children Student[] @relation("ParentChildren")
@@ -91,6 +92,8 @@ model User {
   conversationParticipants ConversationParticipant[]
   messagesSent             Message[]
   pushSubscriptions        PushSubscription[]
+  subjectAssignments       TeacherSubject[]
+  subjectsTaught           Subject[] @relation("SubjectTeacher")
 
   @@map("users")
 }
@@ -166,9 +169,10 @@ model Class {
   assessments    Assessment[]
   termResults    TermResult[]
   termReports    StudentTermReport[]
-  timetablePeriods TimetablePeriod[]
+  timetablePeriods TimetablePeriodClass[]
   topicProgress  TopicProgress[]
   lessonPlans    LessonPlan[]
+  teacherAssignments TeacherSubject[]
 
   @@map("classes")
 }
@@ -177,6 +181,8 @@ model Subject {
   id        String   @id @default(uuid())
   name      String
   code      String   @unique
+  teacherId String?
+  teacher   User?    @relation("SubjectTeacher", fields: [teacherId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -184,6 +190,7 @@ model Subject {
   assessments Assessment[]
   termResults TermResult[]
   timetablePeriods TimetablePeriod[]
+  teacherAssignments TeacherSubject[]
   topics          Topic[]
   lessonPlans     LessonPlan[]
 
@@ -307,20 +314,36 @@ model StudentFeeStructure {
   @@map("student_fee_structures")
 }
 
+enum PaymentStatus {
+  COMPLETED
+  VOIDED
+  PENDING
+}
+
 model Payment {
   id              String        @id @default(uuid())
-  transactionId   String?       @unique // Auto-generated: TXN-YYYYMMDD-XXXX
+  transactionId   String?       @unique // Auto-generated: TXN-XXXXXXXX
   studentId       String
   student         Student       @relation(fields: [studentId], references: [id])
   amount          Decimal       @db.Decimal(10, 2)
   paymentDate     DateTime      @default(now())
   method          PaymentMethod
   notes           String?       // Optional notes about the payment
+  
+  // Status management for handling mistakes
+  status          PaymentStatus @default(COMPLETED)
+  voidedAt        DateTime?     // When the payment was voided
+  voidedByUserId  String?       // Who voided the payment
+  voidedBy        User?         @relation("VoidedPayments", fields: [voidedByUserId], references: [id])
+  voidReason      String?       // Why the payment was voided
+  
   recordedByUserId String
-  recordedBy      User          @relation(fields: [recordedByUserId], references: [id])
+  recordedBy      User          @relation("RecordedPayments", fields: [recordedByUserId], references: [id])
   createdAt       DateTime      @default(now())
 
   @@index([transactionId])
+  @@index([studentId, status])    // For student payment history
+  @@index([paymentDate, status])  // For reports filtering by status
   @@map("payments")
 }
 
@@ -541,10 +564,23 @@ model StudentTermReport {
   @@map("student_term_reports")
 }
 
+model TeacherSubject {
+  id        String   @id @default(uuid())
+  teacherId String
+  teacher   User     @relation(fields: [teacherId], references: [id])
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id])
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([classId, subjectId]) // One teacher per subject per class (usually)
+  @@map("teacher_subjects")
+}
+
 model TimetablePeriod {
   id             String       @id @default(uuid())
-  classId        String
-  class          Class        @relation(fields: [classId], references: [id])
   subjectId      String
   subject        Subject      @relation(fields: [subjectId], references: [id])
   teacherId      String
@@ -554,11 +590,26 @@ model TimetablePeriod {
   endTime        String       // "08:40"
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
+  
+  // Many-to-many: Multiple classes can attend the same period
+  classes        TimetablePeriodClass[]
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@map("timetable_periods")
+}
+
+// Join table for TimetablePeriod <-> Class many-to-many
+model TimetablePeriodClass {
+  id               String          @id @default(uuid())
+  timetablePeriodId String
+  timetablePeriod  TimetablePeriod @relation(fields: [timetablePeriodId], references: [id], onDelete: Cascade)
+  classId          String
+  class            Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([timetablePeriodId, classId])
+  @@map("timetable_period_classes")
 }
 
 model Topic {

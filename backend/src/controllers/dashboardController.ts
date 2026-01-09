@@ -27,7 +27,11 @@ export const getDashboardStats = async (req: Request, res: Response) => {
           dayOfWeek: todayDay as any
         },
         include: {
-          class: true,
+          classes: {
+            include: {
+              class: true
+            }
+          },
           subject: true
         },
         orderBy: { startTime: 'asc' }
@@ -63,7 +67,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     // --- ADMIN / BURSAR View (Existing) ---
 
-    // 1. Total Revenue (Today)
+    // 1. Total Revenue (Today) - COMPLETED ONLY
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -72,6 +76,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         paymentDate: {
           gte: today,
         },
+        status: 'COMPLETED'
       },
       _sum: {
         amount: true,
@@ -86,17 +91,22 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     });
 
     // 3. Outstanding Fees
-    // Calculate total amount due - total amount paid across all fee structures
-    const feeStats = await prisma.studentFeeStructure.aggregate({
-      _sum: {
-        amountDue: true,
-        amountPaid: true,
-      },
+    // Calculate total amount due - total revenue (COMPLETED)
+    // This ensures consistency with paymentController
+    const totalFeesAgg = await prisma.studentFeeStructure.aggregate({
+      _sum: { amountDue: true },
     });
 
-    const totalOutstanding = (Number(feeStats._sum.amountDue) || 0) - (Number(feeStats._sum.amountPaid) || 0);
+    const totalRevenueAgg = await prisma.payment.aggregate({
+      where: { status: 'COMPLETED' },
+      _sum: { amount: true },
+    });
 
-    // 4. Recent Payments (Last 5)
+    const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
+    const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
+    const totalOutstanding = Math.max(0, totalFeesAssigned - totalRevenue);
+
+    // 4. Recent Payments (Last 5) - Include Status
     const recentPayments = await prisma.payment.findMany({
       take: 5,
       orderBy: {
@@ -122,7 +132,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       dailyRevenue: Number(todayPayments._sum.amount) || 0,
       activeStudents: activeStudentsCount,
       outstandingFees: totalOutstanding,
-      recentPayments,
+      recentPayments: recentPayments.map(p => ({
+        ...p,
+        amount: Number(p.amount)
+      })),
     });
   } catch (error) {
     console.error('Dashboard stats error:', error);

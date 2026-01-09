@@ -3,13 +3,17 @@ import path from 'path';
 import fs from 'fs';
 
 const uploadDir = path.join(__dirname, '../../uploads/profiles');
+const logoDir = path.join(__dirname, '../../uploads/logos');
 
-// Ensure upload directory exists
+// Ensure upload directories exist
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+if (!fs.existsSync(logoDir)) {
+  fs.mkdirSync(logoDir, { recursive: true });
+}
 
-const storage = multer.diskStorage({
+const profileStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
   },
@@ -19,7 +23,18 @@ const storage = multer.diskStorage({
   }
 });
 
-const fileFilter = (req: any, file: any, cb: any) => {
+const logoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, logoDir);
+  },
+  filename: (req, file, cb) => {
+    // Use a fixed name for school logo so it's easy to reference
+    const ext = path.extname(file.originalname);
+    cb(null, 'school-logo' + ext);
+  }
+});
+
+const imageFilter = (req: any, file: any, cb: any) => {
   if (file.mimetype.startsWith('image/')) {
     cb(null, true);
   } else {
@@ -28,9 +43,17 @@ const fileFilter = (req: any, file: any, cb: any) => {
 };
 
 export const uploadProfilePicture = multer({
-  storage: storage,
+  storage: profileStorage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB limit
   },
-  fileFilter: fileFilter
+  fileFilter: imageFilter
+});
+
+export const uploadSchoolLogo = multer({
+  storage: logoStorage,
+  limits: {
+    fileSize: 2 * 1024 * 1024 // 2MB limit for logos
+  },
+  fileFilter: imageFilter
 });

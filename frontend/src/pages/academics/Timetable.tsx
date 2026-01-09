@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, User, BookOpen, Plus, Trash2, AlertCircle, Users } from 'lucide-react';
+import { Calendar, User, Plus, Trash2, Users, Download, Printer } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 interface TimetablePeriod {
   id: string;
@@ -17,10 +18,14 @@ interface TimetablePeriod {
     id: string;
     fullName: string;
   };
-  class?: {
-    id: string;
-    name: string;
-  };
+  classes?: {
+    class: {
+      id: string;
+      name: string;
+    };
+  }[];
+  classNames?: string[];
+  isCombined?: boolean;
 }
 
 interface Class {
@@ -37,6 +42,11 @@ interface Subject {
   id: string;
   name: string;
   code: string;
+  teacherId?: string;
+  teacher?: {
+    id: string;
+    fullName: string;
+  };
 }
 
 interface AcademicTerm {
@@ -48,6 +58,7 @@ const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
 
 const Timetable = () => {
   const { user } = useAuth();
+  const { settings: themeSettings } = useTheme();
   const [viewMode, setViewMode] = useState<'CLASS' | 'TEACHER'>('CLASS');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
@@ -61,14 +72,14 @@ const Timetable = () => {
   const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Form State
+  // Form State - now with classIds array
   const [newPeriod, setNewPeriod] = useState({
     dayOfWeek: 'MONDAY',
     startTime: '08:00',
     endTime: '08:40',
     subjectId: '',
     teacherId: '',
-    classId: ''
+    classIds: [] as string[] // Multiple classes
   });
 
   useEffect(() => {
@@ -175,13 +186,21 @@ const Timetable = () => {
     if (!currentTerm) return;
 
     try {
+      // Build classIds array
+      let classIdsToSend = newPeriod.classIds;
+      if (viewMode === 'CLASS' && selectedClassId && classIdsToSend.length === 0) {
+        classIdsToSend = [selectedClassId];
+      }
+
       await api.post('/timetables', {
-        ...newPeriod,
+        classIds: classIdsToSend,
+        dayOfWeek: newPeriod.dayOfWeek,
+        startTime: newPeriod.startTime,
+        endTime: newPeriod.endTime,
+        subjectId: newPeriod.subjectId,
+        // Don't send teacherId - backend will auto-fill from subject's assigned teacher
+        ...(viewMode === 'TEACHER' && selectedTeacherId ? { teacherId: selectedTeacherId } : {}),
         academicTermId: currentTerm.id,
-        // If in class view, use selected class, otherwise use form value
-        classId: viewMode === 'CLASS' ? selectedClassId : newPeriod.classId,
-        // If in teacher view, use selected teacher, otherwise use form value
-        teacherId: viewMode === 'TEACHER' ? selectedTeacherId : newPeriod.teacherId
       });
 
       setShowAddModal(false);
@@ -189,8 +208,8 @@ const Timetable = () => {
       if (viewMode === 'CLASS') fetchClassTimetable();
       else fetchTeacherTimetable();
 
-      // Reset form partially
-      setNewPeriod(prev => ({ ...prev, startTime: prev.endTime, endTime: '' }));
+      // Reset form
+      setNewPeriod(prev => ({ ...prev, startTime: prev.endTime, endTime: '', classIds: [] }));
     } catch (error: any) {
       console.error('Error adding period:', error);
       alert(error.response?.data?.message || 'Failed to add period');
@@ -210,6 +229,402 @@ const Timetable = () => {
 
   const getPeriodsForDay = (day: string) => {
     return periods.filter(p => p.dayOfWeek === day);
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    if (periods.length === 0) {
+      alert('No timetable data to export');
+      return;
+    }
+
+    const headers = ['Day', 'Start Time', 'End Time', 'Subject', 'Subject Code', 'Teacher', 'Classes'];
+    const DAYS_ORDER = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+
+    const sortedPeriods = [...periods].sort((a, b) => {
+      const dayDiff = DAYS_ORDER.indexOf(a.dayOfWeek) - DAYS_ORDER.indexOf(b.dayOfWeek);
+      if (dayDiff !== 0) return dayDiff;
+      return a.startTime.localeCompare(b.startTime);
+    });
+
+    const rows = sortedPeriods.map(period => [
+      period.dayOfWeek,
+      period.startTime,
+      period.endTime,
+      period.subject.name,
+      period.subject.code,
+      period.teacher?.fullName || 'N/A',
+      period.classNames?.join('; ') || 'N/A'
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+
+    const selectedClass = classes.find(c => c.id === selectedClassId);
+    const selectedTeacher = teachers.find(t => t.id === selectedTeacherId);
+    const filename = viewMode === 'CLASS'
+      ? `timetable_${selectedClass?.name || 'class'}_${currentTerm?.name || 'term'}.csv`
+      : `timetable_${selectedTeacher?.fullName?.replace(/\s+/g, '_') || 'teacher'}_${currentTerm?.name || 'term'}.csv`;
+
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Print timetable
+  const printTimetable = () => {
+    const selectedClass = classes.find(c => c.id === selectedClassId);
+    const selectedTeacher = teachers.find(t => t.id === selectedTeacherId);
+    const entityName = viewMode === 'CLASS'
+      ? selectedClass?.name || 'Class'
+      : selectedTeacher?.fullName || 'Teacher';
+    const entityType = viewMode === 'CLASS' ? 'Class Schedule' : 'Teacher Schedule';
+
+    const DAYS_ORDER = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+    const DAY_COLORS: Record<string, string> = {
+      'MONDAY': '#3b82f6',
+      'TUESDAY': '#10b981',
+      'WEDNESDAY': '#f59e0b',
+      'THURSDAY': '#8b5cf6',
+      'FRIDAY': '#ec4899'
+    };
+
+    const currentDate = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${entityType} - ${entityName}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          
+          body { 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+            background: #f8fafc;
+            color: #1e293b;
+            line-height: 1.5;
+          }
+          
+          .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 30px;
+            background: white;
+            min-height: 100vh;
+          }
+          
+          /* Header */
+          .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #3b82f6;
+          }
+          
+          .school-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            border-radius: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);
+          }
+          
+          .school-badge svg {
+            width: 36px;
+            height: 36px;
+            fill: white;
+          }
+          
+          .school-name {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e40af;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+          }
+          
+          .title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+          }
+          
+          .subtitle {
+            font-size: 18px;
+            color: #3b82f6;
+            font-weight: 600;
+            margin-bottom: 4px;
+          }
+          
+          .term-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            color: #0369a1;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            margin-top: 12px;
+            border: 1px solid #bae6fd;
+          }
+          
+          /* Week Grid */
+          .week-grid {
+            display: grid;
+            gap: 20px;
+          }
+          
+          .day-card {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+            border: 1px solid #e2e8f0;
+          }
+          
+          .day-header {
+            padding: 14px 20px;
+            color: white;
+            font-weight: 600;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+          
+          .day-header .icon {
+            width: 20px;
+            height: 20px;
+            opacity: 0.9;
+          }
+          
+          .periods-list {
+            padding: 0;
+          }
+          
+          .period-row {
+            display: grid;
+            grid-template-columns: 120px 1fr 180px;
+            gap: 16px;
+            padding: 16px 20px;
+            border-bottom: 1px solid #f1f5f9;
+            align-items: center;
+          }
+          
+          .period-row:last-child {
+            border-bottom: none;
+          }
+          
+          .period-row:hover {
+            background: #fafbfc;
+          }
+          
+          .time-slot {
+            font-size: 13px;
+            font-weight: 600;
+            color: #475569;
+            background: #f1f5f9;
+            padding: 6px 12px;
+            border-radius: 8px;
+            text-align: center;
+          }
+          
+          .subject-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          
+          .subject-name {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 15px;
+          }
+          
+          .subject-code {
+            font-size: 12px;
+            color: #64748b;
+            font-weight: 500;
+          }
+          
+          .teacher-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #475569;
+          }
+          
+          .teacher-avatar {
+            width: 28px;
+            height: 28px;
+            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4338ca;
+          }
+          
+          .combined-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+            color: #7c3aed;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+            border: 1px solid #e9d5ff;
+          }
+          
+          .no-classes {
+            padding: 24px 20px;
+            text-align: center;
+            color: #94a3b8;
+            font-style: italic;
+            font-size: 14px;
+          }
+          
+          /* Footer */
+          .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #94a3b8;
+          }
+          
+          .footer-logo {
+            font-weight: 600;
+            color: #64748b;
+          }
+          
+          /* Print Styles */
+          @media print {
+            body { 
+              background: white; 
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .container { 
+              padding: 20px; 
+              box-shadow: none;
+            }
+            .day-card {
+              break-inside: avoid;
+              box-shadow: none;
+              border: 1px solid #d1d5db;
+            }
+            .period-row {
+              break-inside: avoid;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="school-badge" style="background: transparent; box-shadow: none;">
+              ${themeSettings.logoUrl
+        ? `<img src="${themeSettings.logoUrl.startsWith('http') ? themeSettings.logoUrl : window.location.origin + themeSettings.logoUrl}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">`
+        : `<div style="width: 70px; height: 70px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);">
+                     <svg viewBox="0 0 24 24" style="width: 36px; height: 36px; fill: white;"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
+                   </div>`
+      }
+            </div>
+            <p class="school-name">${themeSettings.schoolName || 'School Name'}</p>
+            <h1 class="title">${entityName}</h1>
+            <p class="subtitle">${entityType}</p>
+            <span class="term-badge">📅 ${currentTerm?.name || 'Academic Term'}</span>
+          </div>
+          
+          <div class="week-grid">
+            ${DAYS_ORDER.map(day => {
+        const dayPeriods = periods.filter(p => p.dayOfWeek === day).sort((a, b) => a.startTime.localeCompare(b.startTime));
+        const dayColor = DAY_COLORS[day] || '#3b82f6';
+
+        return `
+                <div class="day-card">
+                  <div class="day-header" style="background: linear-gradient(135deg, ${dayColor} 0%, ${dayColor}dd 100%);">
+                    <svg class="icon" viewBox="0 0 24 24" fill="white"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM9 14H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2zm-8 4H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2z"/></svg>
+                    ${day}
+                  </div>
+                  ${dayPeriods.length === 0
+            ? '<div class="no-classes">No scheduled classes</div>'
+            : `<div class="periods-list">
+                        ${dayPeriods.map(period => {
+              const initials = (period.teacher?.fullName || 'NA').split(' ').map(n => n[0]).join('').substring(0, 2);
+              return `
+                            <div class="period-row">
+                              <div class="time-slot">${period.startTime} - ${period.endTime}</div>
+                              <div class="subject-info">
+                                <span class="subject-name">${period.subject.name}</span>
+                                <span class="subject-code">${period.subject.code}</span>
+                              </div>
+                              <div class="teacher-info">
+                                <div class="teacher-avatar">${initials}</div>
+                                ${viewMode === 'CLASS'
+                  ? (period.teacher?.fullName || 'Not Assigned')
+                  : (period.classNames?.join(', ') || 'N/A')}
+                                ${period.isCombined ? '<span class="combined-badge">Combined</span>' : ''}
+                              </div>
+                            </div>
+                          `;
+            }).join('')}
+                      </div>`
+          }
+                </div>
+              `;
+      }).join('')}
+          </div>
+          
+          <div class="footer">
+            <span class="footer-logo">📚 ${themeSettings.schoolName || 'School Name'}</span>
+            <span>Generated on ${currentDate}</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 300);
+    }
   };
 
   return (
@@ -287,6 +702,28 @@ const Timetable = () => {
               Add Period
             </button>
           )}
+
+          {/* Export Buttons */}
+          {periods.length > 0 && (
+            <>
+              <button
+                onClick={exportToCSV}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                title="Export to CSV"
+              >
+                <Download size={18} />
+                CSV
+              </button>
+              <button
+                onClick={printTimetable}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                title="Print / Save as PDF"
+              >
+                <Printer size={18} />
+                Print
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -324,11 +761,21 @@ const Timetable = () => {
                         <>
                           <User size={12} />
                           {period.teacher?.fullName || 'No Teacher'}
+                          {period.isCombined && (
+                            <span className="ml-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                              Combined: {period.classNames?.join(', ')}
+                            </span>
+                          )}
                         </>
                       ) : (
                         <>
                           <Users size={12} />
-                          {period.class?.name || 'No Class'}
+                          {period.classNames?.join(', ') || 'No Classes'}
+                          {period.isCombined && (
+                            <span className="ml-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                              Combined
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
@@ -402,32 +849,61 @@ const Timetable = () => {
               {viewMode === 'CLASS' ? (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Teacher</label>
-                  <select
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    value={newPeriod.teacherId}
-                    onChange={(e) => setNewPeriod({ ...newPeriod, teacherId: e.target.value })}
-                  >
-                    <option value="">Select Teacher</option>
-                    {teachers.map(t => (
-                      <option key={t.id} value={t.id}>{t.fullName}</option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const selectedSubject = subjects.find(s => s.id === newPeriod.subjectId);
+                    if (!newPeriod.subjectId) {
+                      return (
+                        <div className="px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-gray-500 text-sm italic">
+                          Select a subject first
+                        </div>
+                      );
+                    }
+                    if (selectedSubject?.teacher) {
+                      return (
+                        <div className="px-3 py-2 border border-green-200 bg-green-50 rounded-lg text-green-800 font-medium flex items-center gap-2">
+                          <User size={16} />
+                          {selectedSubject.teacher.fullName}
+                          <span className="text-xs text-green-600 ml-auto">(Auto-assigned)</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="px-3 py-2 border border-yellow-200 bg-yellow-50 rounded-lg text-yellow-800 text-sm">
+                        ⚠️ No teacher assigned to this subject. Please assign one in the Subjects page.
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
-                  <select
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    value={newPeriod.classId}
-                    onChange={(e) => setNewPeriod({ ...newPeriod, classId: e.target.value })}
-                  >
-                    <option value="">Select Class</option>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Classes <span className="text-gray-400 text-xs">(Select one or more for combined sessions)</span>
+                  </label>
+                  <div className="border border-gray-300 rounded-lg max-h-40 overflow-y-auto p-2 space-y-1">
                     {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPeriod.classIds.includes(c.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewPeriod({ ...newPeriod, classIds: [...newPeriod.classIds, c.id] });
+                            } else {
+                              setNewPeriod({ ...newPeriod, classIds: newPeriod.classIds.filter(id => id !== c.id) });
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700">{c.name}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
+                  {newPeriod.classIds.length > 1 && (
+                    <p className="text-xs text-purple-600 mt-1 flex items-center gap-1">
+                      <Users size={12} />
+                      Combined session: {newPeriod.classIds.length} classes selected
+                    </p>
+                  )}
                 </div>
               )}
 

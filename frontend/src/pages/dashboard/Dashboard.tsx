@@ -5,6 +5,7 @@ import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
 
 // Admin Stats Interface
+// ... (interfaces)
 interface AdminStats {
   role: 'ADMIN';
   dailyRevenue: number;
@@ -15,6 +16,7 @@ interface AdminStats {
     amount: number;
     method: string;
     createdAt: string;
+    status?: 'COMPLETED' | 'VOIDED'; // Added status
     student: {
       firstName: string;
       lastName: string;
@@ -24,6 +26,8 @@ interface AdminStats {
     };
   }[];
 }
+
+
 
 // Teacher Stats Interface
 interface TeacherStats {
@@ -210,6 +214,34 @@ const Dashboard = () => {
         <p className="text-sm md:text-base text-gray-500">Welcome back, here's what's happening today.</p>
       </div>
 
+      {/* Quick Actions */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <Link to="/students" className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-blue-50 transition-colors group">
+          <div className="p-2 bg-blue-100 text-blue-600 rounded-lg group-hover:bg-blue-200">
+            <Users size={20} />
+          </div>
+          <span className="text-sm font-medium text-gray-700">All Students</span>
+        </Link>
+        <Link to="/finance" className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-green-50 transition-colors group">
+          <div className="p-2 bg-green-100 text-green-600 rounded-lg group-hover:bg-green-200">
+            <TrendingUp size={20} />
+          </div>
+          <span className="text-sm font-medium text-gray-700">Finance</span>
+        </Link>
+        <Link to="/classes" className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-purple-50 transition-colors group">
+          <div className="p-2 bg-purple-100 text-purple-600 rounded-lg group-hover:bg-purple-200">
+            <BookOpen size={20} />
+          </div>
+          <span className="text-sm font-medium text-gray-700">Classes</span>
+        </Link>
+        <Link to="/attendance" className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-orange-50 transition-colors group">
+          <div className="p-2 bg-orange-100 text-orange-600 rounded-lg group-hover:bg-orange-200">
+            <CheckSquare size={20} />
+          </div>
+          <span className="text-sm font-medium text-gray-700">Attendance</span>
+        </Link>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
@@ -250,6 +282,7 @@ const Dashboard = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center">
           <h2 className="text-lg font-bold text-gray-800">Recent Payments</h2>
+          <Link to="/finance" className="text-sm text-blue-600 hover:text-blue-700 font-medium">View All</Link>
         </div>
 
         {/* Desktop Table */}
@@ -277,7 +310,9 @@ const Dashboard = () => {
                       {payment.student.firstName} {payment.student.lastName}
                     </td>
                     <td className="px-6 py-4">{payment.student.class?.name || 'N/A'}</td>
-                    <td className="px-6 py-4">ZMW {Number(payment.amount).toLocaleString()}</td>
+                    <td className={`px-6 py-4 ${payment.status === 'VOIDED' ? 'line-through text-gray-400' : ''}`}>
+                      ZMW {Number(payment.amount).toLocaleString()}
+                    </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                         ${payment.method === 'CASH' ? 'bg-green-100 text-green-800' :
@@ -287,7 +322,13 @@ const Dashboard = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4">{new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                    <td className="px-6 py-4"><span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">Completed</span></td>
+                    <td className="px-6 py-4">
+                      {payment.status === 'VOIDED' ? (
+                        <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs">Voided</span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">Completed</span>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -308,7 +349,9 @@ const Dashboard = () => {
                       <p className="font-medium text-gray-900">{payment.student.firstName} {payment.student.lastName}</p>
                       <p className="text-sm text-gray-500">{payment.student.class?.name || 'N/A'}</p>
                     </div>
-                    <span className="font-bold text-gray-900">ZMW {Number(payment.amount).toLocaleString()}</span>
+                    <span className={`font-bold ${payment.status === 'VOIDED' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                      ZMW {Number(payment.amount).toLocaleString()}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
@@ -321,6 +364,9 @@ const Dashboard = () => {
                       {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
+                  {payment.status === 'VOIDED' && (
+                    <div className="text-xs text-red-600 font-medium">Voided Transaction</div>
+                  )}
                 </div>
               ))}
             </div>

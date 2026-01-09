@@ -664,9 +664,13 @@ export const getMyChildren = async (req: Request, res: Response) => {
         if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(todayName)) {
           todaysClasses = await prisma.timetablePeriod.findMany({
             where: {
-              classId: student.classId,
               academicTermId: activeTerm.id,
-              dayOfWeek: todayName as any
+              dayOfWeek: todayName as any,
+              classes: {
+                some: {
+                  classId: student.classId
+                }
+              }
             },
             include: { subject: true },
             orderBy: { startTime: 'asc' }

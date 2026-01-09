@@ -124,3 +124,62 @@ export const getPublicSettings = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+export const uploadLogo = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const logoUrl = `/uploads/logos/${req.file.filename}`;
+
+    const existing = await prisma.schoolSettings.findFirst();
+
+    let settings;
+    if (existing) {
+      settings = await prisma.schoolSettings.update({
+        where: { id: existing.id },
+        data: { logoUrl },
+      });
+    } else {
+      settings = await prisma.schoolSettings.create({
+        data: {
+          schoolName: 'My School',
+          logoUrl
+        },
+      });
+    }
+
+    res.json({ logoUrl, message: 'Logo uploaded successfully' });
+  } catch (error) {
+    console.error('Upload logo error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const deleteLogo = async (req: Request, res: Response) => {
+  try {
+    const existing = await prisma.schoolSettings.findFirst();
+
+    if (existing && existing.logoUrl) {
+      // Update settings to remove logo URL
+      await prisma.schoolSettings.update({
+        where: { id: existing.id },
+        data: { logoUrl: null },
+      });
+
+      // Optionally delete the file from disk
+      const fs = require('fs');
+      const path = require('path');
+      const filePath = path.join(__dirname, '../../', existing.logoUrl);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    res.json({ message: 'Logo deleted successfully' });
+  } catch (error) {
+    console.error('Delete logo error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

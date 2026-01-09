@@ -303,9 +303,12 @@ export const getStudentStatement = async (req: Request, res: Response) => {
       }
     });
 
-    // 4. Get Payments (Credits)
+    // 4. Get Payments (Credits) - Only COMPLETED payments
     const payments = await prisma.payment.findMany({
-      where: { studentId },
+      where: {
+        studentId,
+        status: 'COMPLETED'
+      },
       orderBy: { paymentDate: 'asc' }
     });
 

@@ -7,12 +7,18 @@ const prisma = new PrismaClient();
 const subjectSchema = z.object({
   name: z.string().min(2),
   code: z.string().min(2),
+  teacherId: z.string().uuid().optional().nullable(),
 });
 
 export const getSubjects = async (req: Request, res: Response) => {
   try {
     const subjects = await prisma.subject.findMany({
       orderBy: { name: 'asc' },
+      include: {
+        teacher: {
+          select: { id: true, fullName: true }
+        }
+      }
     });
     res.json(subjects);
   } catch (error) {
@@ -22,7 +28,7 @@ export const getSubjects = async (req: Request, res: Response) => {
 
 export const createSubject = async (req: Request, res: Response) => {
   try {
-    const { name, code } = subjectSchema.parse(req.body);
+    const { name, code, teacherId } = subjectSchema.parse(req.body);
 
     const existingSubject = await prisma.subject.findUnique({
       where: { code },
@@ -33,7 +39,16 @@ export const createSubject = async (req: Request, res: Response) => {
     }
 
     const subject = await prisma.subject.create({
-      data: { name, code },
+      data: {
+        name,
+        code,
+        teacherId: teacherId || undefined
+      },
+      include: {
+        teacher: {
+          select: { id: true, fullName: true }
+        }
+      }
     });
 
     res.status(201).json(subject);
@@ -48,11 +63,20 @@ export const createSubject = async (req: Request, res: Response) => {
 export const updateSubject = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, code } = subjectSchema.parse(req.body);
+    const { name, code, teacherId } = subjectSchema.parse(req.body);
 
     const subject = await prisma.subject.update({
       where: { id },
-      data: { name, code },
+      data: {
+        name,
+        code,
+        teacherId: teacherId === null ? null : (teacherId || undefined)
+      },
+      include: {
+        teacher: {
+          select: { id: true, fullName: true }
+        }
+      }
     });
 
     res.json(subject);

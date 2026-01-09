@@ -18,6 +18,12 @@ interface Payment {
   method: 'CASH' | 'MOBILE_MONEY' | 'BANK_DEPOSIT';
   transactionId?: string;
   notes?: string;
+  status?: 'COMPLETED' | 'VOIDED' | 'PENDING';
+  voidedAt?: string;
+  voidReason?: string;
+  voidedBy?: {
+    fullName: string;
+  };
   student: {
     firstName: string;
     lastName: string;
@@ -95,6 +101,7 @@ const Finance = () => {
   });
   const [showImportModal, setShowImportModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [paymentTab, setPaymentTab] = useState<'completed' | 'voided'>('completed'); // 'completed' | 'voided'
 
   // Fee Reminders state
   const [debtors, setDebtors] = useState<any[]>([]);
@@ -123,7 +130,14 @@ const Finance = () => {
   const fetchPayments = async () => {
     try {
       const response = await api.get('/payments');
-      setPayments(response.data);
+      // Handle paginated response structure
+      if (response.data.data && Array.isArray(response.data.data)) {
+        setPayments(response.data.data);
+      } else if (Array.isArray(response.data)) {
+        setPayments(response.data);
+      } else {
+        setPayments([]);
+      }
     } catch (error) {
       console.error('Error fetching payments:', error);
     } finally {
@@ -245,19 +259,80 @@ const Finance = () => {
     }
   };
 
-  const handleRecordPayment = async (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleRecordPayment = async (e: React.FormEvent, forceCreate = false) => {
     e.preventDefault();
+    if (submitting) return; // Prevent double submission
+
+    setSubmitting(true);
     try {
       await api.post('/payments', {
         ...paymentForm,
-        amount: Number(paymentForm.amount)
+        amount: Number(paymentForm.amount),
+        forceCreate // If true, skip duplicate check
       });
+
       setShowAddModal(false);
       setPaymentForm({ studentId: '', amount: '', method: 'CASH', notes: '' });
       fetchPayments();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error recording payment:', error);
-      alert('Failed to record payment');
+
+      // Check if it's a duplicate warning
+      if (error.response?.status === 409 && error.response?.data?.warning === 'POTENTIAL_DUPLICATE') {
+        const existingPayment = error.response.data.existingPayment;
+        const confirmMessage =
+          `⚠️ Potential Duplicate Detected!\n\n` +
+          `A similar payment was found:\n` +
+          `• Amount: ZMW ${existingPayment.amount}\n` +
+          `• Transaction ID: ${existingPayment.transactionId}\n` +
+          `• Method: ${existingPayment.method}\n` +
+          `• Date: ${new Date(existingPayment.paymentDate).toLocaleString()}\n\n` +
+          `${error.response.data.message}\n\n` +
+          `Do you want to record this payment anyway?`;
+
+        if (window.confirm(confirmMessage)) {
+          // User confirmed, retry with forceCreate
+          try {
+            await api.post('/payments', {
+              ...paymentForm,
+              amount: Number(paymentForm.amount),
+              forceCreate: true
+            });
+            setShowAddModal(false);
+            setPaymentForm({ studentId: '', amount: '', method: 'CASH', notes: '' });
+            fetchPayments();
+          } catch (retryError) {
+            console.error('Error on retry:', retryError);
+            alert('Failed to record payment');
+          }
+        }
+      } else {
+        alert('Failed to record payment');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Void a payment
+  const handleVoidPayment = async (paymentId: string) => {
+    const reason = window.prompt('Please provide a reason for voiding this payment:');
+    if (!reason || reason.trim().length < 5) {
+      if (reason !== null) {
+        alert('Please provide a reason with at least 5 characters');
+      }
+      return;
+    }
+
+    try {
+      await api.post(`/payments/${paymentId}/void`, { reason });
+      alert('Payment voided successfully');
+      fetchPayments();
+    } catch (error: any) {
+      console.error('Error voiding payment:', error);
+      alert(error.response?.data?.message || 'Failed to void payment');
     }
   };
 
@@ -276,7 +351,12 @@ const Finance = () => {
       (!dateRange.start || paymentDate >= new Date(dateRange.start)) &&
       (!dateRange.end || paymentDate <= new Date(dateRange.end));
 
-    return matchesSearch && matchesMethod && matchesClass && matchesDate;
+    // Tab Logic
+    const matchesTab = paymentTab === 'completed'
+      ? payment.status === 'COMPLETED'
+      : payment.status === 'VOIDED';
+
+    return matchesSearch && matchesMethod && matchesClass && matchesDate && matchesTab;
   });
 
   // Fetch students with outstanding fees
@@ -832,6 +912,24 @@ const Finance = () => {
             </div>
           </div>
 
+          {/* Tabs */}
+          <div className="flex space-x-1 bg-slate-100 p-1 rounded-lg mb-6 w-fit">
+            <button
+              onClick={() => setPaymentTab('completed')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'completed' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              Valid Payments
+            </button>
+            <button
+              onClick={() => setPaymentTab('voided')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'voided' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              Voided Transactions
+            </button>
+          </div>
+
           {/* Search and Action Bar */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
             <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
@@ -903,9 +1001,18 @@ const Finance = () => {
                     <th className="px-6 py-4 font-semibold text-slate-600">Amount (ZMW)</th>
                     <th className="px-6 py-4 font-semibold text-slate-600">Method</th>
                     <th className="px-6 py-4 font-semibold text-slate-600">Transaction ID</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600">Notes</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600">Recorded By</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 text-right">Actions</th>
+                    {paymentTab === 'voided' ? (
+                      <>
+                        <th className="px-6 py-4 font-semibold text-slate-600">Void Reason</th>
+                        <th className="px-6 py-4 font-semibold text-slate-600">Voided By</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-6 py-4 font-semibold text-slate-600">Notes</th>
+                        <th className="px-6 py-4 font-semibold text-slate-600">Recorded By</th>
+                        <th className="px-6 py-4 font-semibold text-slate-600 text-right">Actions</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -934,7 +1041,7 @@ const Finance = () => {
                         <td className="px-6 py-4 text-slate-600">
                           {payment.student.class?.name || 'No Class'}
                         </td>
-                        <td className="px-6 py-4 font-medium text-slate-800">
+                        <td className={`px-6 py-4 font-medium ${payment.status === 'VOIDED' ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
                           {Number(payment.amount).toLocaleString()}
                         </td>
                         <td className="px-6 py-4">
@@ -948,22 +1055,45 @@ const Finance = () => {
                         <td className="px-6 py-4 text-slate-600 font-mono text-sm">
                           {payment.transactionId || '-'}
                         </td>
-                        <td className="px-6 py-4 text-slate-500 text-sm max-w-xs truncate">
-                          {payment.notes || '-'}
-                        </td>
-                        <td className="px-6 py-4 text-slate-600">
-                          {payment.recordedBy.fullName}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => generatePaymentReceipt(payment)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                            title="Download Receipt"
-                          >
-                            <FileText size={14} />
-                            Receipt
-                          </button>
-                        </td>
+                        {paymentTab === 'voided' ? (
+                          <>
+                            <td className="px-6 py-4 text-red-600 text-sm italic">
+                              {payment.voidReason || 'No reason'}
+                            </td>
+                            <td className="px-6 py-4 text-slate-600">
+                              {payment.voidedBy?.fullName || 'Unknown'}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-6 py-4 text-slate-500 text-sm max-w-xs truncate">
+                              {payment.notes || '-'}
+                            </td>
+                            <td className="px-6 py-4 text-slate-600">
+                              {payment.recordedBy.fullName}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => generatePaymentReceipt(payment)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                                  title="Download Receipt"
+                                >
+                                  <FileText size={14} />
+                                  Receipt
+                                </button>
+                                <button
+                                  onClick={() => handleVoidPayment(payment.id)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+                                  title="Void this payment"
+                                >
+                                  <X size={14} />
+                                  Void
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))
                   )}
@@ -1180,9 +1310,10 @@ const Finance = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    disabled={submitting}
+                    className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
-                    Save Payment
+                    {submitting ? 'Saving...' : 'Save Payment'}
                   </button>
                 </div>
               </form>
