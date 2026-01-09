@@ -132,6 +132,59 @@ async function main() {
     createdClasses.push(existingClass);
   }
 
+  // Create Subjects
+  console.log('\n📚 Seeding subjects...');
+  const subjectsData = [
+    { name: 'Mathematics', code: 'MATH' },
+    { name: 'English Language', code: 'ENG' },
+    { name: 'Science', code: 'SCI' },
+    { name: 'Social Studies', code: 'SST' },
+    { name: 'Creative Arts', code: 'CA' },
+    { name: 'Physical Education', code: 'PE' },
+    { name: 'Computer Studies', code: 'COMP' },
+  ];
+
+  const createdSubjects: any[] = [];
+  for (const s of subjectsData) {
+    let subject = await prisma.subject.findUnique({ where: { code: s.code } });
+    if (!subject) {
+      subject = await prisma.subject.create({
+        data: {
+          name: s.name,
+          code: s.code,
+          teacherId: teacher.id, // Assign default teacher
+        }
+      });
+      console.log(`✅ Created subject: ${s.name}`);
+    } else {
+      console.log(`✅ Subject already exists: ${s.name}`);
+    }
+    createdSubjects.push(subject);
+  }
+
+  // Assign Subjects to Classes (All subjects to all Grade 1+ classes)
+  console.log('  Linking subjects to classes...');
+  const gradeClasses = createdClasses.filter(c => c.gradeLevel >= 1);
+  for (const cls of gradeClasses) {
+    // Check if class already has subjects
+    const classWithSubjects = await prisma.class.findUnique({
+      where: { id: cls.id },
+      include: { subjects: true }
+    });
+
+    if (classWithSubjects && classWithSubjects.subjects.length === 0) {
+      await prisma.class.update({
+        where: { id: cls.id },
+        data: {
+          subjects: {
+            connect: createdSubjects.map(s => ({ id: s.id }))
+          }
+        }
+      });
+      console.log(`  Linked ${createdSubjects.length} subjects to ${cls.name}`);
+    }
+  }
+
   // ========================================
   // FINANCE SEED DATA
   // ========================================
