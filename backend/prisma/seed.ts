@@ -279,7 +279,7 @@ async function main() {
               amount: paymentAmount,
               paymentDate: new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000), // Random date in last 30 days
               method: ['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'][Math.floor(Math.random() * 3)] as any,
-              referenceNumber: `PAY${Date.now()}${Math.floor(Math.random() * 1000)}`,
+              transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
               recordedByUserId: bursar.id,
             }
           });
@@ -313,7 +313,7 @@ async function main() {
           amount: randomAmount,
           paymentDate: new Date(Date.now() - Math.floor(Math.random() * 60) * 24 * 60 * 60 * 1000),
           method: 'CASH',
-          referenceNumber: `HIST${Date.now()}${Math.floor(Math.random() * 1000)}`,
+          transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
           recordedByUserId: bursar.id,
         }
       });
