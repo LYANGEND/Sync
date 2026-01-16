@@ -26,6 +26,7 @@ enum StudentStatus {
   TRANSFERRED
   GRADUATED
   DROPPED_OUT
+  ARCHIVED
 }
 
 enum PaymentMethod {

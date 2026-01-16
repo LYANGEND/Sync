@@ -36,7 +36,10 @@ export const getStudents = async (req: Request, res: Response) => {
     const userRole = (req as any).user?.role;
     const userId = (req as any).user?.userId;
 
-    let whereClause = {};
+    // Base filter: always exclude archived students
+    let whereClause: any = {
+      status: { not: 'ARCHIVED' }
+    };
 
     if (userRole === 'TEACHER') {
       const myClasses = await prisma.class.findMany({
@@ -47,6 +50,7 @@ export const getStudents = async (req: Request, res: Response) => {
       const classIds = myClasses.map(c => c.id);
 
       whereClause = {
+        ...whereClause,
         classId: { in: classIds }
       };
     }
@@ -427,18 +431,20 @@ export const bulkDeleteStudents = async (req: Request, res: Response) => {
   try {
     const { ids } = z.object({ ids: z.array(z.string()) }).parse(req.body);
 
-    const result = await prisma.student.deleteMany({
+    // Soft delete: Mark students as ARCHIVED instead of deleting
+    const result = await prisma.student.updateMany({
       where: {
-        id: {
-          in: ids
-        }
+        id: { in: ids }
+      },
+      data: {
+        status: 'ARCHIVED'
       }
     });
 
-    res.json({ message: `Successfully deleted ${result.count} students`, count: result.count });
+    res.json({ message: `Successfully archived ${result.count} students`, count: result.count });
   } catch (error) {
     console.error('Bulk delete error:', error);
-    res.status(500).json({ error: 'Failed to delete students' });
+    res.status(500).json({ error: 'Failed to archive students' });
   }
 };
 
@@ -525,38 +531,24 @@ export const deleteStudent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // 1. Get student to find parent
+    // Verify student exists
     const student = await prisma.student.findUnique({
       where: { id },
-      select: { parentId: true }
+      select: { id: true }
     });
 
     if (!student) return res.status(404).json({ error: 'Student not found' });
 
-    // 2. Delete student
-    await prisma.student.delete({
+    // Soft delete: Mark student as ARCHIVED instead of deleting
+    await prisma.student.update({
       where: { id },
+      data: { status: 'ARCHIVED' }
     });
-
-    // 3. Check parent
-    if (student.parentId) {
-      const remainingChildren = await prisma.student.count({
-        where: { parentId: student.parentId }
-      });
-
-      if (remainingChildren === 0) {
-        try {
-          await prisma.user.delete({ where: { id: student.parentId } });
-          console.log(`Deleted orphan parent account: ${student.parentId}`);
-        } catch (err) {
-          console.warn(`Could not delete parent account ${student.parentId} - likely has other data linked`);
-        }
-      }
-    }
 
     res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete student' });
+    console.error('Delete student error:', error);
+    res.status(500).json({ error: 'Failed to archive student' });
   }
 };
 
