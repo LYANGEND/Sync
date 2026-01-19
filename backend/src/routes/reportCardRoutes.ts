@@ -14,10 +14,14 @@ import {
 } from '../controllers/reportCardController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { tenantHandler } from '../utils/routeTypes';
+import { requireActiveSubscription, requireFeature } from '../middleware/subscriptionMiddleware';
+import { FEATURES } from '../services/subscriptionService';
 
 const router = Router();
 
 router.use(authenticateToken);
+router.use(requireActiveSubscription); // Check subscription
+router.use(requireFeature(FEATURES.REPORT_CARDS)); // Require report cards feature
 
 // Grading Scales
 router.get('/grading-scales', tenantHandler(getGradingScales));

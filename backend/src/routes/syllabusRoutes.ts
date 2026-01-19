@@ -10,10 +10,14 @@ import {
 } from '../controllers/syllabusController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { tenantHandler } from '../utils/routeTypes';
+import { requireActiveSubscription, requireFeature } from '../middleware/subscriptionMiddleware';
+import { FEATURES } from '../services/subscriptionService';
 
 const router = Router();
 
 router.use(authenticateToken);
+router.use(requireActiveSubscription); // Check subscription
+router.use(requireFeature(FEATURES.SYLLABUS_TRACKING)); // Require syllabus tracking feature
 
 // Topics (Syllabus Definition)
 router.get('/topics', tenantHandler(getTopics));

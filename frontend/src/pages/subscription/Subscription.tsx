@@ -495,8 +495,8 @@ const Subscription: React.FC = () => {
                                 <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-3">
                                     What's Included
                                 </p>
-                                <ul className="space-y-2">
-                                    {plan.features.slice(0, 5).map((feature) => (
+                                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                                    {plan.features.map((feature) => (
                                         <li key={feature} className="flex items-start gap-2 text-sm">
                                             <Check className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
                                             <span className="text-slate-700">
@@ -504,9 +504,9 @@ const Subscription: React.FC = () => {
                                             </span>
                                         </li>
                                     ))}
-                                    {plan.features.length > 5 && (
-                                        <li className="text-xs text-slate-500 pl-6">
-                                            +{plan.features.length - 5} more features
+                                    {plan.features.length === 0 && (
+                                        <li className="text-sm text-slate-500 italic">
+                                            No features listed
                                         </li>
                                     )}
                                 </ul>

@@ -3439,18 +3439,13 @@ const PlatformAdmin = () => {
                                         {plan.features && plan.features.length > 0 && (
                                             <div className="px-6 py-4 border-t bg-slate-50">
                                                 <p className="text-xs font-medium text-slate-700 mb-2">FEATURES</p>
-                                                <div className="space-y-1">
-                                                    {plan.features.slice(0, 3).map((feature, idx) => (
+                                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                                    {plan.features.map((feature, idx) => (
                                                         <div key={idx} className="flex items-center gap-2 text-sm text-slate-600">
                                                             <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />
                                                             <span className="truncate">{feature}</span>
                                                         </div>
                                                     ))}
-                                                    {plan.features.length > 3 && (
-                                                        <p className="text-xs text-slate-500 mt-1">
-                                                            +{plan.features.length - 3} more features
-                                                        </p>
-                                                    )}
                                                 </div>
                                             </div>
                                         )}

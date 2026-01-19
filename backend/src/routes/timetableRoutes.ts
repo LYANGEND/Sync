@@ -7,10 +7,14 @@ import {
 } from '../controllers/timetableController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { tenantHandler } from '../utils/routeTypes';
+import { requireActiveSubscription, requireFeature } from '../middleware/subscriptionMiddleware';
+import { FEATURES } from '../services/subscriptionService';
 
 const router = Router();
 
 router.use(authenticateToken);
+router.use(requireActiveSubscription); // Check subscription
+router.use(requireFeature(FEATURES.TIMETABLE)); // Require timetable feature
 
 router.get('/class/:classId', tenantHandler(getTimetableByClass));
 router.get('/teacher/:teacherId', tenantHandler(getTimetableByTeacher));

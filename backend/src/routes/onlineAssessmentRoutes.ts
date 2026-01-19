@@ -8,10 +8,14 @@ import {
 } from '../controllers/onlineAssessmentController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { tenantHandler } from '../utils/routeTypes';
+import { requireActiveSubscription, requireFeature } from '../middleware/subscriptionMiddleware';
+import { FEATURES } from '../services/subscriptionService';
 
 const router = Router();
 
 router.use(authenticateToken);
+router.use(requireActiveSubscription); // Check subscription
+router.use(requireFeature(FEATURES.ONLINE_ASSESSMENTS)); // Require online assessments feature
 
 // Teacher routes
 router.post('/:assessmentId/questions', authorizeRole(['TEACHER', 'SUPER_ADMIN']), tenantHandler(addQuestionsToAssessment));

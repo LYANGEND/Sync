@@ -13,10 +13,13 @@ import {
 import { getTemplates, upsertTemplate } from '../controllers/notificationTemplateController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { tenantHandler } from '../utils/routeTypes';
+import { requireActiveSubscription, requireFeature } from '../middleware/subscriptionMiddleware';
+import { FEATURES } from '../services/subscriptionService';
 
 const router = Router();
 
 router.use(authenticateToken);
+router.use(requireActiveSubscription); // Check subscription on all communication routes
 
 // Push Notification routes
 router.post('/push/subscribe', tenantHandler(subscribeToPush));
@@ -33,9 +36,13 @@ router.get('/conversations/:conversationId/messages', authorizeRole(chatRoles), 
 router.post('/messages', authorizeRole(chatRoles), tenantHandler(sendMessage));
 router.get('/users/search', authorizeRole(chatRoles), tenantHandler(searchUsers));
 
-// Announcement routes
+// Announcement routes (requires email notifications feature)
 const announcementRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER'];
-router.post('/announcements', authorizeRole(announcementRoles), tenantHandler(sendAnnouncement));
+router.post('/announcements', 
+  authorizeRole(announcementRoles), 
+  requireFeature(FEATURES.EMAIL_NOTIFICATIONS),
+  tenantHandler(sendAnnouncement)
+);
 
 // Template Routes (Admin)
 router.get('/templates', authorizeRole(['SUPER_ADMIN']), tenantHandler(getTemplates));
