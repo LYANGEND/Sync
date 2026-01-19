@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { comparePassword, generateToken, hashPassword } from '../utils/auth';
+import { logSecurityEvent, checkAndLockAccount, isAccountLocked, getClientIp, calculateRiskScore } from '../middleware/securityLogger';
 
 const prisma = new PrismaClient();
 
@@ -123,6 +124,25 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
     const explicitTenantId = getTenantIdFromRequest(req);
+    const ipAddress = getClientIp(req);
+    const userAgent = req.headers['user-agent'];
+
+    // Check if account is locked
+    if (await isAccountLocked(email)) {
+      await logSecurityEvent({
+        userEmail: email,
+        eventType: 'FAILED_LOGIN',
+        status: 'FAILED_ACCOUNT_LOCKED',
+        ipAddress,
+        userAgent,
+        riskScore: 100,
+        metadata: { reason: 'Account is locked' }
+      });
+      return res.status(403).json({
+        error: 'Account locked',
+        message: 'Your account has been locked due to multiple failed login attempts. Please try again later or contact support.'
+      });
+    }
 
     // ==========================================
     // CASE 1: Tenant explicitly specified
@@ -154,6 +174,20 @@ export const login = async (req: Request, res: Response) => {
 
     // No user found with this email
     if (usersWithEmail.length === 0) {
+      const riskScore = await calculateRiskScore(email, ipAddress);
+      await logSecurityEvent({
+        userEmail: email,
+        eventType: 'FAILED_LOGIN',
+        status: 'FAILED_USER_NOT_FOUND',
+        ipAddress,
+        userAgent,
+        riskScore,
+        metadata: { reason: 'User not found' }
+      });
+      
+      // Check if we should lock the account
+      await checkAndLockAccount(email);
+      
       return res.status(401).json({
         error: 'Invalid credentials',
         message: 'Email or password is incorrect'
@@ -164,6 +198,19 @@ export const login = async (req: Request, res: Response) => {
     const activeUsers = usersWithEmail.filter(u => u.isActive);
 
     if (activeUsers.length === 0) {
+      const riskScore = await calculateRiskScore(email, ipAddress);
+      await logSecurityEvent({
+        tenantId: usersWithEmail[0]?.tenant.id,
+        userId: usersWithEmail[0]?.id,
+        userEmail: email,
+        eventType: 'FAILED_LOGIN',
+        status: 'FAILED_PASSWORD',
+        ipAddress,
+        userAgent,
+        riskScore,
+        metadata: { reason: 'Account inactive' }
+      });
+      
       return res.status(401).json({
         error: 'Account inactive',
         message: 'Your account has been deactivated. Please contact your administrator.'
@@ -180,6 +227,22 @@ export const login = async (req: Request, res: Response) => {
       // Validate password
       const isValid = await comparePassword(password, user.passwordHash);
       if (!isValid) {
+        const riskScore = await calculateRiskScore(email, ipAddress);
+        await logSecurityEvent({
+          tenantId: tenant.id,
+          userId: user.id,
+          userEmail: email,
+          eventType: 'FAILED_LOGIN',
+          status: 'FAILED_PASSWORD',
+          ipAddress,
+          userAgent,
+          riskScore,
+          metadata: { reason: 'Invalid password' }
+        });
+        
+        // Check if we should lock the account
+        await checkAndLockAccount(email, tenant.id, user.id);
+        
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
@@ -188,6 +251,19 @@ export const login = async (req: Request, res: Response) => {
       if (!tenantValidation.valid) {
         return res.status(tenantValidation.error!.status).json(tenantValidation.error);
       }
+
+      // Log successful login
+      await logSecurityEvent({
+        tenantId: tenant.id,
+        userId: user.id,
+        userEmail: email,
+        eventType: 'SUCCESSFUL_LOGIN',
+        status: 'SUCCESS',
+        ipAddress,
+        userAgent,
+        riskScore: 0,
+        metadata: { loginMethod: 'password' }
+      });
 
       // Generate token and respond
       const token = generateToken(user.id, tenant.id, user.role);
@@ -226,6 +302,20 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (!passwordValid) {
+      const riskScore = await calculateRiskScore(email, ipAddress);
+      await logSecurityEvent({
+        userEmail: email,
+        eventType: 'FAILED_LOGIN',
+        status: 'FAILED_PASSWORD',
+        ipAddress,
+        userAgent,
+        riskScore,
+        metadata: { reason: 'Invalid password', multiTenant: true }
+      });
+      
+      // Check if we should lock the account
+      await checkAndLockAccount(email);
+      
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 

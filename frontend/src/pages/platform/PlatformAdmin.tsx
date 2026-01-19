@@ -19,8 +19,6 @@ import {
     Settings,
     Eye,
     Trash2,
-
-
     EyeOff,
     Briefcase,
     Target,
@@ -32,7 +30,19 @@ import {
     MessageSquare,
     RefreshCw,
     Save,
+    Download,
+    Send,
+    TrendingDown,
+    Percent,
+    Shield,
+    Database,
+    ChevronDown,
+    ChevronRight,
 } from 'lucide-react';
+import SecurityDashboard from '../../components/SecurityDashboard';
+import DataManagement from '../../components/DataManagement';
+import InvoiceManagement from '../../components/InvoiceManagement';
+import RevenueReconciliation from '../../components/RevenueReconciliation';
 
 interface DashboardStats {
     totals: {
@@ -44,6 +54,18 @@ interface DashboardStats {
     tenantsByStatus: Record<string, number>;
     tenantsByTier: Record<string, number>;
     revenueByMonth: Record<string, number>;
+    revenueAnalytics: {
+        currentMonthRevenue: number;
+        lastMonthRevenue: number;
+        revenueGrowth: number;
+        revenueByTier: Record<string, number>;
+        avgRevenuePerSchool: number;
+        paymentSuccessRate: number;
+        schoolTransactionVolume: {
+            total: number;
+            count: number;
+        };
+    };
     recentPayments: Array<{
         id: string;
         tenantName: string;
@@ -57,6 +79,7 @@ interface DashboardStats {
         name: string;
         tier: string;
         subscriptionEndsAt: string;
+        email: string;
     }>;
 }
 
@@ -65,26 +88,51 @@ interface Tenant {
     name: string;
     slug: string;
     email: string;
+    phone?: string;
+    address?: string;
     tier: string;
     status: string;
     currentStudentCount: number;
     maxStudents: number;
+    maxTeachers?: number;
+    maxParents?: number;
+    features?: string[];
     subscriptionEndsAt: string | null;
     createdAt: string;
 }
 
 interface Payment {
     id: string;
-    tenant: { name: string };
+    tenant: { name: string; slug: string };
     plan: { name: string; tier: string };
     totalAmount: number;
     currency: string;
     status: string;
     paymentMethod: string;
     createdAt: string;
+    billingCycle: string;
+    studentCount: number;
+    baseAmount: number;
+    overageStudents: number;
+    overageAmount: number;
+    externalRef?: string;
+    receiptNumber?: string;
+}
+
+interface SchoolTransaction {
+    id: string;
+    tenant: { name: string; slug: string };
+    studentName: string;
+    amount: number;
+    currency: string;
+    method: string;
+    status: string;
+    transactionId: string;
+    date: string;
 }
 
 interface SmsConfig {
+
     platformSettings: {
         smsProvider: string;
         smsDefaultSenderId: string;
@@ -204,9 +252,22 @@ const API_URL = 'http://localhost:3000';
 
 const PlatformAdmin = () => {
     const [token, setToken] = useState<string | null>(localStorage.getItem('platform_token'));
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'payments' | 'sms' | 'settings' | 'crm' | 'plans' | 'announcements' | 'audit'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants' | 'payments' | 'sms' | 'settings' | 'crm' | 'plans' | 'announcements' | 'audit' | 'security' | 'data' | 'invoices' | 'reconciliation'>('dashboard');
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [tenants, setTenants] = useState<Tenant[]>([]);
+    
+    // Menu group collapse state
+    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+        operations: true,
+        finance: false,
+        security: false,
+        sales: false,
+        system: false,
+    });
+
+    const toggleGroup = (group: string) => {
+        setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }));
+    };
     const [payments, setPayments] = useState<Payment[]>([]);
     const [smsConfig, setSmsConfig] = useState<SmsConfig | null>(null);
     const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
@@ -269,6 +330,14 @@ const PlatformAdmin = () => {
         smsCostPerUnit: 0.15,
         availableFeatures: [],
         availableTiers: [],
+        // Email Provider Settings
+        emailProvider: 'smtp',
+        // Azure Email Settings
+        azureEmailEnabled: false,
+        azureEmailConnectionString: '',
+        azureEmailFromAddress: '',
+        azureEmailEndpoint: '',
+        azureEmailAccessKey: '',
         // Payment Gateway Settings
         lencoEnabled: false,
         lencoApiUrl: 'https://api.lenco.co/access/v2',
@@ -294,6 +363,45 @@ const PlatformAdmin = () => {
         autoConfirmThreshold: 0,
     });
     const [logs, setLogs] = useState<any[]>([]);
+
+    // Bulk Email State
+    const [showBulkEmailModal, setShowBulkEmailModal] = useState(false);
+    const [bulkEmailForm, setBulkEmailForm] = useState({
+        subject: '',
+        message: '',
+        targetTiers: [] as string[],
+        targetStatuses: [] as string[],
+    });
+
+    // Tenant Form State
+    const [showTenantModal, setShowTenantModal] = useState(false);
+    const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+    const [tenantForm, setTenantForm] = useState({
+        // School details
+        name: '',
+        slug: '',
+        email: '',
+        phone: '',
+        address: '',
+        city: '',
+        country: 'ZM',
+        tier: 'FREE',
+        // Admin user details (for new tenant creation)
+        adminEmail: '',
+        adminPassword: '',
+        adminFullName: '',
+    });
+
+    // Payment State
+    const [activePaymentType, setActivePaymentType] = useState<'subscription' | 'school'>('subscription');
+    const [schoolTransactions, setSchoolTransactions] = useState<SchoolTransaction[]>([]);
+    const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [paymentFilters, setPaymentFilters] = useState({
+        status: '',
+        search: '',
+        tenantId: '', // For filtering school transactions by specific school
+    });
 
     // Login handler
     const handleLogin = async (e: React.FormEvent) => {
@@ -374,18 +482,58 @@ const PlatformAdmin = () => {
         if (!token) return;
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/platform/payments`, {
+            const queryParams = new URLSearchParams();
+            if (paymentFilters.status) queryParams.append('status', paymentFilters.status);
+
+            let url = `${API_URL}/api/platform/payments`;
+            if (activePaymentType === 'school') {
+                url = `${API_URL}/api/platform/payments/school-transactions`;
+                if (paymentFilters.search) queryParams.append('search', paymentFilters.search);
+                if (paymentFilters.tenantId) queryParams.append('tenantId', paymentFilters.tenantId);
+            }
+
+            const response = await fetch(`${url}?${queryParams}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
+
             if (response.ok) {
                 const data = await response.json();
-                setPayments(data.payments);
+
+                if (activePaymentType === 'school') {
+                    setSchoolTransactions(data.payments);
+                } else {
+                    // Client-side filtering for search query if provided for subscription payments
+                    let filteredPayments = data.payments;
+                    if (paymentFilters.search) {
+                        const searchLower = paymentFilters.search.toLowerCase();
+                        filteredPayments = filteredPayments.filter((p: any) =>
+                            p.tenant.name.toLowerCase().includes(searchLower) ||
+                            p.receiptNumber?.toLowerCase().includes(searchLower)
+                        );
+                    }
+                    setPayments(filteredPayments);
+                }
             }
         } catch (error) {
             console.error('Failed to fetch payments:', error);
         } finally {
             setLoading(false);
         }
+    };
+
+    // Refetch payments when filters change (debounced or effect)
+    useEffect(() => {
+        if (activeTab === 'payments') {
+            const timer = setTimeout(() => {
+                fetchPayments();
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [paymentFilters, activeTab, activePaymentType]);
+
+    const viewPaymentDetails = (payment: Payment) => {
+        setSelectedPayment(payment);
+        setShowPaymentModal(true);
     };
 
     const fetchPlans = async () => {
@@ -593,6 +741,90 @@ const PlatformAdmin = () => {
         }
     };
 
+    const resetTenantForm = () => {
+        setTenantForm({
+            name: '',
+            slug: '',
+            email: '',
+            phone: '',
+            address: '',
+            city: '',
+            country: 'ZM',
+            tier: 'FREE',
+            adminEmail: '',
+            adminPassword: '',
+            adminFullName: '',
+        });
+        setEditingTenant(null);
+    };
+
+    const openEditTenantModal = (tenant: Tenant) => {
+        setEditingTenant(tenant);
+        setTenantForm({
+            name: tenant.name,
+            slug: tenant.slug,
+            email: tenant.email || '',
+            phone: tenant.phone || '',
+            address: tenant.address || '',
+            city: '', // Add city if available in Tenant interface
+            country: 'ZM', // Default or from tenant
+            tier: tenant.tier,
+            adminEmail: '', // Not needed for edit
+            adminPassword: '', // Not needed for edit
+            adminFullName: '', // Not needed for edit
+        });
+        setShowTenantModal(true);
+    };
+
+    const saveTenant = async () => {
+        if (!token) return;
+
+        // Basic validation
+        if (!tenantForm.name || !tenantForm.slug || !tenantForm.email) {
+            alert('Please fill in all required fields (Name, Slug, Email)');
+            return;
+        }
+
+        // Admin validation for new tenants
+        if (!editingTenant) {
+            if (!tenantForm.adminEmail || !tenantForm.adminPassword || !tenantForm.adminFullName) {
+                alert('Please fill in all Admin details for new school');
+                return;
+            }
+        }
+
+        setLoading(true);
+        try {
+            const url = editingTenant
+                ? `${API_URL}/api/platform/tenants/${editingTenant.id}`
+                : `${API_URL}/api/platform/tenants`;
+
+            const response = await fetch(url, {
+                method: editingTenant ? 'PUT' : 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(tenantForm),
+            });
+
+            if (response.ok) {
+                alert(editingTenant ? 'Tenant updated successfully!' : 'Tenant created successfully!');
+                setShowTenantModal(false);
+                resetTenantForm();
+                fetchTenants();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to save tenant');
+            }
+        } catch (error) {
+            console.error('Failed to save tenant:', error);
+            alert('Failed to save tenant');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const fetchSmsConfig = async () => {
         if (!token) return;
         try {
@@ -648,10 +880,58 @@ const PlatformAdmin = () => {
                     smsApiSecret: data.smsApiSecret === '********' ? '' : (data.smsApiSecret || ''),
                     smsDefaultSenderId: data.smsDefaultSenderId || 'SYNC',
                     smsCostPerUnit: Number(data.smsCostPerUnit) || 0.15,
+                    availableFeatures: data.availableFeatures || [],
+                    availableTiers: data.availableTiers || [],
+                    // Email Provider Settings
+                    emailProvider: data.emailProvider || 'smtp',
+                    // Azure Email Settings
+                    azureEmailEnabled: data.azureEmailEnabled || false,
+                    azureEmailConnectionString: data.azureEmailConnectionString === '********' ? '' : (data.azureEmailConnectionString || ''),
+                    azureEmailFromAddress: data.azureEmailFromAddress || '',
+                    azureEmailEndpoint: data.azureEmailEndpoint || '',
+                    azureEmailAccessKey: data.azureEmailAccessKey === '********' ? '' : (data.azureEmailAccessKey || ''),
+                    // Payment Gateway Settings
+                    lencoEnabled: data.lencoEnabled || false,
+                    lencoApiUrl: data.lencoApiUrl || 'https://api.lenco.co/access/v2',
+                    lencoApiToken: data.lencoApiToken === '********' ? '' : (data.lencoApiToken || ''),
+                    lencoWebhookSecret: data.lencoWebhookSecret === '********' ? '' : (data.lencoWebhookSecret || ''),
+                    mtnMomoEnabled: data.mtnMomoEnabled || false,
+                    mtnMomoApiUrl: data.mtnMomoApiUrl || '',
+                    mtnMomoApiUserId: data.mtnMomoApiUserId || '',
+                    mtnMomoApiKey: data.mtnMomoApiKey === '********' ? '' : (data.mtnMomoApiKey || ''),
+                    mtnMomoSubscriptionKey: data.mtnMomoSubscriptionKey === '********' ? '' : (data.mtnMomoSubscriptionKey || ''),
+                    airtelMoneyEnabled: data.airtelMoneyEnabled || false,
+                    airtelMoneyApiUrl: data.airtelMoneyApiUrl || '',
+                    airtelMoneyClientId: data.airtelMoneyClientId || '',
+                    airtelMoneyClientSecret: data.airtelMoneyClientSecret === '********' ? '' : (data.airtelMoneyClientSecret || ''),
+                    bankTransferEnabled: data.bankTransferEnabled !== false,
+                    bankName: data.bankName || '',
+                    bankAccountName: data.bankAccountName || '',
+                    bankAccountNumber: data.bankAccountNumber || '',
+                    bankBranchCode: data.bankBranchCode || '',
+                    bankSwiftCode: data.bankSwiftCode || '',
+                    paymentCurrency: data.paymentCurrency || 'ZMW',
+                    paymentWebhookUrl: data.paymentWebhookUrl || '',
+                    autoConfirmThreshold: Number(data.autoConfirmThreshold) || 0,
                 });
             }
         } catch (error) {
             console.error('Failed to fetch platform settings:', error);
+        }
+    };
+
+    const fetchLogs = async () => {
+        if (!token) return;
+        try {
+            const response = await fetch(`${API_URL}/api/platform/audit-logs`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setLogs(data.logs || []);
+            }
+        } catch (error) {
+            console.error('Failed to fetch audit logs:', error);
         }
     };
 
@@ -811,6 +1091,88 @@ const PlatformAdmin = () => {
         }
     };
 
+    // Export Functions
+    const exportData = async (type: 'tenants' | 'subscription-payments' | 'school-transactions') => {
+        if (!token) return;
+        try {
+            let url = `${API_URL}/api/platform/export/${type}`;
+            const params = new URLSearchParams();
+            
+            if (type === 'tenants') {
+                if (statusFilter) params.append('status', statusFilter);
+            } else if (type === 'subscription-payments') {
+                if (paymentFilters.status) params.append('status', paymentFilters.status);
+            } else if (type === 'school-transactions') {
+                if (paymentFilters.status) params.append('status', paymentFilters.status);
+                if (paymentFilters.tenantId) params.append('tenantId', paymentFilters.tenantId);
+            }
+
+            if (params.toString()) url += `?${params}`;
+
+            const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `${type}-${Date.now()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(downloadUrl);
+            } else {
+                alert('Failed to export data');
+            }
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Failed to export data');
+        }
+    };
+
+    // Bulk Email Function
+    const sendBulkEmail = async () => {
+        if (!token) return;
+        if (!bulkEmailForm.subject || !bulkEmailForm.message) {
+            alert('Please fill in subject and message');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/platform/bulk/email`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(bulkEmailForm),
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                alert(`Email queued for ${data.recipientCount} schools`);
+                setShowBulkEmailModal(false);
+                setBulkEmailForm({
+                    subject: '',
+                    message: '',
+                    targetTiers: [],
+                    targetStatuses: [],
+                });
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to send bulk email');
+            }
+        } catch (error) {
+            console.error('Bulk email error:', error);
+            alert('Failed to send bulk email');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (token) {
             const init = async () => {
@@ -924,10 +1286,11 @@ const PlatformAdmin = () => {
 
     // Dashboard
     return (
-        <div className="min-h-screen bg-slate-100">
-            {/* Header */}
-            <header className="bg-slate-900 text-white px-6 py-4">
-                <div className="flex items-center justify-between max-w-7xl mx-auto">
+        <div className="min-h-screen bg-slate-100 flex">
+            {/* Sidebar */}
+            <aside className="w-64 bg-slate-900 text-white flex flex-col min-h-screen fixed left-0 top-0">
+                {/* Logo Section */}
+                <div className="px-6 py-5 border-b border-slate-700">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-purple-500 rounded-xl flex items-center justify-center">
                             <Building2 className="w-5 h-5" />
@@ -937,639 +1300,1024 @@ const PlatformAdmin = () => {
                             <p className="text-xs text-slate-400">Sync School Management</p>
                         </div>
                     </div>
-
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={() => { fetchDashboard(); fetchPlans(); fetchTenants(); fetchPayments(); }}
-                            className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
-                            title="Refresh"
-                        >
-                            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                        </button>
-                        <button
-                            onClick={handleLogout}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
-                        >
-                            <LogOut className="w-4 h-4" />
-                            <span>Logout</span>
-                        </button>
-                    </div>
                 </div>
-            </header>
 
-            {/* Tabs */}
-            <div className="bg-white border-b">
-                <div className="max-w-7xl mx-auto px-6">
-                    <div className="flex gap-6">
-                        {[
-                            { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-                            { id: 'tenants', label: 'Tenants', icon: Building2 },
-                            { id: 'payments', label: 'Payments', icon: CreditCard },
-                            { id: 'sms', label: 'SMS Config', icon: MessageSquare },
-                            { id: 'crm', label: 'Sales CRM', icon: Briefcase },
-                            { id: 'settings', label: 'Settings', icon: Settings },
-                            { id: 'plans', label: 'Plans', icon: DollarSign },
-                            { id: 'announcements', label: 'Announcements', icon: MessageSquare },
-                        ].map((tab) => (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id as any)}
-                                className={`flex items-center gap-2 py-4 border-b-2 transition-colors ${activeTab === tab.id
-                                    ? 'border-purple-600 text-purple-600'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                {/* Navigation */}
+                <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+                    {/* Dashboard - Always visible */}
+                    <button
+                        onClick={() => setActiveTab('dashboard')}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
+                            activeTab === 'dashboard'
+                                ? 'bg-purple-600 text-white'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                        }`}
+                    >
+                        <BarChart3 className="w-5 h-5" />
+                        <span>Dashboard</span>
+                    </button>
+
+                    {/* Operations Group */}
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => toggleGroup('operations')}
+                            className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                <Building2 className="w-5 h-5" />
+                                <span className="font-medium">Operations</span>
+                            </div>
+                            {expandedGroups.operations ? (
+                                <ChevronDown className="w-4 h-4" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4" />
+                            )}
+                        </button>
+                        {expandedGroups.operations && (
+                            <div className="ml-4 space-y-1">
+                                <button
+                                    onClick={() => setActiveTab('tenants')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'tenants'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                                     }`}
-                            >
-                                <tab.icon className="w-4 h-4" />
-                                <span>{tab.label}</span>
-                            </button>
-                        ))}
+                                >
+                                    <Building2 className="w-4 h-4" />
+                                    <span>Tenants</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('payments')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'payments'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <CreditCard className="w-4 h-4" />
+                                    <span>Payments</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('plans')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'plans'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <DollarSign className="w-4 h-4" />
+                                    <span>Plans</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('sms')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'sms'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <MessageSquare className="w-4 h-4" />
+                                    <span>SMS Config</span>
+                                </button>
+                            </div>
+                        )}
                     </div>
+
+                    {/* Finance Group */}
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => toggleGroup('finance')}
+                            className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                <DollarSign className="w-5 h-5" />
+                                <span className="font-medium">Finance</span>
+                            </div>
+                            {expandedGroups.finance ? (
+                                <ChevronDown className="w-4 h-4" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4" />
+                            )}
+                        </button>
+                        {expandedGroups.finance && (
+                            <div className="ml-4 space-y-1">
+                                <button
+                                    onClick={() => setActiveTab('invoices')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'invoices'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <CreditCard className="w-4 h-4" />
+                                    <span>Invoice Management</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('reconciliation')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'reconciliation'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <TrendingUp className="w-4 h-4" />
+                                    <span>Revenue Reconciliation</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Security & Compliance Group */}
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => toggleGroup('security')}
+                            className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                <Shield className="w-5 h-5" />
+                                <span className="font-medium">Security</span>
+                            </div>
+                            {expandedGroups.security ? (
+                                <ChevronDown className="w-4 h-4" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4" />
+                            )}
+                        </button>
+                        {expandedGroups.security && (
+                            <div className="ml-4 space-y-1">
+                                <button
+                                    onClick={() => setActiveTab('security')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'security'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <Shield className="w-4 h-4" />
+                                    <span>Security Dashboard</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('data')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'data'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <Database className="w-4 h-4" />
+                                    <span>Data Management</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('audit')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'audit'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <Clock className="w-4 h-4" />
+                                    <span>Audit Logs</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Sales & CRM Group */}
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => toggleGroup('sales')}
+                            className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                <Briefcase className="w-5 h-5" />
+                                <span className="font-medium">Sales</span>
+                            </div>
+                            {expandedGroups.sales ? (
+                                <ChevronDown className="w-4 h-4" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4" />
+                            )}
+                        </button>
+                        {expandedGroups.sales && (
+                            <div className="ml-4 space-y-1">
+                                <button
+                                    onClick={() => setActiveTab('crm')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'crm'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <Briefcase className="w-4 h-4" />
+                                    <span>CRM</span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('announcements')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'announcements'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <MessageSquare className="w-4 h-4" />
+                                    <span>Announcements</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* System Group */}
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => toggleGroup('system')}
+                            className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                <Settings className="w-5 h-5" />
+                                <span className="font-medium">System</span>
+                            </div>
+                            {expandedGroups.system ? (
+                                <ChevronDown className="w-4 h-4" />
+                            ) : (
+                                <ChevronRight className="w-4 h-4" />
+                            )}
+                        </button>
+                        {expandedGroups.system && (
+                            <div className="ml-4 space-y-1">
+                                <button
+                                    onClick={() => setActiveTab('settings')}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                                        activeTab === 'settings'
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <Settings className="w-4 h-4" />
+                                    <span>Settings</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </nav>
+
+                {/* Bottom Actions */}
+                <div className="px-4 py-4 border-t border-slate-700 space-y-2">
+                    <button
+                        onClick={() => { fetchDashboard(); fetchPlans(); fetchTenants(); fetchPayments(); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                        title="Refresh"
+                    >
+                        <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                        <span>Refresh Data</span>
+                    </button>
+                    <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-red-600 hover:text-white transition-colors"
+                    >
+                        <LogOut className="w-5 h-5" />
+                        <span>Logout</span>
+                    </button>
                 </div>
-            </div>
+            </aside>
 
-            {/* Content */}
-            <main className="max-w-7xl mx-auto px-6 py-8">
-                {/* Dashboard Tab */}
-                {activeTab === 'dashboard' && stats && (
-                    <div className="space-y-6">
-                        {/* Stats Cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Tenants</p>
-                                        <p className="text-2xl font-bold text-slate-900">{stats.totals.tenants}</p>
-                                    </div>
-                                    <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                                        <Building2 className="w-6 h-6 text-purple-600" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Students</p>
-                                        <p className="text-2xl font-bold text-slate-900">{stats.totals.students.toLocaleString()}</p>
-                                    </div>
-                                    <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                                        <GraduationCap className="w-6 h-6 text-blue-600" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Users</p>
-                                        <p className="text-2xl font-bold text-slate-900">{stats.totals.users.toLocaleString()}</p>
-                                    </div>
-                                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                                        <Users className="w-6 h-6 text-green-600" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Revenue</p>
-                                        <p className="text-2xl font-bold text-slate-900">K{stats.totals.revenue.toLocaleString()}</p>
-                                    </div>
-                                    <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
-                                        <DollarSign className="w-6 h-6 text-amber-600" />
-                                    </div>
-                                </div>
-                            </div>
+            {/* Main Content Area */}
+            <div className="flex-1 ml-64">
+                {/* Top Header Bar */}
+                <header className="bg-white border-b px-8 py-4 sticky top-0 z-10">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold text-slate-900 capitalize">
+                            {activeTab === 'crm' ? 'Sales CRM' : activeTab === 'sms' ? 'SMS Configuration' : activeTab}
+                        </h2>
+                        <div className="text-sm text-slate-500">
+                            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                         </div>
+                    </div>
+                </header>
 
-                        {/* Tenants by Status & Tier */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-white rounded-xl p-6 border">
-                                <h3 className="font-semibold text-slate-900 mb-4">Tenants by Status</h3>
-                                <div className="space-y-3">
-                                    {Object.entries(stats.tenantsByStatus).map(([status, count]) => (
-                                        <div key={status} className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                {status === 'ACTIVE' && <CheckCircle className="w-4 h-4 text-green-500" />}
-                                                {status === 'TRIAL' && <Clock className="w-4 h-4 text-blue-500" />}
-                                                {status === 'SUSPENDED' && <Ban className="w-4 h-4 text-red-500" />}
-                                                {status === 'EXPIRED' && <XCircle className="w-4 h-4 text-orange-500" />}
-                                                <span className="text-slate-600">{status}</span>
-                                            </div>
-                                            <span className="font-semibold text-slate-900">{count}</span>
+                {/* Content */}
+                <main className="p-8">
+                    {/* Dashboard Tab */}
+                    {activeTab === 'dashboard' && stats && (
+                        <div className="space-y-6">
+                            {/* Stats Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm text-slate-500">Total Tenants</p>
+                                            <p className="text-2xl font-bold text-slate-900">{stats.totals.tenants}</p>
                                         </div>
-                                    ))}
+                                        <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                                            <Building2 className="w-6 h-6 text-purple-600" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm text-slate-500">Total Students</p>
+                                            <p className="text-2xl font-bold text-slate-900">{stats.totals.students.toLocaleString()}</p>
+                                        </div>
+                                        <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                                            <GraduationCap className="w-6 h-6 text-blue-600" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm text-slate-500">Total Users</p>
+                                            <p className="text-2xl font-bold text-slate-900">{stats.totals.users.toLocaleString()}</p>
+                                        </div>
+                                        <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                                            <Users className="w-6 h-6 text-green-600" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm text-slate-500">Total Revenue</p>
+                                            <p className="text-2xl font-bold text-slate-900">K{stats.totals.revenue.toLocaleString()}</p>
+                                        </div>
+                                        <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
+                                            <DollarSign className="w-6 h-6 text-amber-600" />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-xl p-6 border">
-                                <h3 className="font-semibold text-slate-900 mb-4">Tenants by Tier</h3>
-                                <div className="space-y-3">
-                                    {Object.entries(stats.tenantsByTier).map(([tier, count]) => (
-                                        <div key={tier} className="flex items-center justify-between">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
-                                                tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
-                                                    tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
-                                                        'bg-slate-100 text-slate-800'
-                                                }`}>
-                                                {tier}
+                            {/* Enhanced Revenue Analytics */}
+                            {stats.revenueAnalytics && (
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-sm text-green-700 font-medium">This Month</p>
+                                            <TrendingUp className="w-5 h-5 text-green-600" />
+                                        </div>
+                                        <p className="text-2xl font-bold text-green-900">
+                                            K{stats.revenueAnalytics.currentMonthRevenue.toLocaleString()}
+                                        </p>
+                                        <div className="flex items-center gap-1 mt-2">
+                                            {stats.revenueAnalytics.revenueGrowth >= 0 ? (
+                                                <TrendingUp className="w-4 h-4 text-green-600" />
+                                            ) : (
+                                                <TrendingDown className="w-4 h-4 text-red-600" />
+                                            )}
+                                            <span className={`text-sm font-medium ${stats.revenueAnalytics.revenueGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                {stats.revenueAnalytics.revenueGrowth.toFixed(1)}%
                                             </span>
-                                            <span className="font-semibold text-slate-900">{count}</span>
+                                            <span className="text-xs text-green-600">vs last month</span>
                                         </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
+                                    </div>
 
-                        {/* Expiring & Recent Payments */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* Expiring Subscriptions */}
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <AlertTriangle className="w-5 h-5 text-amber-500" />
-                                    <h3 className="font-semibold text-slate-900">Expiring Soon</h3>
+                                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-sm text-blue-700 font-medium">Avg per School</p>
+                                            <BarChart3 className="w-5 h-5 text-blue-600" />
+                                        </div>
+                                        <p className="text-2xl font-bold text-blue-900">
+                                            K{stats.revenueAnalytics.avgRevenuePerSchool.toLocaleString()}
+                                        </p>
+                                        <p className="text-xs text-blue-600 mt-2">Average revenue</p>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-sm text-purple-700 font-medium">Payment Success</p>
+                                            <Percent className="w-5 h-5 text-purple-600" />
+                                        </div>
+                                        <p className="text-2xl font-bold text-purple-900">
+                                            {stats.revenueAnalytics.paymentSuccessRate.toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-purple-600 mt-2">Last 30 days</p>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-6 border border-amber-200">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-sm text-amber-700 font-medium">School Fees</p>
+                                            <CreditCard className="w-5 h-5 text-amber-600" />
+                                        </div>
+                                        <p className="text-2xl font-bold text-amber-900">
+                                            K{stats.revenueAnalytics.schoolTransactionVolume.total.toLocaleString()}
+                                        </p>
+                                        <p className="text-xs text-amber-600 mt-2">
+                                            {stats.revenueAnalytics.schoolTransactionVolume.count.toLocaleString()} transactions
+                                        </p>
+                                    </div>
                                 </div>
-                                {stats.expiringSubscriptions.length === 0 ? (
-                                    <p className="text-slate-500 text-sm">No subscriptions expiring soon</p>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {stats.expiringSubscriptions.map((tenant) => (
-                                            <div key={tenant.id} className="flex items-center justify-between p-2 bg-amber-50 rounded-lg">
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{tenant.name}</p>
-                                                    <p className="text-xs text-slate-500">{tenant.tier}</p>
+                            )}
+
+                            {/* Revenue Trend Chart */}
+                            {stats.revenueByMonth && Object.keys(stats.revenueByMonth).length > 0 && (
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                                        <TrendingUp className="w-5 h-5 text-purple-600" />
+                                        Revenue Trend (Last 12 Months)
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {Object.entries(stats.revenueByMonth)
+                                            .sort(([a], [b]) => a.localeCompare(b))
+                                            .slice(-12)
+                                            .map(([month, amount]) => {
+                                                const maxAmount = Math.max(...Object.values(stats.revenueByMonth));
+                                                const percentage = maxAmount > 0 ? (amount / maxAmount) * 100 : 0;
+                                                const date = new Date(month + '-01');
+                                                const monthName = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+                                                return (
+                                                    <div key={month} className="flex items-center gap-3">
+                                                        <div className="w-20 text-xs text-slate-600 font-medium">{monthName}</div>
+                                                        <div className="flex-1 bg-slate-100 rounded-full h-8 relative overflow-hidden">
+                                                            <div
+                                                                className="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full transition-all duration-500 flex items-center justify-end pr-3"
+                                                                style={{ width: `${Math.max(percentage, 5)}%` }}
+                                                            >
+                                                                {amount > 0 && (
+                                                                    <span className="text-xs font-semibold text-white">
+                                                                        K{amount.toLocaleString()}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                    
+                                    {/* Summary */}
+                                    <div className="mt-6 pt-4 border-t flex justify-between items-center">
+                                        <div>
+                                            <p className="text-xs text-slate-500">Total (12 months)</p>
+                                            <p className="text-lg font-bold text-purple-600">
+                                                K{Object.values(stats.revenueByMonth).reduce((sum, val) => sum + val, 0).toLocaleString()}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-slate-500">Average/month</p>
+                                            <p className="text-lg font-bold text-slate-900">
+                                                K{(Object.values(stats.revenueByMonth).reduce((sum, val) => sum + val, 0) / Object.keys(stats.revenueByMonth).length).toFixed(0)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Tenants by Status & Tier */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <h3 className="font-semibold text-slate-900 mb-4">Tenants by Status</h3>
+                                    <div className="space-y-3">
+                                        {Object.entries(stats.tenantsByStatus).map(([status, count]) => (
+                                            <div key={status} className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    {status === 'ACTIVE' && <CheckCircle className="w-4 h-4 text-green-500" />}
+                                                    {status === 'TRIAL' && <Clock className="w-4 h-4 text-blue-500" />}
+                                                    {status === 'SUSPENDED' && <Ban className="w-4 h-4 text-red-500" />}
+                                                    {status === 'EXPIRED' && <XCircle className="w-4 h-4 text-orange-500" />}
+                                                    <span className="text-slate-600">{status}</span>
                                                 </div>
-                                                <p className="text-xs text-amber-600">
-                                                    Expires {new Date(tenant.subscriptionEndsAt).toLocaleDateString()}
-                                                </p>
+                                                <span className="font-semibold text-slate-900">{count}</span>
                                             </div>
                                         ))}
                                     </div>
-                                )}
+                                </div>
+
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <h3 className="font-semibold text-slate-900 mb-4">Tenants by Tier</h3>
+                                    <div className="space-y-3">
+                                        {Object.entries(stats.tenantsByTier).map(([tier, count]) => (
+                                            <div key={tier} className="flex items-center justify-between">
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
+                                                    tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
+                                                        tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
+                                                            'bg-slate-100 text-slate-800'
+                                                    }`}>
+                                                    {tier}
+                                                </span>
+                                                <span className="font-semibold text-slate-900">{count}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
 
-                            {/* Recent Payments */}
-                            <div className="bg-white rounded-xl p-6 border">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <TrendingUp className="w-5 h-5 text-green-500" />
-                                    <h3 className="font-semibold text-slate-900">Recent Payments</h3>
-                                </div>
-                                {stats.recentPayments.length === 0 ? (
-                                    <p className="text-slate-500 text-sm">No recent payments</p>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {stats.recentPayments.map((payment) => (
-                                            <div key={payment.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg">
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{payment.tenantName}</p>
-                                                    <p className="text-xs text-slate-500">{payment.planName}</p>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="font-semibold text-green-600">K{payment.amount.toLocaleString()}</p>
-                                                    <p className="text-xs text-slate-500">
-                                                        {new Date(payment.paidAt).toLocaleDateString()}
+                            {/* Expiring & Recent Payments */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Expiring Subscriptions */}
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <AlertTriangle className="w-5 h-5 text-amber-500" />
+                                        <h3 className="font-semibold text-slate-900">Expiring Soon</h3>
+                                    </div>
+                                    {stats.expiringSubscriptions.length === 0 ? (
+                                        <p className="text-slate-500 text-sm">No subscriptions expiring soon</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {stats.expiringSubscriptions.map((tenant) => (
+                                                <div key={tenant.id} className="flex items-center justify-between p-2 bg-amber-50 rounded-lg">
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">{tenant.name}</p>
+                                                        <p className="text-xs text-slate-500">{tenant.tier}</p>
+                                                    </div>
+                                                    <p className="text-xs text-amber-600">
+                                                        Expires {new Date(tenant.subscriptionEndsAt).toLocaleDateString()}
                                                     </p>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Recent Payments */}
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <TrendingUp className="w-5 h-5 text-green-500" />
+                                        <h3 className="font-semibold text-slate-900">Recent Payments</h3>
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Tenants Tab */}
-                {activeTab === 'tenants' && (
-                    <div className="space-y-4">
-                        {/* Filters */}
-                        <div className="flex items-center gap-4 bg-white p-4 rounded-xl border">
-                            <div className="flex-1 relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search tenants..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                />
-                            </div>
-                            <select
-                                value={statusFilter}
-                                onChange={(e) => setStatusFilter(e.target.value)}
-                                className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            >
-                                <option value="">All Status</option>
-                                <option value="ACTIVE">Active</option>
-                                <option value="TRIAL">Trial</option>
-                                <option value="SUSPENDED">Suspended</option>
-                                <option value="EXPIRED">Expired</option>
-                            </select>
-                            <button
-                                onClick={fetchTenants}
-                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                            >
-                                <Filter className="w-4 h-4" />
-                            </button>
-                        </div>
-
-                        {/* Tenants Table */}
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <table className="w-full">
-                                <thead className="bg-slate-50">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Students</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Expires</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {tenants.map((tenant) => (
-                                        <tr key={tenant.id} className="hover:bg-slate-50">
-                                            <td className="px-4 py-3">
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{tenant.name}</p>
-                                                    <p className="text-xs text-slate-500">{tenant.email}</p>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
-                                                    tenant.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
-                                                        tenant.tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
-                                                            'bg-slate-100 text-slate-800'
-                                                    }`}>
-                                                    {tenant.tier}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
-                                                    tenant.status === 'TRIAL' ? 'bg-blue-100 text-blue-800' :
-                                                        tenant.status === 'SUSPENDED' ? 'bg-red-100 text-red-800' :
-                                                            'bg-orange-100 text-orange-800'
-                                                    }`}>
-                                                    {tenant.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-slate-600">
-                                                {tenant.currentStudentCount} / {tenant.maxStudents === 0 ? '∞' : tenant.maxStudents}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-slate-600">
-                                                {tenant.subscriptionEndsAt
-                                                    ? new Date(tenant.subscriptionEndsAt).toLocaleDateString()
-                                                    : '—'}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2">
-                                                    {tenant.status === 'SUSPENDED' ? (
-                                                        <button
-                                                            onClick={() => activateTenant(tenant.id)}
-                                                            className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                                            title="Activate"
-                                                        >
-                                                            <CheckSquare className="w-4 h-4" />
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => suspendTenant(tenant.id)}
-                                                            className="p-1 text-red-600 hover:bg-red-50 rounded"
-                                                            title="Suspend"
-                                                        >
-                                                            <Ban className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {/* Payments Tab */}
-                {activeTab === 'payments' && (
-                    <div className="bg-white rounded-xl border overflow-hidden">
-                        <table className="w-full">
-                            <thead className="bg-slate-50">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Plan</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Amount</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {payments.map((payment) => (
-                                    <tr key={payment.id} className="hover:bg-slate-50">
-                                        <td className="px-4 py-3 font-medium text-slate-900">{payment.tenant.name}</td>
-                                        <td className="px-4 py-3">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${payment.plan.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
-                                                payment.plan.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
-                                                    'bg-blue-100 text-blue-800'
-                                                }`}>
-                                                {payment.plan.name}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 font-semibold text-slate-900">
-                                            {payment.currency} {payment.totalAmount.toLocaleString()}
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-slate-600">{payment.paymentMethod}</td>
-                                        <td className="px-4 py-3">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                                                payment.status === 'PENDING' ? 'bg-amber-100 text-amber-800' :
-                                                    'bg-red-100 text-red-800'
-                                                }`}>
-                                                {payment.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-slate-600">
-                                            {new Date(payment.createdAt).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            {payment.status === 'PENDING' && (
-                                                <button
-                                                    onClick={() => confirmPayment(payment.id)}
-                                                    className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
-                                                >
-                                                    Confirm
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-
-                {/* SMS Config Tab */}
-                {activeTab === 'sms' && smsConfig && (
-                    <div className="space-y-6">
-                        {/* Platform SMS Stats */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div className="bg-white rounded-xl p-6 border">
-                                <p className="text-sm text-slate-500">SMS Provider</p>
-                                <p className="text-xl font-bold text-slate-900 uppercase">{smsConfig.platformSettings.smsProvider}</p>
-                            </div>
-                            <div className="bg-white rounded-xl p-6 border">
-                                <p className="text-sm text-slate-500">Default Sender ID</p>
-                                <p className="text-xl font-bold text-slate-900">{smsConfig.platformSettings.smsDefaultSenderId}</p>
-                            </div>
-                            <div className="bg-white rounded-xl p-6 border">
-                                <p className="text-sm text-slate-500">SMS Balance</p>
-                                <p className="text-xl font-bold text-green-600">{smsConfig.platformSettings.smsBalanceUnits.toLocaleString()} units</p>
-                            </div>
-                            <div className="bg-white rounded-xl p-6 border">
-                                <p className="text-sm text-slate-500">Cost per SMS</p>
-                                <p className="text-xl font-bold text-slate-900">K{Number(smsConfig.platformSettings.smsCostPerUnit).toFixed(2)}</p>
-                            </div>
-                        </div>
-
-                        {/* Tenant SMS Configuration */}
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <div className="px-6 py-4 border-b bg-slate-50">
-                                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                    <MessageSquare className="w-5 h-5" />
-                                    Tenant SMS Configuration
-                                </h3>
-                                <p className="text-sm text-slate-500 mt-1">Configure sender IDs for each school</p>
-                            </div>
-                            <table className="w-full">
-                                <thead className="bg-slate-50">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">SMS Enabled</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Sender ID</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {smsConfig.tenants.map((tenant) => (
-                                        <tr key={tenant.id} className="hover:bg-slate-50">
-                                            <td className="px-4 py-3">
-                                                <p className="font-medium text-slate-900">{tenant.name}</p>
-                                                <p className="text-xs text-slate-500">{tenant.slug}</p>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
-                                                    tenant.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
-                                                        tenant.tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
-                                                            'bg-slate-100 text-slate-800'
-                                                    }`}>
-                                                    {tenant.tier}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
-                                                    tenant.status === 'TRIAL' ? 'bg-blue-100 text-blue-800' :
-                                                        'bg-slate-100 text-slate-800'
-                                                    }`}>
-                                                    {tenant.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => updateTenantSenderId(tenant.id, tenant.smsSenderId || '', !tenant.smsEnabled)}
-                                                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${tenant.smsEnabled
-                                                        ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                                        }`}
-                                                >
-                                                    {tenant.smsEnabled ? 'Enabled' : 'Disabled'}
-                                                </button>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {editingSenderId === tenant.id ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="text"
-                                                            value={senderIdInput}
-                                                            onChange={(e) => setSenderIdInput(e.target.value.toUpperCase())}
-                                                            className="px-2 py-1 border rounded text-sm w-28 uppercase"
-                                                            placeholder="3-11 chars"
-                                                            maxLength={11}
-                                                        />
-                                                        <button
-                                                            onClick={() => {
-                                                                updateTenantSenderId(tenant.id, senderIdInput, tenant.smsEnabled);
-                                                            }}
-                                                            className="p-1 bg-green-600 text-white rounded hover:bg-green-700"
-                                                        >
-                                                            <Save className="w-3 h-3" />
-                                                        </button>
+                                    {stats.recentPayments.length === 0 ? (
+                                        <p className="text-slate-500 text-sm">No recent payments</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {stats.recentPayments.map((payment) => (
+                                                <div key={payment.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg">
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">{payment.tenantName}</p>
+                                                        <p className="text-xs text-slate-500">{payment.planName}</p>
                                                     </div>
-                                                ) : (
-                                                    <span className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
-                                                        {tenant.smsSenderId || smsConfig.platformSettings.smsDefaultSenderId}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {editingSenderId === tenant.id ? (
-                                                    <button
-                                                        onClick={() => setEditingSenderId(null)}
-                                                        className="text-xs text-slate-500 hover:text-slate-700"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingSenderId(tenant.id);
-                                                            setSenderIdInput(tenant.smsSenderId || '');
-                                                        }}
-                                                        className="text-xs text-purple-600 hover:text-purple-800"
-                                                    >
-                                                        Edit
-                                                    </button>
-                                                )}
-                                            </td>
+                                                    <div className="text-right">
+                                                        <p className="font-semibold text-green-600">K{payment.amount.toLocaleString()}</p>
+                                                        <p className="text-xs text-slate-500">
+                                                            {new Date(payment.paidAt).toLocaleDateString()}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tenants Tab */}
+                    {activeTab === 'tenants' && (
+                        <div className="space-y-4">
+                            {/* Filters */}
+                            <div className="flex items-center gap-4 bg-white p-4 rounded-xl border">
+                                <div className="flex-1 relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search tenants..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    />
+                                </div>
+                                <select
+                                    value={statusFilter}
+                                    onChange={(e) => setStatusFilter(e.target.value)}
+                                    className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                >
+                                    <option value="">All Status</option>
+                                    <option value="ACTIVE">Active</option>
+                                    <option value="TRIAL">Trial</option>
+                                    <option value="SUSPENDED">Suspended</option>
+                                    <option value="EXPIRED">Expired</option>
+                                </select>
+                                <button
+                                    onClick={fetchTenants}
+                                    className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+                                >
+                                    <Filter className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => exportData('tenants')}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                                    title="Export to CSV"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    Export
+                                </button>
+                                <button
+                                    onClick={() => setShowBulkEmailModal(true)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                    title="Send Bulk Email"
+                                >
+                                    <Send className="w-4 h-4" />
+                                    Bulk Email
+                                </button>
+                                <button
+                                    onClick={() => { resetTenantForm(); setShowTenantModal(true); }}
+                                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Add School
+                                </button>
+                            </div>
+
+                            {/* Tenants Table */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <table className="w-full">
+                                    <thead className="bg-slate-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Students</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Expires</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* SMS Info */}
-                        <div className="bg-purple-50 rounded-xl p-4 flex items-start gap-3 border border-purple-200">
-                            <MessageSquare className="w-5 h-5 text-purple-600 mt-0.5" />
-                            <div>
-                                <p className="font-medium text-purple-900">About Sender IDs</p>
-                                <ul className="text-sm text-purple-700 mt-1 space-y-1">
-                                    <li>• Sender ID must be 3-11 alphanumeric characters</li>
-                                    <li>• Schools without a custom sender ID use the platform default</li>
-                                    <li>• SMS must be enabled for schools on Professional tier or above</li>
-                                </ul>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {tenants.map((tenant) => (
+                                            <tr key={tenant.id} className="hover:bg-slate-50">
+                                                <td className="px-4 py-3">
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">{tenant.name}</p>
+                                                        <p className="text-xs text-slate-500">{tenant.email}</p>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
+                                                        tenant.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
+                                                            tenant.tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
+                                                                'bg-slate-100 text-slate-800'
+                                                        }`}>
+                                                        {tenant.tier}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                                                        tenant.status === 'TRIAL' ? 'bg-blue-100 text-blue-800' :
+                                                            tenant.status === 'SUSPENDED' ? 'bg-red-100 text-red-800' :
+                                                                'bg-orange-100 text-orange-800'
+                                                        }`}>
+                                                        {tenant.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-slate-600">
+                                                    {tenant.currentStudentCount} / {tenant.maxStudents === 0 ? '∞' : tenant.maxStudents}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-slate-600">
+                                                    {tenant.subscriptionEndsAt
+                                                        ? new Date(tenant.subscriptionEndsAt).toLocaleDateString()
+                                                        : '—'}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => openEditTenantModal(tenant)}
+                                                            className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                                                            title="Edit"
+                                                        >
+                                                            <Eye className="w-4 h-4" />
+                                                        </button>
+                                                        {tenant.status === 'SUSPENDED' ? (
+                                                            <button
+                                                                onClick={() => activateTenant(tenant.id)}
+                                                                className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                                                title="Activate"
+                                                            >
+                                                                <CheckSquare className="w-4 h-4" />
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => suspendTenant(tenant.id)}
+                                                                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                                                title="Suspend"
+                                                            >
+                                                                <Ban className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
-                    </div>
-                )}
-
-                {/* CRM Tab */}
-                {activeTab === 'crm' && (
-                    <div className="space-y-6">
-                        {/* CRM Stats */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
-                                <div className="p-3 bg-blue-100 rounded-lg text-blue-600">
-                                    <Target className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500">Total Leads</p>
-                                    <p className="text-2xl font-bold">{leads.length}</p>
-                                </div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
-                                <div className="p-3 bg-green-100 rounded-lg text-green-600">
-                                    <CreditCard className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500">Pipeline Value</p>
-                                    <p className="text-2xl font-bold">
-                                        ZMW {pipeline?.stats?.totalValue?.toLocaleString() || '0'}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
-                                <div className="p-3 bg-purple-100 rounded-lg text-purple-600">
-                                    <Briefcase className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500">Active Deals</p>
-                                    <p className="text-2xl font-bold">{pipeline?.stats?.totalDeals || 0}</p>
-                                </div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
-                                <div className="p-3 bg-orange-100 rounded-lg text-orange-600">
-                                    <CheckCircle2 className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-500">Conversion Rate</p>
-                                    <p className="text-2xl font-bold">--%</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Middle Section: Leads and Tasks */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Recent Leads */}
-                            <div className="bg-white rounded-xl border overflow-hidden lg:col-span-2">
-                                <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50">
-                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                        <Users className="w-5 h-5" />
-                                        Recent Leads
+                    )}
+                    {/* Add/Edit Tenant Modal */}
+                    {showTenantModal && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                                <div className="px-6 py-4 border-b flex items-center justify-between">
+                                    <h3 className="text-lg font-semibold text-slate-900">
+                                        {editingTenant ? 'Edit School' : 'Add New School'}
                                     </h3>
                                     <button
-                                        onClick={() => setShowingLeadForm(true)}
-                                        className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 flex items-center gap-2"
+                                        onClick={() => { setShowTenantModal(false); resetTenantForm(); }}
+                                        className="p-2 hover:bg-slate-100 rounded-lg"
                                     >
-                                        <Plus className="w-4 h-4" />
-                                        Add Lead
+                                        <XCircle className="w-5 h-5 text-slate-500" />
                                     </button>
                                 </div>
-                                <div className="overflow-x-auto">
+                                <div className="p-6 space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">School Name *</label>
+                                            <input
+                                                type="text"
+                                                value={tenantForm.name}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, name: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="Lusaka Academy"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Slug *</label>
+                                            <input
+                                                type="text"
+                                                value={tenantForm.slug}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="lusaka-academy"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
+                                            <input
+                                                type="email"
+                                                value={tenantForm.email}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, email: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="admin@school.com"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                                            <input
+                                                type="tel"
+                                                value={tenantForm.phone}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, phone: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="+260 97 1234567"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                            <input
+                                                type="text"
+                                                value={tenantForm.address}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, address: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="123 Main Street"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                            <input
+                                                type="text"
+                                                value={tenantForm.city}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, city: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="Lusaka"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                                            <select
+                                                value={tenantForm.country}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, country: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                            >
+                                                <option value="ZM">Zambia</option>
+                                                <option value="MW">Malawi</option>
+                                                <option value="ZW">Zimbabwe</option>
+                                                <option value="BW">Botswana</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Subscription Tier</label>
+                                            <select
+                                                value={tenantForm.tier}
+                                                onChange={(e) => setTenantForm({ ...tenantForm, tier: e.target.value })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                            >
+                                                <option value="FREE">Free</option>
+                                                <option value="STARTER">Starter</option>
+                                                <option value="PROFESSIONAL">Professional</option>
+                                                <option value="ENTERPRISE">Enterprise</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Admin User Details (Only for new tenants) */}
+                                    {!editingTenant && (
+                                        <div className="pt-4 border-t">
+                                            <h4 className="text-sm font-semibold text-slate-900 mb-4">Initial Administrator</h4>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="col-span-2">
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
+                                                    <input
+                                                        type="text"
+                                                        value={tenantForm.adminFullName}
+                                                        onChange={(e) => setTenantForm({ ...tenantForm, adminFullName: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                        placeholder="John Doe"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Admin Email *</label>
+                                                    <input
+                                                        type="email"
+                                                        value={tenantForm.adminEmail}
+                                                        onChange={(e) => setTenantForm({ ...tenantForm, adminEmail: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                        placeholder="admin@school.com"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Password *</label>
+                                                    <input
+                                                        type="password"
+                                                        value={tenantForm.adminPassword}
+                                                        onChange={(e) => setTenantForm({ ...tenantForm, adminPassword: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                        placeholder="••••••••"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="px-6 py-4 border-t bg-slate-50 flex justify-end gap-3">
+                                    <button
+                                        onClick={() => { setShowTenantModal(false); resetTenantForm(); }}
+                                        className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={saveTenant}
+                                        disabled={loading}
+                                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        <Save className="w-4 h-4" />
+                                        {loading ? 'Saving...' : (editingTenant ? 'Update School' : 'Create School')}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Payments Tab */}
+                    {activeTab === 'payments' && (
+                        <div className="space-y-4">
+                            {/* Payment Type Switcher */}
+                            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg w-fit">
+                                <button
+                                    onClick={() => setActivePaymentType('subscription')}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                        activePaymentType === 'subscription'
+                                            ? 'bg-white text-purple-600 shadow-sm'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                >
+                                    Subscription Payments
+                                </button>
+                                <button
+                                    onClick={() => setActivePaymentType('school')}
+                                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                        activePaymentType === 'school'
+                                            ? 'bg-white text-purple-600 shadow-sm'
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                >
+                                    School Transactions
+                                </button>
+                            </div>
+
+                            {/* Filters */}
+                            <div className="flex gap-4">
+                                <div className="relative flex-1 max-w-sm">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder={activePaymentType === 'subscription' ? "Search schools or receipts..." : "Search schools or students..."}
+                                        className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        value={paymentFilters.search}
+                                        onChange={(e) => setPaymentFilters({ ...paymentFilters, search: e.target.value })}
+                                    />
+                                </div>
+                                
+                                {/* School Filter - Only for School Transactions */}
+                                {activePaymentType === 'school' && (
+                                    <select
+                                        className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                        value={paymentFilters.tenantId}
+                                        onChange={(e) => setPaymentFilters({ ...paymentFilters, tenantId: e.target.value })}
+                                    >
+                                        <option value="">All Schools</option>
+                                        {tenants.map((tenant) => (
+                                            <option key={tenant.id} value={tenant.id}>
+                                                {tenant.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                
+                                <select
+                                    className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    value={paymentFilters.status}
+                                    onChange={(e) => setPaymentFilters({ ...paymentFilters, status: e.target.value })}
+                                >
+                                    <option value="">All Status</option>
+                                    <option value="COMPLETED">Completed</option>
+                                    <option value="PENDING">Pending</option>
+                                    <option value="FAILED">Failed</option>
+                                </select>
+
+                                <button
+                                    onClick={() => exportData(activePaymentType === 'subscription' ? 'subscription-payments' : 'school-transactions')}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                                    title="Export to CSV"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    Export
+                                </button>
+                            </div>
+
+                            {/* Subscription Payments Table */}
+                            {activePaymentType === 'subscription' && (
+                                <div className="bg-white rounded-xl border overflow-hidden">
                                     <table className="w-full">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">School</th>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Source</th>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Assigned</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Plan</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Amount</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="bg-white divide-y divide-slate-200">
-                                            {leads.length === 0 ? (
+                                        <tbody className="divide-y divide-slate-100">
+                                            {payments.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
-                                                        No leads found.
+                                                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                                                        No subscription payments found.
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                leads.map((lead) => (
-                                                    <tr
-                                                        key={lead.id}
-                                                        onClick={() => setViewingLeadId(lead.id)}
-                                                        className="hover:bg-slate-50 cursor-pointer transition-colors"
-                                                    >
-                                                        <td className="px-6 py-4">
-                                                            <div className="font-medium text-slate-900">{lead.schoolName}</div>
-                                                            <div className="text-xs text-slate-500">{lead.contactName}</div>
+                                                payments.map((payment) => (
+                                                    <tr key={payment.id} className="hover:bg-slate-50">
+                                                        <td className="px-4 py-3 font-medium text-slate-900">{payment.tenant.name}</td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${payment.plan.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
+                                                                payment.plan.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
+                                                                    'bg-blue-100 text-blue-800'
+                                                                }`}>
+                                                                {payment.plan.name}
+                                                            </span>
                                                         </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap">
-                                                            <div onClick={(e) => e.stopPropagation()}>
-                                                                <select
-                                                                    value={lead.status}
-                                                                    onChange={(e) => updateLeadStatus(lead.id, e.target.value)}
-                                                                    className={`px-2 py-1 text-xs font-semibold rounded-full border-0 cursor-pointer focus:ring-2 focus:ring-purple-500
-                                                                    ${lead.status === 'NEW' ? 'bg-blue-100 text-blue-800' :
-                                                                            lead.status === 'WON' ? 'bg-green-100 text-green-800' :
-                                                                                'bg-slate-100 text-slate-800'}`}
+                                                        <td className="px-4 py-3 font-semibold text-slate-900">
+                                                            {payment.currency} {payment.totalAmount.toLocaleString()}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">{payment.paymentMethod}</td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                                                                payment.status === 'PENDING' ? 'bg-amber-100 text-amber-800' :
+                                                                    'bg-red-100 text-red-800'
+                                                                }`}>
+                                                                {payment.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">
+                                                            {new Date(payment.createdAt).toLocaleDateString()}
+                                                        </td>
+                                                        <td className="px-4 py-3 flex gap-2">
+                                                            <button
+                                                                onClick={() => viewPaymentDetails(payment)}
+                                                                title="View Details"
+                                                                className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-purple-600"
+                                                            >
+                                                                <Eye className="w-4 h-4" />
+                                                            </button>
+                                                            {payment.status === 'PENDING' && (
+                                                                <button
+                                                                    onClick={() => confirmPayment(payment.id)}
+                                                                    className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
                                                                 >
-                                                                    <option value="NEW">New</option>
-                                                                    <option value="CONTACTED">Contacted</option>
-                                                                    <option value="QUALIFIED">Qualified</option>
-                                                                    <option value="PROPOSAL">Proposal</option>
-                                                                    <option value="NEGOTIATION">Negotiation</option>
-                                                                    <option value="WON">Won</option>
-                                                                    <option value="LOST">Lost</option>
-                                                                </select>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                                            {lead.source}
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                                                            {lead.assignedTo?.fullName || 'Unassigned'}
+                                                                    Confirm
+                                                                </button>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 ))
@@ -1577,954 +2325,2125 @@ const PlatformAdmin = () => {
                                         </tbody>
                                     </table>
                                 </div>
-                            </div>
+                            )}
 
-                            {/* My Tasks */}
-                            <div className="bg-white rounded-xl border overflow-hidden h-full">
-                                <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center">
-                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                        <CheckSquare className="w-5 h-5" />
-                                        My Tasks
-                                    </h3>
-                                    <button className="text-sm text-purple-600 hover:text-purple-800 font-medium">
-                                        + New
-                                    </button>
+                            {/* School Transactions Table */}
+                            {activePaymentType === 'school' && (
+                                <div className="bg-white rounded-xl border overflow-hidden">
+                                    <div className="px-6 py-4 border-b bg-slate-50">
+                                        <h3 className="font-semibold text-slate-900">School Fee Collections (Gateway Payments)</h3>
+                                        <p className="text-sm text-slate-500 mt-1">Payments collected by schools through payment gateways - Mobile Money & Bank Deposits only</p>
+                                    </div>
+                                    <table className="w-full">
+                                        <thead className="bg-slate-50">
+                                            <tr>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Student</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Amount</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Transaction ID</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {schoolTransactions.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                                                        No school transactions found.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                schoolTransactions.map((transaction) => (
+                                                    <tr key={transaction.id} className="hover:bg-slate-50">
+                                                        <td className="px-4 py-3">
+                                                            <div className="font-medium text-slate-900">{transaction.tenant.name}</div>
+                                                            <div className="text-xs text-slate-500">{transaction.tenant.slug}</div>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-700">{transaction.studentName}</td>
+                                                        <td className="px-4 py-3 font-semibold text-slate-900">
+                                                            {transaction.currency} {transaction.amount.toLocaleString()}
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                                transaction.method === 'MOBILE_MONEY' ? 'bg-blue-100 text-blue-800' :
+                                                                transaction.method === 'BANK_DEPOSIT' ? 'bg-green-100 text-green-800' :
+                                                                'bg-slate-100 text-slate-800'
+                                                            }`}>
+                                                                {transaction.method.replace('_', ' ')}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-xs font-mono text-slate-600">{transaction.transactionId}</td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                                transaction.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                                                                transaction.status === 'PENDING' ? 'bg-amber-100 text-amber-800' :
+                                                                'bg-red-100 text-red-800'
+                                                            }`}>
+                                                                {transaction.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">
+                                                            {new Date(transaction.date).toLocaleDateString()}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
                                 </div>
-                                <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-                                    {tasks.length === 0 ? (
-                                        <div className="p-6 text-center text-slate-500 text-sm">
-                                            No tasks assigned to you.
+                            )}
+
+                            {/* Payment Detail Modal */}
+                            {showPaymentModal && selectedPayment && (
+                                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                                    <div className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                                        <div className="px-6 py-4 border-b flex items-center justify-between">
+                                            <h3 className="text-lg font-semibold text-slate-900">Payment Details</h3>
+                                            <button
+                                                onClick={() => setShowPaymentModal(false)}
+                                                className="p-2 hover:bg-slate-100 rounded-lg"
+                                            >
+                                                <XCircle className="w-5 h-5 text-slate-500" />
+                                            </button>
                                         </div>
-                                    ) : (
-                                        tasks.map(task => (
-                                            <div key={task.id} className="p-4 hover:bg-slate-50 flex gap-3">
-                                                <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 cursor-pointer ${task.status === 'COMPLETED' ? 'bg-green-500 border-green-500' : 'border-slate-300'
-                                                    }`}>
-                                                    {task.status === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                        <div className="p-6 space-y-4">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <div className="text-sm text-slate-500">School</div>
+                                                    <div className="font-semibold text-lg">{selectedPayment.tenant.name}</div>
+                                                    <div className="text-xs text-slate-400">{selectedPayment.tenant.slug}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-sm text-slate-500">Amount</div>
+                                                    <div className="font-bold text-xl text-purple-600">
+                                                        {selectedPayment.currency} {selectedPayment.totalAmount.toLocaleString()}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 py-4 border-t border-b border-slate-100">
+                                                <div>
+                                                    <div className="text-sm text-slate-500">Plan</div>
+                                                    <div className="font-medium">{selectedPayment.plan.name}</div>
                                                 </div>
                                                 <div>
-                                                    <p className={`text-sm font-medium ${task.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{task.title}</p>
-                                                    {task.dueDate && (
-                                                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                                            <Calendar className="w-3 h-3" />
-                                                            {new Date(task.dueDate).toLocaleDateString()}
-                                                        </p>
+                                                    <div className="text-sm text-slate-500">Status</div>
+                                                    <div className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${selectedPayment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                                                        selectedPayment.status === 'PENDING' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {selectedPayment.status}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm text-slate-500">Billing Cycle</div>
+                                                    <div className="font-medium capitalize">{selectedPayment.billingCycle.toLowerCase()}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm text-slate-500">Method</div>
+                                                    <div className="font-medium capitalize">{selectedPayment.paymentMethod.replace('_', ' ')}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm text-slate-500">Student Count</div>
+                                                    <div className="font-medium">{selectedPayment.studentCount}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm text-slate-500">Date</div>
+                                                    <div className="font-medium">{new Date(selectedPayment.createdAt).toLocaleDateString()}</div>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div className="text-sm text-slate-500 mb-2">Breakdown</div>
+                                                <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span>Base Plan</span>
+                                                        <span className="font-medium">{selectedPayment.currency} {selectedPayment.baseAmount.toLocaleString()}</span>
+                                                    </div>
+                                                    {selectedPayment.overageAmount > 0 && (
+                                                        <div className="flex justify-between text-amber-600">
+                                                            <span>Overage ({selectedPayment.overageStudents} students)</span>
+                                                            <span className="font-medium">+ {selectedPayment.currency} {selectedPayment.overageAmount.toLocaleString()}</span>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex justify-between pt-2 border-t font-semibold">
+                                                        <span>Total</span>
+                                                        <span>{selectedPayment.currency} {selectedPayment.totalAmount.toLocaleString()}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {selectedPayment.externalRef && (
+                                                <div className="text-xs text-slate-400 text-center pt-2">
+                                                    Ref: {selectedPayment.externalRef} • Receipt: {selectedPayment.receiptNumber}
+                                                </div>
+                                            )}
+
+                                            {/* Download Invoice Button */}
+                                            {selectedPayment.status === 'COMPLETED' && (
+                                                <div className="mt-4 pt-4 border-t">
+                                                    <button
+                                                        onClick={() => {
+                                                            const url = `${API_URL}/api/platform/invoices/${selectedPayment.id}/pdf`;
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = `invoice-${selectedPayment.receiptNumber || selectedPayment.id}.pdf`;
+                                                            a.target = '_blank';
+                                                            // Add auth header
+                                                            fetch(url, {
+                                                                headers: { Authorization: `Bearer ${token}` }
+                                                            }).then(res => res.blob()).then(blob => {
+                                                                const blobUrl = window.URL.createObjectURL(blob);
+                                                                a.href = blobUrl;
+                                                                a.click();
+                                                                window.URL.revokeObjectURL(blobUrl);
+                                                            });
+                                                        }}
+                                                        className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2"
+                                                    >
+                                                        <Download className="w-4 h-4" />
+                                                        Download Invoice PDF
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* SMS Config Tab */}
+                    {activeTab === 'sms' && smsConfig && (
+                        <div className="space-y-6">
+                            {/* Platform SMS Stats */}
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <p className="text-sm text-slate-500">SMS Provider</p>
+                                    <p className="text-xl font-bold text-slate-900 uppercase">{smsConfig.platformSettings.smsProvider}</p>
+                                </div>
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <p className="text-sm text-slate-500">Default Sender ID</p>
+                                    <p className="text-xl font-bold text-slate-900">{smsConfig.platformSettings.smsDefaultSenderId}</p>
+                                </div>
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <p className="text-sm text-slate-500">SMS Balance</p>
+                                    <p className="text-xl font-bold text-green-600">{smsConfig.platformSettings.smsBalanceUnits.toLocaleString()} units</p>
+                                </div>
+                                <div className="bg-white rounded-xl p-6 border">
+                                    <p className="text-sm text-slate-500">Cost per SMS</p>
+                                    <p className="text-xl font-bold text-slate-900">K{Number(smsConfig.platformSettings.smsCostPerUnit).toFixed(2)}</p>
+                                </div>
+                            </div>
+
+                            {/* Tenant SMS Configuration */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-slate-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <MessageSquare className="w-5 h-5" />
+                                        Tenant SMS Configuration
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Configure sender IDs for each school</p>
+                                </div>
+                                <table className="w-full">
+                                    <thead className="bg-slate-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">School</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">SMS Enabled</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Sender ID</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {smsConfig.tenants.map((tenant) => (
+                                            <tr key={tenant.id} className="hover:bg-slate-50">
+                                                <td className="px-4 py-3">
+                                                    <p className="font-medium text-slate-900">{tenant.name}</p>
+                                                    <p className="text-xs text-slate-500">{tenant.slug}</p>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.tier === 'ENTERPRISE' ? 'bg-amber-100 text-amber-800' :
+                                                        tenant.tier === 'PROFESSIONAL' ? 'bg-purple-100 text-purple-800' :
+                                                            tenant.tier === 'STARTER' ? 'bg-blue-100 text-blue-800' :
+                                                                'bg-slate-100 text-slate-800'
+                                                        }`}>
+                                                        {tenant.tier}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${tenant.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                                                        tenant.status === 'TRIAL' ? 'bg-blue-100 text-blue-800' :
+                                                            'bg-slate-100 text-slate-800'
+                                                        }`}>
+                                                        {tenant.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        onClick={() => updateTenantSenderId(tenant.id, tenant.smsSenderId || '', !tenant.smsEnabled)}
+                                                        className={`px-3 py-1 rounded text-xs font-medium transition-colors ${tenant.smsEnabled
+                                                            ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                                            }`}
+                                                    >
+                                                        {tenant.smsEnabled ? 'Enabled' : 'Disabled'}
+                                                    </button>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {editingSenderId === tenant.id ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="text"
+                                                                value={senderIdInput}
+                                                                onChange={(e) => setSenderIdInput(e.target.value.toUpperCase())}
+                                                                className="px-2 py-1 border rounded text-sm w-28 uppercase"
+                                                                placeholder="3-11 chars"
+                                                                maxLength={11}
+                                                            />
+                                                            <button
+                                                                onClick={() => {
+                                                                    updateTenantSenderId(tenant.id, senderIdInput, tenant.smsEnabled);
+                                                                }}
+                                                                className="p-1 bg-green-600 text-white rounded hover:bg-green-700"
+                                                            >
+                                                                <Save className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
+                                                            {tenant.smsSenderId || smsConfig.platformSettings.smsDefaultSenderId}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {editingSenderId === tenant.id ? (
+                                                        <button
+                                                            onClick={() => setEditingSenderId(null)}
+                                                            className="text-xs text-slate-500 hover:text-slate-700"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => {
+                                                                setEditingSenderId(tenant.id);
+                                                                setSenderIdInput(tenant.smsSenderId || '');
+                                                            }}
+                                                            className="text-xs text-purple-600 hover:text-purple-800"
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* SMS Info */}
+                            <div className="bg-purple-50 rounded-xl p-4 flex items-start gap-3 border border-purple-200">
+                                <MessageSquare className="w-5 h-5 text-purple-600 mt-0.5" />
+                                <div>
+                                    <p className="font-medium text-purple-900">About Sender IDs</p>
+                                    <ul className="text-sm text-purple-700 mt-1 space-y-1">
+                                        <li>• Sender ID must be 3-11 alphanumeric characters</li>
+                                        <li>• Schools without a custom sender ID use the platform default</li>
+                                        <li>• SMS must be enabled for schools on Professional tier or above</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* CRM Tab */}
+                    {activeTab === 'crm' && (
+                        <div className="space-y-6">
+                            {/* CRM Stats */}
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
+                                    <div className="p-3 bg-blue-100 rounded-lg text-blue-600">
+                                        <Target className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Total Leads</p>
+                                        <p className="text-2xl font-bold">{leads.length}</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
+                                    <div className="p-3 bg-green-100 rounded-lg text-green-600">
+                                        <CreditCard className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Pipeline Value</p>
+                                        <p className="text-2xl font-bold">
+                                            ZMW {pipeline?.stats?.totalValue?.toLocaleString() || '0'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
+                                    <div className="p-3 bg-purple-100 rounded-lg text-purple-600">
+                                        <Briefcase className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Active Deals</p>
+                                        <p className="text-2xl font-bold">{pipeline?.stats?.totalDeals || 0}</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border flex items-center gap-4">
+                                    <div className="p-3 bg-orange-100 rounded-lg text-orange-600">
+                                        <CheckCircle2 className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Conversion Rate</p>
+                                        <p className="text-2xl font-bold">--%</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Middle Section: Leads and Tasks */}
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* Recent Leads */}
+                                <div className="bg-white rounded-xl border overflow-hidden lg:col-span-2">
+                                    <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50">
+                                        <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                            <Users className="w-5 h-5" />
+                                            Recent Leads
+                                        </h3>
+                                        <button
+                                            onClick={() => setShowingLeadForm(true)}
+                                            className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 flex items-center gap-2"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            Add Lead
+                                        </button>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-slate-50">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">School</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Source</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Assigned</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-slate-200">
+                                                {leads.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
+                                                            No leads found.
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    leads.map((lead) => (
+                                                        <tr
+                                                            key={lead.id}
+                                                            onClick={() => setViewingLeadId(lead.id)}
+                                                            className="hover:bg-slate-50 cursor-pointer transition-colors"
+                                                        >
+                                                            <td className="px-6 py-4">
+                                                                <div className="font-medium text-slate-900">{lead.schoolName}</div>
+                                                                <div className="text-xs text-slate-500">{lead.contactName}</div>
+                                                            </td>
+                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                <div onClick={(e) => e.stopPropagation()}>
+                                                                    <select
+                                                                        value={lead.status}
+                                                                        onChange={(e) => updateLeadStatus(lead.id, e.target.value)}
+                                                                        className={`px-2 py-1 text-xs font-semibold rounded-full border-0 cursor-pointer focus:ring-2 focus:ring-purple-500
+                                                                    ${lead.status === 'NEW' ? 'bg-blue-100 text-blue-800' :
+                                                                                lead.status === 'WON' ? 'bg-green-100 text-green-800' :
+                                                                                    'bg-slate-100 text-slate-800'}`}
+                                                                    >
+                                                                        <option value="NEW">New</option>
+                                                                        <option value="CONTACTED">Contacted</option>
+                                                                        <option value="QUALIFIED">Qualified</option>
+                                                                        <option value="PROPOSAL">Proposal</option>
+                                                                        <option value="NEGOTIATION">Negotiation</option>
+                                                                        <option value="WON">Won</option>
+                                                                        <option value="LOST">Lost</option>
+                                                                    </select>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                                                {lead.source}
+                                                            </td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                                                {lead.assignedTo?.fullName || 'Unassigned'}
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* My Tasks */}
+                                <div className="bg-white rounded-xl border overflow-hidden h-full">
+                                    <div className="px-6 py-4 border-b bg-slate-50 flex justify-between items-center">
+                                        <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                            <CheckSquare className="w-5 h-5" />
+                                            My Tasks
+                                        </h3>
+                                        <button className="text-sm text-purple-600 hover:text-purple-800 font-medium">
+                                            + New
+                                        </button>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                                        {tasks.length === 0 ? (
+                                            <div className="p-6 text-center text-slate-500 text-sm">
+                                                No tasks assigned to you.
+                                            </div>
+                                        ) : (
+                                            tasks.map(task => (
+                                                <div key={task.id} className="p-4 hover:bg-slate-50 flex gap-3">
+                                                    <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 cursor-pointer ${task.status === 'COMPLETED' ? 'bg-green-500 border-green-500' : 'border-slate-300'
+                                                        }`}>
+                                                        {task.status === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <div>
+                                                        <p className={`text-sm font-medium ${task.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{task.title}</p>
+                                                        {task.dueDate && (
+                                                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                                                <Calendar className="w-3 h-3" />
+                                                                {new Date(task.dueDate).toLocaleDateString()}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Pipeline Overview */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-slate-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <BarChart3 className="w-5 h-5" />
+                                        Pipeline Overview
+                                    </h3>
+                                </div>
+                                <div className="p-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                        {['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won'].map((stage) => (
+                                            <div key={stage} className="bg-slate-50 rounded-lg p-3 border h-96 overflow-y-auto">
+                                                <h4 className="text-xs font-semibold uppercase text-slate-500 mb-3 border-b pb-2">
+                                                    {stage.replace('_', ' ')}
+                                                </h4>
+                                                <div className="space-y-2">
+                                                    {pipeline?.deals
+                                                        .filter(d => d.stage === stage)
+                                                        .map(deal => (
+                                                            <div key={deal.id} className="bg-white p-3 rounded shadow-sm border text-sm hover:shadow-md cursor-pointer transition-shadow">
+                                                                <div className="font-medium text-slate-800">{deal.name}</div>
+                                                                <div className="flex justify-between items-center mt-2">
+                                                                    <span className="text-slate-500 text-xs">{deal.lead.schoolName}</span>
+                                                                </div>
+                                                                <div className="mt-2 text-xs font-semibold text-purple-600">
+                                                                    ZMW {Number(deal.value).toLocaleString()}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Lead Details Modal */}
+                            {viewingLeadId && leadDetails && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                                    <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto flex flex-col shadow-2xl">
+                                        <div className="p-6 border-b flex justify-between items-start sticky top-0 bg-white z-10">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-slate-900">{leadDetails.schoolName}</h3>
+                                                <div className="flex items-center gap-2 mt-2">
+                                                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${leadDetails.status === 'NEW' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
+                                                        }`}>
+                                                        {leadDetails.status}
+                                                    </span>
+                                                    <span className="text-sm text-slate-500">• {leadDetails.source}</span>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => setViewingLeadId(null)}
+                                                className="text-slate-400 hover:text-slate-600"
+                                            >
+                                                <XCircle className="w-6 h-6" />
+                                            </button>
+                                        </div>
+
+                                        <div className="p-6 space-y-6">
+                                            {/* Contact Info */}
+                                            <div className="bg-slate-50 p-4 rounded-lg border">
+                                                <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                                                    <Users className="w-4 h-4" /> Contact Information
+                                                </h4>
+                                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                                    <div>
+                                                        <p className="text-slate-500">Contact Person</p>
+                                                        <p className="font-medium">{leadDetails.contactName}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500">Email</p>
+                                                        <p className="font-medium">{leadDetails.contactEmail || 'N/A'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500">Assigned To</p>
+                                                        <p className="font-medium">{leadDetails.assignedTo?.fullName || 'Unassigned'}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Activity Logging */}
+                                            <div className="bg-slate-50 p-4 rounded-lg border">
+                                                <h4 className="font-semibold text-slate-900 mb-2">Log Activity</h4>
+                                                <div className="space-y-3">
+                                                    <select
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
+                                                        value={newActivity.type}
+                                                        onChange={(e) => setNewActivity({ ...newActivity, type: e.target.value })}
+                                                    >
+                                                        <option value="NOTE">Note</option>
+                                                        <option value="CALL">Call</option>
+                                                        <option value="EMAIL">Email</option>
+                                                        <option value="MEETING">Meeting</option>
+                                                    </select>
+                                                    <textarea
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
+                                                        rows={3}
+                                                        placeholder="Enter details..."
+                                                        value={newActivity.description}
+                                                        onChange={(e) => setNewActivity({ ...newActivity, description: e.target.value })}
+                                                    />
+                                                    <div className="flex justify-end">
+                                                        <button
+                                                            onClick={logActivity}
+                                                            disabled={!newActivity.description.trim()}
+                                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"
+                                                        >
+                                                            Log Activity
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Activities Timeline */}
+                                            <div>
+                                                <h4 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                                                    <Clock className="w-4 h-4" /> Activity History
+                                                </h4>
+                                                <div className="relative pl-4 border-l-2 border-slate-200 space-y-6">
+                                                    {leadDetails.activities?.length === 0 ? (
+                                                        <p className="text-sm text-slate-500 pl-4">No activities logged yet.</p>
+                                                    ) : (
+                                                        leadDetails.activities?.map((activity) => (
+                                                            <div key={activity.id} className="relative pl-4">
+                                                                <div className="absolute -left-[21px] top-1 w-3 h-3 bg-purple-500 rounded-full border-2 border-white"></div>
+                                                                <div className="text-sm">
+                                                                    <p className="font-medium text-slate-900">
+                                                                        {activity.type} <span className="text-slate-400 font-normal">by {activity.performedBy.fullName}</span>
+                                                                    </p>
+                                                                    <p className="text-slate-600 mt-1">{activity.description}</p>
+                                                                    <p className="text-xs text-slate-400 mt-1">
+                                                                        {new Date(activity.createdAt).toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        ))
                                                     )}
                                                 </div>
                                             </div>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Pipeline Overview */}
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <div className="px-6 py-4 border-b bg-slate-50">
-                                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                    <BarChart3 className="w-5 h-5" />
-                                    Pipeline Overview
-                                </h3>
-                            </div>
-                            <div className="p-6">
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                                    {['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won'].map((stage) => (
-                                        <div key={stage} className="bg-slate-50 rounded-lg p-3 border h-96 overflow-y-auto">
-                                            <h4 className="text-xs font-semibold uppercase text-slate-500 mb-3 border-b pb-2">
-                                                {stage.replace('_', ' ')}
-                                            </h4>
-                                            <div className="space-y-2">
-                                                {pipeline?.deals
-                                                    .filter(d => d.stage === stage)
-                                                    .map(deal => (
-                                                        <div key={deal.id} className="bg-white p-3 rounded shadow-sm border text-sm hover:shadow-md cursor-pointer transition-shadow">
-                                                            <div className="font-medium text-slate-800">{deal.name}</div>
-                                                            <div className="flex justify-between items-center mt-2">
-                                                                <span className="text-slate-500 text-xs">{deal.lead.schoolName}</span>
-                                                            </div>
-                                                            <div className="mt-2 text-xs font-semibold text-purple-600">
-                                                                ZMW {Number(deal.value).toLocaleString()}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                            </div>
                                         </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Lead Details Modal */}
-                        {viewingLeadId && leadDetails && (
-                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                                <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto flex flex-col shadow-2xl">
-                                    <div className="p-6 border-b flex justify-between items-start sticky top-0 bg-white z-10">
-                                        <div>
-                                            <h3 className="text-xl font-bold text-slate-900">{leadDetails.schoolName}</h3>
-                                            <div className="flex items-center gap-2 mt-2">
-                                                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${leadDetails.status === 'NEW' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
-                                                    }`}>
-                                                    {leadDetails.status}
-                                                </span>
-                                                <span className="text-sm text-slate-500">• {leadDetails.source}</span>
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={() => setViewingLeadId(null)}
-                                            className="text-slate-400 hover:text-slate-600"
-                                        >
-                                            <XCircle className="w-6 h-6" />
-                                        </button>
                                     </div>
+                                </div>
+                            )}
 
-                                    <div className="p-6 space-y-6">
-                                        {/* Contact Info */}
-                                        <div className="bg-slate-50 p-4 rounded-lg border">
-                                            <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                                                <Users className="w-4 h-4" /> Contact Information
-                                            </h4>
-                                            <div className="grid grid-cols-2 gap-4 text-sm">
-                                                <div>
-                                                    <p className="text-slate-500">Contact Person</p>
-                                                    <p className="font-medium">{leadDetails.contactName}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-slate-500">Email</p>
-                                                    <p className="font-medium">{leadDetails.contactEmail || 'N/A'}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-slate-500">Assigned To</p>
-                                                    <p className="font-medium">{leadDetails.assignedTo?.fullName || 'Unassigned'}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Activity Logging */}
-                                        <div className="bg-slate-50 p-4 rounded-lg border">
-                                            <h4 className="font-semibold text-slate-900 mb-2">Log Activity</h4>
-                                            <div className="space-y-3">
-                                                <select
-                                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-                                                    value={newActivity.type}
-                                                    onChange={(e) => setNewActivity({ ...newActivity, type: e.target.value })}
-                                                >
-                                                    <option value="NOTE">Note</option>
-                                                    <option value="CALL">Call</option>
-                                                    <option value="EMAIL">Email</option>
-                                                    <option value="MEETING">Meeting</option>
-                                                </select>
-                                                <textarea
-                                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-                                                    rows={3}
-                                                    placeholder="Enter details..."
-                                                    value={newActivity.description}
-                                                    onChange={(e) => setNewActivity({ ...newActivity, description: e.target.value })}
+                            {/* Add Lead Modal */}
+                            {showingLeadForm && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                                    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+                                        <h3 className="text-xl font-bold text-slate-900 mb-4">Add New Lead</h3>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">School Name</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                                                    value={leadForm.schoolName}
+                                                    onChange={(e) => setLeadForm({ ...leadForm, schoolName: e.target.value })}
                                                 />
-                                                <div className="flex justify-end">
-                                                    <button
-                                                        onClick={logActivity}
-                                                        disabled={!newActivity.description.trim()}
-                                                        className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"
-                                                    >
-                                                        Log Activity
-                                                    </button>
-                                                </div>
                                             </div>
-                                        </div>
-
-                                        {/* Activities Timeline */}
-                                        <div>
-                                            <h4 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                                                <Clock className="w-4 h-4" /> Activity History
-                                            </h4>
-                                            <div className="relative pl-4 border-l-2 border-slate-200 space-y-6">
-                                                {leadDetails.activities?.length === 0 ? (
-                                                    <p className="text-sm text-slate-500 pl-4">No activities logged yet.</p>
-                                                ) : (
-                                                    leadDetails.activities?.map((activity) => (
-                                                        <div key={activity.id} className="relative pl-4">
-                                                            <div className="absolute -left-[21px] top-1 w-3 h-3 bg-purple-500 rounded-full border-2 border-white"></div>
-                                                            <div className="text-sm">
-                                                                <p className="font-medium text-slate-900">
-                                                                    {activity.type} <span className="text-slate-400 font-normal">by {activity.performedBy.fullName}</span>
-                                                                </p>
-                                                                <p className="text-slate-600 mt-1">{activity.description}</p>
-                                                                <p className="text-xs text-slate-400 mt-1">
-                                                                    {new Date(activity.createdAt).toLocaleString()}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    ))
-                                                )}
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Contact Name</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                                                    value={leadForm.contactName}
+                                                    onChange={(e) => setLeadForm({ ...leadForm, contactName: e.target.value })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Contact Email</label>
+                                                <input
+                                                    type="email"
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                                                    value={leadForm.contactEmail}
+                                                    onChange={(e) => setLeadForm({ ...leadForm, contactEmail: e.target.value })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Source</label>
+                                                <select
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                                                    value={leadForm.source}
+                                                    onChange={(e) => setLeadForm({ ...leadForm, source: e.target.value })}
+                                                >
+                                                    <option value="WEBSITE">Website</option>
+                                                    <option value="REFERRAL">Referral</option>
+                                                    <option value="COLD_CALL">Cold Call</option>
+                                                    <option value="CONFERENCE">Conference</option>
+                                                    <option value="OTHER">Other</option>
+                                                </select>
+                                            </div>
+                                            <div className="flex justify-end gap-3 mt-6">
+                                                <button
+                                                    onClick={() => setShowingLeadForm(false)}
+                                                    className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={saveLead}
+                                                    disabled={loading || !leadForm.schoolName}
+                                                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                                                >
+                                                    {loading ? 'Creating...' : 'Create Lead'}
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
+                    )}
 
-                        {/* Add Lead Modal */}
-                        {showingLeadForm && (
-                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                                <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
-                                    <h3 className="text-xl font-bold text-slate-900 mb-4">Add New Lead</h3>
-                                    <div className="space-y-4">
+                    {/* Plans Tab */}
+                    {activeTab === 'plans' && (
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-bold text-slate-800">Subscription Plans</h2>
+                                <button
+                                    onClick={() => {
+                                        setEditingPlan(null);
+                                        setNewPlan({
+                                            name: '',
+                                            tier: 'STARTER',
+                                            monthlyPriceZMW: 0,
+                                            yearlyPriceZMW: 0,
+                                            includedStudents: 50,
+                                            maxStudents: 50,
+                                            maxTeachers: 5,
+                                            maxUsers: 10,
+                                            maxClasses: 5,
+                                            maxStorageGB: 1,
+                                            features: [],
+                                            isActive: true,
+                                            isPopular: false,
+                                            description: ''
+                                        });
+                                        setIsPlanModalOpen(true);
+                                    }}
+                                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Create Plan
+                                </button>
+                            </div>
+
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <table className="w-full">
+                                    <thead className="bg-slate-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Price (ZMW)</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Limits (Students)</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Active</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {plans.map((plan) => (
+                                            <tr key={plan.id} className="hover:bg-slate-50">
+                                                <td className="px-4 py-3 font-medium text-slate-900">{plan.name}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className="px-2 py-1 bg-slate-100 rounded text-xs">
+                                                        {plan.tier}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-600">
+                                                    K{plan.monthlyPriceZMW} / mo
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-600">
+                                                    {plan.maxStudents === 0 ? 'Unlimited' : plan.maxStudents}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        onClick={() => togglePlanStatus(plan)}
+                                                        className={`px-2 py-1 rounded text-xs font-medium ${plan.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                                            }`}
+                                                    >
+                                                        {plan.isActive ? 'Active' : 'Inactive'}
+                                                    </button>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditingPlan(plan);
+                                                            setNewPlan(plan);
+                                                            setIsPlanModalOpen(true);
+                                                        }}
+                                                        className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Plan Modal */}
+                    {isPlanModalOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+                                <h3 className="text-xl font-bold mb-4">{editingPlan ? 'Edit Plan' : 'Create Plan'}</h3>
+                                <form onSubmit={savePlan} className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">School Name</label>
+                                            <label className="block text-sm font-medium text-slate-700">Name</label>
                                             <input
                                                 type="text"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                                                value={leadForm.schoolName}
-                                                onChange={(e) => setLeadForm({ ...leadForm, schoolName: e.target.value })}
+                                                value={newPlan.name}
+                                                onChange={e => setNewPlan({ ...newPlan, name: e.target.value })}
+                                                className="w-full border rounded px-3 py-2"
+                                                required
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Contact Name</label>
-                                            <input
-                                                type="text"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                                                value={leadForm.contactName}
-                                                onChange={(e) => setLeadForm({ ...leadForm, contactName: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Contact Email</label>
-                                            <input
-                                                type="email"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                                                value={leadForm.contactEmail}
-                                                onChange={(e) => setLeadForm({ ...leadForm, contactEmail: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Source</label>
+                                            <label className="block text-sm font-medium text-slate-700">Tier</label>
                                             <select
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                                                value={leadForm.source}
-                                                onChange={(e) => setLeadForm({ ...leadForm, source: e.target.value })}
+                                                value={newPlan.tier}
+                                                onChange={e => setNewPlan({ ...newPlan, tier: e.target.value })}
+                                                className="w-full border rounded px-3 py-2"
+                                                disabled={!!editingPlan}
                                             >
-                                                <option value="WEBSITE">Website</option>
-                                                <option value="REFERRAL">Referral</option>
-                                                <option value="COLD_CALL">Cold Call</option>
-                                                <option value="CONFERENCE">Conference</option>
-                                                <option value="OTHER">Other</option>
+                                                {(settingsForm.availableTiers?.length > 0 ? settingsForm.availableTiers : [
+                                                    { key: 'FREE', label: 'Free' },
+                                                    { key: 'STARTER', label: 'Starter' },
+                                                    { key: 'PROFESSIONAL', label: 'Professional' },
+                                                    { key: 'ENTERPRISE', label: 'Enterprise' },
+                                                ]).map((tier: any) => (
+                                                    <option key={tier.key} value={tier.key}>{tier.label.toUpperCase()}</option>
+                                                ))}
                                             </select>
                                         </div>
-                                        <div className="flex justify-end gap-3 mt-6">
-                                            <button
-                                                onClick={() => setShowingLeadForm(false)}
-                                                className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={saveLead}
-                                                disabled={loading || !leadForm.schoolName}
-                                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                                            >
-                                                {loading ? 'Creating...' : 'Create Lead'}
-                                            </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700">Price (ZMW)</label>
+                                            <input
+                                                type="number"
+                                                value={newPlan.monthlyPriceZMW}
+                                                onChange={e => setNewPlan({ ...newPlan, monthlyPriceZMW: Number(e.target.value) })}
+                                                className="w-full border rounded px-3 py-2"
+                                                required
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700">Yearly (ZMW)</label>
+                                            <input
+                                                type="number"
+                                                value={newPlan.yearlyPriceZMW}
+                                                onChange={e => setNewPlan({ ...newPlan, yearlyPriceZMW: Number(e.target.value) })}
+                                                className="w-full border rounded px-3 py-2"
+                                            />
                                         </div>
                                     </div>
-                                </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700">Max Students</label>
+                                            <input
+                                                type="number"
+                                                value={newPlan.maxStudents}
+                                                onChange={e => setNewPlan({ ...newPlan, maxStudents: Number(e.target.value) })}
+                                                className="w-full border rounded px-3 py-2"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700">Max Teachers</label>
+                                            <input
+                                                type="number"
+                                                value={newPlan.maxTeachers}
+                                                onChange={e => setNewPlan({ ...newPlan, maxTeachers: Number(e.target.value) })}
+                                                className="w-full border rounded px-3 py-2"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Features Section */}
+                                    <div className="border-t pt-4">
+                                        <label className="block text-sm font-medium text-slate-700 mb-3">Included Features</label>
+                                        <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                                            {(settingsForm.availableFeatures?.length > 0 ? settingsForm.availableFeatures : [
+                                                { key: 'attendance', label: 'Attendance Tracking' },
+                                                { key: 'fee_management', label: 'Fee Management' },
+                                                { key: 'report_cards', label: 'Report Cards' },
+                                                { key: 'parent_portal', label: 'Parent Portal' },
+                                                { key: 'email_notifications', label: 'Email Notifications' },
+                                                { key: 'sms_notifications', label: 'SMS Notifications' },
+                                                { key: 'online_assessments', label: 'Online Assessments' },
+                                                { key: 'timetable', label: 'Timetable Management' },
+                                                { key: 'syllabus_tracking', label: 'Syllabus Tracking' },
+                                                { key: 'advanced_reports', label: 'Advanced Reports' },
+                                                { key: 'api_access', label: 'API Access' },
+                                                { key: 'white_label', label: 'White Label Branding' },
+                                                { key: 'data_export', label: 'Data Export' },
+                                                { key: 'basic_reports', label: 'Basic Reports' },
+                                                { key: 'dedicated_support', label: 'Dedicated Support' },
+                                                { key: 'custom_integrations', label: 'Custom Integrations' },
+                                                { key: 'priority_support', label: 'Priority Support' },
+                                            ]).map((feat: any) => (
+                                                <label key={feat.key} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={newPlan.features?.includes(feat.key) || false}
+                                                        onChange={(e) => {
+                                                            const features = newPlan.features || [];
+                                                            if (e.target.checked) {
+                                                                setNewPlan({ ...newPlan, features: [...features, feat.key] });
+                                                            } else {
+                                                                setNewPlan({ ...newPlan, features: features.filter(f => f !== feat.key) });
+                                                            }
+                                                        }}
+                                                        className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                                                    />
+                                                    {feat.label}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Popular & Description */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700">Description</label>
+                                            <input
+                                                type="text"
+                                                value={newPlan.description || ''}
+                                                onChange={e => setNewPlan({ ...newPlan, description: e.target.value })}
+                                                className="w-full border rounded px-3 py-2"
+                                                placeholder="Best for small schools"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2 pt-6">
+                                            <input
+                                                type="checkbox"
+                                                id="isPopular"
+                                                checked={newPlan.isPopular || false}
+                                                onChange={e => setNewPlan({ ...newPlan, isPopular: e.target.checked })}
+                                                className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                                            />
+                                            <label htmlFor="isPopular" className="text-sm font-medium text-slate-700">Mark as Popular</label>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-3 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPlanModalOpen(false)}
+                                            className="px-4 py-2 text-slate-600 hover:text-slate-800"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                                        >
+                                            Save Plan
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Plans Tab */}
-                {activeTab === 'plans' && (
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-slate-800">Subscription Plans</h2>
-                            <button
-                                onClick={() => {
-                                    setEditingPlan(null);
-                                    setNewPlan({
-                                        name: '',
-                                        tier: 'STARTER',
-                                        monthlyPriceZMW: 0,
-                                        yearlyPriceZMW: 0,
-                                        includedStudents: 50,
-                                        maxStudents: 50,
-                                        maxTeachers: 5,
-                                        maxUsers: 10,
-                                        maxClasses: 5,
-                                        maxStorageGB: 1,
-                                        features: [],
-                                        isActive: true,
-                                        isPopular: false,
-                                        description: ''
-                                    });
-                                    setIsPlanModalOpen(true);
-                                }}
-                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
-                            >
-                                <Plus className="w-4 h-4" />
-                                Create Plan
-                            </button>
                         </div>
+                    )}
 
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <table className="w-full">
-                                <thead className="bg-slate-50">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tier</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Price (ZMW)</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Limits (Students)</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Active</th>
-                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {plans.map((plan) => (
-                                        <tr key={plan.id} className="hover:bg-slate-50">
-                                            <td className="px-4 py-3 font-medium text-slate-900">{plan.name}</td>
-                                            <td className="px-4 py-3">
-                                                <span className="px-2 py-1 bg-slate-100 rounded text-xs">
-                                                    {plan.tier}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-slate-600">
-                                                K{plan.monthlyPriceZMW} / mo
-                                            </td>
-                                            <td className="px-4 py-3 text-slate-600">
-                                                {plan.maxStudents === 0 ? 'Unlimited' : plan.maxStudents}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => togglePlanStatus(plan)}
-                                                    className={`px-2 py-1 rounded text-xs font-medium ${plan.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                                        }`}
-                                                >
-                                                    {plan.isActive ? 'Active' : 'Inactive'}
-                                                </button>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => {
-                                                        setEditingPlan(plan);
-                                                        setNewPlan(plan);
-                                                        setIsPlanModalOpen(true);
-                                                    }}
-                                                    className="text-purple-600 hover:text-purple-800 text-sm font-medium"
-                                                >
-                                                    Edit
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                    {/* Announcements Tab */}
+                    {activeTab === 'announcements' && (
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-bold text-slate-800">System Broadcasts</h2>
+                                <button
+                                    onClick={() => setIsAnnouncementModalOpen(true)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    New Broadcast
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                {announcements.map(ann => (
+                                    <div key={ann.id} className={`p-4 rounded-xl border flex justify-between items-start ${ann.type === 'WARNING' ? 'bg-orange-50 border-orange-100' :
+                                        ann.type === 'ERROR' ? 'bg-red-50 border-red-100' :
+                                            'bg-blue-50 border-blue-100'
+                                        }`}>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase ${ann.type === 'WARNING' ? 'bg-orange-200 text-orange-800' :
+                                                    ann.type === 'ERROR' ? 'bg-red-200 text-red-800' :
+                                                        'bg-blue-200 text-blue-800'
+                                                    }`}>{ann.type}</span>
+                                                <h3 className="font-bold text-slate-900">{ann.title}</h3>
+                                            </div>
+                                            <p className="mt-1 text-slate-700">{ann.message}</p>
+                                            <p className="mt-2 text-xs text-slate-500">Posted: {new Date(ann.createdAt).toLocaleString()}</p>
+                                        </div>
+                                        <button onClick={() => deleteAnnouncement(ann.id)} className="text-slate-400 hover:text-red-600">
+                                            <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Plan Modal */}
-                {isPlanModalOpen && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                        <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto">
-                            <h3 className="text-xl font-bold mb-4">{editingPlan ? 'Edit Plan' : 'Create Plan'}</h3>
-                            <form onSubmit={savePlan} className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
+                    {/* Announcement Modal */}
+                    {isAnnouncementModalOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+                                <h3 className="text-xl font-bold mb-4">New Broadcast</h3>
+                                <form onSubmit={saveAnnouncement} className="space-y-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700">Name</label>
+                                        <label className="block text-sm font-medium text-slate-700">Title</label>
                                         <input
                                             type="text"
-                                            value={newPlan.name}
-                                            onChange={e => setNewPlan({ ...newPlan, name: e.target.value })}
+                                            value={newAnnouncement.title}
+                                            onChange={e => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })}
                                             className="w-full border rounded px-3 py-2"
                                             required
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700">Tier</label>
+                                        <label className="block text-sm font-medium text-slate-700">Type</label>
                                         <select
-                                            value={newPlan.tier}
-                                            onChange={e => setNewPlan({ ...newPlan, tier: e.target.value })}
+                                            value={newAnnouncement.type}
+                                            onChange={e => setNewAnnouncement({ ...newAnnouncement, type: e.target.value })}
                                             className="w-full border rounded px-3 py-2"
-                                            disabled={!!editingPlan}
                                         >
-                                            {(settingsForm.availableTiers?.length > 0 ? settingsForm.availableTiers : [
+                                            <option value="INFO">Info</option>
+                                            <option value="WARNING">Warning</option>
+                                            <option value="ERROR">Alert (Red)</option>
+                                            <option value="SUCCESS">Success (Green)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700">Message</label>
+                                        <textarea
+                                            value={newAnnouncement.message}
+                                            onChange={e => setNewAnnouncement({ ...newAnnouncement, message: e.target.value })}
+                                            className="w-full border rounded px-3 py-2 h-24"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="flex justify-end gap-3 mt-6">
+                                        <button type="button" onClick={() => setIsAnnouncementModalOpen(false)} className="text-slate-600">Cancel</button>
+                                        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">Broadcast</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Settings Tab */}
+                    {activeTab === 'settings' && (
+                        <div className="space-y-6">
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-slate-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <Settings className="w-5 h-5" />
+                                        SMS Gateway Configuration
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Configure your centralized SMS gateway credentials</p>
+                                </div>
+
+                                <div className="p-6 space-y-6">
+                                    {/* Provider Selection */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">SMS Provider</label>
+                                        <select
+                                            value={settingsForm.smsProvider}
+                                            onChange={(e) => setSettingsForm({ ...settingsForm, smsProvider: e.target.value })}
+                                            className="w-full md:w-1/2 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                        >
+                                            <option value="africastalking">Africa's Talking</option>
+                                            <option value="twilio">Twilio</option>
+                                            <option value="infobip">Infobip</option>
+                                            <option value="termii">Termii</option>
+                                            <option value="zamtel">Zamtel Bulk SMS</option>
+                                        </select>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                            {settingsForm.smsProvider === 'africastalking' && "Popular in Africa. Get credentials at africastalking.com"}
+                                            {settingsForm.smsProvider === 'twilio' && "Global provider. Get credentials at twilio.com/console"}
+                                            {settingsForm.smsProvider === 'infobip' && "Enterprise SMS. Get credentials at infobip.com"}
+                                            {settingsForm.smsProvider === 'termii' && "Affordable African SMS. Get credentials at termii.com"}
+                                            {settingsForm.smsProvider === 'zamtel' && "Local Zambian provider"}
+                                        </p>
+                                    </div>
+
+                                    {/* Provider-specific fields */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {(settingsForm.smsProvider === 'zamtel' || settingsForm.smsProvider === 'infobip') && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-2">API URL</label>
+                                                <input
+                                                    type="url"
+                                                    value={settingsForm.smsApiUrl}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, smsApiUrl: e.target.value })}
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                                    placeholder={settingsForm.smsProvider === 'infobip' ? 'https://xxxxx.api.infobip.com' : 'https://api.example.com/sms'}
+                                                />
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                {settingsForm.smsProvider === 'twilio' ? 'Account SID' :
+                                                    settingsForm.smsProvider === 'africastalking' ? 'API Key' :
+                                                        'API Key'}
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type={showApiKey ? 'text' : 'password'}
+                                                    value={settingsForm.smsApiKey}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, smsApiKey: e.target.value })}
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 pr-10"
+                                                    placeholder={platformSettings?.smsApiKey ? '••••••••' : 'Enter API key'}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowApiKey(!showApiKey)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                                >
+                                                    {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                {settingsForm.smsProvider === 'twilio' ? 'Auth Token' :
+                                                    settingsForm.smsProvider === 'africastalking' ? 'Username' :
+                                                        'API Secret'}
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type={showApiSecret ? 'text' : 'password'}
+                                                    value={settingsForm.smsApiSecret}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, smsApiSecret: e.target.value })}
+                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 pr-10"
+                                                    placeholder={platformSettings?.smsApiSecret ? '••••••••' : settingsForm.smsProvider === 'africastalking' ? 'sandbox or your username' : 'Enter secret'}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowApiSecret(!showApiSecret)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                                >
+                                                    {showApiSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">Default Sender ID</label>
+                                            <input
+                                                type="text"
+                                                value={settingsForm.smsDefaultSenderId}
+                                                onChange={(e) => setSettingsForm({ ...settingsForm, smsDefaultSenderId: e.target.value.toUpperCase() })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 uppercase"
+                                                placeholder="SYNC"
+                                                maxLength={11}
+                                            />
+                                            <p className="text-xs text-slate-500 mt-1">3-11 alphanumeric characters. Used when tenant doesn't have custom ID.</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">Cost per SMS (ZMW)</label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                value={settingsForm.smsCostPerUnit}
+                                                onChange={(e) => setSettingsForm({ ...settingsForm, smsCostPerUnit: parseFloat(e.target.value) })}
+                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                                placeholder="0.15"
+                                            />
+                                            <p className="text-xs text-slate-500 mt-1">Internal tracking cost per SMS unit</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Save Button */}
+                                    <div className="flex gap-3 pt-4 border-t">
+                                        <button
+                                            onClick={savePlatformSettings}
+                                            disabled={loading}
+                                            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                        >
+                                            <Save className="w-4 h-4" />
+                                            {loading ? 'Saving...' : 'Save Settings'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Azure Email Configuration */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-slate-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <Mail className="w-5 h-5" />
+                                        Azure Email Service Configuration
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Configure Azure Communication Services for high-volume email sending (recommended for &gt;100 emails/day)</p>
+                                </div>
+
+                                <div className="p-6 space-y-6">
+                                    {/* Enable Azure Email */}
+                                    <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <div className="flex-1">
+                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.azureEmailEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, azureEmailEnabled: e.target.checked })}
+                                                    className="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                                                />
+                                                <div>
+                                                    <span className="font-medium text-blue-900">Enable Azure Communication Services</span>
+                                                    <p className="text-sm text-blue-700 mt-1">
+                                                        Use Azure for reliable, high-volume email delivery. Falls back to SMTP if Azure fails.
+                                                    </p>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    {settingsForm.azureEmailEnabled && (
+                                        <>
+                                            {/* Info Box */}
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                                <div className="flex gap-3">
+                                                    <div className="text-amber-600 mt-0.5">ℹ️</div>
+                                                    <div className="flex-1">
+                                                        <p className="text-sm font-medium text-amber-900 mb-2">How to get Azure credentials:</p>
+                                                        <ol className="text-sm text-amber-800 space-y-1 list-decimal list-inside">
+                                                            <li>Go to <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer" className="underline">Azure Portal</a></li>
+                                                            <li>Create a Communication Services resource</li>
+                                                            <li>Go to Keys section and copy the connection string</li>
+                                                            <li>Configure your email domain in Azure</li>
+                                                        </ol>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Connection Method Selection */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-2">Connection Method</label>
+                                                <div className="flex gap-4">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            name="azureConnectionMethod"
+                                                            checked={!!settingsForm.azureEmailConnectionString || !settingsForm.azureEmailEndpoint}
+                                                            onChange={() => setSettingsForm({ 
+                                                                ...settingsForm, 
+                                                                azureEmailEndpoint: '',
+                                                                azureEmailAccessKey: ''
+                                                            })}
+                                                            className="text-blue-600 focus:ring-blue-500"
+                                                        />
+                                                        <span className="text-sm text-slate-700">Connection String (Recommended)</span>
+                                                    </label>
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            name="azureConnectionMethod"
+                                                            checked={!!settingsForm.azureEmailEndpoint}
+                                                            onChange={() => setSettingsForm({ 
+                                                                ...settingsForm, 
+                                                                azureEmailConnectionString: ''
+                                                            })}
+                                                            className="text-blue-600 focus:ring-blue-500"
+                                                        />
+                                                        <span className="text-sm text-slate-700">Endpoint + Access Key</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            {/* Connection String Method */}
+                                            {(!settingsForm.azureEmailEndpoint || settingsForm.azureEmailConnectionString) && (
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                        Azure Connection String *
+                                                    </label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.azureEmailConnectionString}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, azureEmailConnectionString: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                                                        placeholder={platformSettings?.azureEmailConnectionString ? '••••••••' : 'endpoint=https://...;accesskey=...'}
+                                                    />
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        Full connection string from Azure Portal → Communication Services → Keys
+                                                    </p>
+                                                </div>
+                                            )}
+
+                                            {/* Endpoint + Key Method */}
+                                            {settingsForm.azureEmailEndpoint && !settingsForm.azureEmailConnectionString && (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                            Azure Endpoint *
+                                                        </label>
+                                                        <input
+                                                            type="url"
+                                                            value={settingsForm.azureEmailEndpoint}
+                                                            onChange={(e) => setSettingsForm({ ...settingsForm, azureEmailEndpoint: e.target.value })}
+                                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                            placeholder="https://your-resource.communication.azure.com"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                            Access Key *
+                                                        </label>
+                                                        <input
+                                                            type="password"
+                                                            value={settingsForm.azureEmailAccessKey}
+                                                            onChange={(e) => setSettingsForm({ ...settingsForm, azureEmailAccessKey: e.target.value })}
+                                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                                                            placeholder={platformSettings?.azureEmailAccessKey ? '••••••••' : 'Your access key'}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* From Address */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                                    From Email Address *
+                                                </label>
+                                                <input
+                                                    type="email"
+                                                    value={settingsForm.azureEmailFromAddress}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, azureEmailFromAddress: e.target.value })}
+                                                    className="w-full md:w-1/2 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                    placeholder="DoNotReply@yourdomain.com"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-1">
+                                                    Must be a verified domain in your Azure Communication Services
+                                                </p>
+                                            </div>
+
+                                            {/* Test Connection Button */}
+                                            <div className="flex gap-3 pt-4 border-t">
+                                                <button
+                                                    onClick={savePlatformSettings}
+                                                    disabled={loading}
+                                                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Save className="w-4 h-4" />
+                                                    {loading ? 'Saving...' : 'Save Azure Settings'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="px-6 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+                                                    onClick={() => alert('Test email feature coming soon!')}
+                                                >
+                                                    Send Test Email
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {!settingsForm.azureEmailEnabled && (
+                                        <div className="text-center py-8 text-slate-500">
+                                            <p className="text-sm">Azure Email is disabled. Enable it above to configure settings.</p>
+                                            <p className="text-xs mt-2">System will use SMTP for email delivery.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Feature & Tier Management */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-slate-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <Settings className="w-5 h-5" />
+                                        Feature & Tier Configuration
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Manage available features and subscription tiers</p>
+                                </div>
+                                <div className="p-6 space-y-6">
+                                    {/* Available Features */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-3">Available Features</label>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+                                            {(settingsForm.availableFeatures || [
+                                                { key: 'attendance', label: 'Attendance Tracking' },
+                                                { key: 'fee_management', label: 'Fee Management' },
+                                                { key: 'report_cards', label: 'Report Cards' },
+                                                { key: 'parent_portal', label: 'Parent Portal' },
+                                                { key: 'email_notifications', label: 'Email Notifications' },
+                                                { key: 'sms_notifications', label: 'SMS Notifications' },
+                                                { key: 'online_assessments', label: 'Online Assessments' },
+                                                { key: 'timetable', label: 'Timetable Management' },
+                                                { key: 'syllabus_tracking', label: 'Syllabus Tracking' },
+                                                { key: 'advanced_reports', label: 'Advanced Reports' },
+                                                { key: 'api_access', label: 'API Access' },
+                                                { key: 'white_label', label: 'White Label Branding' },
+                                                { key: 'data_export', label: 'Data Export' },
+                                                { key: 'basic_reports', label: 'Basic Reports' },
+                                                { key: 'dedicated_support', label: 'Dedicated Support' },
+                                                { key: 'custom_integrations', label: 'Custom Integrations' },
+                                                { key: 'priority_support', label: 'Priority Support' },
+                                            ]).map((feat: any, idx: number) => (
+                                                <div key={idx} className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg">
+                                                    <span className="text-sm text-slate-700 flex-1">{feat.label}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const features = settingsForm.availableFeatures || [];
+                                                            setSettingsForm({
+                                                                ...settingsForm,
+                                                                availableFeatures: features.filter((_: any, i: number) => i !== idx)
+                                                            });
+                                                        }}
+                                                        className="text-red-500 hover:text-red-700 text-xs"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                id="newFeatureKey"
+                                                placeholder="feature_key"
+                                                className="px-3 py-2 border rounded-lg text-sm"
+                                            />
+                                            <input
+                                                type="text"
+                                                id="newFeatureLabel"
+                                                placeholder="Feature Label"
+                                                className="px-3 py-2 border rounded-lg text-sm flex-1"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const keyEl = document.getElementById('newFeatureKey') as HTMLInputElement;
+                                                    const labelEl = document.getElementById('newFeatureLabel') as HTMLInputElement;
+                                                    if (keyEl.value && labelEl.value) {
+                                                        const features = settingsForm.availableFeatures || [];
+                                                        setSettingsForm({
+                                                            ...settingsForm,
+                                                            availableFeatures: [...features, { key: keyEl.value, label: labelEl.value }]
+                                                        });
+                                                        keyEl.value = '';
+                                                        labelEl.value = '';
+                                                    }
+                                                }}
+                                                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
+                                            >
+                                                Add Feature
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Available Tiers */}
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-3">Available Tiers</label>
+                                        <div className="flex flex-wrap gap-2 mb-3">
+                                            {(settingsForm.availableTiers || [
                                                 { key: 'FREE', label: 'Free' },
                                                 { key: 'STARTER', label: 'Starter' },
                                                 { key: 'PROFESSIONAL', label: 'Professional' },
                                                 { key: 'ENTERPRISE', label: 'Enterprise' },
-                                            ]).map((tier: any) => (
-                                                <option key={tier.key} value={tier.key}>{tier.label.toUpperCase()}</option>
+                                            ]).map((tier: any, idx: number) => (
+                                                <div key={idx} className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
+                                                    <span className="text-sm font-medium text-purple-800">{tier.label}</span>
+                                                    <span className="text-xs text-purple-600">({tier.key})</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const tiers = settingsForm.availableTiers || [];
+                                                            setSettingsForm({
+                                                                ...settingsForm,
+                                                                availableTiers: tiers.filter((_: any, i: number) => i !== idx)
+                                                            });
+                                                        }}
+                                                        className="text-red-500 hover:text-red-700 text-xs ml-1"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </div>
                                             ))}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Price (ZMW)</label>
-                                        <input
-                                            type="number"
-                                            value={newPlan.monthlyPriceZMW}
-                                            onChange={e => setNewPlan({ ...newPlan, monthlyPriceZMW: Number(e.target.value) })}
-                                            className="w-full border rounded px-3 py-2"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Yearly (ZMW)</label>
-                                        <input
-                                            type="number"
-                                            value={newPlan.yearlyPriceZMW}
-                                            onChange={e => setNewPlan({ ...newPlan, yearlyPriceZMW: Number(e.target.value) })}
-                                            className="w-full border rounded px-3 py-2"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Max Students</label>
-                                        <input
-                                            type="number"
-                                            value={newPlan.maxStudents}
-                                            onChange={e => setNewPlan({ ...newPlan, maxStudents: Number(e.target.value) })}
-                                            className="w-full border rounded px-3 py-2"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Max Teachers</label>
-                                        <input
-                                            type="number"
-                                            value={newPlan.maxTeachers}
-                                            onChange={e => setNewPlan({ ...newPlan, maxTeachers: Number(e.target.value) })}
-                                            className="w-full border rounded px-3 py-2"
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Features Section */}
-                                <div className="border-t pt-4">
-                                    <label className="block text-sm font-medium text-slate-700 mb-3">Included Features</label>
-                                    <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                                        {(settingsForm.availableFeatures?.length > 0 ? settingsForm.availableFeatures : [
-                                            { key: 'attendance', label: 'Attendance Tracking' },
-                                            { key: 'fee_management', label: 'Fee Management' },
-                                            { key: 'report_cards', label: 'Report Cards' },
-                                            { key: 'parent_portal', label: 'Parent Portal' },
-                                            { key: 'email_notifications', label: 'Email Notifications' },
-                                            { key: 'sms_notifications', label: 'SMS Notifications' },
-                                            { key: 'online_assessments', label: 'Online Assessments' },
-                                            { key: 'timetable', label: 'Timetable Management' },
-                                            { key: 'syllabus_tracking', label: 'Syllabus Tracking' },
-                                            { key: 'advanced_reports', label: 'Advanced Reports' },
-                                            { key: 'api_access', label: 'API Access' },
-                                            { key: 'white_label', label: 'White Label Branding' },
-                                            { key: 'data_export', label: 'Data Export' },
-                                            { key: 'basic_reports', label: 'Basic Reports' },
-                                            { key: 'dedicated_support', label: 'Dedicated Support' },
-                                            { key: 'custom_integrations', label: 'Custom Integrations' },
-                                            { key: 'priority_support', label: 'Priority Support' },
-                                        ]).map((feat: any) => (
-                                            <label key={feat.key} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 p-1 rounded">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={newPlan.features?.includes(feat.key) || false}
-                                                    onChange={(e) => {
-                                                        const features = newPlan.features || [];
-                                                        if (e.target.checked) {
-                                                            setNewPlan({ ...newPlan, features: [...features, feat.key] });
-                                                        } else {
-                                                            setNewPlan({ ...newPlan, features: features.filter(f => f !== feat.key) });
-                                                        }
-                                                    }}
-                                                    className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
-                                                />
-                                                {feat.label}
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Popular & Description */}
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Description</label>
-                                        <input
-                                            type="text"
-                                            value={newPlan.description || ''}
-                                            onChange={e => setNewPlan({ ...newPlan, description: e.target.value })}
-                                            className="w-full border rounded px-3 py-2"
-                                            placeholder="Best for small schools"
-                                        />
-                                    </div>
-                                    <div className="flex items-center gap-2 pt-6">
-                                        <input
-                                            type="checkbox"
-                                            id="isPopular"
-                                            checked={newPlan.isPopular || false}
-                                            onChange={e => setNewPlan({ ...newPlan, isPopular: e.target.checked })}
-                                            className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
-                                        />
-                                        <label htmlFor="isPopular" className="text-sm font-medium text-slate-700">Mark as Popular</label>
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-end gap-3 mt-6">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsPlanModalOpen(false)}
-                                        className="px-4 py-2 text-slate-600 hover:text-slate-800"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-                                    >
-                                        Save Plan
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Announcements Tab */}
-                {activeTab === 'announcements' && (
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-slate-800">System Broadcasts</h2>
-                            <button
-                                onClick={() => setIsAnnouncementModalOpen(true)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                            >
-                                <Plus className="w-4 h-4" />
-                                New Broadcast
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4">
-                            {announcements.map(ann => (
-                                <div key={ann.id} className={`p-4 rounded-xl border flex justify-between items-start ${ann.type === 'WARNING' ? 'bg-orange-50 border-orange-100' :
-                                    ann.type === 'ERROR' ? 'bg-red-50 border-red-100' :
-                                        'bg-blue-50 border-blue-100'
-                                    }`}>
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase ${ann.type === 'WARNING' ? 'bg-orange-200 text-orange-800' :
-                                                ann.type === 'ERROR' ? 'bg-red-200 text-red-800' :
-                                                    'bg-blue-200 text-blue-800'
-                                                }`}>{ann.type}</span>
-                                            <h3 className="font-bold text-slate-900">{ann.title}</h3>
                                         </div>
-                                        <p className="mt-1 text-slate-700">{ann.message}</p>
-                                        <p className="mt-2 text-xs text-slate-500">Posted: {new Date(ann.createdAt).toLocaleString()}</p>
-                                    </div>
-                                    <button onClick={() => deleteAnnouncement(ann.id)} className="text-slate-400 hover:text-red-600">
-                                        <Trash2 className="w-5 h-5" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Announcement Modal */}
-                {isAnnouncementModalOpen && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                        <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
-                            <h3 className="text-xl font-bold mb-4">New Broadcast</h3>
-                            <form onSubmit={saveAnnouncement} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Title</label>
-                                    <input
-                                        type="text"
-                                        value={newAnnouncement.title}
-                                        onChange={e => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })}
-                                        className="w-full border rounded px-3 py-2"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Type</label>
-                                    <select
-                                        value={newAnnouncement.type}
-                                        onChange={e => setNewAnnouncement({ ...newAnnouncement, type: e.target.value })}
-                                        className="w-full border rounded px-3 py-2"
-                                    >
-                                        <option value="INFO">Info</option>
-                                        <option value="WARNING">Warning</option>
-                                        <option value="ERROR">Alert (Red)</option>
-                                        <option value="SUCCESS">Success (Green)</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Message</label>
-                                    <textarea
-                                        value={newAnnouncement.message}
-                                        onChange={e => setNewAnnouncement({ ...newAnnouncement, message: e.target.value })}
-                                        className="w-full border rounded px-3 py-2 h-24"
-                                        required
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-3 mt-6">
-                                    <button type="button" onClick={() => setIsAnnouncementModalOpen(false)} className="text-slate-600">Cancel</button>
-                                    <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">Broadcast</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Settings Tab */}
-                {activeTab === 'settings' && (
-                    <div className="space-y-6">
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <div className="px-6 py-4 border-b bg-slate-50">
-                                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                    <Settings className="w-5 h-5" />
-                                    SMS Gateway Configuration
-                                </h3>
-                                <p className="text-sm text-slate-500 mt-1">Configure your centralized SMS gateway credentials</p>
-                            </div>
-
-                            <div className="p-6 space-y-6">
-                                {/* Provider Selection */}
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-2">SMS Provider</label>
-                                    <select
-                                        value={settingsForm.smsProvider}
-                                        onChange={(e) => setSettingsForm({ ...settingsForm, smsProvider: e.target.value })}
-                                        className="w-full md:w-1/2 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    >
-                                        <option value="africastalking">Africa's Talking</option>
-                                        <option value="twilio">Twilio</option>
-                                        <option value="infobip">Infobip</option>
-                                        <option value="termii">Termii</option>
-                                        <option value="zamtel">Zamtel Bulk SMS</option>
-                                    </select>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        {settingsForm.smsProvider === 'africastalking' && "Popular in Africa. Get credentials at africastalking.com"}
-                                        {settingsForm.smsProvider === 'twilio' && "Global provider. Get credentials at twilio.com/console"}
-                                        {settingsForm.smsProvider === 'infobip' && "Enterprise SMS. Get credentials at infobip.com"}
-                                        {settingsForm.smsProvider === 'termii' && "Affordable African SMS. Get credentials at termii.com"}
-                                        {settingsForm.smsProvider === 'zamtel' && "Local Zambian provider"}
-                                    </p>
-                                </div>
-
-                                {/* Provider-specific fields */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {(settingsForm.smsProvider === 'zamtel' || settingsForm.smsProvider === 'infobip') && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-2">API URL</label>
+                                        <div className="flex gap-2">
                                             <input
-                                                type="url"
-                                                value={settingsForm.smsApiUrl}
-                                                onChange={(e) => setSettingsForm({ ...settingsForm, smsApiUrl: e.target.value })}
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                                placeholder={settingsForm.smsProvider === 'infobip' ? 'https://xxxxx.api.infobip.com' : 'https://api.example.com/sms'}
+                                                type="text"
+                                                id="newTierKey"
+                                                placeholder="TIER_KEY"
+                                                className="px-3 py-2 border rounded-lg text-sm uppercase"
                                             />
-                                        </div>
-                                    )}
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            {settingsForm.smsProvider === 'twilio' ? 'Account SID' :
-                                                settingsForm.smsProvider === 'africastalking' ? 'API Key' :
-                                                    'API Key'}
-                                        </label>
-                                        <div className="relative">
                                             <input
-                                                type={showApiKey ? 'text' : 'password'}
-                                                value={settingsForm.smsApiKey}
-                                                onChange={(e) => setSettingsForm({ ...settingsForm, smsApiKey: e.target.value })}
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 pr-10"
-                                                placeholder={platformSettings?.smsApiKey ? '••••••••' : 'Enter API key'}
+                                                type="text"
+                                                id="newTierLabel"
+                                                placeholder="Tier Label"
+                                                className="px-3 py-2 border rounded-lg text-sm flex-1"
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setShowApiKey(!showApiKey)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                            >
-                                                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            {settingsForm.smsProvider === 'twilio' ? 'Auth Token' :
-                                                settingsForm.smsProvider === 'africastalking' ? 'Username' :
-                                                    'API Secret'}
-                                        </label>
-                                        <div className="relative">
-                                            <input
-                                                type={showApiSecret ? 'text' : 'password'}
-                                                value={settingsForm.smsApiSecret}
-                                                onChange={(e) => setSettingsForm({ ...settingsForm, smsApiSecret: e.target.value })}
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 pr-10"
-                                                placeholder={platformSettings?.smsApiSecret ? '••••••••' : settingsForm.smsProvider === 'africastalking' ? 'sandbox or your username' : 'Enter secret'}
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowApiSecret(!showApiSecret)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                            >
-                                                {showApiSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">Default Sender ID</label>
-                                        <input
-                                            type="text"
-                                            value={settingsForm.smsDefaultSenderId}
-                                            onChange={(e) => setSettingsForm({ ...settingsForm, smsDefaultSenderId: e.target.value.toUpperCase() })}
-                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 uppercase"
-                                            placeholder="SYNC"
-                                            maxLength={11}
-                                        />
-                                        <p className="text-xs text-slate-500 mt-1">3-11 alphanumeric characters. Used when tenant doesn't have custom ID.</p>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">Cost per SMS (ZMW)</label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            value={settingsForm.smsCostPerUnit}
-                                            onChange={(e) => setSettingsForm({ ...settingsForm, smsCostPerUnit: parseFloat(e.target.value) })}
-                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                            placeholder="0.15"
-                                        />
-                                        <p className="text-xs text-slate-500 mt-1">Internal tracking cost per SMS unit</p>
-                                    </div>
-                                </div>
-
-                                {/* Save Button */}
-                                <div className="flex gap-3 pt-4 border-t">
-                                    <button
-                                        onClick={savePlatformSettings}
-                                        disabled={loading}
-                                        className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        <Save className="w-4 h-4" />
-                                        {loading ? 'Saving...' : 'Save Settings'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Feature & Tier Management */}
-                        <div className="bg-white rounded-xl border overflow-hidden">
-                            <div className="px-6 py-4 border-b bg-slate-50">
-                                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                                    <Settings className="w-5 h-5" />
-                                    Feature & Tier Configuration
-                                </h3>
-                                <p className="text-sm text-slate-500 mt-1">Manage available features and subscription tiers</p>
-                            </div>
-                            <div className="p-6 space-y-6">
-                                {/* Available Features */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-slate-700 mb-3">Available Features</label>
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
-                                        {(settingsForm.availableFeatures || [
-                                            { key: 'attendance', label: 'Attendance Tracking' },
-                                            { key: 'fee_management', label: 'Fee Management' },
-                                            { key: 'report_cards', label: 'Report Cards' },
-                                            { key: 'parent_portal', label: 'Parent Portal' },
-                                            { key: 'email_notifications', label: 'Email Notifications' },
-                                            { key: 'sms_notifications', label: 'SMS Notifications' },
-                                            { key: 'online_assessments', label: 'Online Assessments' },
-                                            { key: 'timetable', label: 'Timetable Management' },
-                                            { key: 'syllabus_tracking', label: 'Syllabus Tracking' },
-                                            { key: 'advanced_reports', label: 'Advanced Reports' },
-                                            { key: 'api_access', label: 'API Access' },
-                                            { key: 'white_label', label: 'White Label Branding' },
-                                            { key: 'data_export', label: 'Data Export' },
-                                            { key: 'basic_reports', label: 'Basic Reports' },
-                                            { key: 'dedicated_support', label: 'Dedicated Support' },
-                                            { key: 'custom_integrations', label: 'Custom Integrations' },
-                                            { key: 'priority_support', label: 'Priority Support' },
-                                        ]).map((feat: any, idx: number) => (
-                                            <div key={idx} className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg">
-                                                <span className="text-sm text-slate-700 flex-1">{feat.label}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const features = settingsForm.availableFeatures || [];
-                                                        setSettingsForm({
-                                                            ...settingsForm,
-                                                            availableFeatures: features.filter((_: any, i: number) => i !== idx)
-                                                        });
-                                                    }}
-                                                    className="text-red-500 hover:text-red-700 text-xs"
-                                                >
-                                                    ×
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            id="newFeatureKey"
-                                            placeholder="feature_key"
-                                            className="px-3 py-2 border rounded-lg text-sm"
-                                        />
-                                        <input
-                                            type="text"
-                                            id="newFeatureLabel"
-                                            placeholder="Feature Label"
-                                            className="px-3 py-2 border rounded-lg text-sm flex-1"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const keyEl = document.getElementById('newFeatureKey') as HTMLInputElement;
-                                                const labelEl = document.getElementById('newFeatureLabel') as HTMLInputElement;
-                                                if (keyEl.value && labelEl.value) {
-                                                    const features = settingsForm.availableFeatures || [];
-                                                    setSettingsForm({
-                                                        ...settingsForm,
-                                                        availableFeatures: [...features, { key: keyEl.value, label: labelEl.value }]
-                                                    });
-                                                    keyEl.value = '';
-                                                    labelEl.value = '';
-                                                }
-                                            }}
-                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
-                                        >
-                                            Add Feature
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Available Tiers */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-slate-700 mb-3">Available Tiers</label>
-                                    <div className="flex flex-wrap gap-2 mb-3">
-                                        {(settingsForm.availableTiers || [
-                                            { key: 'FREE', label: 'Free' },
-                                            { key: 'STARTER', label: 'Starter' },
-                                            { key: 'PROFESSIONAL', label: 'Professional' },
-                                            { key: 'ENTERPRISE', label: 'Enterprise' },
-                                        ]).map((tier: any, idx: number) => (
-                                            <div key={idx} className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
-                                                <span className="text-sm font-medium text-purple-800">{tier.label}</span>
-                                                <span className="text-xs text-purple-600">({tier.key})</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
+                                                onClick={() => {
+                                                    const keyEl = document.getElementById('newTierKey') as HTMLInputElement;
+                                                    const labelEl = document.getElementById('newTierLabel') as HTMLInputElement;
+                                                    if (keyEl.value && labelEl.value) {
                                                         const tiers = settingsForm.availableTiers || [];
                                                         setSettingsForm({
                                                             ...settingsForm,
-                                                            availableTiers: tiers.filter((_: any, i: number) => i !== idx)
+                                                            availableTiers: [...tiers, { key: keyEl.value.toUpperCase(), label: labelEl.value }]
                                                         });
-                                                    }}
-                                                    className="text-red-500 hover:text-red-700 text-xs ml-1"
-                                                >
-                                                    ×
-                                                </button>
-                                            </div>
-                                        ))}
+                                                        keyEl.value = '';
+                                                        labelEl.value = '';
+                                                    }
+                                                }}
+                                                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
+                                            >
+                                                Add Tier
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-2">
+                                            Note: Adding new tiers here allows you to use them when creating plans.
+                                            Make sure to create a corresponding plan for each tier.
+                                        </p>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            id="newTierKey"
-                                            placeholder="TIER_KEY"
-                                            className="px-3 py-2 border rounded-lg text-sm uppercase"
-                                        />
-                                        <input
-                                            type="text"
-                                            id="newTierLabel"
-                                            placeholder="Tier Label"
-                                            className="px-3 py-2 border rounded-lg text-sm flex-1"
-                                        />
+
+                                    <div className="pt-4 border-t">
                                         <button
-                                            type="button"
-                                            onClick={() => {
-                                                const keyEl = document.getElementById('newTierKey') as HTMLInputElement;
-                                                const labelEl = document.getElementById('newTierLabel') as HTMLInputElement;
-                                                if (keyEl.value && labelEl.value) {
-                                                    const tiers = settingsForm.availableTiers || [];
-                                                    setSettingsForm({
-                                                        ...settingsForm,
-                                                        availableTiers: [...tiers, { key: keyEl.value.toUpperCase(), label: labelEl.value }]
-                                                    });
-                                                    keyEl.value = '';
-                                                    labelEl.value = '';
-                                                }
-                                            }}
-                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700"
+                                            onClick={savePlatformSettings}
+                                            disabled={loading}
+                                            className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
                                         >
-                                            Add Tier
+                                            {loading ? 'Saving...' : 'Save Configuration'}
                                         </button>
                                     </div>
-                                    <p className="text-xs text-slate-500 mt-2">
-                                        Note: Adding new tiers here allows you to use them when creating plans.
-                                        Make sure to create a corresponding plan for each tier.
-                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Provider Setup Guides */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                                    <h4 className="font-semibold text-orange-900 mb-2">Africa's Talking Setup</h4>
+                                    <ol className="text-sm text-orange-800 space-y-1 list-decimal list-inside">
+                                        <li>Go to africastalking.com and create an account</li>
+                                        <li>Get your API Key from Settings → API Key</li>
+                                        <li>Your Username is shown in the dashboard</li>
+                                        <li>Register a sender ID (takes 24-48h approval)</li>
+                                        <li>Buy SMS credits for your country</li>
+                                    </ol>
                                 </div>
 
-                                <div className="pt-4 border-t">
-                                    <button
-                                        onClick={savePlatformSettings}
-                                        disabled={loading}
-                                        className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
-                                    >
-                                        {loading ? 'Saving...' : 'Save Configuration'}
-                                    </button>
+                                <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                                    <h4 className="font-semibold text-blue-900 mb-2">Twilio Setup</h4>
+                                    <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+                                        <li>Go to twilio.com/console and create an account</li>
+                                        <li>Copy your Account SID and Auth Token</li>
+                                        <li>Buy a phone number or register Alphanumeric Sender ID</li>
+                                        <li>For Zambia, use +260 numbers or register with carriers</li>
+                                    </ol>
+                                </div>
+
+                                <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+                                    <h4 className="font-semibold text-green-900 mb-2">Termii Setup</h4>
+                                    <ol className="text-sm text-green-800 space-y-1 list-decimal list-inside">
+                                        <li>Go to termii.com and create an account</li>
+                                        <li>Get your API Key from Settings</li>
+                                        <li>Register a Sender ID (approval required)</li>
+                                        <li>Affordable rates for African countries</li>
+                                    </ol>
+                                </div>
+
+                                <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
+                                    <h4 className="font-semibold text-purple-900 mb-2">Infobip Setup</h4>
+                                    <ol className="text-sm text-purple-800 space-y-1 list-decimal list-inside">
+                                        <li>Go to infobip.com and create an account</li>
+                                        <li>Get your API Key and Base URL from portal</li>
+                                        <li>Register sender IDs for each country</li>
+                                        <li>Enterprise-grade delivery and analytics</li>
+                                    </ol>
+                                </div>
+                            </div>
+
+                            {/* Payment Gateway Configuration */}
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="px-6 py-4 border-b bg-emerald-50">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <CreditCard className="w-5 h-5 text-emerald-600" />
+                                        Payment Gateway Configuration
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">Configure payment gateways for collecting subscription payments</p>
+                                </div>
+                                <div className="p-6 space-y-6">
+                                    {/* Lenco Mobile Money */}
+                                    <div className="border rounded-lg p-4">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                                    <span className="text-purple-600 font-bold text-sm">L</span>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-medium text-slate-900">Lenco Mobile Money</h4>
+                                                    <p className="text-xs text-slate-500">MTN & Airtel collections via Lenco</p>
+                                                </div>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.lencoEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, lencoEnabled: e.target.checked })}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                                            </label>
+                                        </div>
+                                        {settingsForm.lencoEnabled && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API URL</label>
+                                                    <input
+                                                        type="url"
+                                                        value={settingsForm.lencoApiUrl}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, lencoApiUrl: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="https://api.lenco.co/access/v2"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API Token</label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.lencoApiToken}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, lencoApiToken: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="Enter Lenco API token"
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Webhook Secret</label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.lencoWebhookSecret}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, lencoWebhookSecret: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="Webhook verification secret"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* MTN MoMo Direct */}
+                                    <div className="border rounded-lg p-4">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                                                    <span className="text-yellow-600 font-bold text-sm">MTN</span>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-medium text-slate-900">MTN Mobile Money</h4>
+                                                    <p className="text-xs text-slate-500">Direct MTN MoMo API integration</p>
+                                                </div>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.mtnMomoEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, mtnMomoEnabled: e.target.checked })}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-500"></div>
+                                            </label>
+                                        </div>
+                                        {settingsForm.mtnMomoEnabled && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API URL</label>
+                                                    <input
+                                                        type="url"
+                                                        value={settingsForm.mtnMomoApiUrl}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, mtnMomoApiUrl: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API User ID</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.mtnMomoApiUserId}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, mtnMomoApiUserId: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API Key</label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.mtnMomoApiKey}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, mtnMomoApiKey: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Subscription Key</label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.mtnMomoSubscriptionKey}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, mtnMomoSubscriptionKey: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Airtel Money */}
+                                    <div className="border rounded-lg p-4">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                                    <span className="text-red-600 font-bold text-xs">Airtel</span>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-medium text-slate-900">Airtel Money</h4>
+                                                    <p className="text-xs text-slate-500">Airtel Money direct integration</p>
+                                                </div>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.airtelMoneyEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, airtelMoneyEnabled: e.target.checked })}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+                                            </label>
+                                        </div>
+                                        {settingsForm.airtelMoneyEnabled && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">API URL</label>
+                                                    <input
+                                                        type="url"
+                                                        value={settingsForm.airtelMoneyApiUrl}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, airtelMoneyApiUrl: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Client ID</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.airtelMoneyClientId}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, airtelMoneyClientId: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Client Secret</label>
+                                                    <input
+                                                        type="password"
+                                                        value={settingsForm.airtelMoneyClientSecret}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, airtelMoneyClientSecret: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Bank Transfer */}
+                                    <div className="border rounded-lg p-4">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                                    <Building2 className="w-5 h-5 text-blue-600" />
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-medium text-slate-900">Bank Transfer</h4>
+                                                    <p className="text-xs text-slate-500">Manual bank deposit instructions</p>
+                                                </div>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.bankTransferEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, bankTransferEnabled: e.target.checked })}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+                                        {settingsForm.bankTransferEnabled && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Bank Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.bankName}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, bankName: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="Zanaco"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Account Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.bankAccountName}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, bankAccountName: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="Sync Technologies Ltd"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Account Number</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.bankAccountNumber}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, bankAccountNumber: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="1234567890"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Branch Code</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.bankBranchCode}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, bankBranchCode: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="01001"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">SWIFT Code</label>
+                                                    <input
+                                                        type="text"
+                                                        value={settingsForm.bankSwiftCode}
+                                                        onChange={(e) => setSettingsForm({ ...settingsForm, bankSwiftCode: e.target.value })}
+                                                        className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        placeholder="ZNCOZMLU"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* General Payment Settings */}
+                                    <div className="border-t pt-4">
+                                        <h4 className="font-medium text-slate-900 mb-4">General Payment Settings</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Currency</label>
+                                                <select
+                                                    value={settingsForm.paymentCurrency}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, paymentCurrency: e.target.value })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                >
+                                                    <option value="ZMW">ZMW - Zambian Kwacha</option>
+                                                    <option value="USD">USD - US Dollar</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Webhook URL</label>
+                                                <input
+                                                    type="url"
+                                                    value={settingsForm.paymentWebhookUrl}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, paymentWebhookUrl: e.target.value })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    placeholder="https://yoursite.com/api/webhooks/payment"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Auto-Confirm Threshold</label>
+                                                <input
+                                                    type="number"
+                                                    value={settingsForm.autoConfirmThreshold}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, autoConfirmThreshold: parseFloat(e.target.value) })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    placeholder="0"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-1">Auto-confirm payments below this amount (0 = disabled)</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Save Button */}
+                                    <div className="flex gap-3 pt-4 border-t">
+                                        <button
+                                            onClick={savePlatformSettings}
+                                            disabled={loading}
+                                            className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                        >
+                                            <Save className="w-4 h-4" />
+                                            {loading ? 'Saving...' : 'Save Payment Settings'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    )}
 
-                        {/* Provider Setup Guides */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
-                                <h4 className="font-semibold text-orange-900 mb-2">Africa's Talking Setup</h4>
-                                <ol className="text-sm text-orange-800 space-y-1 list-decimal list-inside">
-                                    <li>Go to africastalking.com and create an account</li>
-                                    <li>Get your API Key from Settings → API Key</li>
-                                    <li>Your Username is shown in the dashboard</li>
-                                    <li>Register a sender ID (takes 24-48h approval)</li>
-                                    <li>Buy SMS credits for your country</li>
-                                </ol>
+                    {/* Audit Logs Tab */}
+                    {activeTab === 'audit' && (
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-bold text-slate-900">System Audit Logs</h2>
+                                <button onClick={fetchLogs} className="p-2 hover:bg-slate-100 rounded-lg">
+                                    <RefreshCw className="w-5 h-5" />
+                                </button>
                             </div>
 
-                            <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
-                                <h4 className="font-semibold text-blue-900 mb-2">Twilio Setup</h4>
-                                <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-                                    <li>Go to twilio.com/console and create an account</li>
-                                    <li>Copy your Account SID and Auth Token</li>
-                                    <li>Buy a phone number or register Alphanumeric Sender ID</li>
-                                    <li>For Zambia, use +260 numbers or register with carriers</li>
-                                </ol>
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-50 border-b">
+                                            <tr>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">Action</th>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">Description</th>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">User</th>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">Entity</th>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">Time</th>
+                                                <th className="px-6 py-3 font-semibold text-slate-600">IP</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y text-slate-600">
+                                            {logs.map((log) => (
+                                                <tr key={log.id} className="hover:bg-slate-50">
+                                                    <td className="px-6 py-3 font-medium text-slate-900 whitespace-nowrap">
+                                                        {log.action}
+                                                    </td>
+                                                    <td className="px-6 py-3">{log.description}</td>
+                                                    <td className="px-6 py-3">
+                                                        {log.platformUser?.fullName || 'System'}
+                                                        <div className="text-xs text-slate-400">{log.platformUser?.email}</div>
+                                                    </td>
+                                                    <td className="px-6 py-3">
+                                                        {log.entityType ? (
+                                                            <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 border border-slate-200">
+                                                                {log.entityType}
+                                                            </span>
+                                                        ) : '-'}
+                                                    </td>
+                                                    <td className="px-6 py-3 whitespace-nowrap">
+                                                        {new Date(log.createdAt).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-6 py-3 font-mono text-xs text-slate-400">
+                                                        {log.ipAddress}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {logs.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={6} className="px-6 py-8 text-center text-slate-400">
+                                                        No audit logs found
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Security Dashboard Tab */}
+                    {activeTab === 'security' && <SecurityDashboard />}
+
+                    {/* Data Management Tab */}
+                    {activeTab === 'data' && <DataManagement />}
+
+                    {/* Invoice Management Tab */}
+                    {activeTab === 'invoices' && <InvoiceManagement />}
+
+                    {/* Revenue Reconciliation Tab */}
+                    {activeTab === 'reconciliation' && <RevenueReconciliation />}
+                </main>
+            </div>
+
+            {/* Bulk Email Modal */}
+            {showBulkEmailModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="px-6 py-4 border-b flex items-center justify-between sticky top-0 bg-white">
+                            <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                                <Send className="w-5 h-5 text-blue-600" />
+                                Send Bulk Email to Schools
+                            </h3>
+                            <button
+                                onClick={() => setShowBulkEmailModal(false)}
+                                className="p-2 hover:bg-slate-100 rounded-lg"
+                            >
+                                <XCircle className="w-5 h-5 text-slate-500" />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-4">
+                            {/* Target Selection */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Target Schools
+                                </label>
+                                <div className="space-y-2">
+                                    <div>
+                                        <label className="text-xs text-slate-600 mb-1 block">By Tier</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'].map(tier => (
+                                                <label key={tier} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={bulkEmailForm.targetTiers.includes(tier)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setBulkEmailForm({
+                                                                    ...bulkEmailForm,
+                                                                    targetTiers: [...bulkEmailForm.targetTiers, tier]
+                                                                });
+                                                            } else {
+                                                                setBulkEmailForm({
+                                                                    ...bulkEmailForm,
+                                                                    targetTiers: bulkEmailForm.targetTiers.filter(t => t !== tier)
+                                                                });
+                                                            }
+                                                        }}
+                                                        className="rounded"
+                                                    />
+                                                    <span className="text-sm">{tier}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-xs text-slate-600 mb-1 block">By Status</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['TRIAL', 'ACTIVE', 'SUSPENDED', 'EXPIRED'].map(status => (
+                                                <label key={status} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={bulkEmailForm.targetStatuses.includes(status)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setBulkEmailForm({
+                                                                    ...bulkEmailForm,
+                                                                    targetStatuses: [...bulkEmailForm.targetStatuses, status]
+                                                                });
+                                                            } else {
+                                                                setBulkEmailForm({
+                                                                    ...bulkEmailForm,
+                                                                    targetStatuses: bulkEmailForm.targetStatuses.filter(s => s !== status)
+                                                                });
+                                                            }
+                                                        }}
+                                                        className="rounded"
+                                                    />
+                                                    <span className="text-sm">{status}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-2">
+                                    Leave empty to send to all schools
+                                </p>
                             </div>
 
-                            <div className="bg-green-50 rounded-xl p-4 border border-green-200">
-                                <h4 className="font-semibold text-green-900 mb-2">Termii Setup</h4>
-                                <ol className="text-sm text-green-800 space-y-1 list-decimal list-inside">
-                                    <li>Go to termii.com and create an account</li>
-                                    <li>Get your API Key from Settings</li>
-                                    <li>Register a Sender ID (approval required)</li>
-                                    <li>Affordable rates for African countries</li>
-                                </ol>
+                            {/* Subject */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Email Subject *
+                                </label>
+                                <input
+                                    type="text"
+                                    value={bulkEmailForm.subject}
+                                    onChange={(e) => setBulkEmailForm({ ...bulkEmailForm, subject: e.target.value })}
+                                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Important Update: New Features Available"
+                                />
                             </div>
 
-                            <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
-                                <h4 className="font-semibold text-purple-900 mb-2">Infobip Setup</h4>
-                                <ol className="text-sm text-purple-800 space-y-1 list-decimal list-inside">
-                                    <li>Go to infobip.com and create an account</li>
-                                    <li>Get your API Key and Base URL from portal</li>
-                                    <li>Register sender IDs for each country</li>
-                                    <li>Enterprise-grade delivery and analytics</li>
-                                </ol>
+                            {/* Message */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Email Message *
+                                </label>
+                                <textarea
+                                    value={bulkEmailForm.message}
+                                    onChange={(e) => setBulkEmailForm({ ...bulkEmailForm, message: e.target.value })}
+                                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[200px]"
+                                    placeholder="Dear School Administrator,&#10;&#10;We're excited to announce..."
+                                />
+                            </div>
+
+                            {/* Preview */}
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <p className="text-sm text-blue-800 font-medium mb-1">Preview</p>
+                                <p className="text-xs text-blue-600">
+                                    This email will be sent to schools matching your criteria
+                                </p>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    onClick={() => setShowBulkEmailModal(false)}
+                                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={sendBulkEmail}
+                                    disabled={loading || !bulkEmailForm.subject || !bulkEmailForm.message}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    <Send className="w-4 h-4" />
+                                    {loading ? 'Sending...' : 'Send Email'}
+                                </button>
                             </div>
                         </div>
                     </div>
-                )}
-            </main>
+                </div>
+            )}
         </div>
     );
 };

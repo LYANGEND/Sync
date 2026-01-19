@@ -6,12 +6,14 @@ import {
     getAllTenants,
     getTenantDetails,
     createTenant,
+    updateTenant,
     updateTenantSubscription,
     suspendTenant,
     activateTenant,
     getAllPayments,
     confirmPayment,
     rejectPayment,
+    getAllSchoolTransactions,
     createPlatformUser,
     getPlatformUsers,
     getPlatformSettings,
@@ -28,6 +30,11 @@ import {
     getAllAnnouncements,
     deleteAnnouncement,
     toggleAnnouncementStatus,
+    exportTenants,
+    exportSubscriptionPayments,
+    exportSchoolTransactions,
+    sendBulkEmail,
+    generateInvoice,
 } from '../controllers/platformAdminController';
 
 const router = Router();
@@ -47,6 +54,7 @@ router.get('/dashboard', getDashboardStats);
 // Tenant management
 router.get('/tenants', getAllTenants);
 router.post('/tenants', authorizePlatformRole(['PLATFORM_SUPERADMIN']), createTenant);  // SUPERADMIN ONLY - Create new schools
+router.put('/tenants/:tenantId', authorizePlatformRole(['PLATFORM_SUPERADMIN']), updateTenant); // Update tenant details
 router.get('/tenants/:tenantId', getTenantDetails);
 router.put('/tenants/:tenantId/subscription', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), updateTenantSubscription);
 router.post('/tenants/:tenantId/suspend', authorizePlatformRole(['PLATFORM_SUPERADMIN']), suspendTenant);
@@ -54,6 +62,7 @@ router.post('/tenants/:tenantId/activate', authorizePlatformRole(['PLATFORM_SUPE
 
 // Payment management
 router.get('/payments', getAllPayments);
+router.get('/payments/school-transactions', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), getAllSchoolTransactions);
 router.post('/payments/:paymentId/confirm', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), confirmPayment);
 router.post('/payments/:paymentId/reject', authorizePlatformRole(['PLATFORM_SUPERADMIN']), rejectPayment);
 
@@ -81,6 +90,17 @@ router.get('/announcements', getAllAnnouncements);
 router.post('/announcements', authorizePlatformRole(['PLATFORM_SUPERADMIN']), createAnnouncement);
 router.delete('/announcements/:id', authorizePlatformRole(['PLATFORM_SUPERADMIN']), deleteAnnouncement);
 router.patch('/announcements/:id/status', authorizePlatformRole(['PLATFORM_SUPERADMIN']), toggleAnnouncementStatus);
+
+// Export Reports
+router.get('/export/tenants', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), exportTenants);
+router.get('/export/subscription-payments', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), exportSubscriptionPayments);
+router.get('/export/school-transactions', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), exportSchoolTransactions);
+
+// Bulk Operations
+router.post('/bulk/email', authorizePlatformRole(['PLATFORM_SUPERADMIN']), sendBulkEmail);
+
+// Invoice Generation
+router.get('/invoices/:paymentId/pdf', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), generateInvoice);
 
 export default router;
 

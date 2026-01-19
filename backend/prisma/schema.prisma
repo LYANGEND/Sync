@@ -187,6 +187,18 @@ model Tenant {
   auditLogs       AuditLog[]
   usageMetrics    UsageMetric[]
   
+  // Security & Compliance Relations
+  securityEvents  SecurityEvent[]
+  accountLocks    AccountLock[]
+  dataExportRequests DataExportRequest[]
+  dataDeletionRequests DataDeletionRequest[]
+  dataRetentionPolicies DataRetentionPolicy[]
+  
+  // Invoice & Reconciliation Relations
+  invoices          Invoice[]
+  paymentReconciliations PaymentReconciliation[]
+  missingPaymentAlerts MissingPaymentAlert[]
+  
   @@index([slug])
   @@index([status])
   @@map("tenants")
@@ -234,10 +246,17 @@ model PlatformSettings {
   smsCostPerUnit  Decimal  @db.Decimal(10, 4) @default(0.15) // Cost per SMS in ZMW
   
   // Email Gateway Configuration (centralized)
-  emailProvider   String   @default("smtp") // "smtp", "sendgrid", "ses"
+  emailProvider   String   @default("smtp") // "smtp", "azure", "sendgrid", "ses"
   emailApiKey     String?
   emailFromAddress String?
   emailFromName   String?  @default("Sync School Management")
+  
+  // Azure Communication Services Email Configuration
+  azureEmailEnabled Boolean @default(false)
+  azureEmailConnectionString String?
+  azureEmailFromAddress String?
+  azureEmailEndpoint String?
+  azureEmailAccessKey String?
   
   // Platform Branding
   platformName    String   @default("Sync School Management")
@@ -587,6 +606,9 @@ model SubscriptionPayment {
   invoiceUrl      String?
   notes           String?
   
+  // Invoice relation
+  invoice         Invoice?
+  
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -666,6 +688,9 @@ model User {
   
   // Audit logs created by this user
   auditLogs                AuditLog[]
+  
+  // Security
+  twoFactorAuth            TwoFactorAuth?
 
   // Email is unique within a tenant (same email can exist in different schools)
   @@unique([tenantId, email])
@@ -1429,4 +1454,402 @@ model PlatformAnnouncement {
   updatedAt   DateTime @updatedAt // Added for consistency
 
   @@map("platform_announcements")
+}
+
+// ==========================================
+// SECURITY & COMPLIANCE
+// ==========================================
+
+enum LoginAttemptStatus {
+  SUCCESS
+  FAILED_PASSWORD
+  FAILED_USER_NOT_FOUND
+  FAILED_ACCOUNT_LOCKED
+  FAILED_2FA
+}
+
+enum SecurityEventType {
+  FAILED_LOGIN
+  SUCCESSFUL_LOGIN
+  PASSWORD_CHANGE
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  SUSPICIOUS_ACTIVITY
+  DATA_EXPORT
+  DATA_DELETION
+  PERMISSION_CHANGE
+}
+
+// Security Event Log - Track all security-related events
+model SecurityEvent {
+  id          String   @id @default(uuid())
+  
+  // Tenant relation (null for platform-level events)
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // User involved (null if user not found)
+  userId      String?
+  userEmail   String   // Always store email even if user not found
+  
+  // Event details
+  eventType   SecurityEventType
+  status      LoginAttemptStatus?
+  ipAddress   String?
+  userAgent   String?
+  location    String?  // Geo-location if available
+  
+  // Additional context
+  metadata    Json?    // Extra details about the event
+  riskScore   Int      @default(0) // 0-100, higher = more suspicious
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([tenantId, eventType, createdAt])
+  @@index([userEmail, createdAt])
+  @@index([ipAddress, createdAt])
+  @@index([riskScore])
+  @@map("security_events")
+}
+
+// Account Lock Status - Track locked accounts
+model AccountLock {
+  id              String   @id @default(uuid())
+  
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  userId          String?
+  userEmail       String   @unique
+  
+  isLocked        Boolean  @default(true)
+  lockReason      String   // "Too many failed attempts", "Admin action", etc.
+  failedAttempts  Int      @default(0)
+  
+  lockedAt        DateTime @default(now())
+  lockedUntil     DateTime? // Auto-unlock time
+  unlockedAt      DateTime?
+  unlockedBy      String?  // Admin who unlocked
+  
+  @@index([userEmail, isLocked])
+  @@map("account_locks")
+}
+
+// Two-Factor Authentication Settings
+model TwoFactorAuth {
+  id          String   @id @default(uuid())
+  
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  isEnabled   Boolean  @default(false)
+  secret      String?  // TOTP secret
+  backupCodes String[] // Encrypted backup codes
+  
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("two_factor_auth")
+}
+
+// GDPR Data Export Requests
+model DataExportRequest {
+  id          String   @id @default(uuid())
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  requestedBy String   // User ID who requested
+  requestedByEmail String
+  
+  status      String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  exportType  String   // FULL, STUDENTS_ONLY, PAYMENTS_ONLY, etc.
+  
+  fileUrl     String?  // S3/storage URL of exported file
+  fileSize    Int?     // Size in bytes
+  expiresAt   DateTime? // When the download link expires
+  
+  completedAt DateTime?
+  failureReason String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([tenantId, status])
+  @@map("data_export_requests")
+}
+
+// Data Deletion Requests (GDPR Right to be Forgotten)
+model DataDeletionRequest {
+  id          String   @id @default(uuid())
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  requestedBy String   // User ID who requested
+  requestedByEmail String
+  
+  entityType  String   // STUDENT, USER, PAYMENT, etc.
+  entityId    String   // ID of entity to delete
+  
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED, COMPLETED
+  reason      String?  // Reason for deletion
+  
+  approvedBy  String?  // Admin who approved
+  approvedAt  DateTime?
+  
+  completedAt DateTime?
+  deletedData Json?    // Backup of deleted data
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([tenantId, status])
+  @@map("data_deletion_requests")
+}
+
+// Data Retention Policies
+model DataRetentionPolicy {
+  id          String   @id @default(uuid())
+  
+  tenantId    String?  // Null for platform-wide policies
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  entityType  String   // AUDIT_LOGS, PAYMENTS, STUDENTS, etc.
+  retentionDays Int    // How many days to keep data
+  
+  isActive    Boolean  @default(true)
+  autoDelete  Boolean  @default(false) // Automatically delete after retention period
+  
+  lastRunAt   DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([tenantId, entityType])
+  @@map("data_retention_policies")
+}
+
+// Backup Status Tracking
+model BackupLog {
+  id          String   @id @default(uuid())
+  
+  backupType  String   // FULL, INCREMENTAL, TENANT_SPECIFIC
+  tenantId    String?  // Null for full platform backups
+  
+  status      String   // STARTED, IN_PROGRESS, COMPLETED, FAILED
+  
+  fileSize    BigInt?  // Size in bytes
+  fileLocation String? // S3/storage path
+  
+  recordCount Int?     // Number of records backed up
+  duration    Int?     // Duration in seconds
+  
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  failureReason String?
+  
+  @@index([tenantId, status, startedAt])
+  @@map("backup_logs")
+}
+
+// ==========================================
+// INVOICE MANAGEMENT & REVENUE RECONCILIATION
+// ==========================================
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  ONE_TIME
+  RECURRING
+}
+
+// Invoice Model
+model Invoice {
+  id              String   @id @default(uuid())
+  
+  // Tenant relation
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Invoice details
+  invoiceNumber   String   @unique // INV-2024-0001
+  invoiceType     InvoiceType @default(SUBSCRIPTION)
+  status          InvoiceStatus @default(DRAFT)
+  
+  // Amounts
+  subtotal        Decimal  @db.Decimal(12, 2)
+  taxAmount       Decimal  @db.Decimal(12, 2) @default(0)
+  discountAmount  Decimal  @db.Decimal(12, 2) @default(0)
+  totalAmount     Decimal  @db.Decimal(12, 2)
+  paidAmount      Decimal  @db.Decimal(12, 2) @default(0)
+  balanceAmount   Decimal  @db.Decimal(12, 2)
+  
+  currency        String   @default("ZMW")
+  
+  // Dates
+  issueDate       DateTime @default(now())
+  dueDate         DateTime
+  paidDate        DateTime?
+  sentDate        DateTime?
+  
+  // Related payment
+  subscriptionPaymentId String? @unique
+  subscriptionPayment   SubscriptionPayment? @relation(fields: [subscriptionPaymentId], references: [id])
+  
+  // Invoice items
+  items           InvoiceItem[]
+  
+  // Payment tracking
+  payments        InvoicePayment[]
+  
+  // PDF and email
+  pdfUrl          String?
+  emailSent       Boolean  @default(false)
+  emailSentAt     DateTime?
+  
+  // Reminders
+  remindersSent   Int      @default(0)
+  lastReminderAt  DateTime?
+  
+  // Notes
+  notes           String?  @db.Text
+  internalNotes   String?  @db.Text
+  
+  // Metadata
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId, status])
+  @@index([invoiceNumber])
+  @@index([status, dueDate])
+  @@map("invoices")
+}
+
+// Invoice Line Items
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  
+  // Optional metadata
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("invoice_items")
+}
+
+// Invoice Payments (track partial payments)
+model InvoicePayment {
+  id              String   @id @default(uuid())
+  
+  invoiceId       String
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  amount          Decimal  @db.Decimal(12, 2)
+  paymentMethod   String   // MOBILE_MONEY, BANK_TRANSFER, CARD, etc.
+  paymentReference String?
+  
+  paidAt          DateTime @default(now())
+  notes           String?
+  
+  // Reconciliation
+  reconciled      Boolean  @default(false)
+  reconciledAt    DateTime?
+  reconciledBy    String?
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([invoiceId])
+  @@map("invoice_payments")
+}
+
+// Payment Reconciliation
+model PaymentReconciliation {
+  id              String   @id @default(uuid())
+  
+  // Period
+  periodStart     DateTime
+  periodEnd       DateTime
+  
+  // Tenant (null for platform-wide)
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Summary
+  totalInvoiced   Decimal  @db.Decimal(12, 2)
+  totalPaid       Decimal  @db.Decimal(12, 2)
+  totalOutstanding Decimal @db.Decimal(12, 2)
+  totalOverdue    Decimal  @db.Decimal(12, 2)
+  
+  invoiceCount    Int
+  paidInvoiceCount Int
+  overdueInvoiceCount Int
+  
+  // Discrepancies
+  discrepancyCount Int     @default(0)
+  discrepancyAmount Decimal @db.Decimal(12, 2) @default(0)
+  
+  // Status
+  status          String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+  
+  // Report
+  reportUrl       String?
+  
+  // Metadata
+  performedBy     String?
+  notes           String?  @db.Text
+  
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  @@index([tenantId, periodStart])
+  @@index([status])
+  @@map("payment_reconciliations")
+}
+
+// Missing Payment Alerts
+model MissingPaymentAlert {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  invoiceId       String?
+  
+  expectedAmount  Decimal  @db.Decimal(12, 2)
+  expectedDate    DateTime
+  
+  alertType       String   // OVERDUE, MISSING, PARTIAL
+  severity        String   @default("MEDIUM") // LOW, MEDIUM, HIGH
+  
+  description     String
+  
+  resolved        Boolean  @default(false)
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  resolutionNotes String?
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId, resolved])
+  @@index([severity, resolved])
+  @@map("missing_payment_alerts")
 }

@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { logSecurityEvent, checkAndLockAccount, isAccountLocked, getClientIp, calculateRiskScore } from '../middleware/securityLogger';
 
 const prisma = new PrismaClient();
 
@@ -21,6 +22,25 @@ const platformLoginSchema = z.object({
 export const platformLogin = async (req: Request, res: Response) => {
     try {
         const { email, password } = platformLoginSchema.parse(req.body);
+        const ipAddress = getClientIp(req);
+        const userAgent = req.headers['user-agent'];
+
+        // Check if account is locked
+        if (await isAccountLocked(email)) {
+            await logSecurityEvent({
+                userEmail: email,
+                eventType: 'FAILED_LOGIN',
+                status: 'FAILED_ACCOUNT_LOCKED',
+                ipAddress,
+                userAgent,
+                riskScore: 100,
+                metadata: { reason: 'Platform admin account locked', isPlatformUser: true }
+            });
+            return res.status(403).json({
+                error: 'Account locked',
+                message: 'Your account has been locked. Please contact support.'
+            });
+        }
 
         // Find platform user
         const platformUser = await prisma.platformUser.findUnique({
@@ -28,14 +48,53 @@ export const platformLogin = async (req: Request, res: Response) => {
         });
 
         if (!platformUser || !platformUser.isActive) {
+            const riskScore = await calculateRiskScore(email, ipAddress);
+            await logSecurityEvent({
+                userEmail: email,
+                eventType: 'FAILED_LOGIN',
+                status: platformUser ? 'FAILED_PASSWORD' : 'FAILED_USER_NOT_FOUND',
+                ipAddress,
+                userAgent,
+                riskScore,
+                metadata: { reason: platformUser ? 'Account inactive' : 'User not found', isPlatformUser: true }
+            });
+            
+            await checkAndLockAccount(email);
+            
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
         // Verify password
         const isValid = await bcrypt.compare(password, platformUser.passwordHash);
         if (!isValid) {
+            const riskScore = await calculateRiskScore(email, ipAddress);
+            await logSecurityEvent({
+                userId: platformUser.id,
+                userEmail: email,
+                eventType: 'FAILED_LOGIN',
+                status: 'FAILED_PASSWORD',
+                ipAddress,
+                userAgent,
+                riskScore,
+                metadata: { reason: 'Invalid password', isPlatformUser: true }
+            });
+            
+            await checkAndLockAccount(email, undefined, platformUser.id);
+            
             return res.status(401).json({ error: 'Invalid credentials' });
         }
+
+        // Log successful login
+        await logSecurityEvent({
+            userId: platformUser.id,
+            userEmail: email,
+            eventType: 'SUCCESSFUL_LOGIN',
+            status: 'SUCCESS',
+            ipAddress,
+            userAgent,
+            riskScore: 0,
+            metadata: { loginMethod: 'password', isPlatformUser: true, role: platformUser.role }
+        });
 
         // Generate token
         const token = jwt.sign(
@@ -157,7 +216,7 @@ export const getPlatformProfile = async (req: Request, res: Response) => {
 // ==========================================
 
 /**
- * Get platform dashboard stats
+ * Get platform dashboard stats with enhanced revenue analytics
  */
 export const getDashboardStats = async (req: Request, res: Response) => {
     try {
@@ -199,18 +258,19 @@ export const getDashboardStats = async (req: Request, res: Response) => {
             }),
         ]);
 
-        // Get monthly revenue for chart (last 6 months)
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        // Get monthly revenue for chart (last 12 months)
+        const twelveMonthsAgo = new Date();
+        twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
         const monthlyPayments = await prisma.subscriptionPayment.findMany({
             where: {
                 status: 'COMPLETED',
-                paidAt: { gte: sixMonthsAgo },
+                paidAt: { gte: twelveMonthsAgo },
             },
             select: {
                 totalAmount: true,
                 paidAt: true,
+                currency: true,
             },
         });
 
@@ -222,6 +282,57 @@ export const getDashboardStats = async (req: Request, res: Response) => {
                 revenueByMonth[month] = (revenueByMonth[month] || 0) + Number(payment.totalAmount);
             }
         });
+
+        // Calculate revenue growth
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const lastMonth = new Date();
+        lastMonth.setMonth(lastMonth.getMonth() - 1);
+        const lastMonthKey = lastMonth.toISOString().slice(0, 7);
+        
+        const currentMonthRevenue = revenueByMonth[currentMonth] || 0;
+        const lastMonthRevenue = revenueByMonth[lastMonthKey] || 0;
+        const revenueGrowth = lastMonthRevenue > 0 
+            ? ((currentMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100 
+            : 0;
+
+        // Revenue by tier
+        const revenueByTier = await prisma.subscriptionPayment.groupBy({
+            by: ['planId'],
+            where: { status: 'COMPLETED' },
+            _sum: { totalAmount: true },
+        });
+
+        const tierRevenueMap: Record<string, number> = {};
+        for (const item of revenueByTier) {
+            const plan = await prisma.subscriptionPlan.findUnique({
+                where: { id: item.planId },
+                select: { tier: true },
+            });
+            if (plan) {
+                tierRevenueMap[plan.tier] = (tierRevenueMap[plan.tier] || 0) + Number(item._sum.totalAmount || 0);
+            }
+        }
+
+        // Average revenue per school
+        const avgRevenuePerSchool = totalTenants > 0 
+            ? Number(totalRevenue._sum.totalAmount || 0) / totalTenants 
+            : 0;
+
+        // Payment success rate (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const recentPaymentStats = await prisma.subscriptionPayment.groupBy({
+            by: ['status'],
+            where: { createdAt: { gte: thirtyDaysAgo } },
+            _count: true,
+        });
+
+        const totalRecentPayments = recentPaymentStats.reduce((sum, item) => sum + item._count, 0);
+        const successfulPayments = recentPaymentStats.find(item => item.status === 'COMPLETED')?._count || 0;
+        const paymentSuccessRate = totalRecentPayments > 0 
+            ? (successfulPayments / totalRecentPayments) * 100 
+            : 0;
 
         // Get expiring subscriptions (next 7 days)
         const sevenDaysFromNow = new Date();
@@ -240,8 +351,20 @@ export const getDashboardStats = async (req: Request, res: Response) => {
                 name: true,
                 tier: true,
                 subscriptionEndsAt: true,
+                email: true,
             },
             take: 10,
+            orderBy: { subscriptionEndsAt: 'asc' },
+        });
+
+        // School transaction volume (gateway payments)
+        const schoolTransactionVolume = await prisma.payment.aggregate({
+            where: {
+                status: 'COMPLETED',
+                method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+            },
+            _sum: { amount: true },
+            _count: true,
         });
 
         res.json({
@@ -260,6 +383,18 @@ export const getDashboardStats = async (req: Request, res: Response) => {
                 return acc;
             }, {} as Record<string, number>),
             revenueByMonth,
+            revenueAnalytics: {
+                currentMonthRevenue,
+                lastMonthRevenue,
+                revenueGrowth: Number(revenueGrowth.toFixed(2)),
+                revenueByTier: tierRevenueMap,
+                avgRevenuePerSchool: Number(avgRevenuePerSchool.toFixed(2)),
+                paymentSuccessRate: Number(paymentSuccessRate.toFixed(2)),
+                schoolTransactionVolume: {
+                    total: Number(schoolTransactionVolume._sum.amount || 0),
+                    count: schoolTransactionVolume._count,
+                },
+            },
             recentPayments: recentPayments.map((p) => ({
                 id: p.id,
                 tenantName: p.tenant.name,
@@ -538,6 +673,81 @@ export const getTenantDetails = async (req: Request, res: Response) => {
 };
 
 /**
+ * Update tenant details
+ */
+export const updateTenant = async (req: Request, res: Response) => {
+    try {
+        const { tenantId } = req.params;
+        const { name, slug, email, phone, address, city, country, tier } = req.body;
+
+        // Validation for uniqueness if changing slug or email
+        if (slug) {
+            const existingSlug = await prisma.tenant.findUnique({
+                where: { slug },
+            });
+            if (existingSlug && existingSlug.id !== tenantId) {
+                return res.status(400).json({ error: 'Slug already taken' });
+            }
+        }
+
+        if (email) {
+            const existingEmail = await prisma.tenant.findFirst({
+                where: { email },
+            });
+            if (existingEmail && existingEmail.id !== tenantId) {
+                return res.status(400).json({ error: 'Email already used by another school' });
+            }
+        }
+
+        // Tier update logic (if tier changed, update limits)
+        let limitsUpdate = {};
+        if (tier) {
+            const plan = await prisma.subscriptionPlan.findFirst({
+                where: { tier: tier as any },
+            });
+            if (plan) {
+                limitsUpdate = {
+                    maxStudents: plan.maxStudents,
+                    maxTeachers: plan.maxTeachers,
+                    maxUsers: plan.maxUsers,
+                    maxClasses: plan.maxClasses,
+                };
+            }
+        }
+
+        const tenant = await prisma.tenant.update({
+            where: { id: tenantId },
+            data: {
+                name,
+                slug,
+                email,
+                phone,
+                address,
+                city,
+                country,
+                tier: tier as any,
+                ...limitsUpdate,
+            },
+        });
+
+        res.json({
+            message: 'Tenant updated successfully',
+            tenant: {
+                id: tenant.id,
+                name: tenant.name,
+                slug: tenant.slug,
+                email: tenant.email,
+                tier: tenant.tier,
+                status: tenant.status,
+            },
+        });
+    } catch (error) {
+        console.error('Update tenant error:', error);
+        res.status(500).json({ error: 'Failed to update tenant' });
+    }
+};
+
+/**
  * Update tenant subscription/status
  */
 export const updateTenantSubscription = async (req: Request, res: Response) => {
@@ -781,6 +991,79 @@ export const rejectPayment = async (req: Request, res: Response) => {
     }
 };
 
+/**
+ * Get all school transactions (Fees collected by tenants)
+ * Only shows Mobile Money and Bank Deposit transactions (excludes Cash)
+ */
+export const getAllSchoolTransactions = async (req: Request, res: Response) => {
+    try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 20;
+        const skip = (page - 1) * limit;
+        const status = req.query.status as string;
+        const search = req.query.search as string;
+        const tenantId = req.query.tenantId as string;
+
+        const where: any = {
+            // Only show payment gateway transactions (Mobile Money and Bank Deposit)
+            method: {
+                in: ['MOBILE_MONEY', 'BANK_DEPOSIT']
+            }
+        };
+
+        if (status) where.status = status;
+        
+        // Filter by specific school/tenant
+        if (tenantId) where.tenantId = tenantId;
+
+        if (search) {
+            where.OR = [
+                { tenant: { name: { contains: search, mode: 'insensitive' } } },
+                { transactionId: { contains: search, mode: 'insensitive' } },
+                { student: { firstName: { contains: search, mode: 'insensitive' } } },
+                { student: { lastName: { contains: search, mode: 'insensitive' } } },
+            ];
+        }
+
+        const [payments, total] = await Promise.all([
+            prisma.payment.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: { paymentDate: 'desc' },
+                include: {
+                    tenant: { select: { name: true, slug: true } },
+                    student: { select: { firstName: true, lastName: true, admissionNumber: true } },
+                },
+            }),
+            prisma.payment.count({ where }),
+        ]);
+
+        res.json({
+            payments: payments.map((p) => ({
+                id: p.id,
+                tenant: p.tenant,
+                studentName: `${p.student.firstName} ${p.student.lastName}`,
+                amount: Number(p.amount),
+                currency: 'ZMW',
+                method: p.method,
+                status: p.status,
+                transactionId: p.transactionId,
+                date: p.paymentDate,
+            })),
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit),
+            },
+        });
+    } catch (error) {
+        console.error('Get school transactions error:', error);
+        res.status(500).json({ error: 'Failed to fetch school transactions' });
+    }
+};
+
 // ==========================================
 // PLATFORM USER MANAGEMENT
 // ==========================================
@@ -876,6 +1159,8 @@ export const getPlatformSettings = async (req: Request, res: Response) => {
             smsApiKey: settings.smsApiKey ? '********' : null,
             smsApiSecret: settings.smsApiSecret ? '********' : null,
             emailApiKey: settings.emailApiKey ? '********' : null,
+            azureEmailConnectionString: settings.azureEmailConnectionString ? '********' : null,
+            azureEmailAccessKey: settings.azureEmailAccessKey ? '********' : null,
         });
     } catch (error) {
         console.error('Get platform settings error:', error);
@@ -905,6 +1190,12 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
             supportPhone,
             allowTenantCustomSms,
             allowTenantCustomEmail,
+            // Azure Email Settings
+            azureEmailEnabled,
+            azureEmailConnectionString,
+            azureEmailFromAddress,
+            azureEmailEndpoint,
+            azureEmailAccessKey,
         } = req.body;
 
         const updateData: any = {};
@@ -922,6 +1213,17 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
         if (emailApiKey && emailApiKey !== '********') updateData.emailApiKey = emailApiKey;
         if (emailFromAddress !== undefined) updateData.emailFromAddress = emailFromAddress;
         if (emailFromName !== undefined) updateData.emailFromName = emailFromName;
+
+        // Azure Email settings
+        if (azureEmailEnabled !== undefined) updateData.azureEmailEnabled = azureEmailEnabled;
+        if (azureEmailConnectionString && azureEmailConnectionString !== '********') {
+            updateData.azureEmailConnectionString = azureEmailConnectionString;
+        }
+        if (azureEmailFromAddress !== undefined) updateData.azureEmailFromAddress = azureEmailFromAddress;
+        if (azureEmailEndpoint !== undefined) updateData.azureEmailEndpoint = azureEmailEndpoint;
+        if (azureEmailAccessKey && azureEmailAccessKey !== '********') {
+            updateData.azureEmailAccessKey = azureEmailAccessKey;
+        }
 
         // Platform branding
         if (platformName !== undefined) updateData.platformName = platformName;
@@ -951,6 +1253,8 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
                 smsApiKey: settings.smsApiKey ? '********' : null,
                 smsApiSecret: settings.smsApiSecret ? '********' : null,
                 emailApiKey: settings.emailApiKey ? '********' : null,
+                azureEmailConnectionString: settings.azureEmailConnectionString ? '********' : null,
+                azureEmailAccessKey: settings.azureEmailAccessKey ? '********' : null,
             },
         });
     } catch (error) {
@@ -1185,5 +1489,329 @@ export const togglePlanStatus = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('Toggle plan status error:', error);
         res.status(500).json({ error: 'Failed to update plan status' });
+    }
+};
+
+// ==========================================
+// EXPORT REPORTS
+// ==========================================
+
+/**
+ * Export tenants to CSV
+ */
+export const exportTenants = async (req: Request, res: Response) => {
+    try {
+        const status = req.query.status as string;
+        const tier = req.query.tier as string;
+
+        const where: any = {};
+        if (status) where.status = status;
+        if (tier) where.tier = tier;
+
+        const tenants = await prisma.tenant.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            select: {
+                name: true,
+                slug: true,
+                email: true,
+                phone: true,
+                tier: true,
+                status: true,
+                currentStudentCount: true,
+                currentTeacherCount: true,
+                currentUserCount: true,
+                maxStudents: true,
+                subscriptionEndsAt: true,
+                createdAt: true,
+            },
+        });
+
+        // Convert to CSV format
+        const headers = [
+            'School Name',
+            'Slug',
+            'Email',
+            'Phone',
+            'Tier',
+            'Status',
+            'Students',
+            'Teachers',
+            'Users',
+            'Max Students',
+            'Subscription Ends',
+            'Created Date',
+        ];
+
+        const rows = tenants.map(t => [
+            t.name,
+            t.slug,
+            t.email,
+            t.phone || '',
+            t.tier,
+            t.status,
+            t.currentStudentCount,
+            t.currentTeacherCount,
+            t.currentUserCount,
+            t.maxStudents,
+            t.subscriptionEndsAt ? new Date(t.subscriptionEndsAt).toLocaleDateString() : '',
+            new Date(t.createdAt).toLocaleDateString(),
+        ]);
+
+        const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=schools-${Date.now()}.csv`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export tenants error:', error);
+        res.status(500).json({ error: 'Failed to export tenants' });
+    }
+};
+
+/**
+ * Export subscription payments to CSV
+ */
+export const exportSubscriptionPayments = async (req: Request, res: Response) => {
+    try {
+        const status = req.query.status as string;
+        const tenantId = req.query.tenantId as string;
+
+        const where: any = {};
+        if (status) where.status = status;
+        if (tenantId) where.tenantId = tenantId;
+
+        const payments = await prisma.subscriptionPayment.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            include: {
+                tenant: { select: { name: true, slug: true } },
+                plan: { select: { name: true, tier: true } },
+            },
+        });
+
+        const headers = [
+            'School Name',
+            'Plan',
+            'Tier',
+            'Base Amount',
+            'Overage Students',
+            'Overage Amount',
+            'Total Amount',
+            'Currency',
+            'Payment Method',
+            'Status',
+            'Billing Cycle',
+            'Receipt Number',
+            'External Ref',
+            'Period Start',
+            'Period End',
+            'Paid At',
+            'Created At',
+        ];
+
+        const rows = payments.map(p => [
+            p.tenant.name,
+            p.plan.name,
+            p.plan.tier,
+            Number(p.baseAmount),
+            p.overageStudents,
+            Number(p.overageAmount),
+            Number(p.totalAmount),
+            p.currency,
+            p.paymentMethod,
+            p.status,
+            p.billingCycle,
+            p.receiptNumber || '',
+            p.externalRef || '',
+            new Date(p.periodStart).toLocaleDateString(),
+            new Date(p.periodEnd).toLocaleDateString(),
+            p.paidAt ? new Date(p.paidAt).toLocaleDateString() : '',
+            new Date(p.createdAt).toLocaleDateString(),
+        ]);
+
+        const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=subscription-payments-${Date.now()}.csv`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export subscription payments error:', error);
+        res.status(500).json({ error: 'Failed to export payments' });
+    }
+};
+
+/**
+ * Export school transactions to CSV
+ */
+export const exportSchoolTransactions = async (req: Request, res: Response) => {
+    try {
+        const status = req.query.status as string;
+        const tenantId = req.query.tenantId as string;
+
+        const where: any = {
+            method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] }
+        };
+        if (status) where.status = status;
+        if (tenantId) where.tenantId = tenantId;
+
+        const payments = await prisma.payment.findMany({
+            where,
+            orderBy: { paymentDate: 'desc' },
+            include: {
+                tenant: { select: { name: true, slug: true } },
+                student: { select: { firstName: true, lastName: true, admissionNumber: true } },
+            },
+        });
+
+        const headers = [
+            'School Name',
+            'Student Name',
+            'Admission Number',
+            'Amount',
+            'Payment Method',
+            'Transaction ID',
+            'Status',
+            'Payment Date',
+            'Notes',
+        ];
+
+        const rows = payments.map(p => [
+            p.tenant.name,
+            `${p.student.firstName} ${p.student.lastName}`,
+            p.student.admissionNumber,
+            Number(p.amount),
+            p.method,
+            p.transactionId || '',
+            p.status,
+            new Date(p.paymentDate).toLocaleDateString(),
+            p.notes || '',
+        ]);
+
+        const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=school-transactions-${Date.now()}.csv`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export school transactions error:', error);
+        res.status(500).json({ error: 'Failed to export transactions' });
+    }
+};
+
+// ==========================================
+// BULK EMAIL TO SCHOOLS
+// ==========================================
+
+/**
+ * Send bulk email to schools
+ */
+export const sendBulkEmail = async (req: Request, res: Response) => {
+    try {
+        const { subject, message, targetTiers, targetStatuses, tenantIds } = req.body;
+
+        if (!subject || !message) {
+            return res.status(400).json({ error: 'Subject and message are required' });
+        }
+
+        // Build filter criteria
+        const where: any = {};
+        if (targetTiers && targetTiers.length > 0) {
+            where.tier = { in: targetTiers };
+        }
+        if (targetStatuses && targetStatuses.length > 0) {
+            where.status = { in: targetStatuses };
+        }
+        if (tenantIds && tenantIds.length > 0) {
+            where.id = { in: tenantIds };
+        }
+
+        // Get matching tenants
+        const tenants = await prisma.tenant.findMany({
+            where,
+            select: {
+                id: true,
+                name: true,
+                email: true,
+            },
+        });
+
+        if (tenants.length === 0) {
+            return res.json({
+                message: 'No schools match the criteria',
+                recipientCount: 0,
+                recipients: [],
+            });
+        }
+
+        // Use email template service for better formatting
+        const { announcementTemplate } = require('../services/emailTemplateService');
+        const { queueEmails } = require('../services/emailQueueService');
+
+        // Queue emails using the email queue service
+        const emailPromises = tenants.map(async (tenant) => {
+            const html = await announcementTemplate({
+                tenantId: tenant.id,
+                recipientName: tenant.name,
+                subject,
+                message,
+                preheader: message.substring(0, 100),
+            });
+
+            return {
+                tenantId: tenant.id,
+                to: tenant.email,
+                subject,
+                html,
+            };
+        });
+
+        const emails = await Promise.all(emailPromises);
+        queueEmails(emails);
+
+        res.json({
+            message: `Bulk email queued for ${tenants.length} schools`,
+            recipientCount: tenants.length,
+            recipients: tenants.map(t => ({ name: t.name, email: t.email })),
+        });
+    } catch (error) {
+        console.error('Send bulk email error:', error);
+        res.status(500).json({ error: 'Failed to send bulk email' });
+    }
+};
+
+// ==========================================
+// INVOICE GENERATION
+// ==========================================
+
+/**
+ * Generate and download invoice PDF for subscription payment
+ */
+export const generateInvoice = async (req: Request, res: Response) => {
+    try {
+        const { paymentId } = req.params;
+
+        const { generateSubscriptionInvoice } = require('../services/invoiceService');
+        
+        const pdfBuffer = await generateSubscriptionInvoice(paymentId);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=invoice-${paymentId}.pdf`);
+        res.send(pdfBuffer);
+    } catch (error: any) {
+        console.error('Generate invoice error:', error);
+        
+        if (error.message === 'Payment not found') {
+            return res.status(404).json({ error: 'Payment not found' });
+        }
+        
+        if (error.message.includes('PDFKit not installed')) {
+            return res.status(500).json({ 
+                error: 'PDF generation not available', 
+                message: 'Install pdfkit package to enable invoice generation' 
+            });
+        }
+        
+        res.status(500).json({ error: 'Failed to generate invoice' });
     }
 };
