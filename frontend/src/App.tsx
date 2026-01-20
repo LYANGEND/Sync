@@ -21,6 +21,11 @@ import Profile from './pages/profile/Profile';
 import Communication from './pages/communication/Communication';
 import MyChildren from './pages/parents/MyChildren';
 import AcademicReports from './pages/parents/AcademicReports';
+import TeacherHomework from './pages/teacher/TeacherHomework';
+import HomeworkGrading from './pages/teacher/HomeworkGrading';
+import TeacherResources from './pages/teacher/TeacherResources';
+import ParentHomework from './pages/parent/ParentHomework';
+import ParentResources from './pages/parent/ParentResources';
 import DashboardLayout from './components/layout/DashboardLayout';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import RoleGuard from './components/layout/RoleGuard';
@@ -144,6 +149,36 @@ function App() {
                     <AcademicReports />
                   </RoleGuard>
                 } />
+
+                {/* Teacher LMS Routes */}
+                <Route path="/teacher/homework" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN']}>
+                    <TeacherHomework />
+                  </RoleGuard>
+                } />
+                <Route path="/teacher/homework/:homeworkId/submissions" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN']}>
+                    <HomeworkGrading />
+                  </RoleGuard>
+                } />
+                <Route path="/teacher/resources" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN']}>
+                    <TeacherResources />
+                  </RoleGuard>
+                } />
+
+                {/* Parent/Student LMS Routes */}
+                <Route path="/parent/homework" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentHomework />
+                  </RoleGuard>
+                } />
+                <Route path="/parent/resources" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentResources />
+                  </RoleGuard>
+                } />
+
                 <Route path="/settings" element={
                   <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                     <Settings />

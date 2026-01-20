@@ -32,6 +32,9 @@ import auditRoutes from './routes/auditRoutes';
 import webhookRoutes from './routes/webhookRoutes';
 import securityRoutes from './routes/securityRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
+import homeworkRoutes from './routes/homeworkRoutes';
+import resourceRoutes from './routes/resourceRoutes';
+import parentRoutes from './routes/parentRoutes';
 
 import path from 'path';
 
@@ -87,6 +90,11 @@ app.use('/api/platform/crm', crmRoutes);
 app.use('/api/platform/security', securityRoutes);
 app.use('/api/platform/finance', invoiceRoutes);
 app.use('/api/webhooks', webhookRoutes);
+
+// LMS Routes
+app.use('/api/v1/homework', homeworkRoutes);
+app.use('/api/v1/resources', resourceRoutes);
+app.use('/api/v1/parent', parentRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

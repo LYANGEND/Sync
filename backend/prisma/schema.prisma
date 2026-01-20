@@ -2102,3 +2102,262 @@ model CrmReport {
   
   @@map("crm_reports")
 }
+
+// ==========================================
+// LMS FEATURES - Phase 1
+// ==========================================
+
+enum HomeworkType {
+  CLASSWORK
+  HOMEWORK
+  PROJECT
+  RESEARCH
+  PRACTICE
+}
+
+enum ResourceType {
+  PDF
+  VIDEO
+  DOCUMENT
+  LINK
+  IMAGE
+  PAST_PAPER
+  NOTES
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  GRADED
+  RETURNED
+}
+
+// Subject Content (Links class to subject with teacher for LMS)
+model SubjectContent {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  classId         String
+  class           Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  
+  subjectId       String
+  subject         Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  
+  academicTermId  String
+  academicTerm    AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
+  
+  teacherId       String
+  teacher         User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  
+  // ECZ Curriculum alignment
+  curriculumCode  String?
+  
+  // Relations
+  homework        Homework[]
+  resources       Resource[]
+  lessons         Lesson[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([classId, subjectId, academicTermId])
+  @@index([tenantId])
+  @@index([teacherId])
+  @@map("subject_content")
+}
+
+// Homework
+model Homework {
+  id              String   @id @default(uuid())
+  
+  subjectContentId String
+  subjectContent  SubjectContent @relation(fields: [subjectContentId], references: [id], onDelete: Cascade)
+  
+  topicId         String?
+  topic           Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  
+  title           String
+  description     String?  @db.Text
+  instructions    String?  @db.Text
+  type            HomeworkType @default(HOMEWORK)
+  
+  assignedDate    DateTime @default(now())
+  dueDate         DateTime?
+  maxPoints       Decimal? @db.Decimal(5, 2)
+  
+  requiresSubmission Boolean @default(false)
+  allowLateSubmission Boolean @default(true)
+  
+  attachments     String[] // File URLs
+  
+  submissions     HomeworkSubmission[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([subjectContentId])
+  @@index([dueDate])
+  @@map("homework")
+}
+
+// Homework Submissions
+model HomeworkSubmission {
+  id              String   @id @default(uuid())
+  
+  homeworkId      String
+  homework        Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  submittedAt     DateTime @default(now())
+  isLate          Boolean  @default(false)
+  
+  // Submission content
+  content         String?  @db.Text
+  attachments     String[] // File URLs
+  
+  // Grading
+  marks           Decimal? @db.Decimal(5, 2)
+  maxMarks        Decimal? @db.Decimal(5, 2)
+  feedback        String?  @db.Text
+  gradedAt        DateTime?
+  gradedByUserId  String?
+  gradedBy        User?    @relation(fields: [gradedByUserId], references: [id], onDelete: SetNull)
+  
+  status          SubmissionStatus @default(DRAFT)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([homeworkId, studentId])
+  @@index([studentId])
+  @@index([homeworkId])
+  @@map("homework_submission")
+}
+
+// Learning Resources
+model Resource {
+  id              String   @id @default(uuid())
+  
+  subjectContentId String
+  subjectContent  SubjectContent @relation(fields: [subjectContentId], references: [id], onDelete: Cascade)
+  
+  topicId         String?
+  topic           Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  
+  title           String
+  description     String?  @db.Text
+  type            ResourceType
+  
+  // Content
+  fileUrl         String?
+  externalUrl     String?
+  content         String?  @db.Text
+  
+  // Metadata
+  fileSize        Int?
+  duration        Int?     // For videos (seconds)
+  
+  isDownloadable  Boolean  @default(true)
+  
+  lessons         LessonResource[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([subjectContentId])
+  @@map("resource")
+}
+
+// Lesson (Daily/Weekly lessons)
+model Lesson {
+  id              String   @id @default(uuid())
+  
+  subjectContentId String
+  subjectContent  SubjectContent @relation(fields: [subjectContentId], references: [id], onDelete: Cascade)
+  
+  topicId         String?
+  topic           Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  
+  title           String
+  date            DateTime
+  period          Int?     // Period 1, 2, 3...
+  
+  // Lesson content
+  objectives      String[] // Learning objectives
+  notes           String?  @db.Text
+  
+  // Resources used
+  resources       LessonResource[]
+  
+  // Attendance
+  attendanceRecorded Boolean @default(false)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([subjectContentId])
+  @@index([date])
+  @@map("lesson")
+}
+
+// Lesson Resources (Many-to-Many)
+model LessonResource {
+  lessonId        String
+  lesson          Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  
+  resourceId      String
+  resource        Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  
+  @@id([lessonId, resourceId])
+  @@map("lesson_resource")
+}
+
+// Update existing models to add LMS relations
+// Add to Tenant model
+model Tenant {
+  // ... existing fields
+  subjectContent  SubjectContent[]
+}
+
+// Add to Class model
+model Class {
+  // ... existing fields
+  subjectContent  SubjectContent[]
+}
+
+// Add to Subject model
+model Subject {
+  // ... existing fields
+  subjectContent  SubjectContent[]
+}
+
+// Add to AcademicTerm model
+model AcademicTerm {
+  // ... existing fields
+  subjectContent  SubjectContent[]
+}
+
+// Add to User model
+model User {
+  // ... existing fields
+  subjectContentTeaching SubjectContent[]
+  homeworkGraded        HomeworkSubmission[]
+}
+
+// Add to Student model
+model Student {
+  // ... existing fields
+  homeworkSubmissions   HomeworkSubmission[]
+}
+
+// Add to Topic model
+model Topic {
+  // ... existing fields
+  homework        Homework[]
+  resources       Resource[]
+  lessons         Lesson[]
+}
