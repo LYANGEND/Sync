@@ -217,40 +217,40 @@ const Settings = () => {
     }
   };
 
-  if (loading) return <div className="p-6">Loading...</div>;
+  if (loading) return <div className="p-6 dark:text-white">Loading...</div>;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">System Settings</h1>
+    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">System Settings</h1>
 
-      <div className="flex space-x-4 mb-6 border-b border-gray-200">
+      <div className="flex space-x-4 mb-6 border-b border-gray-200 dark:border-slate-700 overflow-x-auto scrollbar-hide">
         <button
           onClick={() => setActiveTab('general')}
-          className={`pb-2 px-1 ${activeTab === 'general' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'general' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           General
         </button>
         <button
           onClick={() => setActiveTab('academic')}
-          className={`pb-2 px-1 ${activeTab === 'academic' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'academic' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           Academic
         </button>
         <button
           onClick={() => setActiveTab('theme')}
-          className={`pb-2 px-1 ${activeTab === 'theme' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'theme' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           Theme & Branding
         </button>
         <button
           onClick={() => setActiveTab('communication')}
-          className={`pb-2 px-1 ${activeTab === 'communication' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'communication' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           Communication
         </button>
         <button
           onClick={() => setActiveTab('payments')}
-          className={`pb-2 px-1 ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           Payments
         </button>
@@ -259,30 +259,30 @@ const Settings = () => {
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* General Information */}
         {activeTab === 'general' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-2">
-              <School className="text-blue-600" size={20} />
-              <h2 className="text-lg font-semibold text-gray-800">School Information</h2>
+              <School className="text-blue-600 dark:text-blue-400" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">School Information</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">School Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">School Name</label>
                 <input
                   type="text"
                   required
                   value={settings.schoolName}
                   onChange={(e) => setSettings({ ...settings, schoolName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 />
               </div>
 
               {/* School Logo Upload */}
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">School Logo</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">School Logo</label>
                 <div className="flex items-center gap-4">
                   {/* Logo Preview */}
-                  <div className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 overflow-hidden">
+                  <div className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 dark:border-slate-600 flex items-center justify-center bg-gray-50 dark:bg-slate-700 overflow-hidden">
                     {logoUrl ? (
                       <img
                         src={logoUrl.startsWith('http') ? logoUrl : `${window.location.origin}${logoUrl}`}
@@ -324,59 +324,59 @@ const Settings = () => {
                         Remove
                       </button>
                     )}
-                    <p className="text-xs text-gray-500">PNG, JPG up to 2MB. Recommended: 200x200px</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">PNG, JPG up to 2MB. Recommended: 200x200px</p>
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Number</label>
                 <div className="relative">
                   <Phone size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
                     value={settings.schoolPhone}
                     onChange={(e) => setSettings({ ...settings, schoolPhone: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Email Address</label>
                 <div className="relative">
                   <Mail size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
                     type="email"
                     value={settings.schoolEmail}
                     onChange={(e) => setSettings({ ...settings, schoolEmail: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
               </div>
 
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Address</label>
                 <div className="relative">
                   <MapPin size={16} className="absolute left-3 top-3 text-gray-400" />
                   <textarea
                     rows={3}
                     value={settings.schoolAddress}
                     onChange={(e) => setSettings({ ...settings, schoolAddress: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
               </div>
 
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Website</label>
                 <div className="relative">
                   <Globe size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
                     type="url"
                     value={settings.schoolWebsite}
                     onChange={(e) => setSettings({ ...settings, schoolWebsite: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="https://"
                   />
                 </div>
@@ -387,19 +387,19 @@ const Settings = () => {
 
         {/* Academic Configuration */}
         {activeTab === 'academic' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-2">
-              <Calendar className="text-blue-600" size={20} />
-              <h2 className="text-lg font-semibold text-gray-800">Academic Configuration</h2>
+              <Calendar className="text-blue-600 dark:text-blue-400" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Academic Configuration</h2>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Current Academic Term</label>
-              <p className="text-sm text-gray-500 mb-2">This sets the active term for attendance, grading, and fees.</p>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Current Academic Term</label>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">This sets the active term for attendance, grading, and fees.</p>
               <select
                 value={settings.currentTermId}
                 onChange={(e) => setSettings({ ...settings, currentTermId: e.target.value })}
-                className="w-full md:w-1/2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full md:w-1/2 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
               >
                 <option value="">Select Active Term</option>
                 {terms.map(term => (
@@ -414,71 +414,71 @@ const Settings = () => {
 
         {/* Theme Configuration */}
         {activeTab === 'theme' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-2">
-              <Palette className="text-blue-600" size={20} />
-              <h2 className="text-lg font-semibold text-gray-800">Theme & Branding</h2>
+              <Palette className="text-blue-600 dark:text-blue-400" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Theme & Branding</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Primary Color</label>
                 <div className="flex items-center space-x-2">
                   <input
                     type="color"
                     value={settings.primaryColor}
                     onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
-                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                    className="h-10 w-10 rounded border border-gray-300 dark:border-slate-600 cursor-pointer"
                   />
                   <input
                     type="text"
                     value={settings.primaryColor}
                     onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
                     pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Used for buttons, links, and active states.</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for buttons, links, and active states.</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Color</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Secondary Color</label>
                 <div className="flex items-center space-x-2">
                   <input
                     type="color"
                     value={settings.secondaryColor}
                     onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
-                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                    className="h-10 w-10 rounded border border-gray-300 dark:border-slate-600 cursor-pointer"
                   />
                   <input
                     type="text"
                     value={settings.secondaryColor}
                     onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
                     pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Used for text, borders, and backgrounds.</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for text, borders, and backgrounds.</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Accent Color</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Accent Color</label>
                 <div className="flex items-center space-x-2">
                   <input
                     type="color"
                     value={settings.accentColor}
                     onChange={(e) => setSettings({ ...settings, accentColor: e.target.value })}
-                    className="h-10 w-10 rounded border border-gray-300 cursor-pointer"
+                    className="h-10 w-10 rounded border border-gray-300 dark:border-slate-600 cursor-pointer"
                   />
                   <input
                     type="text"
                     value={settings.accentColor}
                     onChange={(e) => setSettings({ ...settings, accentColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
                     pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Used for highlights and special indicators.</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for highlights and special indicators.</p>
               </div>
             </div>
           </div>
@@ -488,17 +488,17 @@ const Settings = () => {
         {activeTab === 'communication' && (
           <div className="space-y-6">
             {/* Notification Channels */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
               <div className="flex items-center gap-2 mb-4 border-b pb-2">
-                <Bell className="text-blue-600" size={20} />
-                <h2 className="text-lg font-semibold text-gray-800">Notification Channels</h2>
+                <Bell className="text-blue-600 dark:text-blue-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Notification Channels</h2>
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <h3 className="font-medium text-gray-800">Email Notifications</h3>
-                    <p className="text-sm text-gray-500">Send notifications via email to parents and staff</p>
+                    <h3 className="font-medium text-gray-800 dark:text-white">Email Notifications</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Send notifications via email to parents and staff</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -511,10 +511,10 @@ const Settings = () => {
                   </label>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <h3 className="font-medium text-gray-800">SMS Notifications</h3>
-                    <p className="text-sm text-gray-500">Send notifications via SMS to parents</p>
+                    <h3 className="font-medium text-gray-800 dark:text-white">SMS Notifications</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Send notifications via SMS to parents</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -530,17 +530,17 @@ const Settings = () => {
             </div>
 
             {/* Fee Reminder Settings */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
               <div className="flex items-center gap-2 mb-4 border-b pb-2">
-                <Send className="text-blue-600" size={20} />
-                <h2 className="text-lg font-semibold text-gray-800">Fee Reminder Settings</h2>
+                <Send className="text-blue-600 dark:text-blue-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Fee Reminder Settings</h2>
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <h3 className="font-medium text-gray-800">Automatic Fee Reminders</h3>
-                    <p className="text-sm text-gray-500">Send reminders before fee due dates</p>
+                    <h3 className="font-medium text-gray-800 dark:text-white">Automatic Fee Reminders</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Send reminders before fee due dates</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -554,24 +554,24 @@ const Settings = () => {
                 </div>
 
                 {settings.feeReminderEnabled && (
-                  <div className="pl-4 border-l-2 border-blue-200">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Send reminder this many days before due date</label>
+                  <div className="pl-4 border-l-2 border-blue-200 dark:border-blue-800">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Send reminder this many days before due date</label>
                     <input
                       type="number"
                       min="1"
                       max="30"
                       value={settings.feeReminderDaysBefore}
                       onChange={(e) => setSettings({ ...settings, feeReminderDaysBefore: parseInt(e.target.value) || 7 })}
-                      className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="w-32 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     />
-                    <span className="ml-2 text-sm text-gray-500">days</span>
+                    <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">days</span>
                   </div>
                 )}
 
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <h3 className="font-medium text-gray-800">Overdue Reminders</h3>
-                    <p className="text-sm text-gray-500">Send reminders for overdue payments</p>
+                    <h3 className="font-medium text-gray-800 dark:text-white">Overdue Reminders</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Send reminders for overdue payments</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -585,91 +585,91 @@ const Settings = () => {
                 </div>
 
                 {settings.overdueReminderEnabled && (
-                  <div className="pl-4 border-l-2 border-orange-200">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Send overdue reminder every</label>
+                  <div className="pl-4 border-l-2 border-orange-200 dark:border-orange-800">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Send overdue reminder every</label>
                     <input
                       type="number"
                       min="1"
                       max="30"
                       value={settings.overdueReminderFrequency}
                       onChange={(e) => setSettings({ ...settings, overdueReminderFrequency: parseInt(e.target.value) || 7 })}
-                      className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="w-32 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     />
-                    <span className="ml-2 text-sm text-gray-500">days</span>
+                    <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">days</span>
                   </div>
                 )}
               </div>
             </div>
 
             {/* SMTP Settings */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
               <div className="flex items-center gap-2 mb-4 border-b pb-2">
-                <Server className="text-blue-600" size={20} />
-                <h2 className="text-lg font-semibold text-gray-800">Email Settings (SMTP)</h2>
+                <Server className="text-blue-600 dark:text-blue-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Email Settings (SMTP)</h2>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">SMTP Host</label>
                   <input
                     type="text"
                     value={settings.smtpHost}
                     onChange={(e) => setSettings({ ...settings, smtpHost: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="smtp.gmail.com"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Port</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">SMTP Port</label>
                   <input
                     type="number"
                     value={settings.smtpPort}
                     onChange={(e) => setSettings({ ...settings, smtpPort: e.target.value === '' ? '' : parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="587"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Username</label>
                   <input
                     type="text"
                     value={settings.smtpUser}
                     onChange={(e) => setSettings({ ...settings, smtpUser: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Password</label>
                   <input
                     type="password"
                     value={settings.smtpPassword}
                     onChange={(e) => setSettings({ ...settings, smtpPassword: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="••••••••"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">From Email</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">From Email</label>
                   <input
                     type="email"
                     value={settings.smtpFromEmail}
                     onChange={(e) => setSettings({ ...settings, smtpFromEmail: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="noreply@school.com"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">From Name</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">From Name</label>
                   <input
                     type="text"
                     value={settings.smtpFromName}
                     onChange={(e) => setSettings({ ...settings, smtpFromName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="School Admin"
                   />
                 </div>
@@ -682,26 +682,26 @@ const Settings = () => {
                       onChange={(e) => setSettings({ ...settings, smtpSecure: e.target.checked })}
                       className="rounded text-blue-600 focus:ring-blue-500"
                     />
-                    <span className="text-sm text-gray-700">Use Secure Connection (SSL/TLS)</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-200">Use Secure Connection (SSL/TLS)</span>
                   </label>
                 </div>
               </div>
             </div>
 
             {/* SMS Settings */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
               <div className="flex items-center gap-2 mb-4 border-b pb-2">
-                <MessageSquare className="text-blue-600" size={20} />
-                <h2 className="text-lg font-semibold text-gray-800">SMS Gateway Settings</h2>
+                <MessageSquare className="text-blue-600 dark:text-blue-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">SMS Gateway Settings</h2>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Provider</label>
                   <select
                     value={settings.smsProvider}
                     onChange={(e) => setSettings({ ...settings, smsProvider: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select Provider</option>
                     <option value="TWILIO">Twilio</option>
@@ -711,33 +711,33 @@ const Settings = () => {
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Sender ID</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Sender ID</label>
                   <input
                     type="text"
                     value={settings.smsSenderId}
                     onChange={(e) => setSettings({ ...settings, smsSenderId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="SCHOOL"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">API Key / SID</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key / SID</label>
                   <input
                     type="password"
                     value={settings.smsApiKey}
                     onChange={(e) => setSettings({ ...settings, smsApiKey: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">API Secret / Token</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Secret / Token</label>
                   <input
                     type="password"
                     value={settings.smsApiSecret}
                     onChange={(e) => setSettings({ ...settings, smsApiSecret: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   />
                 </div>
               </div>
@@ -747,41 +747,41 @@ const Settings = () => {
 
         {/* Payment Settings */}
         {activeTab === 'payments' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-2">
-              <CreditCard className="text-blue-600" size={20} />
-              <h2 className="text-lg font-semibold text-gray-800">Payment Gateway Settings</h2>
+              <CreditCard className="text-blue-600 dark:text-blue-400" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Payment Gateway Settings</h2>
             </div>
 
             <div className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="text-md font-medium text-gray-800">Lenco (Mobile Money)</h3>
-                    <p className="text-sm text-gray-500">Configure Lenco API for mobile money collections (Airtel/MTN/TNM)</p>
+                    <h3 className="text-md font-medium text-gray-800 dark:text-white">Lenco (Mobile Money)</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Configure Lenco API for mobile money collections (Airtel/MTN/TNM)</p>
                   </div>
                   <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">Supported in ZM & MW</span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key</label>
                     <input
                       type="password"
                       value={settings.lencoApiKey || ''}
                       onChange={(e) => setSettings({ ...settings, lencoApiKey: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-600 dark:text-white"
                       placeholder="Paste your Lenco API key here"
                     />
-                    <p className="text-xs text-gray-500 mt-1">Found in your Lenco dashboard under Settings {'>'} API Keys</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Found in your Lenco dashboard under Settings {'>'} API Keys</p>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Environment</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Environment</label>
                     <select
                       value={settings.lencoEnvironment || 'sandbox'}
                       onChange={(e) => setSettings({ ...settings, lencoEnvironment: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-600 dark:text-white"
                     >
                       <option value="sandbox">Sandbox (Test Mode)</option>
                       <option value="production">Production (Live Mode)</option>
@@ -789,11 +789,11 @@ const Settings = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Fee Bearer</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Fee Bearer</label>
                     <select
                       value={settings.lencoDefaultBearer || 'merchant'}
                       onChange={(e) => setSettings({ ...settings, lencoDefaultBearer: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-600 dark:text-white"
                     >
                       <option value="merchant">Merchant (School pays fees)</option>
                       <option value="customer">Customer (Parent pays fees)</option>

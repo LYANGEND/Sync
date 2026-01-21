@@ -115,11 +115,11 @@ const Users = () => {
   );
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">User Management</h1>
-          <p className="text-gray-500">Manage system access and roles</p>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">User Management</h1>
+          <p className="text-gray-500 dark:text-gray-400">Manage system access and roles</p>
         </div>
         <button 
           onClick={openAddModal}
@@ -130,8 +130,8 @@ const Users = () => {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row gap-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
@@ -139,13 +139,13 @@ const Users = () => {
               placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
             />
           </div>
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
           >
             <option value="">All Roles</option>
             {ROLES.map(role => (
@@ -155,48 +155,48 @@ const Users = () => {
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-gray-500">Loading users...</div>
+          <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading users...</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="bg-gray-50 border-b border-gray-100">
+              <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-100 dark:border-slate-600">
                 <tr>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">User</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Role</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Created</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">User</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Role</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Created</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                 {filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50">
+                  <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                     <td className="px-6 py-4">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold mr-3">
+                        <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold mr-3">
                           {user.fullName.charAt(0)}
                         </div>
                         <div>
-                          <div className="font-medium text-gray-900">{user.fullName}</div>
-                          <div className="text-sm text-gray-500">{user.email}</div>
+                          <div className="font-medium text-gray-900 dark:text-white">{user.fullName}</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{user.email}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800">
+                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 dark:bg-slate-700 text-gray-800 dark:text-gray-200">
                         {user.role.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                         user.isActive 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-red-100 text-red-800'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' 
+                          : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                       }`}>
                         {user.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
+                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {new Date(user.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4">
@@ -227,11 +227,11 @@ const Users = () => {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 pb-safe">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto pb-safe">
-            <h2 className="text-xl font-bold mb-4">{editingUser ? 'Edit User' : 'Add New User'}</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto pb-safe">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">{editingUser ? 'Edit User' : 'Add New User'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Full Name</label>
                 <div className="relative">
                   <User size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
@@ -239,14 +239,14 @@ const Users = () => {
                     required
                     value={formData.fullName}
                     onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="John Doe"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Email Address</label>
                 <div className="relative">
                   <Mail size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <input
@@ -254,20 +254,20 @@ const Users = () => {
                     required
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="john@example.com"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Role</label>
                 <div className="relative">
                   <Shield size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                   <select
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     {ROLES.map(role => (
                       <option key={role} value={role}>{role.replace('_', ' ')}</option>
@@ -277,7 +277,7 @@ const Users = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                   {editingUser ? 'New Password (leave blank to keep current)' : 'Password'}
                 </label>
                 <div className="relative">
@@ -288,7 +288,7 @@ const Users = () => {
                     minLength={6}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder={editingUser ? '••••••••' : 'Enter password'}
                   />
                 </div>
@@ -298,7 +298,7 @@ const Users = () => {
                 <button 
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>

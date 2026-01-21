@@ -115,33 +115,33 @@ const StudentQuiz = () => {
   };
 
   if (loading) {
-    return <div className="p-8 text-center">Loading quiz...</div>;
+    return <div className="p-8 text-center dark:text-gray-400">Loading quiz...</div>;
   }
 
   if (!quiz) {
-    return <div className="p-8 text-center text-red-600">Quiz not found.</div>;
+    return <div className="p-8 text-center text-red-600 dark:text-red-400">Quiz not found.</div>;
   }
 
   if (submitted) {
     return (
-      <div className="max-w-2xl mx-auto p-8 text-center">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+      <div className="max-w-2xl mx-auto p-4 md:p-8 pb-24 md:pb-8 text-center">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 p-6 md:p-8">
+          <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Quiz Submitted!</h2>
-          <p className="text-gray-600 mb-6">Your answers have been recorded successfully.</p>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Quiz Submitted!</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">Your answers have been recorded successfully.</p>
           
           {score !== null && (
-            <div className="bg-blue-50 rounded-lg p-4 mb-6">
-              <div className="text-sm text-blue-600 font-medium uppercase tracking-wider">Your Score</div>
-              <div className="text-3xl font-bold text-blue-700">{score} points</div>
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6">
+              <div className="text-sm text-blue-600 dark:text-blue-400 font-medium uppercase tracking-wider">Your Score</div>
+              <div className="text-3xl font-bold text-blue-700 dark:text-blue-400">{score} points</div>
             </div>
           )}
           
           <button 
             onClick={() => navigate('/')}
-            className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+            className="px-6 py-2 bg-gray-900 dark:bg-slate-600 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-slate-500 transition-colors"
           >
             Return to Dashboard
           </button>
@@ -151,11 +151,11 @@ const StudentQuiz = () => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
-        <div className="p-6 border-b border-gray-200 bg-blue-50">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{quiz.title}</h1>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+    <div className="max-w-3xl mx-auto p-4 md:p-6 pb-24 md:pb-6">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden mb-6">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-700 bg-blue-50 dark:bg-blue-900/20">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{quiz.title}</h1>
+          <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
             <span className="flex items-center gap-1">
               <Clock size={16} />
               {quiz.durationMinutes ? `${quiz.durationMinutes} mins` : 'No time limit'}
@@ -168,14 +168,14 @@ const StudentQuiz = () => {
           {quiz.questions.map((q, index) => (
             <div key={q.id} className="space-y-3">
               <div className="flex gap-3">
-                <span className="font-bold text-gray-500">{index + 1}.</span>
+                <span className="font-bold text-gray-500 dark:text-gray-400">{index + 1}.</span>
                 <div className="flex-1">
-                  <p className="text-lg text-gray-900 font-medium mb-3">{q.text}</p>
+                  <p className="text-lg text-gray-900 dark:text-white font-medium mb-3">{q.text}</p>
                   
                   {q.type === 'MULTIPLE_CHOICE' && (
                     <div className="space-y-2">
                       {q.options?.map(opt => (
-                        <label key={opt.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                        <label key={opt.id} className="flex items-center gap-3 p-3 border border-gray-200 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer transition-colors">
                           <input
                             type="radio"
                             name={q.id}
@@ -184,7 +184,7 @@ const StudentQuiz = () => {
                             onChange={(e) => handleAnswerChange(q.id, e.target.value)}
                             className="w-4 h-4 text-blue-600"
                           />
-                          <span className="text-gray-700">{opt.text}</span>
+                          <span className="text-gray-700 dark:text-gray-300">{opt.text}</span>
                         </label>
                       ))}
                     </div>
@@ -202,7 +202,7 @@ const StudentQuiz = () => {
                             onChange={(e) => handleAnswerChange(q.id, e.target.value)}
                             className="w-4 h-4 text-blue-600"
                           />
-                          <span className="text-gray-700">{opt.text}</span>
+                          <span className="text-gray-700 dark:text-gray-300">{opt.text}</span>
                         </label>
                       ))}
                     </div>
@@ -212,7 +212,7 @@ const StudentQuiz = () => {
                     <textarea
                       value={answers[q.id] || ''}
                       onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
                       rows={3}
                       placeholder="Type your answer here..."
                     />
@@ -223,7 +223,7 @@ const StudentQuiz = () => {
           ))}
         </div>
 
-        <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-end">
+        <div className="p-6 border-t border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700 flex justify-end">
           <button
             onClick={handleSubmit}
             disabled={submitting}

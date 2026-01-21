@@ -103,18 +103,18 @@ const Subjects = () => {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-semibold text-gray-800">Subjects Management</h2>
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Subjects Management</h2>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-        <div className="flex border-b border-gray-200">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 mb-6">
+        <div className="flex border-b border-gray-200 dark:border-slate-700">
           <button
             onClick={() => setActiveTab('list')}
             className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'list'
               ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
           >
             <List size={18} />
@@ -124,7 +124,7 @@ const Subjects = () => {
             onClick={() => setActiveTab('syllabus')}
             className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'syllabus'
               ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
           >
             <BookOpen size={18} />
@@ -142,7 +142,7 @@ const Subjects = () => {
                   placeholder="Search subjects..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 dark:text-white"
                 />
               </div>
               <div className="flex space-x-3">
@@ -163,9 +163,9 @@ const Subjects = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-gray-100 rounded-lg">
-              <table className="w-full text-left text-sm text-gray-600">
-                <thead className="bg-gray-50 text-gray-700 font-medium">
+            <div className="overflow-x-auto border border-gray-100 dark:border-slate-700 rounded-lg">
+              <table className="w-full text-left text-sm text-gray-600 dark:text-gray-300">
+                <thead className="bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-medium">
                   <tr>
                     <th className="px-6 py-3">Code</th>
                     <th className="px-6 py-3">Name</th>
@@ -173,22 +173,22 @@ const Subjects = () => {
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                   {loading ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500">Loading subjects...</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">Loading subjects...</td>
                     </tr>
                   ) : filteredSubjects.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500">No subjects found</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No subjects found</td>
                     </tr>
                   ) : (
                     filteredSubjects.map((subject) => (
-                      <tr key={subject.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 font-mono text-xs text-gray-500">{subject.code}</td>
-                        <td className="px-6 py-4 font-medium text-gray-900">{subject.name}</td>
-                        <td className="px-6 py-4 text-gray-600">
-                          {subject.teacher?.fullName || <span className="text-gray-400 italic">Not assigned</span>}
+                      <tr key={subject.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <td className="px-6 py-4 font-mono text-xs text-gray-500 dark:text-gray-400">{subject.code}</td>
+                        <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">{subject.name}</td>
+                        <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
+                          {subject.teacher?.fullName || <span className="text-gray-400 dark:text-gray-500 italic">Not assigned</span>}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex justify-end space-x-2">
@@ -222,37 +222,37 @@ const Subjects = () => {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">{editingSubject ? 'Edit Subject' : 'Add Subject'}</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold dark:text-white mb-4">{editingSubject ? 'Edit Subject' : 'Add Subject'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Subject Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject Name</label>
                 <input
                   type="text"
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   placeholder="e.g. Mathematics"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Subject Code</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject Code</label>
                 <input
                   type="text"
                   required
                   value={formData.code}
                   onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   placeholder="e.g. MATH101"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assign Teacher (Optional)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assign Teacher (Optional)</label>
                 <select
                   value={formData.teacherId}
                   onChange={(e) => setFormData({ ...formData, teacherId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="">-- Select Teacher --</option>
                   {teachers.map(teacher => (
@@ -264,7 +264,7 @@ const Subjects = () => {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>
