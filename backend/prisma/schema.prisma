@@ -322,9 +322,10 @@ model StudentFeeStructure {
 }
 
 enum PaymentStatus {
-  COMPLETED
-  VOIDED
   PENDING
+  COMPLETED
+  FAILED
+  VOIDED
 }
 
 enum MobileMoneyStatus {

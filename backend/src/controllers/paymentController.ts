@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, PaymentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
@@ -712,7 +712,10 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
     // Generate unique reference
     const reference = generateMobileMoneyReference();
 
-    // Create the collection record in our database first
+    // Generate transaction ID for the payment
+    const transactionId = generateTransactionId();
+
+    // Create the collection record and pending payment in our database first
     const collection = await prisma.mobileMoneyCollection.create({
       data: {
         reference,
@@ -724,6 +727,25 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
         initiatedByUserId: userId,
         status: 'PENDING',
       },
+    });
+
+    // Create Payment record with PENDING status
+    const pendingPayment = await prisma.payment.create({
+      data: {
+        transactionId,
+        studentId,
+        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
+        method: 'MOBILE_MONEY',
+        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
+        status: 'PENDING',
+        recordedByUserId: userId,
+      },
+    });
+
+    // Link the payment to the collection
+    await prisma.mobileMoneyCollection.update({
+      where: { id: collection.id },
+      data: { paymentId: pendingPayment.id },
     });
 
     // Call Lenco API to initiate the collection
@@ -887,10 +909,15 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
         },
       });
 
-      // If successful, create the actual payment record
-      if (newStatus === 'SUCCESSFUL') {
-        const payment = await createPaymentFromCollection(collection);
+      // Update payment status based on collection result
+      if (newStatus === 'SUCCESSFUL' && collection.paymentId) {
+        await updatePaymentFromCollection({ ...collection, paymentId: collection.paymentId }, 'COMPLETED');
+      } else if (newStatus === 'FAILED' && collection.paymentId) {
+        await updatePaymentFromCollection({ ...collection, paymentId: collection.paymentId }, 'FAILED');
+      }
 
+      // If successful, return with payment info
+      if (newStatus === 'SUCCESSFUL') {
         return res.json({
           collection: {
             id: updatedCollection.id,
@@ -898,9 +925,9 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
             amount: Number(updatedCollection.amount),
             status: updatedCollection.status,
             student: collection.student,
-            payment: payment ? {
-              id: payment.id,
-              transactionId: payment.transactionId,
+            payment: collection.payment ? {
+              id: collection.payment.id,
+              transactionId: collection.payment.transactionId,
             } : null,
             completedAt: updatedCollection.completedAt,
           },
@@ -926,39 +953,71 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
 };
 
 /**
- * Helper function to create a payment record from a successful mobile money collection
+ * Helper function to update payment status from mobile money collection
  */
-async function createPaymentFromCollection(collection: any) {
+async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETED' | 'FAILED') {
   try {
-    const transactionId = generateTransactionId();
+    if (!collection.paymentId) {
+      console.error(`No payment linked to collection ${collection.reference}`);
+      return null;
+    }
 
-    const payment = await prisma.payment.create({
+    // Update payment status
+    const paymentStatus = newStatus === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+    const payment = await prisma.payment.update({
+      where: { id: collection.paymentId },
       data: {
-        transactionId,
-        studentId: collection.studentId,
-        // Dismount the 2.5% fee to record only the tuition amount
-        amount: Number(collection.amount) / 1.025,
-        method: 'MOBILE_MONEY',
-        notes: `Mobile Money payment via ${collection.operator.toUpperCase()}. Ref: ${collection.reference}`,
-        status: 'COMPLETED',
-        recordedByUserId: collection.initiatedByUserId,
+        status: paymentStatus as PaymentStatus,
       },
     });
 
-    // Link the payment to the collection
-    await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: { paymentId: payment.id },
-    });
+    console.log(`Payment ${payment.transactionId} updated to ${newStatus} from collection ${collection.reference}`);
 
-    console.log(`Payment created from mobile money collection: ${payment.transactionId}`);
+    // Send notification to parent on successful payment
+    if (newStatus === 'COMPLETED') {
+      // Fetch student with parent info for notification
+      const student = await prisma.student.findUnique({
+        where: { id: payment.studentId },
+        include: { parent: true },
+      });
 
-    // TODO: Send notification to parent about successful payment
-    // This would use the existing sendNotification service
+      if (student) {
+        const guardianEmail = student.guardianEmail || student.parent?.email;
+        const guardianPhone = student.guardianPhone; // Phone from student record
+        const guardianName = student.guardianName || student.parent?.fullName || 'Parent/Guardian';
+
+        // Get school name
+        const settings = await prisma.schoolSettings.findFirst();
+        const schoolName = settings?.schoolName || 'School';
+
+        // Generate email/SMS content
+        const { subject, text, html, sms } = generatePaymentReceiptEmail(
+          guardianName,
+          `${student.firstName} ${student.lastName}`,
+          Number(payment.amount),
+          new Date(),
+          'MOBILE_MONEY',
+          payment.transactionId || collection.reference,
+          schoolName
+        );
+
+        // Send email and SMS
+        const { emailSent, smsSent } = await sendNotification(
+          guardianEmail || undefined,
+          guardianPhone || undefined,
+          subject,
+          text,
+          html,
+          sms
+        );
+
+        console.log(`Payment notification sent - Email: ${emailSent}, SMS: ${smsSent}`);
+      }
+    }
 
     return payment;
   } catch (error) {
-    console.error('Error creating payment from collection:', error);
+    console.error('Error updating payment from collection:', error);
     return null;
   }
 }
@@ -1001,7 +1060,7 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
     }
 
     // Update collection status
-    await prisma.mobileMoneyCollection.update({
+    const updatedCollection = await prisma.mobileMoneyCollection.update({
       where: { id: collection.id },
       data: {
         status: newStatus,
@@ -1012,9 +1071,11 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
       },
     });
 
-    // If successful, create the payment record
-    if (newStatus === 'SUCCESSFUL' && !collection.paymentId) {
-      await createPaymentFromCollection(collection);
+    // Update payment status based on collection result
+    if (newStatus === 'SUCCESSFUL' && updatedCollection.paymentId) {
+      await updatePaymentFromCollection(updatedCollection, 'COMPLETED');
+    } else if (newStatus === 'FAILED' && updatedCollection.paymentId) {
+      await updatePaymentFromCollection(updatedCollection, 'FAILED');
     }
 
     console.log(`Webhook processed for collection ${reference}: ${newStatus}`);
@@ -1249,6 +1310,7 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     }
 
     const reference = generateMobileMoneyReference();
+    const transactionId = generateTransactionId();
 
     const collection = await prisma.mobileMoneyCollection.create({
       data: {
@@ -1260,6 +1322,25 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
         operator,
         status: 'PENDING',
       },
+    });
+
+    // Create Payment record with PENDING status
+    const pendingPayment = await prisma.payment.create({
+      data: {
+        transactionId,
+        studentId,
+        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
+        method: 'MOBILE_MONEY',
+        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
+        status: 'PENDING',
+        recordedByUserId: null, // Public payment has no recorded user
+      },
+    });
+
+    // Link the payment to the collection
+    await prisma.mobileMoneyCollection.update({
+      where: { id: collection.id },
+      data: { paymentId: pendingPayment.id },
     });
 
     const lencoResult = await initiateMobileMoneyCollection({
