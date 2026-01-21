@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Calendar, CheckCircle, Clock, AlertCircle, Download, Upload } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, AlertCircle, Download, Upload, Paperclip } from 'lucide-react';
 import api from '../../services/api';
+import FileUpload from '../../components/FileUpload';
+
+interface UploadedFile {
+  filename: string;
+  originalName: string;
+  mimetype: string;
+  size: number;
+  url: string;
+}
 
 interface Homework {
   id: string;
@@ -44,6 +53,7 @@ const ParentHomework = () => {
   const [submitData, setSubmitData] = useState({
     content: '',
     status: 'SUBMITTED' as 'DRAFT' | 'SUBMITTED',
+    attachments: [] as string[],
   });
 
   useEffect(() => {
@@ -91,7 +101,7 @@ const ParentHomework = () => {
       setLoading(true);
       await api.post(`/homework/${selectedHomework.id}/submit?studentId=${selectedChild.id}`, submitData);
       setShowSubmitModal(false);
-      setSubmitData({ content: '', status: 'SUBMITTED' });
+      setSubmitData({ content: '', status: 'SUBMITTED', attachments: [] });
       fetchHomework();
       alert('Homework submitted successfully!');
     } catch (error) {
@@ -102,8 +112,16 @@ const ParentHomework = () => {
     }
   };
 
+  const handleFileUpload = (files: UploadedFile[]) => {
+    setSubmitData({
+      ...submitData,
+      attachments: files.map(f => f.url),
+    });
+  };
+
   const openSubmitModal = (hw: Homework) => {
     setSelectedHomework(hw);
+    setSubmitData({ content: '', status: 'SUBMITTED', attachments: [] });
     setShowSubmitModal(true);
   };
 
@@ -340,28 +358,44 @@ const ParentHomework = () => {
       {/* Submit Modal */}
       {showSubmitModal && selectedHomework && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold text-slate-900">Submit: {selectedHomework.title}</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b dark:border-slate-700">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Submit: {selectedHomework.title}</h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Submission Note (Optional)
                 </label>
                 <textarea
                   value={submitData.content}
                   onChange={(e) => setSubmitData({ ...submitData, content: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
                   rows={4}
                   placeholder="e.g., I completed this in my exercise book"
                 />
               </div>
 
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <p className="text-sm text-blue-800">
+              {/* File Upload Section */}
+              {selectedHomework.requiresSubmission && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    <Paperclip className="w-4 h-4 inline mr-1" />
+                    Attach Files (Photos, Documents)
+                  </label>
+                  <FileUpload
+                    onUpload={handleFileUpload}
+                    multiple={true}
+                    accept="image/*,application/pdf,.doc,.docx"
+                    maxSize={10}
+                  />
+                </div>
+              )}
+
+              <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-300">
                   {selectedHomework.requiresSubmission
-                    ? 'You can upload photos or files after submitting.'
+                    ? 'Upload photos of your work or any documents you need to submit.'
                     : 'This will mark the homework as complete.'}
                 </p>
               </div>
@@ -370,7 +404,7 @@ const ParentHomework = () => {
                 <button
                   type="button"
                   onClick={() => setShowSubmitModal(false)}
-                  className="flex-1 px-4 py-2 border rounded-lg hover:bg-slate-50"
+                  className="flex-1 px-4 py-2 border dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 dark:text-white"
                 >
                   Cancel
                 </button>
