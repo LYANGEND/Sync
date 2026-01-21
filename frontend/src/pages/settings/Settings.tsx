@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -40,6 +40,11 @@ interface SettingsData {
   smsApiKey: string;
   smsApiSecret: string;
   smsSenderId: string;
+
+  // Lenco Payment Gateway
+  lencoApiKey?: string;
+  lencoEnvironment?: string;
+  lencoDefaultBearer?: string;
 }
 
 interface Term {
@@ -82,11 +87,15 @@ const Settings = () => {
     smsApiKey: '',
     smsApiSecret: '',
     smsSenderId: '',
+
+    lencoApiKey: '',
+    lencoEnvironment: 'sandbox',
+    lencoDefaultBearer: 'merchant',
   });
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments'>('general');
 
   // Logo upload state
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -135,6 +144,10 @@ const Settings = () => {
         smsApiKey: settingsRes.data.smsApiKey || '',
         smsApiSecret: settingsRes.data.smsApiSecret || '',
         smsSenderId: settingsRes.data.smsSenderId || '',
+
+        lencoApiKey: settingsRes.data.lencoApiKey || '',
+        lencoEnvironment: settingsRes.data.lencoEnvironment || 'sandbox',
+        lencoDefaultBearer: settingsRes.data.lencoDefaultBearer || 'merchant',
       });
       setLogoUrl(settingsRes.data.logoUrl || null);
       setTerms(termsRes.data);
@@ -234,6 +247,12 @@ const Settings = () => {
           className={`pb-2 px-1 ${activeTab === 'communication' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
         >
           Communication
+        </button>
+        <button
+          onClick={() => setActiveTab('payments')}
+          className={`pb-2 px-1 ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          Payments
         </button>
       </div>
 
@@ -720,6 +739,66 @@ const Settings = () => {
                     onChange={(e) => setSettings({ ...settings, smsApiSecret: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                   />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Settings */}
+        {activeTab === 'payments' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center gap-2 mb-4 border-b pb-2">
+              <CreditCard className="text-blue-600" size={20} />
+              <h2 className="text-lg font-semibold text-gray-800">Payment Gateway Settings</h2>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-md font-medium text-gray-800">Lenco (Mobile Money)</h3>
+                    <p className="text-sm text-gray-500">Configure Lenco API for mobile money collections (Airtel/MTN/TNM)</p>
+                  </div>
+                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded">Supported in ZM & MW</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                    <input
+                      type="password"
+                      value={settings.lencoApiKey || ''}
+                      onChange={(e) => setSettings({ ...settings, lencoApiKey: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Paste your Lenco API key here"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Found in your Lenco dashboard under Settings {'>'} API Keys</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Environment</label>
+                    <select
+                      value={settings.lencoEnvironment || 'sandbox'}
+                      onChange={(e) => setSettings({ ...settings, lencoEnvironment: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="sandbox">Sandbox (Test Mode)</option>
+                      <option value="production">Production (Live Mode)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Fee Bearer</label>
+                    <select
+                      value={settings.lencoDefaultBearer || 'merchant'}
+                      onChange={(e) => setSettings({ ...settings, lencoDefaultBearer: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="merchant">Merchant (School pays fees)</option>
+                      <option value="customer">Customer (Parent pays fees)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
