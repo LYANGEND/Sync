@@ -24,6 +24,11 @@ import HomeworkGrading from './pages/teacher/HomeworkGrading';
 import TeacherResources from './pages/teacher/TeacherResources';
 import ParentHomework from './pages/parent/ParentHomework';
 import ParentResources from './pages/parent/ParentResources';
+import ParentQuizzes from './pages/parent/ParentQuizzes';
+import ParentTimetable from './pages/parent/ParentTimetable';
+import ParentGrades from './pages/parent/ParentGrades';
+import ParentVideoLessons from './pages/parent/ParentVideoLessons';
+import TeacherVideoLessons from './pages/teacher/TeacherVideoLessons';
 import MyChildren from './pages/parents/MyChildren';
 import AcademicReports from './pages/parents/AcademicReports';
 import ForumList from './pages/forums/ForumList';
@@ -170,6 +175,11 @@ function App() {
                     <TeacherResources />
                   </RoleGuard>
                 } />
+                <Route path="/teacher/video-lessons" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN']}>
+                    <TeacherVideoLessons />
+                  </RoleGuard>
+                } />
 
                 {/* Parent/Student LMS Routes */}
                 <Route path="/parent/homework" element={
@@ -180,6 +190,26 @@ function App() {
                 <Route path="/parent/resources" element={
                   <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
                     <ParentResources />
+                  </RoleGuard>
+                } />
+                <Route path="/parent/quizzes" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentQuizzes />
+                  </RoleGuard>
+                } />
+                <Route path="/parent/timetable" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentTimetable />
+                  </RoleGuard>
+                } />
+                <Route path="/parent/grades" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentGrades />
+                  </RoleGuard>
+                } />
+                <Route path="/parent/video-lessons" element={
+                  <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN']}>
+                    <ParentVideoLessons />
                   </RoleGuard>
                 } />
 

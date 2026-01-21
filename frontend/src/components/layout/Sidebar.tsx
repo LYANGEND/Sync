@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, Crown } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, Crown, Video } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -37,6 +37,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: BookOpen,
       label: 'Academics',
       path: '/academics',
+      roles: ['SUPER_ADMIN', 'TEACHER']
+    },
+    {
+      icon: Video,
+      label: 'Video Lessons',
+      path: '/teacher/video-lessons',
       roles: ['SUPER_ADMIN', 'TEACHER']
     },
     {
@@ -98,6 +104,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: Award,
       label: 'Academic Reports',
       path: '/academics/reports',
+      roles: ['PARENT', 'STUDENT']
+    },
+    {
+      icon: Video,
+      label: 'Video Lessons',
+      path: '/parent/video-lessons',
       roles: ['PARENT', 'STUDENT']
     },
   ];

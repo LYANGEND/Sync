@@ -203,6 +203,7 @@ model Tenant {
   forums            Forum[]
   announcements     Announcement[]
   subjectContents   SubjectContent[]
+  videoLessons      VideoLesson[]
   
   @@index([slug])
   @@index([status])
@@ -724,6 +725,7 @@ model User {
   announcementReads        AnnouncementRead[] @relation("AnnouncementReads")
   subjectContentsTaught    SubjectContent[]
   homeworkGraded           HomeworkSubmission[]
+  videoLessonsHosted       VideoLesson[]   @relation("VideoLessonTeacher")
 
   // Email is unique within a tenant (same email can exist in different schools)
   @@unique([tenantId, email])
@@ -787,6 +789,7 @@ model Student {
   termReports       StudentTermReport[]
   submissions     AssessmentSubmission[]
   homeworkSubmissions HomeworkSubmission[]
+  videoLessonAttendance VideoLessonAttendee[]
 
   // Admission number unique per tenant
   @@unique([tenantId, admissionNumber])
@@ -826,6 +829,7 @@ model Class {
   lessonPlans    LessonPlan[]
   forums         Forum[]
   subjectContents SubjectContent[]
+  videoLessons   VideoLesson[]
 
   @@index([tenantId])
   @@map("classes")
@@ -854,6 +858,7 @@ model Subject {
   lessonPlans     LessonPlan[]
   forums          Forum[]
   subjectContents SubjectContent[]
+  videoLessons    VideoLesson[]
 
   // Subject code unique per tenant
   @@unique([tenantId, code])
@@ -2522,3 +2527,77 @@ model AnnouncementRead {
   @@map("announcement_reads")
 }
 
+// ==================== VIDEO LESSONS ====================
+
+enum VideoLessonStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  CANCELLED
+}
+
+model VideoLesson {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  title           String
+  description     String?
+  
+  classId         String
+  class           Class    @relation(fields: [classId], references: [id])
+  
+  subjectId       String
+  subject         Subject  @relation(fields: [subjectId], references: [id])
+  
+  teacherId       String
+  teacher         User     @relation("VideoLessonTeacher", fields: [teacherId], references: [id])
+  
+  // Jitsi room configuration
+  roomId          String   @unique  // Unique room identifier
+  roomPassword    String?            // Optional password protection
+  
+  scheduledStart  DateTime
+  scheduledEnd    DateTime
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  
+  status          VideoLessonStatus @default(SCHEDULED)
+  
+  // Recording
+  recordingUrl    String?
+  isRecordingEnabled Boolean @default(false)
+  
+  // Attendance tracking
+  attendees       VideoLessonAttendee[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([classId])
+  @@index([teacherId])
+  @@index([scheduledStart])
+  @@index([status])
+  @@map("video_lessons")
+}
+
+model VideoLessonAttendee {
+  id              String   @id @default(uuid())
+  
+  videoLessonId   String
+  videoLesson     VideoLesson @relation(fields: [videoLessonId], references: [id], onDelete: Cascade)
+  
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  
+  joinedAt        DateTime @default(now())
+  leftAt          DateTime?
+  duration        Int?     // Total minutes attended
+  
+  @@unique([videoLessonId, studentId])
+  @@index([videoLessonId])
+  @@index([studentId])
+  @@map("video_lesson_attendees")
+}
