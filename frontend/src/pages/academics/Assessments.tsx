@@ -254,15 +254,15 @@ const Assessments = () => {
       <div className="p-6">
         <button
           onClick={() => setView('list')}
-          className="flex items-center text-gray-600 hover:text-gray-900 mb-6"
+          className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6"
         >
           <ArrowLeft size={20} className="mr-2" />
           Back to Assessments
         </button>
 
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">{currentAssessment.title}</h2>
-          <p className="text-gray-500">Manage Questions</p>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white">{currentAssessment.title}</h2>
+          <p className="text-gray-500 dark:text-gray-400">Manage Questions</p>
         </div>
 
         <QuestionBuilder
@@ -325,35 +325,35 @@ const Assessments = () => {
       <div className="p-6">
         <button
           onClick={() => setView('list')}
-          className="flex items-center text-gray-600 hover:text-gray-900 mb-6"
+          className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6"
         >
           <ArrowLeft size={20} className="mr-2" />
           Back to Assessments
         </button>
 
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-6">Create New Assessment</h2>
+        <div className="max-w-2xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 p-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-6">Create New Assessment</h2>
 
           <form onSubmit={handleCreateAssessment} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
               <input
                 type="text"
                 required
                 value={newAssessment.title}
                 onChange={e => setNewAssessment({ ...newAssessment, title: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 dark:text-white"
                 placeholder="e.g., Mid-Term Mathematics Exam"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
                 <select
                   value={newAssessment.type}
                   onChange={e => setNewAssessment({ ...newAssessment, type: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="QUIZ">Quiz</option>
                   <option value="TEST">Test</option>
@@ -363,25 +363,25 @@ const Assessments = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date</label>
                 <input
                   type="date"
                   required
                   value={newAssessment.date}
                   onChange={e => setNewAssessment({ ...newAssessment, date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
                 <select
                   required
                   value={newAssessment.classId}
                   onChange={e => setNewAssessment({ ...newAssessment, classId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="">Select Class</option>
                   {classes.map(c => (
@@ -390,12 +390,12 @@ const Assessments = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
                 <select
                   required
                   value={newAssessment.subjectId}
                   onChange={e => setNewAssessment({ ...newAssessment, subjectId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="">Select Subject</option>
                   {subjects.map(s => (
@@ -406,12 +406,12 @@ const Assessments = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Academic Term</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
               <select
                 required
                 value={newAssessment.termId}
                 onChange={e => setNewAssessment({ ...newAssessment, termId: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
               >
                 <option value="">Select Term</option>
                 {terms.map(t => (
@@ -422,18 +422,18 @@ const Assessments = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Total Marks</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Total Marks</label>
                 <input
                   type="number"
                   required
                   min="1"
                   value={newAssessment.totalMarks}
                   onChange={e => setNewAssessment({ ...newAssessment, totalMarks: Number(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Weight (%)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Weight (%)</label>
                 <input
                   type="number"
                   required
@@ -441,17 +441,17 @@ const Assessments = () => {
                   max="100"
                   value={newAssessment.weight}
                   onChange={e => setNewAssessment({ ...newAssessment, weight: Number(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (Optional)</label>
               <textarea
                 value={newAssessment.description}
                 onChange={e => setNewAssessment({ ...newAssessment, description: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 rows={3}
               />
             </div>
@@ -477,12 +477,12 @@ const Assessments = () => {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setView('list')}
-              className="flex items-center text-gray-600 hover:text-gray-900"
+              className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
             >
               <ArrowLeft size={20} className="mr-2" />
               Back to Assessments
             </button>
-            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="h-6 w-px bg-gray-300 dark:bg-slate-600"></div>
             <button onClick={downloadTemplate} className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium">
               <Download size={16} className="mr-1" /> Template
             </button>
@@ -502,47 +502,47 @@ const Assessments = () => {
           </button>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 bg-gray-50">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+          <div className="p-6 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50">
             <div className="flex justify-between items-start mb-6">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">{currentAssessment.title}</h2>
-                <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
+                <h2 className="text-xl font-bold text-gray-800 dark:text-white">{currentAssessment.title}</h2>
+                <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
                   <span className="flex items-center"><BookOpen size={16} className="mr-1" /> {currentAssessment.subject.name}</span>
                   <span className="flex items-center"><Users size={16} className="mr-1" /> {currentAssessment.class.name}</span>
                   <span className="flex items-center"><Calendar size={16} className="mr-1" /> {new Date(currentAssessment.date).toLocaleDateString()}</span>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-sm text-gray-500">Total Marks</div>
-                <div className="text-2xl font-bold text-gray-800">{currentAssessment.totalMarks}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">Total Marks</div>
+                <div className="text-2xl font-bold text-gray-800 dark:text-white">{currentAssessment.totalMarks}</div>
               </div>
             </div>
 
             {/* Analytics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
-              <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                <div className="text-xs text-gray-500 font-medium uppercase mb-1 flex items-center gap-1">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
+                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
                   <BarChart2 size={14} className="text-blue-500" /> Average Score
                 </div>
-                <div className="text-xl font-bold text-gray-800">
+                <div className="text-xl font-bold text-gray-800 dark:text-white">
                   {(Object.values(grades).reduce((acc, g) => acc + (Number(g.score) || 0), 0) / (Object.keys(grades).length || 1)).toFixed(1)}
                   <span className="text-xs text-gray-400 font-normal ml-1">/ {currentAssessment.totalMarks}</span>
                 </div>
               </div>
-              <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                <div className="text-xs text-gray-500 font-medium uppercase mb-1 flex items-center gap-1">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
+                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
                   <TrendingUp size={14} className="text-green-500" /> Pass Rate
                 </div>
-                <div className="text-xl font-bold text-gray-800">
+                <div className="text-xl font-bold text-gray-800 dark:text-white">
                   {(Object.values(grades).filter(g => (Number(g.score) || 0) >= (currentAssessment.totalMarks * 0.5)).length / (Object.keys(grades).length || 1) * 100).toFixed(1)}%
                 </div>
               </div>
-              <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                <div className="text-xs text-gray-500 font-medium uppercase mb-1 flex items-center gap-1">
+              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
+                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
                   <Award size={14} className="text-purple-500" /> Highest Score
                 </div>
-                <div className="text-xl font-bold text-gray-800">
+                <div className="text-xl font-bold text-gray-800 dark:text-white">
                   {Math.max(...Object.values(grades).map(g => Number(g.score) || 0))}
                 </div>
               </div>
@@ -551,21 +551,21 @@ const Assessments = () => {
 
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                 <tr>
-                  <th className="px-6 py-3 font-semibold text-gray-600">Student</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600">Admission No.</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600 w-32">Score</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600">Remarks</th>
+                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Student</th>
+                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Admission No.</th>
+                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300 w-32">Score</th>
+                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Remarks</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                 {students.map(student => (
-                  <tr key={student.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 font-medium text-gray-800">
+                  <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                    <td className="px-6 py-4 font-medium text-gray-800 dark:text-white">
                       {student.firstName} {student.lastName}
                     </td>
-                    <td className="px-6 py-4 text-gray-500 font-mono text-sm">
+                    <td className="px-6 py-4 text-gray-500 dark:text-gray-400 font-mono text-sm">
                       {student.admissionNumber}
                     </td>
                     <td className="px-6 py-4">
@@ -575,7 +575,7 @@ const Assessments = () => {
                         max={currentAssessment.totalMarks}
                         value={grades[student.id]?.score || ''}
                         onChange={e => handleGradeChange(student.id, 'score', e.target.value)}
-                        className="w-full px-3 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-3 py-1 border border-gray-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                         placeholder="-"
                       />
                     </td>
@@ -584,7 +584,7 @@ const Assessments = () => {
                         type="text"
                         value={grades[student.id]?.remarks || ''}
                         onChange={e => handleGradeChange(student.id, 'remarks', e.target.value)}
-                        className="w-full px-3 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-3 py-1 border border-gray-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                         placeholder="Optional remarks"
                       />
                     </td>
@@ -601,18 +601,18 @@ const Assessments = () => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Assessments</h1>
-        <p className="text-gray-500 mt-1">Manage exams, tests, and homework assignments.</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Assessments</h1>
+        <p className="text-gray-500 dark:text-gray-400 mt-1">Manage exams, tests, and homework assignments.</p>
       </div>
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
         <div className="flex flex-1 gap-4 w-full sm:w-auto">
           <div className="relative flex-1 sm:flex-none sm:w-64">
             <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <select
               value={selectedClass}
               onChange={(e) => setSelectedClass(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors appearance-none cursor-pointer"
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
             >
               <option value="">All Classes</option>
               {classes.map(c => (
@@ -626,7 +626,7 @@ const Assessments = () => {
             <select
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors appearance-none cursor-pointer"
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
             >
               <option value="">All Subjects</option>
               {subjects.map(s => (
@@ -675,12 +675,12 @@ const Assessments = () => {
           <p>Loading assessments...</p>
         </div>
       ) : assessments.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
-          <div className="bg-blue-50 text-blue-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
+          <div className="bg-blue-50 dark:bg-blue-900/30 text-blue-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
             <FileText size={32} />
           </div>
-          <h3 className="text-xl font-bold text-gray-900">No assessments found</h3>
-          <p className="text-gray-500 mt-2 max-w-sm mx-auto">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">No assessments found</h3>
+          <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-sm mx-auto">
             {selectedClass || selectedSubject
               ? "Try adjusting your filters to find what you're looking for."
               : "Create your first assessment to start tracking student performance."}
@@ -698,15 +698,15 @@ const Assessments = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {assessments.map(assessment => {
             const typeColors =
-              assessment.type === 'EXAM' ? { border: 'border-red-500', bg: 'bg-red-50', text: 'text-red-700' } :
-                assessment.type === 'TEST' ? { border: 'border-orange-500', bg: 'bg-orange-50', text: 'text-orange-700' } :
-                  assessment.type === 'QUIZ' ? { border: 'border-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' } :
-                    { border: 'border-green-500', bg: 'bg-green-50', text: 'text-green-700' };
+              assessment.type === 'EXAM' ? { border: 'border-red-500', bg: 'bg-red-50 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-300' } :
+                assessment.type === 'TEST' ? { border: 'border-orange-500', bg: 'bg-orange-50 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-300' } :
+                  assessment.type === 'QUIZ' ? { border: 'border-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300' } :
+                    { border: 'border-green-500', bg: 'bg-green-50 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-300' };
 
             return (
               <div
                 key={assessment.id}
-                className={`bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 relative group overflow-hidden border-l-4 ${typeColors.border}`}
+                className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 hover:shadow-md transition-all duration-200 relative group overflow-hidden border-l-4 ${typeColors.border}`}
               >
                 <div className="p-5">
                   <div className="flex justify-between items-start mb-3">
@@ -714,7 +714,7 @@ const Assessments = () => {
                       {assessment.type}
                     </span>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs font-medium text-gray-400 flex items-center bg-gray-50 px-2 py-1 rounded">
+                      <span className="text-xs font-medium text-gray-400 dark:text-gray-500 flex items-center bg-gray-50 dark:bg-slate-700 px-2 py-1 rounded">
                         <Calendar size={12} className="mr-1.5" />
                         {new Date(assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                       </span>
@@ -727,28 +727,28 @@ const Assessments = () => {
                     </div>
                   </div>
 
-                  <h3 className="text-lg font-bold text-gray-900 mb-1 line-clamp-1 group-hover:text-blue-600 transition-colors">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 line-clamp-1 group-hover:text-blue-600 transition-colors">
                     {assessment.title}
                   </h3>
 
                   <div className="flex flex-col gap-1.5 mt-4">
-                    <div className="flex items-center text-sm text-gray-600">
+                    <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
                       <BookOpen size={16} className="mr-2 text-gray-400" />
                       <span className="truncate font-medium">{assessment.subject.name}</span>
                     </div>
-                    <div className="flex items-center text-sm text-gray-600">
+                    <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
                       <Users size={16} className="mr-2 text-gray-400" />
                       <span className="truncate">{assessment.class.name}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                <div className="px-5 py-4 bg-gray-50 dark:bg-slate-700/50 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between">
                   <div className="flex flex-col">
-                    <span className="text-xl font-bold text-gray-800 leading-none">
+                    <span className="text-xl font-bold text-gray-800 dark:text-white leading-none">
                       {assessment._count?.results || 0}
                     </span>
-                    <span className="text-[10px] uppercase font-bold text-gray-400 mt-1">Graded</span>
+                    <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-500 mt-1">Graded</span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -763,7 +763,7 @@ const Assessments = () => {
                     )}
                     <button
                       onClick={() => openGradebook(assessment)}
-                      className="flex items-center bg-white border border-gray-200 text-gray-700 hover:text-blue-600 hover:border-blue-200 px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm group-hover:border-blue-300"
+                      className="flex items-center bg-white dark:bg-slate-600 border border-gray-200 dark:border-slate-500 text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm group-hover:border-blue-300"
                     >
                       Grade
                       <ChevronRight size={16} className="ml-1 text-gray-400 group-hover:text-blue-500" />

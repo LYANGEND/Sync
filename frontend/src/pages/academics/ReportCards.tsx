@@ -208,17 +208,17 @@ const ReportCards: React.FC = () => {
   }
 
   return (
-    <div className="p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Report Cards</h2>
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
+      <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">Report Cards</h2>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+      <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Academic Term</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
             <select
               value={selectedTerm}
               onChange={(e) => setSelectedTerm(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
             >
               <option value="">Select Term</option>
               {terms.map((term) => (
@@ -230,14 +230,14 @@ const ReportCards: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
             <select
               value={selectedClass}
               onChange={(e) => {
                 setSelectedClass(e.target.value);
                 setSelectedStudent('');
               }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
             >
               <option value="">Select Class</option>
               {classes.map((cls) => (
@@ -247,12 +247,12 @@ const ReportCards: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student</label>
             <select
               value={selectedStudent}
               onChange={(e) => setSelectedStudent(e.target.value)}
               disabled={!selectedClass}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-gray-100 dark:disabled:bg-slate-700 disabled:text-gray-400 dark:disabled:text-gray-500 bg-white dark:bg-slate-700 dark:text-white"
             >
               <option value="">None (Select for individual report)</option>
               {students.map((student) => (
@@ -284,24 +284,24 @@ const ReportCards: React.FC = () => {
             </button>
 
             {showExportMenu && (
-              <div className="absolute left-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+              <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-100 dark:border-slate-700 z-50 overflow-hidden">
                 <button
                   onClick={() => handleExport('PRINT')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-2 text-gray-700 border-b border-gray-50"
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300 border-b border-gray-50 dark:border-slate-700"
                 >
                   <Printer size={16} className="text-blue-600" />
                   Print Reports (PDF)
                 </button>
                 <button
                   onClick={() => handleExport('EXCEL')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-2 text-gray-700 border-b border-gray-50"
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300 border-b border-gray-50 dark:border-slate-700"
                 >
                   <FileSpreadsheet size={16} className="text-green-600" />
                   Export Excel (Results)
                 </button>
                 <button
                   onClick={() => handleExport('CSV')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300"
                 >
                   <FileText size={16} className="text-gray-500" />
                   Export CSV
@@ -320,14 +320,14 @@ const ReportCards: React.FC = () => {
         </div>
 
         {error && (
-          <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-center gap-2">
+          <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg border border-red-200 dark:border-red-800 flex items-center gap-2">
             <AlertCircle size={20} />
             <span>{error}</span>
             <button onClick={() => setError(null)} className="ml-auto"><div className="sr-only">Close</div></button>
           </div>
         )}
         {success && (
-          <div className="mt-4 p-4 bg-green-50 text-green-700 rounded-lg border border-green-200 flex items-center gap-2">
+          <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg border border-green-200 dark:border-green-800 flex items-center gap-2">
             <CheckCircle size={20} />
             <span>{success}</span>
             <button onClick={() => setSuccess(null)} className="ml-auto"><div className="sr-only">Close</div></button>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -86,9 +86,11 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
     ];
   };
 
-  const navItems = getNavItems().filter(item =>
-    user && item.roles.includes(user.role)
-  );
+  const navItems = useMemo(() => {
+    return getNavItems().filter(item =>
+      user && item.roles.includes(user.role)
+    );
+  }, [user?.role]);
 
   // Haptic feedback helper
   const triggerHaptic = () => {
@@ -99,7 +101,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-200/50 z-50"
+      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-t border-gray-200/50 dark:border-slate-700/50 z-50"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
@@ -115,8 +117,8 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
               to={item.path}
               onClick={triggerHaptic}
               className={`flex flex-col items-center justify-center flex-1 relative group min-h-[48px] transition-all duration-200 ${isActive
-                  ? 'text-blue-600'
-                  : 'text-gray-500 active:text-gray-700'
+                  ? 'text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 dark:text-gray-400 active:text-gray-700 dark:active:text-gray-300'
                 }`}
             >
               {/* Active Indicator */}
@@ -141,7 +143,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
               </div>
 
               {/* Label */}
-              <span className={`text-[10px] mt-1 font-medium transition-all duration-200 ${isActive ? 'text-blue-600' : 'text-gray-500'
+              <span className={`text-[10px] mt-1 font-medium transition-all duration-200 ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
                 }`}>
                 {item.label}
               </span>
@@ -155,7 +157,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
             triggerHaptic();
             onMenuClick();
           }}
-          className="flex flex-col items-center justify-center flex-1 min-h-[48px] text-gray-500 active:text-gray-700 transition-all duration-200 group"
+          className="flex flex-col items-center justify-center flex-1 min-h-[48px] text-gray-500 dark:text-gray-400 active:text-gray-700 dark:active:text-gray-300 transition-all duration-200 group"
         >
           <div className="relative">
             <Menu
@@ -168,7 +170,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
               <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
             )}
           </div>
-          <span className="text-[10px] mt-1 font-medium text-gray-500">More</span>
+          <span className="text-[10px] mt-1 font-medium text-gray-500 dark:text-gray-400">More</span>
         </button>
       </div>
     </nav>

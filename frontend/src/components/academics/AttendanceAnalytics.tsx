@@ -159,7 +159,7 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
     }, [dailyData, month, year]);
 
     const getHeatmapColor = (data: DayData | null) => {
-        if (!data) return 'bg-gray-100';
+        if (!data) return 'bg-gray-100 dark:bg-slate-700';
         const rate = data.total > 0 ? (data.present / data.total) : 0;
         if (rate >= 0.95) return 'bg-green-500';
         if (rate >= 0.85) return 'bg-green-300';
@@ -181,27 +181,27 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <button onClick={onBack} className="text-gray-500 hover:text-gray-800 flex items-center mb-2 text-sm">
+                    <button onClick={onBack} className="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white flex items-center mb-2 text-sm">
                         <ArrowLeft size={16} className="mr-1" /> Back to Register
                     </button>
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                         <BarChart2 className="text-purple-600" />
                         Attendance Analytics
                     </h2>
-                    <p className="text-gray-500">{className}</p>
+                    <p className="text-gray-500 dark:text-gray-400">{className}</p>
                 </div>
 
                 <div className="flex items-center gap-4">
                     {/* Month Navigator */}
-                    <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
-                        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 rounded">
-                            <ChevronLeft size={18} />
+                    <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-1 shadow-sm">
+                        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+                            <ChevronLeft size={18} className="text-gray-600 dark:text-gray-400" />
                         </button>
-                        <span className="font-medium text-gray-800 min-w-[140px] text-center">
+                        <span className="font-medium text-gray-800 dark:text-white min-w-[140px] text-center">
                             {monthNames[month]} {year}
                         </span>
-                        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded">
-                            <ChevronRight size={18} />
+                        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+                            <ChevronRight size={18} className="text-gray-600 dark:text-gray-400" />
                         </button>
                     </div>
 
@@ -217,73 +217,73 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
 
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="text-sm text-gray-500 mb-1">Average Rate</div>
-                            <div className="text-3xl font-bold text-gray-900">{stats.avgRate.toFixed(1)}%</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Average Rate</div>
+                            <div className="text-3xl font-bold text-gray-900 dark:text-white">{stats.avgRate.toFixed(1)}%</div>
                         </div>
-                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                            <TrendingUp className="text-blue-600" size={24} />
+                        <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                            <TrendingUp className="text-blue-600 dark:text-blue-400" size={24} />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="text-sm text-gray-500 mb-1">School Days</div>
-                            <div className="text-3xl font-bold text-gray-900">{stats.totalDays}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">School Days</div>
+                            <div className="text-3xl font-bold text-gray-900 dark:text-white">{stats.totalDays}</div>
                         </div>
-                        <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                            <Calendar className="text-purple-600" size={24} />
+                        <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
+                            <Calendar className="text-purple-600 dark:text-purple-400" size={24} />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="text-sm text-gray-500 mb-1">Total Absences</div>
-                            <div className="text-3xl font-bold text-red-600">{stats.totalAbsent}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Absences</div>
+                            <div className="text-3xl font-bold text-red-600 dark:text-red-400">{stats.totalAbsent}</div>
                         </div>
-                        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-                            <Users className="text-red-600" size={24} />
+                        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+                            <Users className="text-red-600 dark:text-red-400" size={24} />
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="text-sm text-gray-500 mb-1">At-Risk Students</div>
-                            <div className="text-3xl font-bold text-orange-600">{chronicAbsentees.length}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">At-Risk Students</div>
+                            <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">{chronicAbsentees.length}</div>
                         </div>
-                        <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                            <AlertTriangle className="text-orange-600" size={24} />
+                        <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center">
+                            <AlertTriangle className="text-orange-600 dark:text-orange-400" size={24} />
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Calendar Heatmap */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                <h3 className="font-bold text-gray-800 mb-4">Monthly Attendance Heatmap</h3>
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+                <h3 className="font-bold text-gray-800 dark:text-white mb-4">Monthly Attendance Heatmap</h3>
                 <div className="grid grid-cols-7 gap-2">
                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                        <div key={day} className="text-center text-xs font-medium text-gray-500 py-2">{day}</div>
+                        <div key={day} className="text-center text-xs font-medium text-gray-500 dark:text-gray-400 py-2">{day}</div>
                     ))}
                     {calendarDays.map((day, idx) => (
                         <div
                             key={idx}
-                            className={`aspect-square rounded-lg flex items-center justify-center text-xs font-medium ${getHeatmapColor(day)} ${day ? 'text-white' : 'text-gray-400'}`}
+                            className={`aspect-square rounded-lg flex items-center justify-center text-xs font-medium ${getHeatmapColor(day)} ${day ? 'text-white' : 'text-gray-400 dark:text-gray-600'}`}
                             title={day ? `${day.date}: ${day.present}/${day.total} present` : ''}
                         >
                             {day ? new Date(day.date).getDate() : ''}
                         </div>
                     ))}
                 </div>
-                <div className="flex items-center justify-center gap-4 mt-4 text-xs">
+                <div className="flex items-center justify-center gap-4 mt-4 text-xs text-gray-600 dark:text-gray-400">
                     <span className="flex items-center gap-1"><span className="w-4 h-4 bg-green-500 rounded"></span> 95%+</span>
                     <span className="flex items-center gap-1"><span className="w-4 h-4 bg-green-300 rounded"></span> 85-94%</span>
                     <span className="flex items-center gap-1"><span className="w-4 h-4 bg-yellow-300 rounded"></span> 70-84%</span>
@@ -294,21 +294,21 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
 
             {/* At-Risk Students */}
             {chronicAbsentees.length > 0 && (
-                <div className="bg-white p-6 rounded-xl border border-orange-200 shadow-sm">
-                    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-orange-200 dark:border-orange-900/50 shadow-sm">
+                    <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                         <AlertTriangle className="text-orange-500" size={20} />
                         Chronic Absenteeism Alert (3+ absences)
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {chronicAbsentees.map(student => (
-                            <div key={student.studentId} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg border border-orange-100">
+                            <div key={student.studentId} className="flex items-center justify-between p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-100 dark:border-orange-900/30">
                                 <div>
-                                    <div className="font-medium text-gray-900">{student.studentName}</div>
-                                    <div className="text-xs text-gray-500">{student.admissionNumber}</div>
+                                    <div className="font-medium text-gray-900 dark:text-white">{student.studentName}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">{student.admissionNumber}</div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-lg font-bold text-red-600">{student.absentDays}</div>
-                                    <div className="text-xs text-gray-500">absences</div>
+                                    <div className="text-lg font-bold text-red-600 dark:text-red-400">{student.absentDays}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">absences</div>
                                 </div>
                             </div>
                         ))}

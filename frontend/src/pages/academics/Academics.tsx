@@ -42,18 +42,18 @@ const Academics = () => {
   if (!user) return null;
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">Academic Management</h1>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Academic Management</h1>
 
-        <div className="bg-white p-1 rounded-lg border border-gray-200 flex flex-wrap gap-1">
+        <div className="bg-white dark:bg-slate-800 p-1 rounded-lg border border-gray-200 dark:border-slate-700 flex flex-wrap gap-1">
           {allowedTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setView(tab.id as any)}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all whitespace-nowrap ${view === tab.id
-                ? 'bg-blue-100 text-blue-700 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700/50'
                 }`}
             >
               {tab.label}
@@ -62,7 +62,7 @@ const Academics = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-h-[400px]">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 min-h-[400px]">
         {/* Render only if role allows to prevent unauthorized access via state manipulation */}
         {view === 'classes' && allowedTabs.find(t => t.id === 'classes') && <Classes />}
         {view === 'subjects' && allowedTabs.find(t => t.id === 'subjects') && <Subjects />}

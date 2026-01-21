@@ -279,35 +279,35 @@ const AttendanceRegister = () => {
     }
 
     return (
-        <div className="p-6 max-w-7xl mx-auto print:p-0 printable-content">
+        <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto print:p-0 printable-content">
             {/* Header */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                         <UserCheck className="text-blue-600" />
                         Class Attendance
                     </h1>
-                    <p className="text-gray-500">Daily register and attendance tracking</p>
+                    <p className="text-gray-500 dark:text-gray-400">Daily register and attendance tracking</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                     {/* View Mode Toggle */}
-                    <div className="flex bg-gray-100 rounded-lg p-1">
+                    <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                         <button
                             onClick={() => setViewMode('daily')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'daily' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'daily' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Daily
                         </button>
                         <button
                             onClick={() => setViewMode('weekly')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'weekly' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'weekly' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Weekly
                         </button>
                         <button
                             onClick={() => setViewMode('analytics')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1 ${viewMode === 'analytics' ? 'bg-white shadow-sm text-purple-600' : 'text-gray-600 hover:text-gray-900'}`}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1 ${viewMode === 'analytics' ? 'bg-white dark:bg-slate-600 shadow-sm text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             <BarChart2 size={14} />
                             Analytics
@@ -317,7 +317,7 @@ const AttendanceRegister = () => {
             </div>
 
             {/* Controls Bar */}
-            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 flex flex-wrap items-center gap-4">
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm mb-6 flex flex-wrap items-center gap-4">
                 {/* Class Select */}
                 <select
                     value={selectedClassId}
@@ -325,7 +325,7 @@ const AttendanceRegister = () => {
                         setSelectedClassId(e.target.value);
                         setSelectedClassName(classes.find(c => c.id === e.target.value)?.name || '');
                     }}
-                    className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                    className="px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-slate-700 dark:text-white"
                 >
                     {classes.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
@@ -333,33 +333,33 @@ const AttendanceRegister = () => {
                 </select>
 
                 {/* Date Navigator */}
-                <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg p-1">
-                    <button onClick={() => changeDate(-1)} className="p-2 hover:bg-white rounded transition-colors">
+                <div className="flex items-center gap-1 bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg p-1">
+                    <button onClick={() => changeDate(-1)} className="p-2 hover:bg-white dark:hover:bg-slate-600 rounded transition-colors dark:text-gray-300">
                         <ChevronLeft size={16} />
                     </button>
                     <div className="relative">
-                        <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input
                             type="date"
                             value={date}
                             onChange={(e) => setDate(e.target.value)}
-                            className="pl-9 pr-3 py-2 bg-transparent focus:outline-none w-36"
+                            className="pl-9 pr-3 py-2 bg-transparent focus:outline-none w-36 dark:text-white"
                         />
                     </div>
-                    <button onClick={() => changeDate(1)} className="p-2 hover:bg-white rounded transition-colors">
+                    <button onClick={() => changeDate(1)} className="p-2 hover:bg-white dark:hover:bg-slate-600 rounded transition-colors dark:text-gray-300">
                         <ChevronRight size={16} />
                     </button>
                 </div>
 
                 {/* Search */}
                 <div className="relative flex-1 max-w-xs">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                         type="text"
                         placeholder="Search student..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full pl-9 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400"
                     />
                 </div>
 
@@ -367,14 +367,14 @@ const AttendanceRegister = () => {
                 <div className="flex gap-2 ml-auto">
                     <button
                         onClick={handleExportDaily}
-                        className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                         title="Export to Excel"
                     >
                         <Download size={18} />
                     </button>
                     <button
                         onClick={handlePrint}
-                        className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors print:hidden"
+                        className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors print:hidden"
                         title="Print"
                     >
                         <Printer size={18} />
@@ -384,29 +384,29 @@ const AttendanceRegister = () => {
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 print:hidden">
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                    <div className="text-sm text-gray-500 mb-1">Total</div>
-                    <div className="text-2xl font-bold text-gray-800">{stats.total}</div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total</div>
+                    <div className="text-2xl font-bold text-gray-800 dark:text-white">{stats.total}</div>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-green-500">
-                    <div className="text-sm text-green-600 font-medium mb-1">Present</div>
-                    <div className="text-2xl font-bold text-green-700">{stats.present}</div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-green-500">
+                    <div className="text-sm text-green-600 dark:text-green-400 font-medium mb-1">Present</div>
+                    <div className="text-2xl font-bold text-green-700 dark:text-green-400">{stats.present}</div>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-red-500">
-                    <div className="text-sm text-red-600 font-medium mb-1">Absent</div>
-                    <div className="text-2xl font-bold text-red-700">{stats.absent}</div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-red-500">
+                    <div className="text-sm text-red-600 dark:text-red-400 font-medium mb-1">Absent</div>
+                    <div className="text-2xl font-bold text-red-700 dark:text-red-400">{stats.absent}</div>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-orange-500">
-                    <div className="text-sm text-orange-600 font-medium mb-1">Late</div>
-                    <div className="text-2xl font-bold text-orange-700">{stats.late}</div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-orange-500">
+                    <div className="text-sm text-orange-600 dark:text-orange-400 font-medium mb-1">Late</div>
+                    <div className="text-2xl font-bold text-orange-700 dark:text-orange-400">{stats.late}</div>
                 </div>
             </div>
 
             {/* Main Register - Daily View */}
             {viewMode === 'daily' && (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 print:bg-white">
-                        <h2 className="font-semibold text-gray-700">Student Register</h2>
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-700/50 print:bg-white">
+                        <h2 className="font-semibold text-gray-700 dark:text-gray-200">Student Register</h2>
                         <div className="flex gap-2 print:hidden">
                             <button
                                 onClick={() => markAll('PRESENT')}
@@ -434,27 +434,27 @@ const AttendanceRegister = () => {
                         </div>
                     ) : (
                         <table className="w-full text-left">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                                 <tr>
-                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">#</th>
-                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Student</th>
-                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center print:hidden">Status</th>
-                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden print:table-cell">Status</th>
-                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider print:hidden">Reason</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">#</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Student</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center print:hidden">Status</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden print:table-cell">Status</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider print:hidden">Reason</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                                 {filteredStudents.map((student, index) => (
-                                    <tr key={student.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-500">{index + 1}</td>
+                                    <tr key={student.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                        <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{index + 1}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-sm">
                                                     {student.firstName[0]}{student.lastName[0]}
                                                 </div>
                                                 <div>
-                                                    <div className="font-medium text-gray-900">{student.firstName} {student.lastName}</div>
-                                                    <div className="text-xs text-gray-400">{student.admissionNumber}</div>
+                                                    <div className="font-medium text-gray-900 dark:text-white">{student.firstName} {student.lastName}</div>
+                                                    <div className="text-xs text-gray-400 dark:text-gray-500">{student.admissionNumber}</div>
                                                 </div>
                                             </div>
                                         </td>
@@ -521,10 +521,10 @@ const AttendanceRegister = () => {
 
             {/* Weekly View */}
             {viewMode === 'weekly' && (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                        <h2 className="font-semibold text-gray-700">Weekly View</h2>
-                        <p className="text-sm text-gray-500">
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50">
+                        <h2 className="font-semibold text-gray-700 dark:text-gray-200">Weekly View</h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
                             Week of {weekDates[0] ? new Date(weekDates[0]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''} -
                             {weekDates[4] ? new Date(weekDates[4]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
                         </p>
@@ -538,23 +538,23 @@ const AttendanceRegister = () => {
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
-                                <thead className="bg-gray-50 border-b border-gray-200">
+                                <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                                     <tr>
-                                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase sticky left-0 bg-gray-50 z-10">Student</th>
+                                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase sticky left-0 bg-gray-50 dark:bg-slate-700 z-10">Student</th>
                                         {weekDates.map(d => (
-                                            <th key={d} className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center min-w-[80px]">
+                                            <th key={d} className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase text-center min-w-[80px]">
                                                 {new Date(d).toLocaleDateString(undefined, { weekday: 'short' })}<br />
                                                 <span className="text-[10px] font-normal">{new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                                             </th>
                                         ))}
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100">
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                                     {filteredStudents.map((student) => (
-                                        <tr key={student.id} className="hover:bg-gray-50/50">
-                                            <td className="px-4 py-3 sticky left-0 bg-white z-10">
-                                                <div className="font-medium text-gray-900 text-sm">{student.firstName} {student.lastName}</div>
-                                                <div className="text-xs text-gray-400">{student.admissionNumber}</div>
+                                        <tr key={student.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50">
+                                            <td className="px-4 py-3 sticky left-0 bg-white dark:bg-slate-800 z-10">
+                                                <div className="font-medium text-gray-900 dark:text-white text-sm">{student.firstName} {student.lastName}</div>
+                                                <div className="text-xs text-gray-400 dark:text-gray-500">{student.admissionNumber}</div>
                                             </td>
                                             {weekDates.map(d => {
                                                 const status = weeklyAttendance[student.id]?.[d];
@@ -599,22 +599,22 @@ const AttendanceRegister = () => {
             {/* Reason Modal */}
             {showReasonModal && reasonStudent && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden">
-                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-                        <h3 className="text-lg font-bold text-gray-900 mb-2">Absence Reason</h3>
-                        <p className="text-sm text-gray-500 mb-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Absence Reason</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                             {reasonStudent.firstName} {reasonStudent.lastName}
                         </p>
                         <textarea
                             value={reasonText}
                             onChange={(e) => setReasonText(e.target.value)}
                             placeholder="e.g., Sick, Family emergency, Doctor's appointment..."
-                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                            className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400"
                             rows={3}
                         />
                         <div className="flex justify-end gap-3 mt-4">
                             <button
                                 onClick={() => { setShowReasonModal(false); setReasonStudent(null); }}
-                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                             >
                                 Cancel
                             </button>

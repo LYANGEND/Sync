@@ -15,7 +15,7 @@ const DashboardLayout = () => {
   const showFAB = !hideFABPaths.includes(location.pathname);
 
   return (
-    <div className="min-h-screen bg-gray-50/50">
+    <div className="min-h-screen bg-gray-50/50 dark:bg-slate-900">
       {/* Sidebar - Hidden on mobile */}
       <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 
