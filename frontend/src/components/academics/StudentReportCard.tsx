@@ -41,10 +41,9 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
 
     useEffect(() => {
         if (report) {
-            // Verify link: In production this would be a real URL
-            const schoolName = report.school?.schoolName || 'SYNC SCHOOL';
-            const verifyData = `${schoolName.toUpperCase()} REPORT VERIFICATION\nStudent: ${report.student?.firstName} ${report.student?.lastName}\nID: ${report.student?.admissionNumber}\nTerm: ${report.term?.name}\nAvg: ${Number(report.averageScore || 0).toFixed(1)}%`;
-            QRCode.toDataURL(verifyData, { margin: 1, width: 100 })
+            // Updated to link to verification page
+            const verifyUrl = `${window.location.origin}/verify/report/${report.id}`;
+            QRCode.toDataURL(verifyUrl, { margin: 1, width: 100 })
                 .then(url => setQrCodeUrl(url))
                 .catch(err => console.error(err));
         }
