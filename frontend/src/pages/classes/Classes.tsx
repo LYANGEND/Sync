@@ -270,9 +270,9 @@ const Classes = () => {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-lg font-semibold text-gray-800">Class Sections</h2>
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Class Sections</h2>
         <div className="flex space-x-3">
           <button
             onClick={() => setShowImportModal(true)}
@@ -293,20 +293,20 @@ const Classes = () => {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <p className="text-gray-500">Loading classes...</p>
+          <p className="text-gray-500 dark:text-gray-400">Loading classes...</p>
         </div>
       ) : filteredClasses.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
-          <p className="text-gray-400 mb-2">No classes defined. Create one to start adding students.</p>
+          <p className="text-gray-400 dark:text-gray-500 mb-2">No classes defined. Create one to start adding students.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredClasses.map((cls) => (
-            <div key={cls.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow">
+            <div key={cls.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 hover:shadow-md transition-shadow">
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">{cls.name}</h3>
-                  <p className="text-sm text-gray-500">{getGradeLabel(cls.gradeLevel)} • {cls._count.students} Students</p>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">{cls.name}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{getGradeLabel(cls.gradeLevel)} • {cls._count.students} Students</p>
                 </div>
                 <div className="flex space-x-2">
                   <button onClick={() => openSyllabusModal(cls)} className="text-gray-400 hover:text-purple-600" title="Syllabus & Plans">
@@ -325,25 +325,25 @@ const Classes = () => {
               </div>
 
               <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-2 flex items-center">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 flex items-center">
                   <BookOpen size={16} className="mr-2" />
                   Subjects ({cls.subjects.length})
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {cls.subjects.map(subject => (
-                    <span key={subject.id} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-md font-medium border border-blue-100">
+                    <span key={subject.id} className="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-md font-medium border border-blue-100 dark:border-blue-800">
                       {subject.name}
                     </span>
                   ))}
                   {cls.subjects.length === 0 && (
-                    <span className="text-xs text-gray-400 italic">No subjects assigned</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">No subjects assigned</span>
                   )}
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 flex justify-between items-center text-sm">
-                <span className="text-gray-500">Teacher:</span>
-                <span className="font-medium text-gray-900">{cls.teacher?.fullName || 'Unassigned'}</span>
+              <div className="pt-4 border-t border-gray-100 dark:border-slate-700 flex justify-between items-center text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Teacher:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{cls.teacher?.fullName || 'Unassigned'}</span>
               </div>
             </div>
           ))}
@@ -352,23 +352,23 @@ const Classes = () => {
 
       {showSyllabusModal && syllabusClass && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl p-6 w-full max-w-5xl my-8 h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-5xl my-8 h-[90vh] flex flex-col">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-xl font-bold">Class Syllabus & Lesson Plans</h2>
-                <p className="text-gray-500 text-sm">Class: {syllabusClass.name}</p>
+                <h2 className="text-xl font-bold dark:text-white">Class Syllabus & Lesson Plans</h2>
+                <p className="text-gray-500 dark:text-gray-400 text-sm">Class: {syllabusClass.name}</p>
               </div>
-              <button onClick={() => setShowSyllabusModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowSyllabusModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <span className="text-2xl">&times;</span>
               </button>
             </div>
 
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Subject</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Subject</label>
               <select
                 value={syllabusSubjectId}
                 onChange={(e) => setSyllabusSubjectId(e.target.value)}
-                className="w-full md:w-1/3 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                className="w-full md:w-1/3 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
               >
                 {syllabusClass.subjects.length === 0 && <option value="">No subjects assigned</option>}
                 {syllabusClass.subjects.map(subject => (
@@ -381,7 +381,7 @@ const Classes = () => {
               {syllabusSubjectId ? (
                 <ClassSyllabus classId={syllabusClass.id} subjectId={syllabusSubjectId} />
               ) : (
-                <div className="text-center py-12 text-gray-500">
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   Please select a subject to view syllabus and lesson plans.
                 </div>
               )}
@@ -392,32 +392,32 @@ const Classes = () => {
 
       {showStudentModal && managingClass && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl p-6 w-full max-w-4xl my-8 h-[80vh] flex flex-col">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-4xl my-8 h-[80vh] flex flex-col">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-xl font-bold">Manage Students</h2>
-                <p className="text-gray-500 text-sm">Class: {managingClass.name}</p>
+                <h2 className="text-xl font-bold dark:text-white">Manage Students</h2>
+                <p className="text-gray-500 dark:text-gray-400 text-sm">Class: {managingClass.name}</p>
               </div>
-              <button onClick={() => setShowStudentModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowStudentModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <span className="text-2xl">&times;</span>
               </button>
             </div>
 
             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-hidden">
               {/* Current Students */}
-              <div className="flex flex-col border rounded-lg overflow-hidden">
-                <div className="bg-gray-50 p-3 border-b font-medium text-gray-700">
+              <div className="flex flex-col border dark:border-slate-700 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 dark:bg-slate-700 p-3 border-b dark:border-slate-600 font-medium text-gray-700 dark:text-gray-200">
                   Current Students ({classStudents.length})
                 </div>
                 <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-safe">
                   {classStudents.length === 0 ? (
-                    <p className="text-gray-400 text-center py-4">No students in this class</p>
+                    <p className="text-gray-400 dark:text-gray-500 text-center py-4">No students in this class</p>
                   ) : (
                     classStudents.map(student => (
-                      <div key={student.id} className="flex justify-between items-center p-2 bg-white border rounded hover:bg-gray-50">
+                      <div key={student.id} className="flex justify-between items-center p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700">
                         <div>
-                          <p className="font-medium">{student.firstName} {student.lastName}</p>
-                          <p className="text-xs text-gray-500">{student.admissionNumber}</p>
+                          <p className="font-medium dark:text-white">{student.firstName} {student.lastName}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{student.admissionNumber}</p>
                         </div>
                       </div>
                     ))
@@ -426,21 +426,21 @@ const Classes = () => {
               </div>
 
               {/* Add Students */}
-              <div className="flex flex-col border rounded-lg overflow-hidden">
-                <div className="bg-gray-50 p-3 border-b font-medium text-gray-700 flex justify-between items-center">
+              <div className="flex flex-col border dark:border-slate-700 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 dark:bg-slate-700 p-3 border-b dark:border-slate-600 font-medium text-gray-700 dark:text-gray-200 flex justify-between items-center">
                   <span>Add Students</span>
                   <button
                     onClick={handleAddStudents}
                     disabled={selectedStudentIds.length === 0}
                     className={`text-xs px-3 py-1 rounded ${selectedStudentIds.length > 0
                       ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-gray-200 dark:bg-slate-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                       }`}
                   >
                     Add Selected ({selectedStudentIds.length})
                   </button>
                 </div>
-                <div className="p-2 border-b">
+                <div className="p-2 border-b dark:border-slate-600">
                   <div className="relative">
                     <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                     <input
@@ -448,16 +448,16 @@ const Classes = () => {
                       placeholder="Search students..."
                       value={studentSearchTerm}
                       onChange={(e) => setStudentSearchTerm(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     />
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-safe">
                   {availableStudents.length === 0 ? (
-                    <p className="text-gray-400 text-center py-4">No students found</p>
+                    <p className="text-gray-400 dark:text-gray-500 text-center py-4">No students found</p>
                   ) : (
                     availableStudents.map(student => (
-                      <label key={student.id} className="flex items-center space-x-3 p-2 bg-white border rounded hover:bg-gray-50 cursor-pointer">
+                      <label key={student.id} className="flex items-center space-x-3 p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={selectedStudentIds.includes(student.id)}
@@ -465,8 +465,8 @@ const Classes = () => {
                           className="rounded text-blue-600 focus:ring-blue-500"
                         />
                         <div>
-                          <p className="font-medium">{student.firstName} {student.lastName}</p>
-                          <p className="text-xs text-gray-500">
+                          <p className="font-medium dark:text-white">{student.firstName} {student.lastName}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
                             {student.admissionNumber} • Current Class: {allStudents.find(s => s.id === student.id)?.classId === student.classId ? 'Other' : 'None'}
                           </p>
                         </div>
@@ -482,28 +482,28 @@ const Classes = () => {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto pb-safe">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto pb-safe">
-            <h2 className="text-xl font-bold mb-4">{editingClass ? 'Edit Class' : 'Add Class'}</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto pb-safe">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">{editingClass ? 'Edit Class' : 'Add Class'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Class Name</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class Name</label>
                   <input
                     type="text"
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     placeholder="e.g. Grade 10A"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Grade Level</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Grade Level</label>
                   <select
                     required
                     value={formData.gradeLevel}
                     onChange={(e) => setFormData({ ...formData, gradeLevel: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select Grade</option>
                     <option value="0">Nursery</option>
@@ -513,12 +513,12 @@ const Classes = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Teacher</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teacher</label>
                   <select
                     required
                     value={formData.teacherId}
                     onChange={(e) => setFormData({ ...formData, teacherId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select a teacher</option>
                     {teachers.map(teacher => (
@@ -526,18 +526,18 @@ const Classes = () => {
                     ))}
                   </select>
                   {teachers.length === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                       No teachers found. Ensure teachers are added in the system.
                     </p>
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Academic Term</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
                   <select
                     required
                     value={formData.academicTermId}
                     onChange={(e) => setFormData({ ...formData, academicTermId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select a term</option>
                     {terms.map(term => (
@@ -545,7 +545,7 @@ const Classes = () => {
                     ))}
                   </select>
                   {terms.length === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                       No academic terms found. Please create a term first.
                     </p>
                   )}
@@ -553,17 +553,17 @@ const Classes = () => {
               </div>
 
               <div className="mt-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Assign Subjects</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-60 overflow-y-auto p-2 border border-gray-200 rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign Subjects</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-60 overflow-y-auto p-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700">
                   {subjects.map(subject => (
-                    <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
                       <input
                         type="checkbox"
                         checked={formData.subjectIds.includes(subject.id)}
                         onChange={() => toggleSubject(subject.id)}
                         className="rounded text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm text-gray-700">{subject.name}</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-200">{subject.name}</span>
                     </label>
                   ))}
                 </div>
@@ -573,7 +573,7 @@ const Classes = () => {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>

@@ -628,14 +628,14 @@ const Timetable = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
             <Calendar className="text-blue-600" />
             Class Timetable
           </h1>
-          <p className="text-gray-500">
+          <p className="text-gray-500 dark:text-gray-400">
             {currentTerm ? `${currentTerm.name} Schedule` : 'Loading term...'}
           </p>
         </div>
@@ -643,17 +643,17 @@ const Timetable = () => {
         <div className="flex flex-wrap items-center gap-3">
           {/* View Toggles - Only for Admin/Teachers/Staff */}
           {['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'].includes(user?.role || '') && (
-            <div className="bg-gray-100 p-1 rounded-lg flex">
+            <div className="bg-gray-100 dark:bg-slate-700 p-1 rounded-lg flex">
               <button
                 onClick={() => setViewMode('CLASS')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'CLASS' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'CLASS' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
               >
                 Class View
               </button>
               <button
                 onClick={() => setViewMode('TEACHER')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'TEACHER' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'TEACHER' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
               >
                 Teacher View
@@ -663,15 +663,15 @@ const Timetable = () => {
 
           {viewMode === 'CLASS' ? (
             user?.role === 'STUDENT' && classes.length > 0 ? (
-              <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 font-medium flex items-center gap-2">
-                <span className="text-blue-500 text-xs uppercase font-bold">Your Class:</span>
+              <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-300 font-medium flex items-center gap-2">
+                <span className="text-blue-500 dark:text-blue-400 text-xs uppercase font-bold">Your Class:</span>
                 {classes[0].name}
               </div>
             ) : (
               <select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
               >
                 <option value="">Select Class</option>
                 {classes.map(c => (
@@ -683,7 +683,7 @@ const Timetable = () => {
             <select
               value={selectedTeacherId}
               onChange={(e) => setSelectedTeacherId(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
             >
               <option value="">Select Teacher</option>
               {teachers.map(t => (
@@ -730,20 +730,20 @@ const Timetable = () => {
       {/* Timetable Grid */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {DAYS.map(day => (
-          <div key={day} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
-            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-semibold text-gray-700 text-center">
+          <div key={day} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col h-full">
+            <div className="bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-gray-700 dark:text-gray-200 text-center">
               {day}
             </div>
             <div className="p-2 space-y-2 flex-1 min-h-[200px]">
               {getPeriodsForDay(day).length === 0 ? (
-                <div className="h-full flex items-center justify-center text-gray-400 text-sm italic">
+                <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm italic">
                   No classes
                 </div>
               ) : (
                 getPeriodsForDay(day).map(period => (
-                  <div key={period.id} className="bg-blue-50 border border-blue-100 rounded-lg p-3 hover:shadow-md transition-shadow relative group">
+                  <div key={period.id} className="bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 rounded-lg p-3 hover:shadow-md transition-shadow relative group">
                     <div className="flex justify-between items-start mb-1">
-                      <span className="text-xs font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
+                      <span className="text-xs font-bold text-blue-800 dark:text-blue-300 bg-blue-100 dark:bg-blue-800/50 px-2 py-0.5 rounded">
                         {period.startTime} - {period.endTime}
                       </span>
                       {(user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER') && (
@@ -755,14 +755,14 @@ const Timetable = () => {
                         </button>
                       )}
                     </div>
-                    <h4 className="font-bold text-gray-800 text-sm mb-1">{period.subject.name}</h4>
-                    <div className="text-xs text-gray-600 flex items-center gap-1">
+                    <h4 className="font-bold text-gray-800 dark:text-white text-sm mb-1">{period.subject.name}</h4>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1">
                       {viewMode === 'CLASS' ? (
                         <>
                           <User size={12} />
                           {period.teacher?.fullName || 'No Teacher'}
                           {period.isCombined && (
-                            <span className="ml-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                            <span className="ml-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-xs">
                               Combined: {period.classNames?.join(', ')}
                             </span>
                           )}
@@ -772,7 +772,7 @@ const Timetable = () => {
                           <Users size={12} />
                           {period.classNames?.join(', ') || 'No Classes'}
                           {period.isCombined && (
-                            <span className="ml-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                            <span className="ml-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-xs">
                               Combined
                             </span>
                           )}
@@ -790,15 +790,15 @@ const Timetable = () => {
       {/* Add Period Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Add Timetable Period</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Add Timetable Period</h2>
             <form onSubmit={handleAddPeriod} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Day</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>
                   <select
                     required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.dayOfWeek}
                     onChange={(e) => setNewPeriod({ ...newPeriod, dayOfWeek: e.target.value })}
                   >
@@ -808,10 +808,10 @@ const Timetable = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
                   <select
                     required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.subjectId}
                     onChange={(e) => setNewPeriod({ ...newPeriod, subjectId: e.target.value })}
                   >
@@ -825,21 +825,21 @@ const Timetable = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Time</label>
                   <input
                     type="time"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.startTime}
                     onChange={(e) => setNewPeriod({ ...newPeriod, startTime: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Time</label>
                   <input
                     type="time"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.endTime}
                     onChange={(e) => setNewPeriod({ ...newPeriod, endTime: e.target.value })}
                   />
@@ -848,27 +848,27 @@ const Timetable = () => {
 
               {viewMode === 'CLASS' ? (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Teacher</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teacher</label>
                   {(() => {
                     const selectedSubject = subjects.find(s => s.id === newPeriod.subjectId);
                     if (!newPeriod.subjectId) {
                       return (
-                        <div className="px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-gray-500 text-sm italic">
+                        <div className="px-3 py-2 border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 rounded-lg text-gray-500 dark:text-gray-400 text-sm italic">
                           Select a subject first
                         </div>
                       );
                     }
                     if (selectedSubject?.teacher) {
                       return (
-                        <div className="px-3 py-2 border border-green-200 bg-green-50 rounded-lg text-green-800 font-medium flex items-center gap-2">
+                        <div className="px-3 py-2 border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 rounded-lg text-green-800 dark:text-green-300 font-medium flex items-center gap-2">
                           <User size={16} />
                           {selectedSubject.teacher.fullName}
-                          <span className="text-xs text-green-600 ml-auto">(Auto-assigned)</span>
+                          <span className="text-xs text-green-600 dark:text-green-400 ml-auto">(Auto-assigned)</span>
                         </div>
                       );
                     }
                     return (
-                      <div className="px-3 py-2 border border-yellow-200 bg-yellow-50 rounded-lg text-yellow-800 text-sm">
+                      <div className="px-3 py-2 border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg text-yellow-800 dark:text-yellow-300 text-sm">
                         ⚠️ No teacher assigned to this subject. Please assign one in the Subjects page.
                       </div>
                     );
@@ -876,12 +876,12 @@ const Timetable = () => {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Classes <span className="text-gray-400 text-xs">(Select one or more for combined sessions)</span>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Classes <span className="text-gray-400 dark:text-gray-500 text-xs">(Select one or more for combined sessions)</span>
                   </label>
-                  <div className="border border-gray-300 rounded-lg max-h-40 overflow-y-auto p-2 space-y-1">
+                  <div className="border border-gray-300 dark:border-slate-600 rounded-lg max-h-40 overflow-y-auto p-2 space-y-1 bg-white dark:bg-slate-700">
                     {classes.map(c => (
-                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
                         <input
                           type="checkbox"
                           checked={newPeriod.classIds.includes(c.id)}
@@ -892,9 +892,9 @@ const Timetable = () => {
                               setNewPeriod({ ...newPeriod, classIds: newPeriod.classIds.filter(id => id !== c.id) });
                             }
                           }}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500"
                         />
-                        <span className="text-sm text-gray-700">{c.name}</span>
+                        <span className="text-sm text-gray-700 dark:text-gray-200">{c.name}</span>
                       </label>
                     ))}
                   </div>
@@ -911,7 +911,7 @@ const Timetable = () => {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>

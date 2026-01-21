@@ -158,25 +158,25 @@ const TeacherGradebook = () => {
     };
 
     return (
-        <div className="p-6 max-w-[1600px] mx-auto">
+        <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-[1600px] mx-auto">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
                         <TrendingUp className="text-blue-600" />
                         Teacher Gradebook
                     </h1>
-                    <p className="text-gray-500">Manage assessment scores for your classes</p>
+                    <p className="text-gray-500 dark:text-gray-400">Manage assessment scores for your classes</p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-lg shadow-sm border border-gray-200">
-                    <div className="flex items-center gap-2 text-gray-500 px-2">
+                <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-gray-200 dark:border-slate-700">
+                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 px-2">
                         <Filter size={16} />
                         <span className="text-sm font-medium">Filters:</span>
                     </div>
                     <select
                         value={selectedTermId}
                         onChange={(e) => setSelectedTermId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
                     >
                         {terms.map(t => (
                             <option key={t.id} value={t.id}>{t.name}</option>
@@ -185,7 +185,7 @@ const TeacherGradebook = () => {
                     <select
                         value={selectedClassId}
                         onChange={(e) => setSelectedClassId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
                     >
                         {classes.map(c => (
                             <option key={c.id} value={c.id}>{c.name}</option>
@@ -194,7 +194,7 @@ const TeacherGradebook = () => {
                     <select
                         value={selectedSubjectId}
                         onChange={(e) => setSelectedSubjectId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
                     >
                         {subjects.map(s => (
                             <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
@@ -203,35 +203,35 @@ const TeacherGradebook = () => {
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col min-h-[500px]">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col min-h-[500px]">
                 {loading ? (
-                    <div className="flex-1 flex items-center justify-center text-gray-500">Loading gradebook...</div>
+                    <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">Loading gradebook...</div>
                 ) : !data || data.students.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-                        <AlertCircle size={48} className="text-gray-300 mb-4" />
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+                        <AlertCircle size={48} className="text-gray-300 dark:text-gray-600 mb-4" />
                         <p>No students or data found for this selection.</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto flex-1">
                         <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 z-10 sticky top-0">
+                            <thead className="bg-gray-50 dark:bg-slate-700 z-10 sticky top-0">
                                 <tr>
-                                    <th className="sticky left-0 bg-gray-50 px-4 py-3 border-b border-gray-200 font-semibold text-xs text-gray-500 uppercase tracking-wider w-12 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">#</th>
-                                    <th className="sticky left-12 bg-gray-50 px-4 py-3 border-b border-gray-200 font-semibold text-xs text-gray-500 uppercase tracking-wider min-w-[200px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Student</th>
+                                    <th className="sticky left-0 bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">#</th>
+                                    <th className="sticky left-12 bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[200px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Student</th>
 
                                     {data.assessments.map(assessment => (
-                                        <th key={assessment.id} className="px-4 py-3 border-b border-gray-200 min-w-[120px] text-center">
-                                            <div className="text-xs font-bold text-gray-800">{assessment.title}</div>
-                                            <div className="text-[10px] text-gray-500 font-normal">
+                                        <th key={assessment.id} className="px-4 py-3 border-b border-gray-200 dark:border-slate-600 min-w-[120px] text-center">
+                                            <div className="text-xs font-bold text-gray-800 dark:text-white">{assessment.title}</div>
+                                            <div className="text-[10px] text-gray-500 dark:text-gray-400 font-normal">
                                                 Max: {assessment.totalMarks} • {assessment.weight}%
                                             </div>
                                         </th>
                                     ))}
 
-                                    <th className="px-4 py-3 border-b border-gray-200 text-center font-semibold text-xs text-gray-500 uppercase tracking-wider min-w-[100px] bg-blue-50/50">Average</th>
+                                    <th className="px-4 py-3 border-b border-gray-200 dark:border-slate-600 text-center font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[100px] bg-blue-50/50 dark:bg-blue-900/30">Average</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                                 {data.students.map((student, idx) => {
                                     // Calculate quick average based on available results + edits
                                     // This is 'simple' client side calc for display
@@ -250,29 +250,29 @@ const TeacherGradebook = () => {
                                     });
 
                                     return (
-                                        <tr key={student.id} className="hover:bg-gray-50/80 transition-colors group">
-                                            <td className="sticky left-0 bg-white group-hover:bg-gray-50 px-4 py-3 text-sm text-gray-500 border-r border-gray-100 z-10">{idx + 1}</td>
-                                            <td className="sticky left-12 bg-white group-hover:bg-gray-50 px-4 py-3 border-r border-gray-100 z-10">
-                                                <div className="text-sm font-medium text-gray-900">{student.firstName} {student.lastName}</div>
+                                        <tr key={student.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-700/50 transition-colors group">
+                                            <td className="sticky left-0 bg-white dark:bg-slate-800 group-hover:bg-gray-50 dark:group-hover:bg-slate-700 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 border-r border-gray-100 dark:border-slate-700 z-10">{idx + 1}</td>
+                                            <td className="sticky left-12 bg-white dark:bg-slate-800 group-hover:bg-gray-50 dark:group-hover:bg-slate-700 px-4 py-3 border-r border-gray-100 dark:border-slate-700 z-10">
+                                                <div className="text-sm font-medium text-gray-900 dark:text-white">{student.firstName} {student.lastName}</div>
                                                 <div className="text-xs text-gray-400">{student.admissionNumber}</div>
                                             </td>
 
                                             {data.assessments.map(assessment => (
-                                                <td key={assessment.id} className="p-0 border-r border-gray-100 relative">
+                                                <td key={assessment.id} className="p-0 border-r border-gray-100 dark:border-slate-700 relative">
                                                     <input
                                                         type="number"
                                                         min="0"
                                                         max={assessment.totalMarks}
                                                         value={getScore(student.id, assessment.id)}
                                                         onChange={(e) => handleScoreChange(student.id, assessment.id, e.target.value)}
-                                                        className={`w-full h-full min-h-[48px] px-2 text-center text-sm outline-none focus:bg-blue-50 focus:ring-2 focus:ring-blue-500 inset-0 transition-all ${`${assessment.id}_${student.id}` in edits ? 'bg-amber-50 text-amber-900 font-semibold' : 'bg-transparent'
+                                                        className={`w-full h-full min-h-[48px] px-2 text-center text-sm outline-none focus:bg-blue-50 dark:focus:bg-blue-900/30 focus:ring-2 focus:ring-blue-500 inset-0 transition-all dark:text-white ${`${assessment.id}_${student.id}` in edits ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-300 font-semibold' : 'bg-transparent'
                                                             }`}
                                                         placeholder="-"
                                                     />
                                                 </td>
                                             ))}
 
-                                            <td className="px-4 py-3 text-center text-sm font-bold text-gray-700 bg-blue-50/30">
+                                            <td className="px-4 py-3 text-center text-sm font-bold text-gray-700 dark:text-gray-300 bg-blue-50/30 dark:bg-blue-900/20">
                                                 {/* Placeholder for calculated Total */}
                                                 -
                                             </td>

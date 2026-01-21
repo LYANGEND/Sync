@@ -104,18 +104,18 @@ const SubjectAllocation = () => {
     const selectedClass = classes.find(c => c.id === selectedClassId);
 
     return (
-        <div className="p-6">
+        <div className="p-4 md:p-6 pb-24 md:pb-6">
             <div className="mb-6">
-                <h2 className="text-xl font-bold text-slate-800 mb-2">Subject Teacher Allocation</h2>
-                <p className="text-slate-500">Assign teachers to subjects for each class.</p>
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Subject Teacher Allocation</h2>
+                <p className="text-slate-500 dark:text-slate-400">Assign teachers to subjects for each class.</p>
             </div>
 
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
-                <label className="block text-sm font-medium text-slate-700 mb-2">Select Class</label>
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Select Class</label>
                 <select
                     value={selectedClassId}
                     onChange={(e) => setSelectedClassId(e.target.value)}
-                    className="w-full md:w-1/3 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full md:w-1/3 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 dark:text-white"
                 >
                     <option value="">-- Choose a Class --</option>
                     {classes.map(c => (
@@ -125,35 +125,35 @@ const SubjectAllocation = () => {
             </div>
 
             {selectedClass && (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
-                            <thead className="bg-slate-50 border-b border-slate-200">
+                            <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600">
                                 <tr>
-                                    <th className="px-6 py-4 font-semibold text-slate-600">Subject Name</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600">Code</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600">Assigned Teacher</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600 text-right">Action</th>
+                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Subject Name</th>
+                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Code</th>
+                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Assigned Teacher</th>
+                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300 text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-200">
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                                 {selectedClass.subjects && selectedClass.subjects.length > 0 ? (
                                     selectedClass.subjects.map((subject) => (
-                                        <tr key={subject.id} className="hover:bg-slate-50">
-                                            <td className="px-6 py-4 font-medium text-slate-800">
+                                        <tr key={subject.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                            <td className="px-6 py-4 font-medium text-slate-800 dark:text-white">
                                                 <div className="flex items-center gap-2">
                                                     <BookOpen size={16} className="text-blue-500" />
                                                     {subject.name}
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-slate-500 font-mono text-sm">{subject.code}</td>
+                                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-mono text-sm">{subject.code}</td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
-                                                    <User size={16} className="text-slate-400" />
+                                                    <User size={16} className="text-slate-400 dark:text-slate-500" />
                                                     <select
                                                         value={assignments[subject.id] || ''}
                                                         onChange={(e) => handleAssignmentChange(subject.id, e.target.value)}
-                                                        className="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[200px]"
+                                                        className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[200px] bg-white dark:bg-slate-700 dark:text-white"
                                                     >
                                                         <option value="">Select Teacher...</option>
                                                         {teachers.map(t => (
@@ -185,7 +185,7 @@ const SubjectAllocation = () => {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
+                                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                                             No subjects found for this class. Please go to Classes to add subjects.
                                         </td>
                                     </tr>

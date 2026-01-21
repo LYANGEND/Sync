@@ -40,7 +40,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-white md:overflow-hidden">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-white dark:bg-slate-900 md:overflow-hidden">
       {/* Left Panel - Branding & Information */}
       <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-6 md:p-12 flex-col justify-between relative h-full">
         {/* Decorative Circle (Optional subtle gradient effect) */}
@@ -93,7 +93,7 @@ const Login = () => {
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="md:w-1/2 flex items-center justify-center p-6 md:p-12 bg-white md:h-full md:overflow-y-auto">
+      <div className="md:w-1/2 flex items-center justify-center p-6 md:p-12 bg-white dark:bg-slate-900 md:h-full md:overflow-y-auto">
         <div className="w-full max-w-md space-y-6">
           <div className="space-y-2">
             {/* Mobile Logo */}
@@ -101,23 +101,23 @@ const Login = () => {
               <div className="bg-blue-600 p-2 rounded-lg">
                 <GraduationCap size={24} className="text-white" />
               </div>
-              <span className="text-xl font-bold tracking-tight text-blue-900">Sync Portal</span>
+              <span className="text-xl font-bold tracking-tight text-blue-900 dark:text-white">Sync Portal</span>
             </div>
 
-            <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
-            <p className="text-gray-500">Sign in to access your dashboard</p>
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome back</h2>
+            <p className="text-gray-500 dark:text-gray-400">Sign in to access your dashboard</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100 flex items-center">
+              <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-4 rounded-lg text-sm border border-red-100 dark:border-red-800 flex items-center">
                 {error}
               </div>
             )}
 
             <div className="space-y-3">
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email or ID
                 </label>
                 <input
@@ -126,14 +126,14 @@ const Login = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  className="block w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white dark:bg-slate-800"
                   placeholder="student@school.edu"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Password
                   </label>
                   <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-500">
@@ -147,13 +147,13 @@ const Login = () => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10"
+                    className="block w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10 bg-white dark:bg-slate-800"
                     placeholder="Enter your password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
                   >
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
@@ -166,9 +166,9 @@ const Login = () => {
                 id="remember-me"
                 name="remember-me"
                 type="checkbox"
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-slate-600 rounded"
               />
-              <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600">
+              <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600 dark:text-gray-400">
                 Keep me signed in
               </label>
             </div>
@@ -176,7 +176,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-[#0056b3] hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {loading ? (
                 <Loader2 size={20} className="animate-spin" />
@@ -187,7 +187,7 @@ const Login = () => {
           </form>
 
           <div className="text-center">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Need help?{' '}
               <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
                 Contact IT Support

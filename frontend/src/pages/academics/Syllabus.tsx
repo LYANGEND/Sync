@@ -124,22 +124,22 @@ const Syllabus = () => {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
+    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-5xl mx-auto">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Syllabus & Lesson Plans</h1>
-          <p className="text-gray-500">Manage curriculum, track progress, and plan lessons</p>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Syllabus & Lesson Plans</h1>
+          <p className="text-gray-500 dark:text-gray-400">Manage curriculum, track progress, and plan lessons</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-        <div className="flex border-b border-gray-200">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 mb-6">
+        <div className="flex border-b border-gray-200 dark:border-slate-700">
           <button
             onClick={() => setActiveTab('definition')}
             className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${
               activeTab === 'definition'
-                ? 'border-b-2 border-blue-600 text-blue-600'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             <BookOpen size={18} />
@@ -149,8 +149,8 @@ const Syllabus = () => {
             onClick={() => setActiveTab('class-view')}
             className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${
               activeTab === 'class-view'
-                ? 'border-b-2 border-blue-600 text-blue-600'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             <Layout size={18} />
@@ -164,11 +164,11 @@ const Syllabus = () => {
               <div className="flex justify-between items-center mb-6">
                 <div className="flex gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Subject</label>
                     <select
                       value={selectedSubjectId}
                       onChange={(e) => setSelectedSubjectId(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+                      className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px] bg-white dark:bg-slate-700 dark:text-white"
                     >
                       {subjects.map(s => (
                         <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
@@ -176,11 +176,11 @@ const Syllabus = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Grade Level</label>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Grade Level</label>
                     <select
                       value={selectedGrade}
                       onChange={(e) => setSelectedGrade(Number(e.target.value))}
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[120px]"
+                      className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[120px] bg-white dark:bg-slate-700 dark:text-white"
                     >
                       {[...Array(12)].map((_, i) => (
                         <option key={i + 1} value={i + 1}>Grade {i + 1}</option>
@@ -198,22 +198,22 @@ const Syllabus = () => {
                 </button>
               </div>
 
-              <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 font-medium text-gray-700">
+              <div className="bg-gray-50 dark:bg-slate-700 rounded-lg border border-gray-200 dark:border-slate-600 overflow-hidden">
+                <div className="p-4 border-b border-gray-200 dark:border-slate-600 font-medium text-gray-700 dark:text-gray-300">
                   Topics List
                 </div>
                 {loading ? (
-                  <div className="p-8 text-center text-gray-500">Loading topics...</div>
+                  <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading topics...</div>
                 ) : topics.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500">No topics defined for this subject and grade.</div>
+                  <div className="p-8 text-center text-gray-500 dark:text-gray-400">No topics defined for this subject and grade.</div>
                 ) : (
-                  <div className="divide-y divide-gray-200">
+                  <div className="divide-y divide-gray-200 dark:divide-slate-600">
                     {topics.map((topic) => (
-                      <div key={topic.id} className="p-4 hover:bg-white transition-colors flex justify-between items-start group">
+                      <div key={topic.id} className="p-4 hover:bg-white dark:hover:bg-slate-600 transition-colors flex justify-between items-start group">
                         <div>
-                          <h3 className="font-medium text-gray-900">{topic.title}</h3>
+                          <h3 className="font-medium text-gray-900 dark:text-white">{topic.title}</h3>
                           {topic.description && (
-                            <p className="text-sm text-gray-500 mt-1">{topic.description}</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{topic.description}</p>
                           )}
                         </div>
                         <button
@@ -230,13 +230,13 @@ const Syllabus = () => {
             </>
           ) : (
             <div className="space-y-6">
-              <div className="flex gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <div className="flex gap-4 bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Class</label>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Class</label>
                   <select
                     value={selectedClassId}
                     onChange={(e) => setSelectedClassId(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+                    className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px] bg-white dark:bg-slate-700 dark:text-white"
                   >
                     {classes.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -244,11 +244,11 @@ const Syllabus = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Subject</label>
                   <select
                     value={viewSubjectId}
                     onChange={(e) => setViewSubjectId(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+                    className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 min-w-[200px] bg-white dark:bg-slate-700 dark:text-white"
                   >
                     {subjects.map(s => (
                       <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
@@ -260,7 +260,7 @@ const Syllabus = () => {
               {selectedClassId && viewSubjectId ? (
                 <ClassSyllabus classId={selectedClassId} subjectId={viewSubjectId} />
               ) : (
-                <div className="text-center py-12 text-gray-500">
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   Please select a class and subject to view progress and lesson plans.
                 </div>
               )}
@@ -271,24 +271,24 @@ const Syllabus = () => {
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Add New Topic</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Add New Topic</h2>
             <form onSubmit={handleAddTopic} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Topic Title</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic Title</label>
                 <input
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   value={newTopic.title}
                   onChange={(e) => setNewTopic({ ...newTopic, title: e.target.value })}
                   placeholder="e.g. Introduction to Algebra"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   rows={3}
                   value={newTopic.description}
                   onChange={(e) => setNewTopic({ ...newTopic, description: e.target.value })}
@@ -296,10 +296,10 @@ const Syllabus = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Order Index</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Order Index</label>
                 <input
                   type="number"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   value={newTopic.orderIndex}
                   onChange={(e) => setNewTopic({ ...newTopic, orderIndex: Number(e.target.value) })}
                 />
@@ -308,7 +308,7 @@ const Syllabus = () => {
                 <button 
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>
