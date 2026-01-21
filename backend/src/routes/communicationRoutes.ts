@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { 
-  sendAnnouncement, 
-  getMyNotifications, 
-  markAsRead, 
+import {
+  sendAnnouncement,
+  getMyNotifications,
+  markAsRead,
   markAllAsRead,
+  getUnreadNotificationCount,
   getConversations,
   getMessages,
   sendMessage,
@@ -21,6 +22,7 @@ router.post('/push/subscribe', subscribeToPush);
 
 // User routes
 router.get('/notifications', getMyNotifications);
+router.get('/notifications/unread-count', getUnreadNotificationCount);
 router.patch('/notifications/:id/read', markAsRead);
 router.patch('/notifications/read-all', markAllAsRead);
 

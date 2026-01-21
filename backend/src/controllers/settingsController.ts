@@ -41,6 +41,11 @@ const updateSettingsSchema = z.object({
   smsApiKey: z.string().optional().or(z.literal('')),
   smsApiSecret: z.string().optional().or(z.literal('')),
   smsSenderId: z.string().optional().or(z.literal('')),
+
+  // Lenco Payment Gateway
+  lencoApiKey: z.string().optional().or(z.literal('')),
+  lencoEnvironment: z.string().optional().or(z.literal('')),
+  lencoDefaultBearer: z.string().optional().or(z.literal('')),
 });
 
 export const getSettings = async (req: Request, res: Response) => {

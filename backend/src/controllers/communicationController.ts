@@ -105,6 +105,20 @@ export const markAllAsRead = async (req: Request, res: Response) => {
   }
 };
 
+export const getUnreadNotificationCount = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    const count = await prisma.notification.count({
+      where: { userId, isRead: false },
+    });
+
+    res.json({ count });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to get notification count' });
+  }
+};
+
 const sendMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   recipientId: z.string().uuid().optional(),

@@ -1,19 +1,192 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Sync" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#ffffff" />
-    <title>Sync - School Management</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+
+  <!-- Safari Pinned Tab (macOS) -->
+  <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#2563eb" />
+
+  <!-- ============================================ -->
+  <!-- iOS/iPadOS - Apple Specific Tags -->
+  <!-- ============================================ -->
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="120x120" href="/apple-touch-icon.png" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sync" />
+  <meta name="apple-touch-fullscreen" content="yes" />
+
+  <!-- iOS Splash Screens (Launch Images) -->
+  <!-- iPhone SE, 8, 7, 6s, 6 (750x1334) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-750-1334.png"
+    media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- iPhone 8 Plus, 7 Plus, 6s Plus, 6 Plus (1242x2208) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1242-2208.png"
+    media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone X, Xs, 11 Pro (1125x2436) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1125-2436.png"
+    media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone Xr, 11 (828x1792) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-828-1792.png"
+    media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- iPhone Xs Max, 11 Pro Max (1242x2688) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1242-2688.png"
+    media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone 12 mini, 13 mini (1080x2340) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1080-2340.png"
+    media="(device-width: 360px) and (device-height: 780px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone 12, 12 Pro, 13, 13 Pro, 14 (1170x2532) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1170-2532.png"
+    media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone 12 Pro Max, 13 Pro Max, 14 Plus (1284x2778) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1284-2778.png"
+    media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone 14 Pro (1179x2556) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1179-2556.png"
+    media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPhone 14 Pro Max (1290x2796) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1290-2796.png"
+    media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+
+  <!-- iPad Mini, Air (1536x2048) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1536-2048.png"
+    media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- iPad Pro 10.5" (1668x2224) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1668-2224.png"
+    media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- iPad Pro 11" (1668x2388) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-1668-2388.png"
+    media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- iPad Pro 12.9" (2048x2732) -->
+  <link rel="apple-touch-startup-image" href="/splash/apple-splash-2048-2732.png"
+    media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+
+  <!-- ============================================ -->
+  <!-- Windows - Microsoft Specific Tags -->
+  <!-- ============================================ -->
+  <meta name="msapplication-TileColor" content="#2563eb" />
+  <meta name="msapplication-TileImage" content="/mstile-144x144.png" />
+  <meta name="msapplication-config" content="/browserconfig.xml" />
+  <meta name="msapplication-navbutton-color" content="#2563eb" />
+  <meta name="msapplication-starturl" content="/" />
+  <meta name="msapplication-tooltip" content="Sync School Management" />
+
+  <!-- Windows 8/10 Tile Sizes -->
+  <meta name="msapplication-square70x70logo" content="/mstile-70x70.png" />
+  <meta name="msapplication-square150x150logo" content="/mstile-150x150.png" />
+  <meta name="msapplication-wide310x150logo" content="/mstile-310x150.png" />
+  <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
+
+  <!-- ============================================ -->
+  <!-- Standard Meta Tags -->
+  <!-- ============================================ -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5" />
+  <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1e293b" media="(prefers-color-scheme: dark)" />
+  <meta name="description"
+    content="Sync School Management - Modern solution for managing students, fees, attendance, and academics." />
+  <meta name="keywords" content="school management, education, fees, attendance, students, teachers, Zambia" />
+  <meta name="author" content="Sync School Management" />
+  <meta name="application-name" content="Sync" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <!-- ============================================ -->
+  <!-- Open Graph / Social -->
+  <!-- ============================================ -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sync School Management" />
+  <meta property="og:title" content="Sync - School Management System" />
+  <meta property="og:description" content="Modern School Management System for Zambian Schools" />
+  <meta property="og:image" content="/pwa-512x512.png" />
+  <meta property="og:image:width" content="512" />
+  <meta property="og:image:height" content="512" />
+  <meta property="og:locale" content="en_ZM" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Sync - School Management System" />
+  <meta name="twitter:description" content="Modern School Management System for Zambian Schools" />
+  <meta name="twitter:image" content="/pwa-512x512.png" />
+
+  <!-- ============================================ -->
+  <!-- PWA Related -->
+  <!-- ============================================ -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <!-- Preconnect to API -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <!-- DNS Prefetch -->
+  <link rel="dns-prefetch" href="//fonts.googleapis.com" />
+
+  <title>Sync - School Management</title>
+
+  <!-- Inline Critical CSS for Splash Screen -->
+  <style>
+    /* Prevent FOUC and show loading state */
+    #root:empty::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #root:empty::after {
+      content: '';
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: translate(-50%, -50%) rotate(360deg);
+      }
+    }
+
+    /* iOS Safe Area Support */
+    body {
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

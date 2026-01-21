@@ -1,20 +1,24 @@
 import { Router } from 'express';
-import { 
-  getGradingScales, 
-  createGradingScale, 
-  updateGradingScale, 
-  deleteGradingScale 
+import {
+  getGradingScales,
+  createGradingScale,
+  updateGradingScale,
+  deleteGradingScale
 } from '../controllers/gradingScaleController';
-import { 
-  generateStudentReport, 
-  getStudentReport, 
+import {
+  generateStudentReport,
+  getStudentReport,
   generateClassReports,
   updateReportRemarks,
-  getClassReports
+  getClassReports,
+  verifyReport
 } from '../controllers/reportCardController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
 const router = Router();
+
+// Public Verification Route
+router.get('/public/verify/:id', verifyReport);
 
 router.use(authenticateToken);
 
