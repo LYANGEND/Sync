@@ -25,6 +25,7 @@ import scholarshipRoutes from './routes/scholarshipRoutes';
 import profileRoutes from './routes/profileRoutes';
 import feeReminderRoutes from './routes/feeReminderRoutes';
 import subscriptionRoutes from './routes/subscriptionRoutes';
+import websiteRoutes from './routes/websiteRoutes';
 import platformAdminRoutes from './routes/platformAdminRoutes';
 import crmRoutes from './routes/crmRoutes';
 import uploadRoutes from './routes/uploadRoutes';
@@ -40,6 +41,8 @@ import announcementRoutes from './routes/announcementRoutes';
 import fileUploadRoutes from './routes/uploadRoutes';
 import searchRoutes from './routes/searchRoutes';
 import videoLessonRoutes from './routes/videoLessonRoutes';
+import aiTeacherRoutes from './routes/aiTeacherRoutes';
+import teacherAssistantRoutes from './routes/teacherAssistantRoutes';
 
 import path from 'path';
 
@@ -85,6 +88,7 @@ app.use('/api/v1/communication', communicationRoutes);
 app.use('/api/v1/scholarships', scholarshipRoutes);
 app.use('/api/v1/fee-reminders', feeReminderRoutes);
 app.use('/api/v1/subscription', subscriptionRoutes);
+app.use('/api/v1/website', websiteRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/audit-logs', auditRoutes);
 
@@ -105,6 +109,8 @@ app.use('/api/v1/announcements', announcementRoutes);
 app.use('/api/v1/upload', fileUploadRoutes);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/video-lessons', videoLessonRoutes);
+app.use('/api/v1/ai-teacher', aiTeacherRoutes);
+app.use('/api/v1/teacher-assistant', teacherAssistantRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

@@ -205,6 +205,15 @@ model Tenant {
   subjectContents   SubjectContent[]
   videoLessons      VideoLesson[]
   
+  // AI Relations
+  aiConversations   AIConversation[]
+  aiUsage           AIUsage[]
+  
+  // Teacher AI Assistant Relations
+  teacherAIConversations TeacherAIConversation[] @relation("TenantTeacherAIConversations")
+  teacherAITemplates     TeacherAITemplate[]     @relation("TenantTeacherAITemplates")
+  teacherAIUsage         TeacherAIUsage[]        @relation("TenantTeacherAIUsage")
+  
   @@index([slug])
   @@index([status])
   @@map("tenants")
@@ -726,6 +735,12 @@ model User {
   subjectContentsTaught    SubjectContent[]
   homeworkGraded           HomeworkSubmission[]
   videoLessonsHosted       VideoLesson[]   @relation("VideoLessonTeacher")
+  aiConversations          AIConversation[] @relation("AIConversations")
+  
+  // Teacher AI Assistant Relations
+  teacherAIConversations   TeacherAIConversation[] @relation("TeacherAIConversations")
+  teacherAITemplates       TeacherAITemplate[]     @relation("TeacherAITemplates")
+  teacherAIUsage           TeacherAIUsage[]        @relation("TeacherAIUsage")
 
   // Email is unique within a tenant (same email can exist in different schools)
   @@unique([tenantId, email])
@@ -790,6 +805,7 @@ model Student {
   submissions     AssessmentSubmission[]
   homeworkSubmissions HomeworkSubmission[]
   videoLessonAttendance VideoLessonAttendee[]
+  aiConversations   AIConversation[] @relation("AIStudentConversations")
 
   // Admission number unique per tenant
   @@unique([tenantId, admissionNumber])
@@ -859,6 +875,7 @@ model Subject {
   forums          Forum[]
   subjectContents SubjectContent[]
   videoLessons    VideoLesson[]
+  aiConversations AIConversation[]
 
   // Subject code unique per tenant
   @@unique([tenantId, code])
@@ -2600,4 +2617,168 @@ model VideoLessonAttendee {
   @@index([videoLessonId])
   @@index([studentId])
   @@map("video_lesson_attendees")
+}
+
+// ==================== AI TEACHER ====================
+
+model AIConversation {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Can be linked to a user (student/parent) or a student record
+  userId          String?
+  user            User?    @relation("AIConversations", fields: [userId], references: [id])
+  
+  studentId       String?
+  student         Student? @relation("AIStudentConversations", fields: [studentId], references: [id])
+  
+  // Optional context
+  subjectId       String?
+  subject         Subject? @relation(fields: [subjectId], references: [id])
+  
+  title           String?  // Auto-generated from first message
+  
+  messages        AIMessage[]
+  
+  // Token usage tracking
+  totalTokensUsed Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([userId])
+  @@index([studentId])
+  @@index([subjectId])
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id              String   @id @default(uuid())
+  
+  conversationId  String
+  conversation    AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  role            String   // "user" | "assistant" | "system"
+  content         String   @db.Text
+  
+  // Token tracking
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("ai_messages")
+}
+
+// Track daily usage for rate limiting and billing
+model AIUsage {
+  id              String   @id @default(uuid())
+  
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  userId          String?
+  
+  date            DateTime @db.Date
+  
+  messagesCount   Int      @default(0)
+  tokensUsed      Int      @default(0)
+  
+  @@unique([tenantId, userId, date])
+  @@index([tenantId])
+  @@index([date])
+  @@map("ai_usage")
+}
+
+
+// ==========================================
+// TEACHER AI ASSISTANT MODELS
+// ==========================================
+
+enum TeacherAIConversationType {
+  CHAT
+  LESSON_PLAN
+  QUIZ
+  EMAIL
+  GRADING
+  ANALYSIS
+}
+
+model TeacherAIConversation {
+  id          String                      @id @default(uuid())
+  teacherId   String
+  tenantId    String
+  title       String
+  type        TeacherAIConversationType
+  metadata    Json?                       // Store structured data like inputs
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+
+  teacher     User                        @relation("TeacherAIConversations", fields: [teacherId], references: [id], onDelete: Cascade)
+  tenant      Tenant                      @relation("TenantTeacherAIConversations", fields: [tenantId], references: [id], onDelete: Cascade)
+  messages    TeacherAIMessage[]
+  
+  @@index([teacherId])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("teacher_ai_conversations")
+}
+
+model TeacherAIMessage {
+  id              String                  @id @default(uuid())
+  conversationId  String
+  role            String                  // 'user' or 'assistant'
+  content         String                  @db.Text
+  metadata        Json?                   // Store structured outputs
+  promptTokens    Int                     @default(0)
+  completionTokens Int                    @default(0)
+  createdAt       DateTime                @default(now())
+
+  conversation    TeacherAIConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@map("teacher_ai_messages")
+}
+
+model TeacherAITemplate {
+  id          String    @id @default(uuid())
+  teacherId   String
+  tenantId    String
+  type        String    // 'lesson-plan', 'quiz', 'email'
+  name        String
+  content     Json      // Store template structure
+  isPublic    Boolean   @default(false)
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  teacher     User      @relation("TeacherAITemplates", fields: [teacherId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation("TenantTeacherAITemplates", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([teacherId])
+  @@index([tenantId])
+  @@index([type])
+  @@map("teacher_ai_templates")
+}
+
+model TeacherAIUsage {
+  id          String    @id @default(uuid())
+  teacherId   String
+  tenantId    String
+  feature     String    // 'lesson-plan', 'quiz', 'email', 'chat'
+  tokensUsed  Int
+  date        DateTime  @default(now())
+
+  teacher     User      @relation("TeacherAIUsage", fields: [teacherId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation("TenantTeacherAIUsage", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([teacherId])
+  @@index([tenantId])
+  @@index([date])
+  @@map("teacher_ai_usage")
 }
