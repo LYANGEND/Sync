@@ -83,9 +83,9 @@ const Header = () => {
   };
 
   return (
-    <header 
+    <header
       className="bg-white border-b border-gray-200 fixed top-0 right-0 left-0 md:left-64 z-10 transition-all duration-300"
-      style={{ 
+      style={{
         paddingTop: 'env(safe-area-inset-top)',
       }}
     >
@@ -100,7 +100,7 @@ const Header = () => {
         </div>
 
         <div className="flex items-center space-x-2 md:space-x-4 flex-shrink-0">
-          <button 
+          <button
             onClick={handleEnablePush}
             className="hidden md:flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded-full"
             title="Enable Push Notifications"
@@ -110,7 +110,7 @@ const Header = () => {
           </button>
 
           <div className="relative" ref={notificationRef}>
-            <button 
+            <button
               onClick={() => setShowNotifications(!showNotifications)}
               className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
             >
@@ -125,7 +125,7 @@ const Header = () => {
                 <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                   <h3 className="font-semibold text-gray-700">Notifications</h3>
                   {unreadCount > 0 && (
-                    <button 
+                    <button
                       onClick={markAllAsRead}
                       className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                     >
@@ -140,8 +140,8 @@ const Header = () => {
                     </div>
                   ) : (
                     notifications.map(notification => (
-                      <div 
-                        key={notification.id} 
+                      <div
+                        key={notification.id}
                         className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
                       >
                         <div className="flex justify-between items-start">
@@ -149,7 +149,7 @@ const Header = () => {
                             {notification.title}
                           </h4>
                           {!notification.isRead && (
-                            <button 
+                            <button
                               onClick={() => markAsRead(notification.id)}
                               className="text-gray-400 hover:text-blue-600"
                               title="Mark as read"
@@ -169,7 +169,7 @@ const Header = () => {
               </div>
             )}
           </div>
-          
+
           <div className="flex items-center space-x-3 pl-4 border-l border-gray-200 cursor-pointer" onClick={() => window.location.href = '/profile'}>
             <div className="text-right hidden md:block">
               <p className="text-sm font-medium text-gray-700">{user?.fullName || 'User'}</p>
@@ -177,9 +177,9 @@ const Header = () => {
             </div>
             <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
               {user?.profilePictureUrl ? (
-                <img 
-                  src={user.profilePictureUrl.startsWith('http') ? user.profilePictureUrl : `${import.meta.env.VITE_API_URL || ''}${user.profilePictureUrl}`} 
-                  alt={user.fullName} 
+                <img
+                  src={user.profilePictureUrl.startsWith('http') ? user.profilePictureUrl : `${import.meta.env.VITE_API_URL || ''}${user.profilePictureUrl}`}
+                  alt={user.fullName}
                   className="w-full h-full object-cover"
                 />
               ) : (

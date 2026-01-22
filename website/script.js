@@ -3,6 +3,8 @@
  * Interactive JavaScript - Enhanced & Responsive
  */
 
+const API_BASE_URL = 'http://localhost:3000/api/v1';
+
 document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // NAVBAR SCROLL EFFECT
@@ -101,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const contactForm = document.getElementById('contact-form');
 
     if (contactForm) {
-        contactForm.addEventListener('submit', (e) => {
+        contactForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
             // Get form data
@@ -121,20 +123,100 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Simulate form submission
             const submitBtn = contactForm.querySelector('button[type="submit"]');
             const originalText = submitBtn.textContent;
             submitBtn.textContent = 'Sending...';
             submitBtn.disabled = true;
 
-            setTimeout(() => {
-                showNotification('Thank you! We\'ll be in touch shortly.', 'success');
-                contactForm.reset();
+            try {
+                const response = await fetch(`${API_BASE_URL}/website/contact`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showNotification('Thank you! We\'ll be in touch shortly.', 'success');
+                    contactForm.reset();
+                } else {
+                    showNotification(result.error || 'Failed to send message. Please try again.', 'error');
+                }
+            } catch (error) {
+                console.error('Contact form error:', error);
+                showNotification('Network error. Please try again later.', 'error');
+            } finally {
                 submitBtn.textContent = originalText;
                 submitBtn.disabled = false;
-            }, 1500);
+            }
         });
     }
+
+    // ==========================================
+    // LOAD PRICING PLANS
+    // ==========================================
+    const loadPlans = async () => {
+        const pricingGrid = document.querySelector('.pricing-grid');
+        if (!pricingGrid) return;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/subscription/plans`);
+            if (!response.ok) throw new Error('Failed to fetch fees');
+
+            const { plans, featureLabels } = await response.json();
+
+            if (!plans || plans.length === 0) return; // Keep default if no plans
+
+            // Clear existing static plans
+            pricingGrid.innerHTML = '';
+
+            plans.forEach(plan => {
+                const isPopular = plan.isPopular;
+                const featuresHtml = plan.features.map(f => {
+                    // Try to get label from featureLabels, else format key
+                    const label = (featureLabels && featureLabels[f]) || f.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    return `<li><span class="check">✓</span> ${label}</li>`;
+                }).join('');
+
+                const price = Number(plan.monthlyPriceZMW).toLocaleString();
+
+                const cardHtml = `
+                    <div class="pricing-card ${isPopular ? 'popular' : ''}">
+                        ${isPopular ? '<div class="popular-badge">Most Popular</div>' : ''}
+                        <div class="pricing-header">
+                            <h3>${plan.name}</h3>
+                            <p>${plan.description || 'Suitable for your school'}</p>
+                        </div>
+                        <div class="pricing-price">
+                            <span class="currency">ZMW</span>
+                            <span class="amount">${price}</span>
+                            <span class="period">/month</span>
+                        </div>
+                        <ul class="pricing-features">
+                            <li><span class="check">✓</span> Up to ${plan.maxStudents === 0 ? 'Unlimited' : plan.maxStudents} students</li>
+                            ${featuresHtml}
+                        </ul>
+                        <a href="#contact" class="btn ${isPopular ? 'btn-primary' : 'btn-outline'} btn-block">Get Started</a>
+                    </div>
+                `;
+                pricingGrid.innerHTML += cardHtml;
+            });
+
+            // Re-run animation observer for new elements
+            setTimeout(animateOnScroll, 100);
+
+        } catch (error) {
+            console.error('Error loading plans:', error);
+            // Fallback to static content if API fails (already in HTML)
+        }
+    };
+
+    // Load plans on startup
+    loadPlans();
+
 
     // ==========================================
     // NOTIFICATION SYSTEM
