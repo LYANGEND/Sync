@@ -29,6 +29,8 @@ import ParentTimetable from './pages/parent/ParentTimetable';
 import ParentGrades from './pages/parent/ParentGrades';
 import ParentVideoLessons from './pages/parent/ParentVideoLessons';
 import TeacherVideoLessons from './pages/teacher/TeacherVideoLessons';
+import TeacherAIAssistant from './pages/teacher-assistant/TeacherAIAssistant';
+import AITeacher from './pages/ai-teacher/AITeacher';
 import MyChildren from './pages/parents/MyChildren';
 import AcademicReports from './pages/parents/AcademicReports';
 import ForumList from './pages/forums/ForumList';
@@ -180,6 +182,16 @@ function App() {
                     <TeacherVideoLessons />
                   </RoleGuard>
                 } />
+                <Route path="/teacher/ai-assistant" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN', 'BURSAR', 'SECRETARY']}>
+                    <TeacherAIAssistant />
+                  </RoleGuard>
+                } />
+                <Route path="/teacher/ai-assistant/:tab" element={
+                  <RoleGuard allowedRoles={['TEACHER', 'SUPER_ADMIN', 'BURSAR', 'SECRETARY']}>
+                    <TeacherAIAssistant />
+                  </RoleGuard>
+                } />
 
                 {/* Parent/Student LMS Routes */}
                 <Route path="/parent/homework" element={
@@ -217,6 +229,13 @@ function App() {
                 <Route path="/forums" element={<ForumList />} />
                 <Route path="/forums/:forumId" element={<ForumView />} />
                 <Route path="/forums/topics/:topicId" element={<TopicView />} />
+
+                {/* AI Teacher Route */}
+                <Route path="/ai-teacher" element={
+                  <RoleGuard allowedRoles={['STUDENT', 'PARENT', 'TEACHER', 'SUPER_ADMIN']}>
+                    <AITeacher />
+                  </RoleGuard>
+                } />
 
                 {/* Announcements Routes (All authenticated users) */}
                 <Route path="/announcements" element={<AnnouncementList />} />

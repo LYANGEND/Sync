@@ -12,40 +12,40 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
   const { user } = useAuth();
 
   const navItems = [
-    { 
-      icon: LayoutDashboard, 
-      label: 'Home', 
-      path: '/', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] 
+    {
+      icon: LayoutDashboard,
+      label: 'Home',
+      path: '/',
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']
     },
-    { 
-      icon: BookOpen, 
-      label: 'Academics', 
-      path: '/academics', 
-      roles: ['SUPER_ADMIN', 'TEACHER'] 
+    {
+      icon: BookOpen,
+      label: 'Academics',
+      path: '/academics',
+      roles: ['SUPER_ADMIN', 'TEACHER']
     },
-    { 
-      icon: MessageSquare, 
-      label: 'Chat', 
-      path: '/communication', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] 
+    {
+      icon: MessageSquare,
+      label: 'Chat',
+      path: '/communication',
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
     },
-    { 
-      icon: User, 
-      label: 'Profile', 
-      path: '/profile', 
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] 
+    {
+      icon: User,
+      label: 'Profile',
+      path: '/profile',
+      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
     },
   ];
 
-  const filteredItems = navItems.filter(item => 
+  const filteredItems = navItems.filter(item =>
     user && item.roles.includes(user.role)
   );
 
   return (
-    <div 
+    <div
       className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 flex justify-around items-center z-40 transition-all duration-300"
-      style={{ 
+      style={{
         paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
         paddingTop: '0.5rem',
         height: 'auto'
@@ -57,9 +57,8 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
           <Link
             key={item.label}
             to={item.path}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 rounded-lg active:scale-95 transition-transform ${
-              isActive ? 'text-blue-600' : 'text-gray-500'
-            }`}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 rounded-lg active:scale-95 transition-transform ${isActive ? 'text-blue-600' : 'text-gray-500'
+              }`}
           >
             <item.icon size={24} />
             <span className="text-[10px] font-medium">{item.label}</span>
