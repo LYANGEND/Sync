@@ -1535,3 +1535,30 @@ section {
     .module-features li { font-size: 14px; }
     .form-group input, .form-group textarea { padding: 12px 14px; font-size: 14px; }
 }
+
+/* Page Header for sub-pages */
+.page-header {
+    background: var(--gray-50);
+    padding: 120px 0 60px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.page-header h1 {
+    font-size: clamp(32px, 4vw, 48px);
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+}
+
+.page-header p {
+    font-size: 18px;
+    color: var(--gray-600);
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.page-content {
+    background: white;
+    padding: 60px 0;
+}

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sync - Modern School Management System</title>
     <meta name="description"
-        content="Sync is a comprehensive school management system tailored for Zambian schools. Features AI lesson planning, mobile money payments, and automated parent communication.">
+        content="Sync is a comprehensive school management system that streamlines administration, academics, finance, and communication for modern educational institutions.">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -86,13 +86,14 @@
             <div class="hero-content">
                 <div class="hero-badge">
                     <span class="badge-dot"></span>
-                    <span>New: AI Teacher Assistant Included</span>
+                    <span>Trusted by 200+ Schools Nationwide</span>
                 </div>
                 <h1 class="hero-title">
-                    The Complete <span class="gradient-text">School Intelligence</span> System
+                    The Complete <span class="gradient-text">School Management</span> Solution
                 </h1>
                 <p class="hero-subtitle">
-                    Empower your Zambian school with AI-driven lesson planning, automated mobile money payments, and seamless parent communication via SMS & WhatsApp.
+                    Empower your institution with an all-in-one platform for student management,
+                    academics, finance, and seamless parent communication.
                 </p>
                 <div class="hero-actions">
                     <a href="#demo" class="btn btn-primary btn-lg">
@@ -113,18 +114,18 @@
                 </div>
                 <div class="hero-stats">
                     <div class="stat-item">
-                        <span class="stat-value">500+</span>
-                        <span class="stat-label">AI Plans Generated</span>
+                        <span class="stat-value">50K+</span>
+                        <span class="stat-label">Students Managed</span>
                     </div>
                     <div class="stat-divider"></div>
                     <div class="stat-item">
-                        <span class="stat-value">95%</span>
-                        <span class="stat-label">Faster Reporting</span>
+                        <span class="stat-value">200+</span>
+                        <span class="stat-label">Schools</span>
                     </div>
                     <div class="stat-divider"></div>
                     <div class="stat-item">
-                        <span class="stat-value">ZMW</span>
-                        <span class="stat-label">Mobile Pay Ready</span>
+                        <span class="stat-value">99.9%</span>
+                        <span class="stat-label">Uptime</span>
                     </div>
                 </div>
             </div>
@@ -134,7 +135,7 @@
                         <div class="preview-dots">
                             <span></span><span></span><span></span>
                         </div>
-                        <div class="preview-title">Sync Dashboard - Principal View</div>
+                        <div class="preview-title">Dashboard Overview</div>
                     </div>
                     <div class="preview-content">
                         <div class="preview-sidebar">
@@ -157,24 +158,24 @@
                     </div>
                 </div>
                 <div class="floating-card card-1">
-                    <div class="floating-icon blue">🤖</div>
+                    <div class="floating-icon blue">📊</div>
                     <div class="floating-text">
-                        <strong>AI Assistant</strong>
-                        <span>Lesson plan generated</span>
+                        <strong>Real-time Analytics</strong>
+                        <span>Track performance instantly</span>
                     </div>
                 </div>
                 <div class="floating-card card-2">
-                    <div class="floating-icon green">✨</div>
+                    <div class="floating-icon green">✓</div>
                     <div class="floating-text">
-                        <strong>Fees Collected</strong>
-                        <span>ZMW 4,500 via Airtel</span>
+                        <strong>Attendance Marked</strong>
+                        <span>Grade 8A - 32/35 Present</span>
                     </div>
                 </div>
                 <div class="floating-card card-3">
-                    <div class="floating-icon purple">📱</div>
+                    <div class="floating-icon purple">💳</div>
                     <div class="floating-text">
-                        <strong>SMS Sent</strong>
-                        <span>Grade 7 Announcements</span>
+                        <strong>Payment Received</strong>
+                        <span>ZMW 2,500 - Term Fees</span>
                     </div>
                 </div>
             </div>
@@ -193,9 +194,10 @@
         <div class="container">
             <div class="section-header">
                 <span class="section-badge">Why Choose Sync</span>
-                <h2 class="section-title">Built for Modern <br><span class="gradient-text">Zambian Schools</span>
+                <h2 class="section-title">Everything You Need, <br><span class="gradient-text">All in One Place</span>
                 </h2>
-                <p class="section-subtitle">Combining advanced AI with local payment solutions to solve real administrative challenges.</p>
+                <p class="section-subtitle">Built by educators, for educators. Sync combines powerful features with
+                    intuitive design.</p>
             </div>
 
             <div class="features-grid">
@@ -203,20 +205,20 @@
                     <div class="feature-icon-wrap gradient-blue">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <circle cx="12" cy="12" r="4" />
-                            <line x1="21.17" y1="8" x2="12" y2="8" />
-                            <line x1="3.95" y1="6.06" x2="8.54" y2="14" />
-                            <line x1="10.88" y1="21.94" x2="15.46" y2="14" />
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                     </div>
-                    <h3>AI Teacher Assistant</h3>
-                    <p>Revolutionize your classroom with our built-in AI. Generate comprehensive lesson plans, create quizzes in seconds, and export everything to PDF or Word for offline use.</p>
+                    <h3>Student Management</h3>
+                    <p>Complete student lifecycle management from admission to graduation. Track academic progress,
+                        attendance, and personal records with ease.</p>
                     <ul class="feature-list">
-                        <li>Instant Lesson Plan Generator</li>
-                        <li>Export to PDF & Word</li>
-                        <li>Voice-activated commands</li>
-                        <li>Quiz & Assessment Creator</li>
+                        <li>Digital enrollment forms</li>
+                        <li>Academic history tracking</li>
+                        <li>Parent portal access</li>
+                        <li>Document management</li>
                     </ul>
                 </div>
 
@@ -224,37 +226,34 @@
                     <div class="feature-icon-wrap gradient-green">
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
-                            <rect x="2" y="5" width="20" height="14" rx="2" />
-                            <line x1="2" y1="10" x2="22" y2="10" />
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
                         </svg>
                     </div>
-                    <h3>Smart Finance</h3>
-                    <p>Track fees, reconcile payments, and integrate directly with Airtel Money & MTN Mobile Money.</p>
+                    <h3>Academic Excellence</h3>
+                    <p>Comprehensive grading, report cards, and curriculum management tools.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon-wrap gradient-purple">
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                            <line x1="1" y1="10" x2="23" y2="10" />
                         </svg>
                     </div>
-                    <h3>Communication Hub</h3>
-                    <p>Send bulk SMS and WhatsApp notifications to parents for payments, results, and events.</p>
+                    <h3>Fee Management</h3>
+                    <p>Automate fee collection, generate invoices, and track payments in real-time.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon-wrap gradient-orange">
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
-                             <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="9" cy="7" r="4" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                         </svg>
                     </div>
-                    <h3>Student Lifecycle</h3>
-                    <p>Manage admissions, academic history, medical records, and alumni data in one secure place.</p>
+                    <h3>Communication Hub</h3>
+                    <p>Send SMS, emails, and in-app notifications to parents and staff instantly.</p>
                 </div>
 
                 <div class="feature-card">
@@ -267,8 +266,8 @@
                             <line x1="3" y1="10" x2="21" y2="10" />
                         </svg>
                     </div>
-                    <h3>Digital Attendance</h3>
-                    <p>One-tap attendance marking that automatically alerts parents of absenteeism via SMS.</p>
+                    <h3>Attendance & Timetable</h3>
+                    <p>Mark attendance digitally and manage class schedules efficiently.</p>
                 </div>
 
                 <div class="feature-card">
@@ -282,8 +281,8 @@
                             <polyline points="10 9 9 9 8 9" />
                         </svg>
                     </div>
-                    <h3>Automated Reports</h3>
-                    <p>Generate professional report cards suitable for Zambian curriculum standards instantly.</p>
+                    <h3>Report Generation</h3>
+                    <p>Generate professional report cards, transcripts, and analytics reports.</p>
                 </div>
             </div>
         </div>
@@ -295,7 +294,8 @@
             <div class="section-header">
                 <span class="section-badge">Comprehensive Modules</span>
                 <h2 class="section-title">Powerful Tools for <span class="gradient-text">Every Role</span></h2>
-                <p class="section-subtitle">From administrators to teachers, parents, and students - everyone has a tailored experience.</p>
+                <p class="section-subtitle">From administrators to teachers, parents to students - everyone has a
+                    tailored experience.</p>
             </div>
 
             <div class="modules-tabs">
@@ -320,28 +320,29 @@
             <div class="modules-content">
                 <div class="module-panel active" id="admin-panel">
                     <div class="module-info">
-                        <h3>Complete Institutional Control</h3>
-                        <p>Manage your entire school from a single, powerful dashboard. From financial reconciliation to staff access control.</p>
+                        <h3>Complete Administrative Control</h3>
+                        <p>Manage your entire institution from a single, powerful dashboard. From student admissions to
+                            financial reports, everything is at your fingertips.</p>
                         <ul class="module-features">
                             <li>
                                 <span class="check-icon">✓</span>
-                                <span>Financial Dashboard & Fee Reconciliation</span>
+                                <span>Centralized student & staff database</span>
                             </li>
                             <li>
                                 <span class="check-icon">✓</span>
-                                <span>Role-Based Access Control (RBAC)</span>
+                                <span>Real-time financial dashboards</span>
                             </li>
                             <li>
                                 <span class="check-icon">✓</span>
-                                <span>Bulk SMS & WhatsApp Announcements</span>
+                                <span>Automated fee reminders & receipts</span>
                             </li>
                             <li>
                                 <span class="check-icon">✓</span>
-                                <span>Student Admission & Promotion</span>
+                                <span>Class promotion & academic year setup</span>
                             </li>
                             <li>
                                 <span class="check-icon">✓</span>
-                                <span>Export Data & Audit Logs</span>
+                                <span>Bulk data import/export</span>
                             </li>
                         </ul>
                         <a href="#demo" class="btn btn-primary">See Admin Demo</a>
@@ -351,15 +352,15 @@
                             <div class="mockup-stat">
                                 <div class="stat-icon blue">📈</div>
                                 <div>
-                                    <div class="mockup-stat-value">ZMW 125k</div>
-                                    <div class="mockup-stat-label">Term Revenue</div>
+                                    <div class="mockup-stat-value">ZMW 2.4M</div>
+                                    <div class="mockup-stat-label">Total Revenue</div>
                                 </div>
                             </div>
                             <div class="mockup-stat">
                                 <div class="stat-icon green">👥</div>
                                 <div>
-                                    <div class="mockup-stat-value">850</div>
-                                    <div class="mockup-stat-label">Active Students</div>
+                                    <div class="mockup-stat-value">1,245</div>
+                                    <div class="mockup-stat-label">Total Students</div>
                                 </div>
                             </div>
                             <div class="mockup-chart"></div>
@@ -369,14 +370,15 @@
 
                 <div class="module-panel" id="teacher-panel">
                     <div class="module-info">
-                        <h3>AI-Enhanced Teaching</h3>
-                        <p>Focus on what matters most—teaching. Let Sync's AI handle the lesson planning and administrative burden.</p>
+                        <h3>Streamlined Teaching Experience</h3>
+                        <p>Focus on what matters most - teaching. Let Sync handle the administrative burden so you can
+                            inspire students.</p>
                         <ul class="module-features">
-                            <li><span class="check-icon">✓</span><span>AI Lesson Plan Generator (PDF/Word Export)</span></li>
-                            <li><span class="check-icon">✓</span><span>AI Quiz & Assessment Creator</span></li>
-                            <li><span class="check-icon">✓</span><span>Digital Gradebook & Result Entry</span></li>
-                            <li><span class="check-icon">✓</span><span>One-Tap Mobile Attendance</span></li>
-                            <li><span class="check-icon">✓</span><span>Class Performance Analytics</span></li>
+                            <li><span class="check-icon">✓</span><span>Easy grade entry with gradebook</span></li>
+                            <li><span class="check-icon">✓</span><span>Digital attendance marking</span></li>
+                            <li><span class="check-icon">✓</span><span>Assessment creation & management</span></li>
+                            <li><span class="check-icon">✓</span><span>Direct parent communication</span></li>
+                            <li><span class="check-icon">✓</span><span>Class performance analytics</span></li>
                         </ul>
                         <a href="#demo" class="btn btn-primary">See Teacher Demo</a>
                     </div>
@@ -389,14 +391,15 @@
 
                 <div class="module-panel" id="parent-panel">
                     <div class="module-info">
-                        <h3>Transparent Parent Connection</h3>
-                        <p>Keep parents engaged and informed with real-time updates on their child's progress and payments.</p>
+                        <h3>Stay Connected, Stay Informed</h3>
+                        <p>Track your child's academic journey in real-time. Receive updates, view grades, and
+                            communicate with teachers effortlessly.</p>
                         <ul class="module-features">
-                            <li><span class="check-icon">✓</span><span>Instant SMS/WhatsApp Attendance Alerts</span></li>
-                            <li><span class="check-icon">✓</span><span>View & Download Report Cards</span></li>
-                            <li><span class="check-icon">✓</span><span>Fee Balance Checking & Payment History</span></li>
-                            <li><span class="check-icon">✓</span><span>School Event Calendar</span></li>
-                            <li><span class="check-icon">✓</span><span>Direct Teacher Messaging</span></li>
+                            <li><span class="check-icon">✓</span><span>Real-time grade & attendance updates</span></li>
+                            <li><span class="check-icon">✓</span><span>Fee balance & payment history</span></li>
+                            <li><span class="check-icon">✓</span><span>Download report cards anytime</span></li>
+                            <li><span class="check-icon">✓</span><span>School announcements & events</span></li>
+                            <li><span class="check-icon">✓</span><span>Mobile-friendly parent portal</span></li>
                         </ul>
                         <a href="#demo" class="btn btn-primary">See Parent Demo</a>
                     </div>
@@ -407,13 +410,14 @@
 
                 <div class="module-panel" id="student-panel">
                     <div class="module-info">
-                        <h3>Empowered Learning</h3>
-                        <p>Give students the tools they need to succeed with access to their own academic data and study resources.</p>
+                        <h3>Empower Student Success</h3>
+                        <p>Give students ownership of their learning journey with access to grades, schedules, and
+                            learning resources.</p>
                         <ul class="module-features">
-                            <li><span class="check-icon">✓</span><span>Personalized AI Tutor Access</span></li>
-                            <li><span class="check-icon">✓</span><span>View Timetable & Exam Schedule</span></li>
-                            <li><span class="check-icon">✓</span><span>Assignment Submission Portal</span></li>
-                            <li><span class="check-icon">✓</span><span>Library & Resource Access</span></li>
+                            <li><span class="check-icon">✓</span><span>View personal academic performance</span></li>
+                            <li><span class="check-icon">✓</span><span>Class timetable & exam schedule</span></li>
+                            <li><span class="check-icon">✓</span><span>Assignment submissions</span></li>
+                            <li><span class="check-icon">✓</span><span>Online assessments & quizzes</span></li>
                         </ul>
                         <a href="#demo" class="btn btn-primary">See Student Demo</a>
                     </div>
@@ -430,42 +434,45 @@
         <div class="container">
             <div class="section-header">
                 <span class="section-badge">Testimonials</span>
-                <h2 class="section-title">Trusted by <span class="gradient-text">Zambian Educators</span></h2>
+                <h2 class="section-title">Loved by <span class="gradient-text">Educators Everywhere</span></h2>
             </div>
 
             <div class="testimonials-grid">
                 <div class="testimonial-card">
                     <div class="testimonial-quote">"</div>
-                    <p class="testimonial-text">Sync's AI lesson planner is a game changer. I save about 5 hours every week on paperwork, which I can now spend with my students in the classroom.</p>
+                    <p class="testimonial-text">Sync transformed how we manage our school. The fee collection alone has
+                        improved by 40% since implementation. Highly recommend!</p>
                     <div class="testimonial-author">
-                        <div class="author-avatar">BN</div>
+                        <div class="author-avatar">JM</div>
                         <div class="author-info">
-                            <strong>Bwalya N.</strong>
-                            <span>Head Teacher, Kitwe</span>
+                            <strong>John Mwanza</strong>
+                            <span>Principal, Lusaka Academy</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="testimonial-card featured">
                     <div class="testimonial-quote">"</div>
-                    <p class="testimonial-text">The mobile money integration for fee collection has reduced our administrative workload by 80%. Parents love the SMS reminders!</p>
+                    <p class="testimonial-text">As a teacher, I was skeptical of another software. But Sync is different
+                        - it actually makes my job easier. The gradebook saves me hours every week.</p>
                     <div class="testimonial-author">
-                        <div class="author-avatar">MM</div>
+                        <div class="author-avatar">SM</div>
                         <div class="author-info">
-                            <strong>Mutale M.</strong>
-                            <span>Administrator, Lusaka International</span>
+                            <strong>Sarah Mumba</strong>
+                            <span>Science Teacher, St. Mary's Secondary</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="testimonial-card">
                     <div class="testimonial-quote">"</div>
-                    <p class="testimonial-text">Finally, I can check my son's attendance and fees from my phone. The system is so easy to use and transparent.</p>
+                    <p class="testimonial-text">Finally, a system that keeps parents in the loop. I can check my
+                        daughter's grades and attendance right from my phone. Brilliant!</p>
                     <div class="testimonial-author">
-                        <div class="author-avatar">KC</div>
+                        <div class="author-avatar">PC</div>
                         <div class="author-info">
-                            <strong>Kennedy C.</strong>
-                            <span>Parent, Ndola</span>
+                            <strong>Peter Chisanga</strong>
+                            <span>Parent of 2, Ndola</span>
                         </div>
                     </div>
                 </div>
@@ -478,15 +485,16 @@
         <div class="container">
             <div class="section-header">
                 <span class="section-badge">Pricing Plans</span>
-                <h2 class="section-title">Affordable, <span class="gradient-text">Transparent Pricing</span></h2>
-                <p class="section-subtitle">Choose the plan that fits your institution's size. All plans include free training and setup.</p>
+                <h2 class="section-title">Simple, <span class="gradient-text">Transparent Pricing</span></h2>
+                <p class="section-subtitle">Choose the plan that fits your institution. All plans include free setup and
+                    training.</p>
             </div>
 
             <div class="pricing-grid">
                 <div class="pricing-card">
                     <div class="pricing-header">
                         <h3>Starter</h3>
-                        <p>For small schools & preschools</p>
+                        <p>Perfect for small schools</p>
                     </div>
                     <div class="pricing-price">
                         <span class="currency">ZMW</span>
@@ -495,10 +503,10 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Up to 300 students</li>
-                        <li><span class="check">✓</span> Student & Staff Management</li>
-                        <li><span class="check">✓</span> Basic Fee Tracking</li>
-                        <li><span class="check">✓</span> Digital Attendance</li>
-                        <li><span class="check">✓</span> Standard Report Cards</li>
+                        <li><span class="check">✓</span> Student & staff management</li>
+                        <li><span class="check">✓</span> Basic fee tracking</li>
+                        <li><span class="check">✓</span> Attendance module</li>
+                        <li><span class="check">✓</span> Email support</li>
                     </ul>
                     <a href="#contact" class="btn btn-outline btn-block">Get Started</a>
                 </div>
@@ -507,7 +515,7 @@
                     <div class="popular-badge">Most Popular</div>
                     <div class="pricing-header">
                         <h3>Professional</h3>
-                        <p>For primary & secondary schools</p>
+                        <p>For growing institutions</p>
                     </div>
                     <div class="pricing-price">
                         <span class="currency">ZMW</span>
@@ -516,11 +524,11 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Up to 1,000 students</li>
-                        <li><span class="check">✓</span> <strong>AI Teacher Assistant</strong></li>
-                        <li><span class="check">✓</span> SMS & WhatsApp Messages</li>
-                        <li><span class="check">✓</span> Mobile Money Integration</li>
-                        <li><span class="check">✓</span> Parent Portal Access</li>
-                        <li><span class="check">✓</span> Priority Support</li>
+                        <li><span class="check">✓</span> All Starter features</li>
+                        <li><span class="check">✓</span> Advanced reporting</li>
+                        <li><span class="check">✓</span> Parent & student portals</li>
+                        <li><span class="check">✓</span> SMS notifications</li>
+                        <li><span class="check">✓</span> Priority support</li>
                     </ul>
                     <a href="#contact" class="btn btn-primary btn-block">Get Started</a>
                 </div>
@@ -528,7 +536,7 @@
                 <div class="pricing-card">
                     <div class="pricing-header">
                         <h3>Enterprise</h3>
-                        <p>For large institutions & groups</p>
+                        <p>For large institutions</p>
                     </div>
                     <div class="pricing-price">
                         <span class="currency">ZMW</span>
@@ -537,11 +545,11 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Unlimited students</li>
+                        <li><span class="check">✓</span> All Professional features</li>
                         <li><span class="check">✓</span> Multi-campus support</li>
-                        <li><span class="check">✓</span> Custom Reports & Domain</li>
-                        <li><span class="check">✓</span> Dedicated Account Manager</li>
-                        <li><span class="check">✓</span> On-site Staff Training</li>
-                        <li><span class="check">✓</span> 99.9% SLA Uptime</li>
+                        <li><span class="check">✓</span> Custom integrations</li>
+                        <li><span class="check">✓</span> Dedicated account manager</li>
+                        <li><span class="check">✓</span> On-site training</li>
                     </ul>
                     <a href="#contact" class="btn btn-outline btn-block">Contact Sales</a>
                 </div>
@@ -553,8 +561,9 @@
     <section class="cta" id="demo">
         <div class="container">
             <div class="cta-content">
-                <h2>Ready to Modernize Your School?</h2>
-                <p>Join the digital revolution in Zambian education. Start your free 30-day trial today—no commitment required.</p>
+                <h2>Ready to Transform Your School?</h2>
+                <p>Join hundreds of schools already using Sync. Start your free 30-day trial today—no credit card
+                    required.</p>
                 <div class="cta-actions">
                     <a href="#contact" class="btn btn-white btn-lg">
                         Start Free Trial
@@ -575,14 +584,15 @@
             <div class="contact-grid">
                 <div class="contact-info">
                     <h2>Get in Touch</h2>
-                    <p>We are locally based in Lusaka and ready to assist you. Contact us for a demo or consultation.</p>
+                    <p>Have questions? We'd love to hear from you. Send us a message and we'll respond as soon as
+                        possible.</p>
 
                     <div class="contact-details">
                         <div class="contact-item">
                             <div class="contact-icon">📧</div>
                             <div>
                                 <strong>Email</strong>
-                                <span>sales@sync.zm</span>
+                                <span>hello@syncsms.com</span>
                             </div>
                         </div>
                         <div class="contact-item">
@@ -596,7 +606,7 @@
                             <div class="contact-icon">📍</div>
                             <div>
                                 <strong>Office</strong>
-                                <span>Cairo Road, Lusaka, Zambia</span>
+                                <span>Lusaka, Zambia</span>
                             </div>
                         </div>
                     </div>
@@ -609,7 +619,7 @@
                     </div>
                     <div class="form-group">
                         <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" placeholder="headteacher@school.edu.zm" required>
+                        <input type="email" id="email" name="email" placeholder="john@school.edu.zm" required>
                     </div>
                     <div class="form-group">
                         <label for="school">School Name</label>
@@ -617,7 +627,7 @@
                     </div>
                     <div class="form-group">
                         <label for="message">Message</label>
-                        <textarea id="message" name="message" rows="4" placeholder="I would like a demo of the AI features..."
+                        <textarea id="message" name="message" rows="4" placeholder="Tell us about your school..."
                             required></textarea>
                     </div>
                     <button type="submit" class="btn btn-primary btn-block">Send Message</button>
@@ -651,29 +661,42 @@
                         </div>
                         <span class="logo-text">Sync</span>
                     </a>
-                    <p>The #1 School Management System in Zambia. AI-powered and build for local success.</p>
+                    <p>The complete school management solution trusted by educators worldwide.</p>
                 </div>
 
                 <div class="footer-links">
                     <h4>Product</h4>
                     <ul>
                         <li><a href="#features">Features</a></li>
-                        <li><a href="#modules">Modules</a></li>
                         <li><a href="#pricing">Pricing</a></li>
+                        <li><a href="#modules">Modules</a></li>
+                        <li><a href="#">Updates</a></li>
                     </ul>
                 </div>
 
                 <div class="footer-links">
                     <h4>Company</h4>
                     <ul>
-                        <li><a href="#testimonials">Testimonials</a></li>
+                        <li><a href="#">About Us</a></li>
+                        <li><a href="#">Careers</a></li>
+                        <li><a href="#">Blog</a></li>
                         <li><a href="#contact">Contact</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Support</h4>
+                    <ul>
+                        <li><a href="#">Help Center</a></li>
+                        <li><a href="#">Documentation</a></li>
+                        <li><a href="#">API Reference</a></li>
+                        <li><a href="#">Status</a></li>
                     </ul>
                 </div>
             </div>
 
             <div class="footer-bottom">
-                <p>© 2026 Sync School Management System. Made in Zambia.</p>
+                <p>© 2026 Sync School Management System. All rights reserved.</p>
                 <div class="footer-legal">
                     <a href="#">Privacy Policy</a>
                     <a href="#">Terms of Service</a>
