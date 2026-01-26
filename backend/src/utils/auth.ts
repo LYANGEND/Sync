@@ -3,8 +3,8 @@ import bcrypt from 'bcryptjs';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
-export const generateToken = (userId: string, role: string) => {
-  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '24h' });
+export const generateToken = (userId: string, role: string, branchId?: string | null) => {
+  return jwt.sign({ userId, role, branchId }, JWT_SECRET, { expiresIn: '24h' });
 };
 
 export const hashPassword = async (password: string) => {

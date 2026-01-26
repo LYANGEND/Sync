@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteScholarship = exports.updateScholarship = exports.createScholarship = exports.getScholarships = void 0;
+exports.bulkCreateScholarships = exports.deleteScholarship = exports.updateScholarship = exports.createScholarship = exports.getScholarships = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma = new client_1.PrismaClient();
@@ -84,3 +84,24 @@ const deleteScholarship = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.deleteScholarship = deleteScholarship;
+const bulkCreateScholarships = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const scholarshipsData = zod_1.z.array(scholarshipSchema).parse(req.body);
+        const result = yield prisma.scholarship.createMany({
+            data: scholarshipsData,
+            skipDuplicates: true,
+        });
+        res.status(201).json({
+            message: `Successfully imported ${result.count} scholarships`,
+            count: result.count,
+        });
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            return res.status(400).json({ error: error.errors });
+        }
+        console.error('Bulk create scholarships error:', error);
+        res.status(500).json({ error: 'Failed to import scholarships' });
+    }
+});
+exports.bulkCreateScholarships = bulkCreateScholarships;

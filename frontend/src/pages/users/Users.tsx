@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
-import { Plus, Search, Edit2, Power, Shield, User, Mail, Lock } from 'lucide-react';
+import { Plus, Search, Edit2, Power, Shield, User, Mail, Lock, GitBranch } from 'lucide-react';
 
 interface UserData {
   id: string;
@@ -9,6 +9,18 @@ interface UserData {
   role: string;
   isActive: boolean;
   createdAt: string;
+  branchId?: string;
+  branch?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
+
+interface Branch {
+  id: string;
+  name: string;
+  code: string;
 }
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
@@ -20,24 +32,37 @@ const Users = () => {
   const [roleFilter, setRoleFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
-  
+
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     role: 'TEACHER',
     password: '',
+    branchId: '',
   });
+
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   useEffect(() => {
     fetchUsers();
+    fetchBranches();
   }, [roleFilter]);
+
+  const fetchBranches = async () => {
+    try {
+      const response = await api.get('/branches');
+      setBranches(response.data);
+    } catch (error) {
+      console.error('Failed to fetch branches', error);
+    }
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
       const params: any = {};
       if (roleFilter) params.role = roleFilter;
-      
+
       const response = await api.get('/users', { params });
       setUsers(response.data);
     } catch (error) {
@@ -59,6 +84,11 @@ const Users = () => {
         if (formData.password) {
           payload.password = formData.password;
         }
+        if (formData.branchId) {
+          payload.branchId = formData.branchId;
+        } else {
+          payload.branchId = null; // Explicitly clear branch if not selected
+        }
         await api.put(`/users/${editingUser.id}`, payload);
       } else {
         await api.post('/users', formData);
@@ -74,7 +104,7 @@ const Users = () => {
 
   const handleToggleStatus = async (id: string) => {
     if (!window.confirm('Are you sure you want to change this user\'s status?')) return;
-    
+
     try {
       await api.patch(`/users/${id}/status`);
       fetchUsers();
@@ -89,6 +119,7 @@ const Users = () => {
       email: '',
       role: 'TEACHER',
       password: '',
+      branchId: '',
     });
     setEditingUser(null);
   };
@@ -100,6 +131,7 @@ const Users = () => {
       email: user.email,
       role: user.role,
       password: '', // Don't populate password
+      branchId: user.branchId || '',
     });
     setShowModal(true);
   };
@@ -109,7 +141,7 @@ const Users = () => {
     setShowModal(true);
   };
 
-  const filteredUsers = users.filter(user => 
+  const filteredUsers = users.filter(user =>
     user.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -121,7 +153,7 @@ const Users = () => {
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">User Management</h1>
           <p className="text-gray-500 dark:text-gray-400">Manage system access and roles</p>
         </div>
-        <button 
+        <button
           onClick={openAddModal}
           className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
         >
@@ -183,16 +215,23 @@ const Users = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 dark:bg-slate-700 text-gray-800 dark:text-gray-200">
-                        {user.role.replace('_', ' ')}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 dark:bg-slate-700 text-gray-800 dark:text-gray-200 w-fit">
+                          {user.role.replace('_', ' ')}
+                        </span>
+                        {user.branch && (
+                          <span className="flex items-center text-xs text-gray-500 dark:text-gray-400">
+                            <GitBranch size={12} className="mr-1" />
+                            {user.branch.name}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        user.isActive 
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' 
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${user.isActive
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                           : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
-                      }`}>
+                        }`}>
                         {user.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </td>
@@ -201,14 +240,14 @@ const Users = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
-                        <button 
+                        <button
                           onClick={() => openEditModal(user)}
                           className="text-gray-400 hover:text-blue-600 transition-colors"
                           title="Edit User"
                         >
                           <Edit2 size={18} />
                         </button>
-                        <button 
+                        <button
                           onClick={() => handleToggleStatus(user.id)}
                           className={`${user.isActive ? 'text-green-600 hover:text-red-600' : 'text-red-600 hover:text-green-600'} transition-colors`}
                           title={user.isActive ? 'Deactivate User' : 'Activate User'}
@@ -277,6 +316,24 @@ const Users = () => {
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Branch (Optional)</label>
+                <div className="relative">
+                  <GitBranch size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <select
+                    value={formData.branchId}
+                    onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">No Branch (Global Access)</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name} ({branch.code})</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Leave empty for SUPER_ADMIN or global users.</p>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                   {editingUser ? 'New Password (leave blank to keep current)' : 'Password'}
                 </label>
@@ -295,14 +352,14 @@ const Users = () => {
               </div>
 
               <div className="flex justify-end space-x-3 mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >

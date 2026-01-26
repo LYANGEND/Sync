@@ -7,5 +7,6 @@ const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticateToken);
 router.post('/', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN', 'SECRETARY']), attendanceController_1.recordAttendance);
 router.get('/', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN', 'BURSAR', 'SECRETARY']), attendanceController_1.getClassAttendance);
+router.get('/analytics', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN', 'SECRETARY']), attendanceController_1.getAttendanceAnalytics);
 router.get('/student/:studentId', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN', 'BURSAR', 'SECRETARY']), attendanceController_1.getStudentAttendance);
 exports.default = router;

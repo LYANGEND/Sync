@@ -16,6 +16,10 @@ interface Student {
   class: {
     name: string;
   };
+  branch?: {
+    id: string;
+    name: string;
+  };
   guardianName: string;
   guardianPhone: string;
   guardianEmail?: string;
@@ -38,6 +42,7 @@ const Students = () => {
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [classes, setClasses] = useState<Class[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -74,13 +79,26 @@ const Students = () => {
     guardianEmail: '',
     address: '',
     classId: '',
+    branchId: '',
     status: 'ACTIVE'
   });
 
   useEffect(() => {
     fetchStudents();
     fetchClasses();
-  }, []);
+    if (user?.role === 'SUPER_ADMIN') {
+      fetchBranches();
+    }
+  }, [user]);
+
+  const fetchBranches = async () => {
+    try {
+      const response = await api.get('/branches');
+      setBranches(response.data);
+    } catch (error) {
+      console.error('Failed to fetch branches', error);
+    }
+  };
 
   const fetchStudents = async () => {
     try {
@@ -143,6 +161,7 @@ const Students = () => {
       guardianEmail: student.guardianEmail || '',
       address: student.address || '',
       classId: student.classId,
+      branchId: student.branch?.id || '',
       status: student.status
     });
     setShowModal(true);
@@ -165,6 +184,7 @@ const Students = () => {
       guardianEmail: '',
       address: '',
       classId: '',
+      branchId: '',
       status: 'ACTIVE'
     });
     setEditingStudent(null);
@@ -565,6 +585,7 @@ const Students = () => {
                 <th className="px-6 py-3">Name</th>
                 <th className="px-6 py-3">Class</th>
                 <th className="px-6 py-3">Guardian</th>
+                <th className="px-6 py-3">Branch</th>
                 <th className="px-6 py-3">Status</th>
                 <th className="px-6 py-3 text-right">Actions</th>
               </tr>
@@ -604,6 +625,11 @@ const Students = () => {
                         <span className="text-gray-700 dark:text-gray-300">{student.guardianName}</span>
                         <span className="text-xs text-gray-400 dark:text-gray-500">{student.guardianPhone}</span>
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                        {student.branch ? student.branch.name : '-'}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'ACTIVE'
@@ -960,6 +986,23 @@ const Students = () => {
                     ))}
                   </select>
                 </div>
+                {/* Branch Selection - Only for Admins */}
+                {user?.role === 'SUPER_ADMIN' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Branch</label>
+                    <select
+                      value={formData.branchId || ''}
+                      onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="">Select Branch (Optional)</option>
+                      {branches.map(branch => (
+                        <option key={branch.id} value={branch.id}>{branch.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">Leave empty to auto-assign or use default.</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Guardian Name</label>
                   <input

@@ -19,6 +19,7 @@ const baseStudentSchema = z.object({
   classId: z.string().uuid().nullable().optional().or(z.literal('')).transform(val => (val === '' || val === null) ? undefined : val),
   className: z.string().nullable().optional().transform(val => (val === '' || val === null) ? undefined : val),
   scholarshipId: z.string().uuid().nullable().optional().or(z.literal('')).transform(val => (val === '' || val === null) ? undefined : val),
+  branchId: z.string().uuid().nullable().optional().or(z.literal('')).transform(val => (val === '' || val === null) ? undefined : val),
 });
 
 const createStudentSchema = baseStudentSchema.refine(data => data.classId || data.className, {
@@ -33,13 +34,20 @@ const updateStudentSchema = baseStudentSchema.partial().extend({
 
 export const getStudents = async (req: Request, res: Response) => {
   try {
-    const userRole = (req as any).user?.role;
-    const userId = (req as any).user?.userId;
+    const user = (req as any).user;
+    const userRole = user?.role;
+    const userId = user?.userId;
+    const userBranchId = user?.branchId; // Assumes branchId is in the token or attached by middleware
 
     // Base filter: always exclude archived students
     let whereClause: any = {
       status: { not: 'ARCHIVED' }
     };
+
+    // Branch Scoping: If not SUPER_ADMIN, restrict to user's branch
+    if (userRole !== 'SUPER_ADMIN' && userBranchId) {
+      whereClause.branchId = userBranchId;
+    }
 
     if (userRole === 'TEACHER') {
       const myClasses = await prisma.class.findMany({
@@ -49,6 +57,7 @@ export const getStudents = async (req: Request, res: Response) => {
 
       const classIds = myClasses.map(c => c.id);
 
+      // Teachers see students in their classes AND belong to their branch (already filtered above)
       whereClause = {
         ...whereClause,
         classId: { in: classIds }
@@ -59,6 +68,7 @@ export const getStudents = async (req: Request, res: Response) => {
       where: whereClause,
       include: {
         class: true,
+        branch: true,
       },
       orderBy: {
         lastName: 'asc',
@@ -73,12 +83,32 @@ export const getStudents = async (req: Request, res: Response) => {
 
 export const createStudent = async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
     const parseResult = createStudentSchema.safeParse(req.body);
     if (!parseResult.success) {
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
     const data = parseResult.data;
+
+    // Branch Logic
+    let branchId = data.branchId;
+
+    // If user is NOT Super Admin, force them to create in their own branch
+    if (user.role !== 'SUPER_ADMIN') {
+      if (user.branchId) {
+        branchId = user.branchId;
+      } else {
+        // Fallback: This shouldn't happen if auth middleware is working correctly for restricted roles
+        return res.status(403).json({ error: 'User does not belong to a branch and cannot create students.' });
+      }
+    } else {
+      // If Super Admin didn't specify a branch, maybe default to their own?
+      // Or leave it null (global). Prefer defaulting to their branch if available.
+      if (!branchId && user.branchId) {
+        branchId = user.branchId;
+      }
+    }
 
     let parentId: string | null = null;
 
@@ -140,6 +170,7 @@ export const createStudent = async (req: Request, res: Response) => {
               fullName: data.guardianName || 'Guardian',
               role: 'PARENT',
               passwordHash: hashedPassword,
+              branchId: branchId, // Assign parent to the same branch as the student
             }
           });
           parentId = newParent.id;
@@ -247,6 +278,7 @@ export const createStudent = async (req: Request, res: Response) => {
             gradeLevel,
             teacherId: defaultTeacher.id,
             academicTermId: currentTerm.id,
+            branchId: branchId // Assign new class to the same branch
           }
         });
 
@@ -269,6 +301,7 @@ export const createStudent = async (req: Request, res: Response) => {
         admissionNumber,
         status: 'ACTIVE',
         parentId,
+        branchId: branchId,
       },
     });
 

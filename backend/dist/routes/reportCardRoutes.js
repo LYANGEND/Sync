@@ -5,6 +5,8 @@ const gradingScaleController_1 = require("../controllers/gradingScaleController"
 const reportCardController_1 = require("../controllers/reportCardController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = (0, express_1.Router)();
+// Public Verification Route
+router.get('/public/verify/:id', reportCardController_1.verifyReport);
 router.use(authMiddleware_1.authenticateToken);
 // Grading Scales
 router.get('/grading-scales', gradingScaleController_1.getGradingScales);
@@ -16,4 +18,5 @@ router.post('/generate', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_
 router.post('/generate-bulk', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN']), reportCardController_1.generateClassReports);
 router.put('/remarks', (0, authMiddleware_1.authorizeRole)(['TEACHER', 'SUPER_ADMIN']), reportCardController_1.updateReportRemarks);
 router.get('/student', reportCardController_1.getStudentReport);
+router.get('/class', reportCardController_1.getClassReports);
 exports.default = router;

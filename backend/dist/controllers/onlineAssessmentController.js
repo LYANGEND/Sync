@@ -219,16 +219,32 @@ const submitQuiz = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.submitQuiz = submitQuiz;
 const getStudentAssessments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
     try {
-        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+        const user = req.user;
+        // Determine which student to fetch for
+        let student;
+        if (user.role === 'PARENT') {
+            const targetStudentId = req.query.studentId;
+            if (!targetStudentId) {
+                return res.status(400).json({ error: 'Student ID is required when accessing as parent' });
+            }
+            // Verify ownership
+            student = yield prisma.student.findUnique({
+                where: { id: targetStudentId }
+            });
+            if (!student || student.parentId !== user.userId) {
+                return res.status(403).json({ error: 'Unauthorized: You are not the guardian of this student' });
+            }
         }
-        // Find student profile
-        const student = yield prisma.student.findUnique({
-            where: { userId }
-        });
+        else {
+            // Regular Student Access
+            const userId = user.userId;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            student = yield prisma.student.findUnique({
+                where: { userId }
+            });
+        }
         if (!student) {
             return res.status(404).json({ error: 'Student profile not found' });
         }

@@ -84,6 +84,9 @@ export const createPayment = async (req: Request, res: Response) => {
     // Generate transaction ID
     const transactionId = generateTransactionId();
 
+    // Link payment to the branch of the student
+    const branchId = student.branchId;
+
     const payment = await prisma.payment.create({
       data: {
         transactionId,
@@ -92,6 +95,7 @@ export const createPayment = async (req: Request, res: Response) => {
         method,
         notes,
         recordedByUserId: userId,
+        branchId, // Assign branch
       },
       include: {
         student: {
@@ -178,9 +182,14 @@ export const getPayments = async (req: Request, res: Response) => {
     const limit = Number(req.query.limit) || 50; // Higher default for now
     const search = req.query.search as string;
     const status = req.query.status as string;
+    const branchId = req.query.branchId as string; // Optional branch filter
 
     const skip = (page - 1) * limit;
     const where: any = {};
+
+    if (branchId) {
+      where.branchId = branchId;
+    }
 
     if (search) {
       where.OR = [
@@ -193,6 +202,15 @@ export const getPayments = async (req: Request, res: Response) => {
 
     if (status) {
       where.status = status;
+    }
+
+    // Branch Scoping:
+    const user = (req as any).user;
+    if (user?.role !== 'SUPER_ADMIN' && user?.branchId) {
+      where.branchId = user.branchId;
+    } else if (branchId) {
+      // If SUPER_ADMIN allows filtering by branch
+      where.branchId = branchId;
     }
 
     const [payments, total] = await Promise.all([
@@ -288,9 +306,15 @@ export const getStudentPayments = async (req: Request, res: Response) => {
 
 export const getFinanceStats = async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    const branchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : req.query.branchId as string;
+
+    const whereStatus: any = { status: 'COMPLETED' };
+    if (branchId) whereStatus.branchId = branchId;
+
     // 1. Total Revenue (Sum of COMPLETED payments only)
     const totalRevenueAgg = await prisma.payment.aggregate({
-      where: { status: 'COMPLETED' },
+      where: whereStatus,
       _sum: { amount: true },
       _count: { id: true },
     });
@@ -304,7 +328,32 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
 
     // 3. Pending Fees
+    // 3. Pending Fees
     const pendingFees = Math.max(0, totalFeesAssigned - totalRevenue);
+
+    // 4. Overdue Students Count
+    // Get total due per student
+    // Note: This logic needs to be branch-aware if strict branch separation is needed. 
+    // For now, it calculates globally or we can filter by branchId if passed.
+
+    // 5. Total Revenue per Branch
+    // Only fetch breakdown if SUPER_ADMIN and no specific branch filter applied
+    let revenueByBranch: any[] = [];
+    if (user?.role === 'SUPER_ADMIN' && !branchId) {
+      revenueByBranch = await prisma.payment.groupBy({
+        by: ['branchId'],
+        where: { status: 'COMPLETED' },
+        _sum: { amount: true },
+      } as any);
+    }
+
+    // Enrich branch names
+    const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
+    const revenueByBranchWithNames = revenueByBranch.map(r => ({
+      branchId: r.branchId,
+      branchName: branches.find(b => b.id === r.branchId)?.name || 'Unknown Branch',
+      amount: Number(r._sum.amount || 0)
+    }));
 
     // 4. Overdue Students Count
     // Get total due per student
@@ -333,7 +382,11 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     });
 
     // 5. Recent Activity (Show voided ones too, with status)
+    const whereRecent: any = {};
+    if (branchId) whereRecent.branchId = branchId;
+
     const recentActivity = await prisma.payment.findMany({
+      where: whereRecent,
       take: 5,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -346,6 +399,7 @@ export const getFinanceStats = async (req: Request, res: Response) => {
       totalTransactions,
       pendingFees,
       overdueCount,
+      revenueByBranch: revenueByBranchWithNames, // New breakdown
       recentActivity: recentActivity.map(p => ({
         id: p.id,
         description: `Payment from ${p.student.firstName} ${p.student.lastName}`,
@@ -362,18 +416,28 @@ export const getFinanceStats = async (req: Request, res: Response) => {
 
 export const getFinancialReport = async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, branchId } = req.query;
 
     const dateFilter: any = {};
     if (startDate) dateFilter.gte = new Date(startDate as string);
     if (endDate) dateFilter.lte = new Date(endDate as string);
 
+    const paymentWhere: any = {
+      paymentDate: dateFilter,
+      status: 'COMPLETED'
+    };
+
+    const user = (req as any).user;
+    // Determine effective branchId: User's branch overrides query if not SUPER_ADMIN
+    const effectiveBranchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : (branchId as string);
+
+    if (effectiveBranchId) {
+      paymentWhere.branchId = effectiveBranchId;
+    }
+
     // Monthly Revenue (COMPLETED only)
     const payments = await prisma.payment.findMany({
-      where: {
-        paymentDate: dateFilter,
-        status: 'COMPLETED'
-      },
+      where: paymentWhere,
       select: {
         amount: true,
         paymentDate: true
@@ -389,17 +453,19 @@ export const getFinancialReport = async (req: Request, res: Response) => {
     // Payment Methods Stats (COMPLETED only)
     const methodsStats = await prisma.payment.groupBy({
       by: ['method'],
-      where: {
-        paymentDate: dateFilter,
-        status: 'COMPLETED'
-      },
+      where: paymentWhere,
       _count: { id: true },
       _sum: { amount: true }
     });
 
     // 3. Collection by Class
-    // This is complex, so we'll do an aggregation
+    const classWhere: any = {};
+    if (effectiveBranchId) {
+      classWhere.branchId = effectiveBranchId;
+    }
+
     const classes = await prisma.class.findMany({
+      where: classWhere,
       select: {
         id: true,
         name: true,
@@ -409,6 +475,7 @@ export const getFinancialReport = async (req: Request, res: Response) => {
               select: { amountDue: true }
             },
             payments: {
+              where: { status: 'COMPLETED' }, // Ensure we only count completed payments
               select: { amount: true }
             }
           }

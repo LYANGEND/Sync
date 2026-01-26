@@ -13,8 +13,63 @@ exports.getDashboardStats = void 0;
 const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
-        // 1. Total Revenue (Today)
+        const userRole = (_a = req.user) === null || _a === void 0 ? void 0 : _a.role;
+        const userId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId;
+        if (userRole === 'TEACHER') {
+            // 1. My Classes
+            const myClasses = yield prisma.class.findMany({
+                where: { teacherId: userId },
+                include: { _count: { select: { students: true } } }
+            });
+            const totalStudents = myClasses.reduce((acc, curr) => acc + curr._count.students, 0);
+            // 2. Today's Schedule
+            const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+            const todayDay = days[new Date().getDay()];
+            const todaySchedule = yield prisma.timetablePeriod.findMany({
+                where: {
+                    teacherId: userId,
+                    dayOfWeek: todayDay
+                },
+                include: {
+                    classes: {
+                        include: {
+                            class: true
+                        }
+                    },
+                    subject: true
+                },
+                orderBy: { startTime: 'asc' }
+            });
+            // 3. Recent Assessments (Created for my classes)
+            const classIds = myClasses.map(c => c.id);
+            const recentAssessments = yield prisma.assessment.findMany({
+                where: {
+                    classId: { in: classIds }
+                },
+                take: 5,
+                orderBy: { date: 'desc' },
+                include: {
+                    class: true,
+                    subject: true,
+                    _count: { select: { results: true } }
+                }
+            });
+            return res.json({
+                role: 'TEACHER',
+                stats: {
+                    totalStudents,
+                    totalClasses: myClasses.length,
+                    todayScheduleCount: todaySchedule.length
+                },
+                myClasses,
+                todaySchedule,
+                recentAssessments
+            });
+        }
+        // --- ADMIN / BURSAR View (Existing) ---
+        // 1. Total Revenue (Today) - COMPLETED ONLY
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todayPayments = yield prisma.payment.aggregate({
@@ -22,6 +77,7 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 paymentDate: {
                     gte: today,
                 },
+                status: 'COMPLETED'
             },
             _sum: {
                 amount: true,
@@ -34,15 +90,19 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             },
         });
         // 3. Outstanding Fees
-        // Calculate total amount due - total amount paid across all fee structures
-        const feeStats = yield prisma.studentFeeStructure.aggregate({
-            _sum: {
-                amountDue: true,
-                amountPaid: true,
-            },
+        // Calculate total amount due - total revenue (COMPLETED)
+        // This ensures consistency with paymentController
+        const totalFeesAgg = yield prisma.studentFeeStructure.aggregate({
+            _sum: { amountDue: true },
         });
-        const totalOutstanding = (Number(feeStats._sum.amountDue) || 0) - (Number(feeStats._sum.amountPaid) || 0);
-        // 4. Recent Payments (Last 5)
+        const totalRevenueAgg = yield prisma.payment.aggregate({
+            where: { status: 'COMPLETED' },
+            _sum: { amount: true },
+        });
+        const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
+        const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
+        const totalOutstanding = Math.max(0, totalFeesAssigned - totalRevenue);
+        // 4. Recent Payments (Last 5) - Include Status
         const recentPayments = yield prisma.payment.findMany({
             take: 5,
             orderBy: {
@@ -63,10 +123,11 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             },
         });
         res.json({
+            role: 'ADMIN',
             dailyRevenue: Number(todayPayments._sum.amount) || 0,
             activeStudents: activeStudentsCount,
             outstandingFees: totalOutstanding,
-            recentPayments,
+            recentPayments: recentPayments.map(p => (Object.assign(Object.assign({}, p), { amount: Number(p.amount) }))),
         });
     }
     catch (error) {

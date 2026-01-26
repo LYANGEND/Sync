@@ -15,6 +15,7 @@ import Timetable from './pages/academics/Timetable';
 import Subjects from './pages/subjects/Subjects';
 import Classes from './pages/classes/Classes';
 import Users from './pages/users/Users';
+import Branches from './pages/branches/Branches';
 import Settings from './pages/settings/Settings';
 import Profile from './pages/profile/Profile';
 import Communication from './pages/communication/Communication';
@@ -134,6 +135,12 @@ function App() {
                 <Route path="/users" element={
                   <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                     <Users />
+                  </RoleGuard>
+                } />
+
+                <Route path="/branches" element={
+                  <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                    <Branches />
                   </RoleGuard>
                 } />
 

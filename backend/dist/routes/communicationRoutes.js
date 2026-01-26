@@ -9,6 +9,7 @@ router.use(authMiddleware_1.authenticateToken);
 router.post('/push/subscribe', communicationController_1.subscribeToPush);
 // User routes
 router.get('/notifications', communicationController_1.getMyNotifications);
+router.get('/notifications/unread-count', communicationController_1.getUnreadNotificationCount);
 router.patch('/notifications/:id/read', communicationController_1.markAsRead);
 router.patch('/notifications/read-all', communicationController_1.markAllAsRead);
 // Chat routes

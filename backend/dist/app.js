@@ -27,6 +27,8 @@ const settingsRoutes_1 = __importDefault(require("./routes/settingsRoutes"));
 const communicationRoutes_1 = __importDefault(require("./routes/communicationRoutes"));
 const scholarshipRoutes_1 = __importDefault(require("./routes/scholarshipRoutes"));
 const profileRoutes_1 = __importDefault(require("./routes/profileRoutes"));
+const feeReminderRoutes_1 = __importDefault(require("./routes/feeReminderRoutes"));
+const academicsRoutes_1 = __importDefault(require("./routes/academicsRoutes"));
 const path_1 = __importDefault(require("path"));
 const app = (0, express_1.default)();
 // Middleware
@@ -35,7 +37,8 @@ app.use((0, cors_1.default)({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '50mb' })); // Increased limit for bulk imports
+app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" } // Allow serving images
 }));
@@ -63,6 +66,12 @@ app.use('/api/v1/promotions', promotionRoutes_1.default);
 app.use('/api/v1/settings', settingsRoutes_1.default);
 app.use('/api/v1/communication', communicationRoutes_1.default);
 app.use('/api/v1/scholarships', scholarshipRoutes_1.default);
+app.use('/api/v1/fee-reminders', feeReminderRoutes_1.default);
+app.use('/api/v1/academics', academicsRoutes_1.default);
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 // Basic Route
 app.get('/', (req, res) => {
     res.json({ message: 'Welcome to Sync School Management System API' });

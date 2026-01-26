@@ -6,6 +6,25 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting database seeding...');
 
+  // Create Main Branch
+  let mainBranch = await prisma.branch.findUnique({
+    where: { code: 'MAIN' }
+  });
+
+  if (!mainBranch) {
+    mainBranch = await prisma.branch.create({
+      data: {
+        name: 'Main Campus',
+        code: 'MAIN',
+        address: '123 Education Road, Lusaka, Zambia',
+        isMain: true,
+      }
+    });
+    console.log('✅ Created Main Branch');
+  } else {
+    console.log('✅ Main Branch already exists');
+  }
+
   // Check if super admin already exists
   const existingAdmin = await prisma.user.findFirst({
     where: { role: 'SUPER_ADMIN' }
@@ -22,6 +41,7 @@ async function main() {
         passwordHash: hashedPassword,
         fullName: 'Super Admin',
         role: 'SUPER_ADMIN',
+        branchId: mainBranch.id,
       }
     });
 
@@ -44,6 +64,7 @@ async function main() {
         passwordHash: hashedPassword,
         fullName: 'Sarah Mulenga',
         role: 'BURSAR',
+        branchId: mainBranch.id,
       }
     });
     console.log('✅ Created bursar:', bursar.fullName);
@@ -64,6 +85,7 @@ async function main() {
         passwordHash: hashedPassword,
         fullName: 'Robbie Tembo',
         role: 'TEACHER',
+        branchId: mainBranch.id,
       }
     });
     console.log('✅ Created teacher:', teacher.fullName);
@@ -123,6 +145,7 @@ async function main() {
           gradeLevel: classData.gradeLevel,
           teacherId: teacher.id,
           academicTermId: currentTerm.id,
+          branchId: mainBranch.id,
         }
       });
       console.log(`✅ Created class: ${classData.name} (Grade Level: ${classData.gradeLevel})`);
@@ -303,6 +326,7 @@ async function main() {
           guardianEmail: studentData.guardianEmail,
           classId: classForStudent.id,
           status: 'ACTIVE',
+          branchId: mainBranch.id,
         }
       });
       console.log(`✅ Created student: ${studentData.firstName} ${studentData.lastName}`);
@@ -334,6 +358,7 @@ async function main() {
               method: ['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'][Math.floor(Math.random() * 3)] as any,
               transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
               recordedByUserId: bursar.id,
+              branchId: mainBranch.id,
             }
           });
           console.log(`  💳 Created payment of ZMW ${paymentAmount} for ${studentData.firstName}`);
@@ -354,6 +379,7 @@ async function main() {
           passwordHash: parentPassword,
           fullName: studentData.guardianName || 'Parent',
           role: 'PARENT',
+          branchId: mainBranch.id,
         }
       });
 
@@ -392,6 +418,7 @@ async function main() {
           method: 'CASH',
           transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
           recordedByUserId: bursar.id,
+          branchId: mainBranch.id,
         }
       });
     }

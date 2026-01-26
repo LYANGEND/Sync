@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getStudentAttendance = exports.getClassAttendance = exports.recordAttendance = void 0;
+exports.getAttendanceAnalytics = exports.getStudentAttendance = exports.getClassAttendance = exports.recordAttendance = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma = new client_1.PrismaClient();
@@ -126,3 +126,78 @@ const getStudentAttendance = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getStudentAttendance = getStudentAttendance;
+const getAttendanceAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { classId, startDate, endDate } = req.query;
+        if (!classId || !startDate || !endDate) {
+            return res.status(400).json({ message: 'classId, startDate, and endDate are required' });
+        }
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        // Get all students in the class
+        const students = yield prisma.student.findMany({
+            where: { classId: classId, status: 'ACTIVE' },
+            select: { id: true, firstName: true, lastName: true, admissionNumber: true }
+        });
+        // Get all attendance records for the date range
+        const records = yield prisma.attendance.findMany({
+            where: {
+                classId: classId,
+                date: { gte: start, lte: end }
+            },
+            orderBy: { date: 'asc' }
+        });
+        // Group by date for daily summary
+        const dailyMap = {};
+        records.forEach(r => {
+            const dateKey = r.date.toISOString().split('T')[0];
+            if (!dailyMap[dateKey]) {
+                dailyMap[dateKey] = { present: 0, absent: 0, late: 0, total: 0 };
+            }
+            dailyMap[dateKey].total++;
+            if (r.status === 'PRESENT')
+                dailyMap[dateKey].present++;
+            else if (r.status === 'ABSENT')
+                dailyMap[dateKey].absent++;
+            else if (r.status === 'LATE')
+                dailyMap[dateKey].late++;
+        });
+        const dailyData = Object.entries(dailyMap).map(([date, data]) => (Object.assign({ date }, data)));
+        // Student summaries
+        const studentMap = {};
+        students.forEach(s => {
+            studentMap[s.id] = { present: 0, absent: 0, late: 0 };
+        });
+        records.forEach(r => {
+            if (studentMap[r.studentId]) {
+                if (r.status === 'PRESENT')
+                    studentMap[r.studentId].present++;
+                else if (r.status === 'ABSENT')
+                    studentMap[r.studentId].absent++;
+                else if (r.status === 'LATE')
+                    studentMap[r.studentId].late++;
+            }
+        });
+        const totalDays = dailyData.length;
+        const studentSummaries = students.map(s => {
+            const data = studentMap[s.id];
+            const totalRecorded = data.present + data.absent + data.late;
+            return {
+                studentId: s.id,
+                studentName: `${s.firstName} ${s.lastName}`,
+                admissionNumber: s.admissionNumber,
+                presentDays: data.present,
+                absentDays: data.absent,
+                lateDays: data.late,
+                attendanceRate: totalRecorded > 0 ? (data.present / totalRecorded) * 100 : 0
+            };
+        });
+        res.json({ dailyData, studentSummaries, totalDays });
+    }
+    catch (error) {
+        console.error('Get attendance analytics error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.getAttendanceAnalytics = getAttendanceAnalytics;

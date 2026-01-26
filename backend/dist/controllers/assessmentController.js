@@ -20,7 +20,7 @@ var __rest = (this && this.__rest) || function (s, e) {
     return t;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getStudentResults = exports.getAssessmentResults = exports.recordResults = exports.getAssessmentById = exports.getAssessments = exports.createAssessment = void 0;
+exports.getGradebook = exports.getStudentResults = exports.getAssessmentResults = exports.recordResults = exports.bulkDeleteAssessments = exports.deleteAssessment = exports.getAssessmentById = exports.getAssessments = exports.createAssessment = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 // Prisma Client should be generated. If you see errors here, try reloading the window.
@@ -112,6 +112,33 @@ const getAssessmentById = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getAssessmentById = getAssessmentById;
+const deleteAssessment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        yield prisma.assessment.delete({ where: { id } });
+        res.status(204).send();
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to delete assessment' });
+    }
+});
+exports.deleteAssessment = deleteAssessment;
+const bulkDeleteAssessments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { ids } = zod_1.z.object({ ids: zod_1.z.array(zod_1.z.string().uuid()) }).parse(req.body);
+        yield prisma.assessment.deleteMany({
+            where: { id: { in: ids } }
+        });
+        res.json({ message: `Successfully deleted ${ids.length} assessments` });
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: 'Failed to delete assessments' });
+    }
+});
+exports.bulkDeleteAssessments = bulkDeleteAssessments;
 const recordResults = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -216,3 +243,42 @@ const getStudentResults = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getStudentResults = getStudentResults;
+const getGradebook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { classId, subjectId, termId } = req.query;
+        if (!classId || !subjectId || !termId) {
+            return res.status(400).json({ error: 'Class, Subject and Term IDs are required' });
+        }
+        // 1. Get Assessments
+        const assessments = yield prisma.assessment.findMany({
+            where: {
+                classId: String(classId),
+                subjectId: String(subjectId),
+                termId: String(termId)
+            },
+            orderBy: { date: 'asc' }
+        });
+        // 2. Get Students (using specific ID/String casting to be safe)
+        const students = yield prisma.student.findMany({
+            where: { classId: String(classId) },
+            orderBy: { lastName: 'asc' },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                admissionNumber: true
+            }
+        });
+        // 3. Get All Results for these assessments
+        const assessmentIds = assessments.map(a => a.id);
+        const results = yield prisma.assessmentResult.findMany({
+            where: { assessmentId: { in: assessmentIds } }
+        });
+        res.json({ assessments, students, results });
+    }
+    catch (error) {
+        console.error('Get gradebook error:', error);
+        res.status(500).json({ error: 'Failed to fetch gradebook data' });
+    }
+});
+exports.getGradebook = getGradebook;

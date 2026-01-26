@@ -8,6 +8,7 @@ router.use(authMiddleware_1.authenticateToken);
 router.use((0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']));
 router.get('/', scholarshipController_1.getScholarships);
 router.post('/', scholarshipController_1.createScholarship);
+router.post('/bulk', scholarshipController_1.bulkCreateScholarships);
 router.put('/:id', scholarshipController_1.updateScholarship);
 router.delete('/:id', scholarshipController_1.deleteScholarship);
 exports.default = router;

@@ -7,6 +7,7 @@ const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticateToken);
 router.get('/', subjectController_1.getSubjects);
 router.post('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), subjectController_1.createSubject);
+router.post('/bulk', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), subjectController_1.bulkCreateSubjects);
 router.put('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), subjectController_1.updateSubject);
 router.delete('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), subjectController_1.deleteSubject);
 exports.default = router;

@@ -18,7 +18,7 @@ const createTopicSchema = zod_1.z.object({
     title: zod_1.z.string().min(3),
     description: zod_1.z.string().optional(),
     subjectId: zod_1.z.string().uuid(),
-    gradeLevel: zod_1.z.number().int().min(1).max(12),
+    gradeLevel: zod_1.z.number().int().min(-3).max(12), // Allow negative values for ECD (Baby, Middle, Reception)
     orderIndex: zod_1.z.number().int().optional(),
 });
 const updateTopicProgressSchema = zod_1.z.object({
@@ -28,7 +28,7 @@ const createLessonPlanSchema = zod_1.z.object({
     classId: zod_1.z.string().uuid(),
     subjectId: zod_1.z.string().uuid(),
     termId: zod_1.z.string().uuid(),
-    weekStartDate: zod_1.z.string().datetime(), // ISO Date string
+    weekStartDate: zod_1.z.string(), // Allow YYYY-MM-DD formatted strings
     title: zod_1.z.string().min(3),
     content: zod_1.z.string().min(10),
     fileUrl: zod_1.z.string().url().optional().or(zod_1.z.literal('')),

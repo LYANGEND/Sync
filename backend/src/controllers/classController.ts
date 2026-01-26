@@ -17,10 +17,16 @@ export const getClasses = async (req: Request, res: Response) => {
     const userRole = (req as any).user?.role;
     const userId = (req as any).user?.userId;
 
-    let whereClause = {};
+    const userBranchId = (req as any).user?.branchId;
+
+    let whereClause: any = {};
+
+    if (userRole !== 'SUPER_ADMIN' && userBranchId) {
+      whereClause.branchId = userBranchId;
+    }
 
     if (userRole === 'TEACHER') {
-      whereClause = { teacherId: userId };
+      whereClause = { ...whereClause, teacherId: userId };
     }
 
     const classes = await prisma.class.findMany({
@@ -48,6 +54,9 @@ export const getClasses = async (req: Request, res: Response) => {
 export const getClassById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const user = (req as any).user;
+    const userRole = user?.role;
+    const userBranchId = user?.branchId;
 
     const classData = await prisma.class.findUnique({
       where: { id },
@@ -76,6 +85,11 @@ export const getClassById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Class not found' });
     }
 
+    // Check branch access
+    if (userRole !== 'SUPER_ADMIN' && userBranchId && classData.branchId && classData.branchId !== userBranchId) {
+      return res.status(403).json({ error: 'Unauthorized access to this class' });
+    }
+
     res.json(classData);
   } catch (error) {
     console.error('Error fetching class:', error);
@@ -96,6 +110,7 @@ export const createClass = async (req: Request, res: Response) => {
         subjects: subjectIds ? {
           connect: subjectIds.map(id => ({ id })),
         } : undefined,
+        branchId: (req as any).user?.branchId, // Assign to creator's branch
       },
       include: {
         subjects: true,
@@ -231,6 +246,7 @@ export const bulkCreateClasses = async (req: Request, res: Response) => {
       gradeLevel: c.gradeLevel,
       teacherId: c.teacherId || defaultTeacher.id,
       academicTermId: c.academicTermId || currentTerm.id,
+      branchId: (req as any).user?.branchId, // Assign to creator's branch
     }));
 
     const result = await prisma.class.createMany({

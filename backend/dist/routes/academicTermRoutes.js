@@ -7,4 +7,6 @@ const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticateToken);
 router.get('/', academicTermController_1.getAcademicTerms);
 router.post('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), academicTermController_1.createAcademicTerm);
+router.put('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), academicTermController_1.updateAcademicTerm);
+router.delete('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), academicTermController_1.deleteAcademicTerm);
 exports.default = router;

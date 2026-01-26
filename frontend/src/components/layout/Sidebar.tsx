@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -61,6 +61,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: UserCog,
       label: 'Users',
       path: '/users',
+      roles: ['SUPER_ADMIN']
+    },
+    {
+      icon: GitBranch, // You need to import GitBranch from lucide-react
+      label: 'Branches',
+      path: '/branches',
       roles: ['SUPER_ADMIN']
     },
     {

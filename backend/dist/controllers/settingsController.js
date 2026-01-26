@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateSettings = exports.getSettings = void 0;
+exports.deleteLogo = exports.uploadLogo = exports.getPublicSettings = exports.updateSettings = exports.getSettings = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma = new client_1.PrismaClient();
@@ -20,6 +20,18 @@ const updateSettingsSchema = zod_1.z.object({
     schoolEmail: zod_1.z.string().email().optional().or(zod_1.z.literal('')),
     schoolWebsite: zod_1.z.string().url().optional().or(zod_1.z.literal('')),
     currentTermId: zod_1.z.string().uuid().optional().nullable(),
+    // Theme
+    primaryColor: zod_1.z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+    secondaryColor: zod_1.z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+    accentColor: zod_1.z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/).optional(),
+    // Notification Channel Toggles
+    emailNotificationsEnabled: zod_1.z.boolean().optional(),
+    smsNotificationsEnabled: zod_1.z.boolean().optional(),
+    // Fee Reminder Settings
+    feeReminderEnabled: zod_1.z.boolean().optional(),
+    feeReminderDaysBefore: zod_1.z.number().min(1).max(30).optional(),
+    overdueReminderEnabled: zod_1.z.boolean().optional(),
+    overdueReminderFrequency: zod_1.z.number().min(1).max(30).optional(),
     // SMTP
     smtpHost: zod_1.z.string().optional().or(zod_1.z.literal('')),
     smtpPort: zod_1.z.number().optional().nullable(),
@@ -33,6 +45,10 @@ const updateSettingsSchema = zod_1.z.object({
     smsApiKey: zod_1.z.string().optional().or(zod_1.z.literal('')),
     smsApiSecret: zod_1.z.string().optional().or(zod_1.z.literal('')),
     smsSenderId: zod_1.z.string().optional().or(zod_1.z.literal('')),
+    // Lenco Payment Gateway
+    lencoApiKey: zod_1.z.string().optional().or(zod_1.z.literal('')),
+    lencoEnvironment: zod_1.z.string().optional().or(zod_1.z.literal('')),
+    lencoDefaultBearer: zod_1.z.string().optional().or(zod_1.z.literal('')),
 });
 const getSettings = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -86,3 +102,85 @@ const updateSettings = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.updateSettings = updateSettings;
+const getPublicSettings = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const settings = yield prisma.schoolSettings.findFirst({
+            select: {
+                schoolName: true,
+                logoUrl: true,
+                primaryColor: true,
+                secondaryColor: true,
+                accentColor: true,
+            }
+        });
+        if (!settings) {
+            return res.json({
+                schoolName: 'My School',
+                primaryColor: '#2563eb',
+                secondaryColor: '#475569',
+                accentColor: '#f59e0b',
+            });
+        }
+        res.json(settings);
+    }
+    catch (error) {
+        console.error('Get public settings error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.getPublicSettings = getPublicSettings;
+const uploadLogo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+        const logoUrl = `/uploads/logos/${req.file.filename}`;
+        const existing = yield prisma.schoolSettings.findFirst();
+        let settings;
+        if (existing) {
+            settings = yield prisma.schoolSettings.update({
+                where: { id: existing.id },
+                data: { logoUrl },
+            });
+        }
+        else {
+            settings = yield prisma.schoolSettings.create({
+                data: {
+                    schoolName: 'My School',
+                    logoUrl
+                },
+            });
+        }
+        res.json({ logoUrl, message: 'Logo uploaded successfully' });
+    }
+    catch (error) {
+        console.error('Upload logo error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.uploadLogo = uploadLogo;
+const deleteLogo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const existing = yield prisma.schoolSettings.findFirst();
+        if (existing && existing.logoUrl) {
+            // Update settings to remove logo URL
+            yield prisma.schoolSettings.update({
+                where: { id: existing.id },
+                data: { logoUrl: null },
+            });
+            // Optionally delete the file from disk
+            const fs = require('fs');
+            const path = require('path');
+            const filePath = path.join(__dirname, '../../', existing.logoUrl);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        }
+        res.json({ message: 'Logo deleted successfully' });
+    }
+    catch (error) {
+        console.error('Delete logo error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+exports.deleteLogo = deleteLogo;

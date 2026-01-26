@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Smartphone, RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, X, Send, Phone, Eye } from 'lucide-react';
 import api from '../utils/api';
+import ExportDropdown from './ExportDropdown';
+import StudentSelector from './StudentSelector';
 
 interface Student {
     id: string;
@@ -194,6 +196,17 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
         statusFilter === 'ALL' || c.status === statusFilter
     );
 
+    // Derive unique classes from students for the selector
+    const classes = React.useMemo(() => {
+        const uniqueClasses = new Map();
+        students.forEach(student => {
+            if (student.class) {
+                uniqueClasses.set(student.class.id, student.class);
+            }
+        });
+        return Array.from(uniqueClasses.values());
+    }, [students]);
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -205,13 +218,44 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                     </h2>
                     <p className="text-slate-500 dark:text-gray-400 mt-1">Request payments directly from customer phones via Lenco</p>
                 </div>
-                <button
-                    onClick={() => setShowInitiateModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
-                >
-                    <Send size={18} />
-                    Request Payment
-                </button>
+                <div className="flex gap-2">
+                    <ExportDropdown
+                        data={filteredCollections.map(c => ({
+                            date: new Date(c.initiatedAt).toLocaleDateString(),
+                            time: new Date(c.initiatedAt).toLocaleTimeString(),
+                            studentName: `${c.student.firstName} ${c.student.lastName}`,
+                            admissionNumber: c.student.admissionNumber,
+                            phone: c.phone,
+                            operator: c.operator,
+                            amount: c.amount,
+                            reference: c.reference,
+                            status: c.status,
+                            failReason: c.reasonForFailure || '',
+                            transactionId: c.payment?.transactionId || 'N/A'
+                        }))}
+                        columns={[
+                            { key: 'date', header: 'Date' },
+                            { key: 'time', header: 'Time' },
+                            { key: 'studentName', header: 'Student' },
+                            { key: 'admissionNumber', header: 'Admission No' },
+                            { key: 'phone', header: 'Phone' },
+                            { key: 'operator', header: 'Operator' },
+                            { key: 'amount', header: 'Amount' },
+                            { key: 'reference', header: 'Reference' },
+                            { key: 'status', header: 'Status' },
+                            { key: 'failReason', header: 'Failure Reason' },
+                            { key: 'transactionId', header: 'Transaction ID' },
+                        ]}
+                        filename={`mobile_money_collections_${new Date().toISOString().split('T')[0]}`}
+                    />
+                    <button
+                        onClick={() => setShowInitiateModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
+                    >
+                        <Send size={18} />
+                        Request Payment
+                    </button>
+                </div>
             </div>
 
             {/* Status Filter Pills */}
@@ -352,19 +396,12 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                             {/* Student Selection */}
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Student</label>
-                                <select
-                                    required
-                                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                <StudentSelector
+                                    students={students}
+                                    classes={classes}
                                     value={form.studentId}
-                                    onChange={(e) => handleStudentSelect(e.target.value)}
-                                >
-                                    <option value="">Select a student</option>
-                                    {students.map((student) => (
-                                        <option key={student.id} value={student.id}>
-                                            {student.firstName} {student.lastName} ({student.admissionNumber})
-                                        </option>
-                                    ))}
-                                </select>
+                                    onChange={handleStudentSelect}
+                                />
                             </div>
 
                             {/* Amount */}

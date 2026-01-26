@@ -10,6 +10,7 @@ const createUserSchema = z.object({
   password: z.string().min(6),
   fullName: z.string().min(2),
   role: z.nativeEnum(Role),
+  branchId: z.string().optional(),
 });
 
 const updateUserSchema = z.object({
@@ -17,12 +18,13 @@ const updateUserSchema = z.object({
   fullName: z.string().min(2).optional(),
   role: z.nativeEnum(Role).optional(),
   password: z.string().min(6).optional(),
+  branchId: z.string().optional().nullable(),
 });
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
     const { role } = req.query;
-    
+
     const whereClause: any = {};
     if (role) {
       whereClause.role = role as Role;
@@ -37,6 +39,13 @@ export const getUsers = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         createdAt: true,
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
+        }
       },
       orderBy: {
         createdAt: 'desc',
@@ -50,6 +59,8 @@ export const getUsers = async (req: Request, res: Response) => {
 
 export const getTeachers = async (req: Request, res: Response) => {
   try {
+    // Optional: Filter teachers by branch if the requester is not SUPER_ADMIN?
+    // For now, let's keep it global or we can filter if needed.
     const teachers = await prisma.user.findMany({
       where: {
         role: Role.TEACHER,
@@ -59,6 +70,7 @@ export const getTeachers = async (req: Request, res: Response) => {
         id: true,
         fullName: true,
         email: true,
+        branchId: true,
       },
       orderBy: {
         fullName: 'asc',
@@ -72,7 +84,7 @@ export const getTeachers = async (req: Request, res: Response) => {
 
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { email, password, fullName, role } = createUserSchema.parse(req.body);
+    const { email, password, fullName, role, branchId } = createUserSchema.parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -87,6 +99,7 @@ export const createUser = async (req: Request, res: Response) => {
         passwordHash,
         fullName,
         role,
+        branchId
       },
       select: {
         id: true,
@@ -95,6 +108,7 @@ export const createUser = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         createdAt: true,
+        branchId: true
       },
     });
 
@@ -110,11 +124,14 @@ export const createUser = async (req: Request, res: Response) => {
 export const updateUser = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { email, fullName, role, password } = updateUserSchema.parse(req.body);
+    const { email, fullName, role, password, branchId } = updateUserSchema.parse(req.body);
 
     const data: any = { email, fullName, role };
     if (password) {
       data.passwordHash = await hashPassword(password);
+    }
+    if (branchId !== undefined) {
+      data.branchId = branchId;
     }
 
     const user = await prisma.user.update({
@@ -126,6 +143,7 @@ export const updateUser = async (req: Request, res: Response) => {
         email: true,
         role: true,
         isActive: true,
+        branchId: true
       },
     });
 
@@ -141,7 +159,7 @@ export const updateUser = async (req: Request, res: Response) => {
 export const toggleUserStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    
+
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

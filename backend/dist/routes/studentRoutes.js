@@ -5,6 +5,7 @@ const studentController_1 = require("../controllers/studentController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = (0, express_1.Router)();
 router.use(authMiddleware_1.authenticateToken);
+router.get('/profile/me', (0, authMiddleware_1.authorizeRole)(['STUDENT']), studentController_1.getStudentProfile);
 router.get('/my-children', (0, authMiddleware_1.authorizeRole)(['PARENT']), studentController_1.getMyChildren);
 router.get('/', studentController_1.getStudents);
 router.post('/bulk', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'SECRETARY']), studentController_1.bulkCreateStudents);

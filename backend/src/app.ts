@@ -24,6 +24,7 @@ import scholarshipRoutes from './routes/scholarshipRoutes';
 import profileRoutes from './routes/profileRoutes';
 import feeReminderRoutes from './routes/feeReminderRoutes';
 import academicsRoutes from './routes/academicsRoutes';
+import branchRoutes from './routes/branchRoutes';
 import path from 'path';
 
 const app: Application = express();
@@ -67,6 +68,7 @@ app.use('/api/v1/communication', communicationRoutes);
 app.use('/api/v1/scholarships', scholarshipRoutes);
 app.use('/api/v1/fee-reminders', feeReminderRoutes);
 app.use('/api/v1/academics', academicsRoutes);
+app.use('/api/v1/branches', branchRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

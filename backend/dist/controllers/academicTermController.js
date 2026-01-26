@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createAcademicTerm = exports.getAcademicTerms = void 0;
+exports.deleteAcademicTerm = exports.updateAcademicTerm = exports.createAcademicTerm = exports.getAcademicTerms = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma = new client_1.PrismaClient();
@@ -52,3 +52,39 @@ const createAcademicTerm = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.createAcademicTerm = createAcademicTerm;
+const updateAcademicTerm = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { name, startDate, endDate, isActive } = termSchema.parse(req.body);
+        const term = yield prisma.academicTerm.update({
+            where: { id },
+            data: {
+                name,
+                startDate,
+                endDate,
+                isActive,
+            },
+        });
+        res.json(term);
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: 'Failed to update academic term' });
+    }
+});
+exports.updateAcademicTerm = updateAcademicTerm;
+const deleteAcademicTerm = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        yield prisma.academicTerm.delete({
+            where: { id },
+        });
+        res.status(204).send();
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to delete academic term' });
+    }
+});
+exports.deleteAcademicTerm = deleteAcademicTerm;

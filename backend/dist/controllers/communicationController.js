@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.subscribeToPush = exports.searchUsers = exports.sendMessage = exports.getMessages = exports.getConversations = exports.markAllAsRead = exports.markAsRead = exports.getMyNotifications = exports.sendAnnouncement = void 0;
+exports.subscribeToPush = exports.searchUsers = exports.sendMessage = exports.getMessages = exports.getConversations = exports.getUnreadNotificationCount = exports.markAllAsRead = exports.markAsRead = exports.getMyNotifications = exports.sendAnnouncement = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const emailService_1 = require("../services/emailService");
@@ -107,6 +107,20 @@ const markAllAsRead = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.markAllAsRead = markAllAsRead;
+const getUnreadNotificationCount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const count = yield prisma.notification.count({
+            where: { userId, isRead: false },
+        });
+        res.json({ count });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Failed to get notification count' });
+    }
+});
+exports.getUnreadNotificationCount = getUnreadNotificationCount;
 const sendMessageSchema = zod_1.z.object({
     conversationId: zod_1.z.string().uuid().optional(),
     recipientId: zod_1.z.string().uuid().optional(),
@@ -277,26 +291,34 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.sendMessage = sendMessage;
 const searchUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
     try {
         const { query } = req.query;
-        const currentUserId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const currentUser = req.user;
+        const currentUserId = currentUser === null || currentUser === void 0 ? void 0 : currentUser.userId;
+        const userRole = currentUser === null || currentUser === void 0 ? void 0 : currentUser.role;
         if (!query || typeof query !== 'string' || query.length < 2) {
             return res.json([]);
         }
+        const whereClause = {
+            AND: [
+                {
+                    OR: [
+                        { fullName: { contains: query, mode: 'insensitive' } },
+                        { email: { contains: query, mode: 'insensitive' } }
+                    ]
+                },
+                { id: { not: currentUserId } },
+                { isActive: true }
+            ]
+        };
+        // RESTRICTION: Parents and Students can ONLY see Staff
+        if (userRole === 'PARENT' || userRole === 'STUDENT') {
+            whereClause.AND.push({
+                role: { in: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] }
+            });
+        }
         const users = yield prisma.user.findMany({
-            where: {
-                AND: [
-                    {
-                        OR: [
-                            { fullName: { contains: query, mode: 'insensitive' } },
-                            { email: { contains: query, mode: 'insensitive' } }
-                        ]
-                    },
-                    { id: { not: currentUserId } },
-                    { isActive: true }
-                ]
-            },
+            where: whereClause,
             select: {
                 id: true,
                 fullName: true,
