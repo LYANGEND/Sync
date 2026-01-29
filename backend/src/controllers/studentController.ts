@@ -21,6 +21,7 @@ const baseStudentSchema = z.object({
   classId: z.string().uuid().optional(),
   className: z.string().optional(),
   scholarshipId: z.string().uuid().optional().nullable(),
+  branchId: z.string().uuid().optional(),
 });
 
 const createStudentSchema = baseStudentSchema.refine(data => data.classId || data.className, {
@@ -324,6 +325,18 @@ export const createStudent = async (req: AuthRequest, res: Response) => {
     // Remove className and guardianEmail from data before creating
     const { className, guardianEmail, classId: _, ...studentData } = data;
 
+    // Use provided branchId or default to tenant's main branch or active one?
+    // For now, if provided, use it.
+
+    // Determine Branch ID
+    let finalBranchId = data.branchId;
+    if (!finalBranchId) {
+      // Fallback to staff's active branch if they are creating it
+      if (req.user?.branchId) {
+        finalBranchId = req.user.branchId;
+      }
+    }
+
     const student = await prisma.student.create({
       data: {
         tenantId,
@@ -332,6 +345,14 @@ export const createStudent = async (req: AuthRequest, res: Response) => {
         admissionNumber,
         status: 'ACTIVE',
         parentId,
+        branchId: finalBranchId || undefined,
+        branchEnrollments: finalBranchId ? {
+          create: {
+            branchId: finalBranchId,
+            isPrimary: true,
+            enrollType: 'FULL_TIME'
+          }
+        } : undefined
       },
     });
 

@@ -19,7 +19,14 @@ export const requireActiveSubscription: RequestHandler = async (
     next: NextFunction
 ) => {
     try {
-        const tenantId = getTenantId(req as TenantRequest);
+        // Skip subscription check if user is not authenticated
+        const tenantRequest = req as TenantRequest;
+        if (!tenantRequest.user?.tenantId) {
+            // Not authenticated yet - let auth middleware handle it
+            return next();
+        }
+
+        const tenantId = tenantRequest.user.tenantId;
         const result = await checkSubscriptionActive(tenantId);
 
         if (!result.allowed) {

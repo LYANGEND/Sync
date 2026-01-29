@@ -41,7 +41,28 @@ async function main() {
     });
     console.log(`   ✅ Tenant ID: ${tenant.id}`);
 
-    // 2. Create Users (Admin, Bursar, Teacher)
+    // 2. Create Default Branch (Main Campus)
+    const branch = await prisma.branch.upsert({
+      where: {
+        tenantId_code: {
+          tenantId: tenant.id,
+          code: 'MAIN'
+        }
+      },
+      update: {},
+      create: {
+        name: 'Main Campus',
+        code: 'MAIN',
+        tenantId: tenant.id,
+        isMain: true,
+        address: '123 Education Lane',
+        status: 'ACTIVE',
+        capacity: 500
+      }
+    });
+    console.log(`   🏢 Created Branch: ${branch.name}`);
+
+    // 3. Create Users (Admin, Bursar, Teacher)
     const users = [
       { role: 'SUPER_ADMIN', name: 'Super Admin', email: `admin@${tenantData.slug}.com` },
       { role: 'BURSAR', name: 'Bursar', email: `bursar@${tenantData.slug}.com` },
@@ -61,8 +82,20 @@ async function main() {
             fullName: u.name,
             role: u.role as any,
             tenantId: tenant.id,
+            branchId: branch.id, // Assign to main branch
           } as any,
         });
+
+        // Create UserBranch assignment
+        await prisma.userBranch.create({
+          data: {
+            userId: createdUsers[u.role].id,
+            branchId: branch.id,
+            isPrimary: true,
+            role: u.role
+          }
+        });
+
         console.log(`   👤 Created ${u.role}: ${u.email}`);
       } else {
         createdUsers[u.role] = existingUser;
@@ -110,6 +143,7 @@ async function main() {
             tenantId: tenant.id,
             academicTermId: term.id,
             teacherId: createdUsers['TEACHER'].id,
+            branchId: branch.id // Link class to branch
           } as any
         });
         console.log(`   📚 Created Class: ${cls.name}`);
@@ -195,8 +229,19 @@ async function main() {
               guardianName: `Parent of ${admNum}`,
               guardianPhone: '097000000',
               guardianEmail: parentEmail,
-              parentId: parentId
+              parentId: parentId,
+              branchId: branch.id // Assign directly to branch
             } as any
+          });
+
+          // Create StudentBranch enrollment
+          await prisma.studentBranch.create({
+            data: {
+              studentId: student.id,
+              branchId: branch.id,
+              isPrimary: true,
+              enrollType: 'FULL_TIME'
+            }
           });
 
           // Add Fee Structure
@@ -217,6 +262,7 @@ async function main() {
                 data: {
                   studentId: student.id,
                   tenantId: tenant.id,
+                  branchId: branch.id, // Link payment to branch
                   amount: feeTemplate.amount,
                   method: 'CASH' as any,
                   recordedByUserId: createdUsers['BURSAR'].id,

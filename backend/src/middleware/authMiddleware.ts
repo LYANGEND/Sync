@@ -8,6 +8,7 @@ export interface AuthRequest extends Request {
     userId: string;
     tenantId: string;  // Added for multi-tenancy
     role: string;
+    branchId?: string;
   };
 }
 

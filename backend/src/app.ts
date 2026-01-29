@@ -43,6 +43,7 @@ import searchRoutes from './routes/searchRoutes';
 import videoLessonRoutes from './routes/videoLessonRoutes';
 import aiTeacherRoutes from './routes/aiTeacherRoutes';
 import teacherAssistantRoutes from './routes/teacherAssistantRoutes';
+import branchRoutes from './routes/branchRoutes';
 
 import path from 'path';
 
@@ -111,6 +112,7 @@ app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/video-lessons', videoLessonRoutes);
 app.use('/api/v1/ai-teacher', aiTeacherRoutes);
 app.use('/api/v1/teacher-assistant', teacherAssistantRoutes);
+app.use('/api/v1/branches', branchRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

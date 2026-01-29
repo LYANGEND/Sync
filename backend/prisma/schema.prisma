@@ -214,9 +214,142 @@ model Tenant {
   teacherAITemplates     TeacherAITemplate[]     @relation("TenantTeacherAITemplates")
   teacherAIUsage         TeacherAIUsage[]        @relation("TenantTeacherAIUsage")
   
+  // Branch Relations
+  branches          Branch[]
+  
   @@index([slug])
   @@index([status])
   @@map("tenants")
+}
+
+// ==========================================
+// BRANCH (Campus/Location within a School)
+// ==========================================
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  
+  // Multi-tenant relation
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name      String   // "North Campus"
+  code      String   // "NTH"
+  address   String?
+  phone     String?
+  email     String?
+  isMain    Boolean  @default(false) // Is this the main/headquarters branch
+  
+  status    BranchStatus @default(ACTIVE)
+  capacity  Int?         // Max student capacity
+  logoUrl   String?      // Branch-specific logo
+  
+  // Hierarchy support
+  parentBranchId String?
+  parentBranch   Branch?  @relation("BranchHierarchy", fields: [parentBranchId], references: [id])
+  childBranches  Branch[] @relation("BranchHierarchy")
+  
+  // Direct relations (primary branch associations)
+  users     User[]
+  students  Student[]
+  classes   Class[]
+  payments  Payment[]
+  
+  // Multi-branch assignments
+  userAssignments    UserBranch[]
+  studentEnrollments StudentBranch[]
+  
+  // Transfers
+  outgoingTransfers  BranchTransfer[] @relation("FromBranch")
+  incomingTransfers  BranchTransfer[] @relation("ToBranch")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("branches")
+}
+
+// Junction table for users working at multiple branches
+model UserBranch {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  
+  isPrimary Boolean  @default(false) // Is this their main branch?
+  role      String?  // Optional: specific role at this branch
+  
+  startDate DateTime @default(now())
+  endDate   DateTime? // Null means currently active
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, branchId])
+  @@index([userId])
+  @@index([branchId])
+  @@map("user_branches")
+}
+
+// Junction table for students enrolled at multiple branches
+model StudentBranch {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  
+  isPrimary  Boolean  @default(false) // Is this their main branch?
+  enrollType String?  // e.g., "full-time", "part-time", "exchange"
+  
+  startDate  DateTime @default(now())
+  endDate    DateTime? // Null means currently active
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([studentId, branchId])
+  @@index([studentId])
+  @@index([branchId])
+  @@map("student_branches")
+}
+
+enum TransferEntityType {
+  STUDENT
+  USER
+}
+
+model BranchTransfer {
+  id String @id @default(uuid())
+
+  // What was transferred
+  entityType TransferEntityType
+  entityId   String // Student ID or User ID
+
+  // From/To
+  fromBranchId String
+  fromBranch   Branch @relation("FromBranch", fields: [fromBranchId], references: [id])
+  toBranchId   String
+  toBranch     Branch @relation("ToBranch", fields: [toBranchId], references: [id])
+
+  // Details
+  reason              String?
+  transferredByUserId String
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@map("branch_transfers")
 }
 
 // ==========================================
@@ -741,12 +874,18 @@ model User {
   teacherAIConversations   TeacherAIConversation[] @relation("TeacherAIConversations")
   teacherAITemplates       TeacherAITemplate[]     @relation("TeacherAITemplates")
   teacherAIUsage           TeacherAIUsage[]        @relation("TeacherAIUsage")
+  
+  // Branch Relations
+  branchId                 String?
+  branch                   Branch? @relation(fields: [branchId], references: [id])
+  branchAssignments        UserBranch[]
 
   // Email is unique within a tenant (same email can exist in different schools)
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([tenantId, role])  // For filtering users by role
   @@index([tenantId, isActive])  // For filtering active users
+  @@index([branchId])  // For filtering by branch
   @@map("users")
 }
 
@@ -806,6 +945,11 @@ model Student {
   homeworkSubmissions HomeworkSubmission[]
   videoLessonAttendance VideoLessonAttendee[]
   aiConversations   AIConversation[] @relation("AIStudentConversations")
+  
+  // Branch Relations
+  branchId          String?
+  branch            Branch? @relation(fields: [branchId], references: [id])
+  branchEnrollments StudentBranch[]
 
   // Admission number unique per tenant
   @@unique([tenantId, admissionNumber])
@@ -813,6 +957,7 @@ model Student {
   @@index([tenantId, status])              // Filter active/inactive students
   @@index([tenantId, classId])             // Class roster queries
   @@index([tenantId, createdAt])           // Recent enrollments
+  @@index([branchId])                      // Filter by branch
   @@map("students")
 }
 
@@ -846,8 +991,13 @@ model Class {
   forums         Forum[]
   subjectContents SubjectContent[]
   videoLessons   VideoLesson[]
+  
+  // Branch Relations
+  branchId       String?
+  branch         Branch? @relation(fields: [branchId], references: [id])
 
   @@index([tenantId])
+  @@index([branchId])
   @@map("classes")
 }
 
@@ -1015,6 +1165,10 @@ model Payment {
   recordedByUserId String
   recordedBy      User          @relation("RecordedPayments", fields: [recordedByUserId], references: [id])
   createdAt       DateTime      @default(now())
+  
+  // Branch Relations
+  branchId        String?
+  branch          Branch?       @relation(fields: [branchId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, paymentDate])        // Financial reports
@@ -1022,6 +1176,7 @@ model Payment {
   @@index([tenantId, method, paymentDate]) // Payment method analytics
   @@index([transactionId])                // Transaction lookup
   @@index([status])                       // Filter by status
+  @@index([branchId])                     // Filter by branch
   @@map("payments")
 }
 

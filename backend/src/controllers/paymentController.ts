@@ -15,6 +15,7 @@ const createPaymentSchema = z.object({
   notes: z.string().optional(),
   operator: z.enum(['mtn', 'airtel']).optional(),
   phoneNumber: z.string().optional(),
+  branchId: z.string().uuid().optional(),
 });
 
 export const createPayment = async (req: TenantRequest, res: Response) => {
@@ -25,16 +26,38 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
     console.log(`DEBUG: createPayment called by user ${userId} (${userRole}) for tenant ${tenantId}`);
     console.log('DEBUG: Request Body:', JSON.stringify(req.body, null, 2));
 
-    const { studentId, amount, method, notes, transactionId: providedTxnId, operator, phoneNumber } = createPaymentSchema.parse(req.body);
-
+    const { studentId, amount, method, notes, transactionId: providedTxnId, operator, phoneNumber, branchId: providedBranchId } = createPaymentSchema.parse(req.body);
 
     // Check if student exists in this tenant
     const student = await prisma.student.findFirst({
       where: { id: studentId, tenantId },
+      include: {
+        branchEnrollments: {
+          where: { isPrimary: true },
+          take: 1
+        }
+      }
     });
 
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Determine Branch ID
+    let finalBranchId = providedBranchId;
+    if (!finalBranchId) {
+      // 1. Try to use staff's active branch if they are recording it
+      if (req.user?.branchId) {
+        finalBranchId = req.user.branchId;
+      }
+      // 2. Fallback to student's primary branch
+      else if (student.branchEnrollments && student.branchEnrollments.length > 0) {
+        finalBranchId = student.branchEnrollments[0].branchId;
+      }
+      // 3. Fallback to student.branchId (direct link if exists)
+      else if (student.branchId) {
+        finalBranchId = student.branchId;
+      }
     }
 
     // Security Check: Parents can only pay for their own children
@@ -77,6 +100,7 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
       data: {
         tenantId,
         studentId,
+        branchId: finalBranchId,
         amount: finalAmount,
         method,
         notes: finalNotes,
@@ -331,6 +355,7 @@ export const getPayments = async (req: TenantRequest, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const search = req.query.search as string;
+    const branchId = req.query.branchId as string;
 
     const where: any = { tenantId };
 
@@ -341,6 +366,11 @@ export const getPayments = async (req: TenantRequest, res: Response) => {
         { student: { admissionNumber: { contains: search, mode: 'insensitive' } } },
         { transactionId: { contains: search, mode: 'insensitive' } }
       ];
+    }
+
+    // Branch filter
+    if (branchId && branchId !== 'ALL') {
+      where.branchId = branchId;
     }
 
     const [payments, total] = await prisma.$transaction([
@@ -373,6 +403,13 @@ export const getPayments = async (req: TenantRequest, res: Response) => {
               fullName: true,
             },
           },
+          branch: {
+            select: {
+              id: true,
+              name: true,
+              code: true
+            }
+          }
         },
         orderBy: {
           paymentDate: 'desc'

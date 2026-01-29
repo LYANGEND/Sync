@@ -13,6 +13,7 @@ export interface TenantRequest extends Request {
         userId: string;
         tenantId: string;
         role: string;
+        branchId?: string;
     };
 }
 

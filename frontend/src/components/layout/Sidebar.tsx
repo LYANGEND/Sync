@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, Crown, Video, Bot, Sparkles, ChevronDown, ChevronRight, Mail, ClipboardList, History } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, Crown, Video, Bot, Sparkles, ChevronDown, ChevronRight, Mail, ClipboardList, History, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -30,8 +30,8 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
   const [expandedMenus, setExpandedMenus] = useState<string[]>([]);
 
   const toggleMenu = (label: string) => {
-    setExpandedMenus(prev => 
-      prev.includes(label) 
+    setExpandedMenus(prev =>
+      prev.includes(label)
         ? prev.filter(l => l !== label)
         : [...prev, label]
     );
@@ -43,6 +43,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       label: 'Dashboard',
       path: '/',
       roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']
+    },
+    {
+      icon: Building,
+      label: 'Branches',
+      path: '/branches',
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
     },
     {
       icon: GraduationCap,
@@ -191,11 +197,10 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                   {/* Parent menu item */}
                   <button
                     onClick={() => toggleMenu(item.label)}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 ${
-                      isSubItemActive || isExpanded
-                        ? 'bg-blue-600/20 text-blue-400'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                    }`}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 ${isSubItemActive || isExpanded
+                      ? 'bg-blue-600/20 text-blue-400'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                      }`}
                   >
                     <div className="flex items-center space-x-3">
                       <item.icon size={20} />
@@ -218,11 +223,10 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                             key={subItem.path}
                             to={subItem.path}
                             onClick={onClose}
-                            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${
-                              isSubActive
-                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                            }`}
+                            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${isSubActive
+                              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                              : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                              }`}
                           >
                             <subItem.icon size={16} />
                             <span className="font-medium">{subItem.label}</span>
