@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -19,7 +18,7 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: LayoutDashboard,
       label: 'Dashboard',
       path: '/',
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY']
     },
     {
       icon: GraduationCap,
@@ -31,31 +30,31 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       icon: Users,
       label: 'Students',
       path: '/students',
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY']
     },
     {
       icon: BookOpen,
       label: 'Academics',
       path: '/academics',
-      roles: ['SUPER_ADMIN', 'TEACHER']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']
     },
     {
       icon: CreditCard,
       label: 'Finance',
       path: '/finance',
-      roles: ['SUPER_ADMIN', 'BURSAR']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR']
     },
     {
       icon: Users,
       label: 'Attendance',
       path: '/academics/attendance',
-      roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY']
     },
     {
       icon: TrendingUp,
       label: 'Gradebook',
       path: '/academics/gradebook',
-      roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY']
     },
     {
       icon: UserCog,
@@ -64,16 +63,16 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       roles: ['SUPER_ADMIN']
     },
     {
-      icon: GitBranch, // You need to import GitBranch from lucide-react
+      icon: GitBranch,
       label: 'Branches',
       path: '/branches',
-      roles: ['SUPER_ADMIN']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
     },
     {
       icon: MessageSquare,
       label: 'Communication',
       path: '/communication',
-      roles: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
     },
     {
       icon: Settings,

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { User, Calendar, CreditCard, BookOpen, Download, ChevronDown, ChevronUp, TrendingUp, FileText, Award, Clock, ClipboardList, X } from 'lucide-react';
+import { User, Calendar, CreditCard, BookOpen, Download, ChevronDown, ChevronUp, TrendingUp, FileText, Clock, ClipboardList, X } from 'lucide-react';
 import api from '../../utils/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface Student {
@@ -34,6 +33,7 @@ interface Student {
     feeTemplate: {
       name: string;
     };
+    createdAt: string;
   }[];
   assessmentResults: {
     id: string;
@@ -123,8 +123,113 @@ const MyChildren = () => {
     doc.save(`receipt_${payment.id}.pdf`);
   };
 
-  const handleDownloadStatement = (studentId: string) => {
-    alert("Statement download is coming soon.");
+  const handleDownloadStatement = async (studentId: string) => {
+    const child = children.find(c => c.id === studentId);
+    if (!child) return;
+
+    try {
+      // 1. Fetch full payment history
+      const response = await api.get(`/payments/student/${studentId}`);
+      const payments = response.data;
+
+      // 2. Prepare Statement Data
+      let balance = 0;
+      const statementItems: any[] = [];
+
+      // Add Fees (Debits)
+      child.feeStructures.forEach(fee => {
+        statementItems.push({
+          date: new Date(fee.createdAt), // Using creation date as posting date
+          description: `Fee: ${fee.feeTemplate.name}`,
+          debit: Number(fee.amountDue),
+          credit: 0,
+          type: 'DEBIT'
+        });
+      });
+
+      // Add Payments (Credits)
+      payments.forEach((payment: any) => {
+        statementItems.push({
+          date: new Date(payment.paymentDate),
+          description: `Payment: ${payment.method} ${payment.transactionId ? `(${payment.transactionId})` : ''}`,
+          debit: 0,
+          credit: Number(payment.amount),
+          type: 'CREDIT'
+        });
+      });
+
+      // Sort by Date
+      statementItems.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      // Calculate Running Balance
+      const rows = statementItems.map(item => {
+        balance += item.debit - item.credit;
+        return [
+          item.date.toLocaleDateString(),
+          item.description,
+          item.debit > 0 ? item.debit.toLocaleString() : '-',
+          item.credit > 0 ? item.credit.toLocaleString() : '-',
+          balance.toLocaleString()
+        ];
+      });
+
+      // 3. Generate PDF
+      const doc = new jsPDF();
+
+      // Header
+      doc.setFontSize(22);
+      doc.setTextColor(37, 99, 235); // Blue
+      doc.text('STATEMENT OF ACCOUNT', 105, 20, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, 105, 28, { align: 'center' });
+
+      // Student Details
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text(`Student Name: ${child.firstName} ${child.lastName}`, 14, 40);
+      doc.text(`Admission Number: ${child.admissionNumber}`, 14, 46);
+      doc.text(`Class: ${child.class?.name}`, 14, 52);
+
+      // School Details (Right aligned)
+      doc.text('School Name', 196, 40, { align: 'right' }); // Placeholder, ideally fetch from settings
+      doc.text('Accounts Department', 196, 46, { align: 'right' });
+
+      // Table
+      autoTable(doc, {
+        startY: 60,
+        head: [['Date', 'Description', 'Debit (ZMW)', 'Credit (ZMW)', 'Balance (ZMW)']],
+        body: rows,
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: 30 },
+          1: { cellWidth: 'auto' },
+          2: { cellWidth: 30, halign: 'right' },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 35, halign: 'right', fontStyle: 'bold' }
+        },
+        foot: [
+          ['', 'Closing Balance', '', '', `ZMW ${balance.toLocaleString()}`]
+        ],
+        showFoot: 'lastPage',
+        footStyles: { fillColor: [241, 245, 249], textColor: 0, fontStyle: 'bold', halign: 'right' }
+      });
+
+      // Footer Message
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text('This is a computer-generated document and does not require a signature.', 105, finalY, { align: 'center' });
+
+      doc.save(`${child.firstName}_${child.lastName}_Statement.pdf`);
+
+    } catch (error) {
+      console.error('Failed to generate statement:', error);
+      alert('Failed to generate statement. Please try again.');
+    }
   };
 
   // Payment History State

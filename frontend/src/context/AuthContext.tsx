@@ -7,6 +7,7 @@ interface User {
   fullName: string;
   role: string;
   profilePictureUrl?: string;
+  branchId?: string;
 }
 
 interface AuthContextType {
@@ -47,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (storedUser) {
           setUser(JSON.parse(storedUser));
         }
-        
+
         // Fetch fresh user data
         try {
           const response = await api.get('/profile');
