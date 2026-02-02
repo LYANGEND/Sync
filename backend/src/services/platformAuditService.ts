@@ -31,18 +31,30 @@ interface AuditLogData {
 
 export const logPlatformAudit = async (data: AuditLogData) => {
     try {
-        await prisma.platformAuditLog.create({
-            data: {
-                platformUserId: data.userId,
-                action: data.action,
-                description: data.description,
-                entityType: data.entityType,
-                entityId: data.entityId,
-                metadata: data.metadata || {},
-                ipAddress: data.ipAddress,
-                userAgent: data.userAgent,
-            },
+        // TODO: Add PlatformAuditLog model to schema
+        // For now, just log to console
+        console.log('[AUDIT]', {
+            userId: data.userId,
+            action: data.action,
+            description: data.description,
+            entityType: data.entityType,
+            entityId: data.entityId,
+            timestamp: new Date().toISOString(),
         });
+        
+        // Uncomment when PlatformAuditLog model is added:
+        // await prisma.platformAuditLog.create({
+        //     data: {
+        //         platformUserId: data.userId,
+        //         action: data.action,
+        //         description: data.description,
+        //         entityType: data.entityType,
+        //         entityId: data.entityId,
+        //         metadata: data.metadata || {},
+        //         ipAddress: data.ipAddress,
+        //         userAgent: data.userAgent,
+        //     },
+        // });
     } catch (error) {
         console.error('Failed to create platform audit log:', error);
         // Don't throw, just log error so main flow isn't interrupted

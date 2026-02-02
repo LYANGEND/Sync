@@ -31,13 +31,14 @@ async function checkExpiry() {
             }
         },
         include: {
-            users: { where: { role: 'ADMIN' } } // Notify admins
+            users: { where: { role: 'SUPER_ADMIN' } } // Notify super admins
         }
     });
 
     for (const tenant of expiringTenants) {
         console.log(`Sending reminder to ${tenant.name}`);
-        for (const user of tenant.users) {
+        const tenantWithUsers = tenant as typeof tenant & { users: { email: string; fullName: string }[] };
+        for (const user of tenantWithUsers.users) {
             try {
                 // Send Email Logic
                 await transporter.sendMail({
