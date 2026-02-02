@@ -11,6 +11,9 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.js',
       registerType: 'autoUpdate',
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB limit for large bundles
+      },
       devOptions: {
         enabled: true,
         type: 'module',
