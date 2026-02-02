@@ -44,9 +44,9 @@ ENV PORT=3000
 # Install OpenSSL for Prisma and dumb-init for proper signal handling
 RUN apk add --no-cache openssl dumb-init
 
-# Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 sync
+# Create non-root user for security (use 'appuser' to avoid conflicts with existing users)
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --ingroup nodejs appuser
 
 # Copy package files
 COPY package.json package-lock.json* ./
@@ -63,10 +63,10 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/dist ./dist
 
 # Create uploads directory with proper permissions
-RUN mkdir -p uploads && chown -R sync:nodejs uploads
+RUN mkdir -p uploads && chown -R appuser:nodejs uploads
 
 # Switch to non-root user
-USER sync
+USER appuser
 
 # Expose port
 EXPOSE 3000
