@@ -1,6 +1,8 @@
 # =============================================
-# SYNC Production Docker Compose
-# For production deployment with security hardening
+# SYNC Multi-Tenant Production Docker Compose
+# Isolated from single-tenant system
+# Container prefix: sync_mt_
+# Ports: 5080 (HTTP), 5443 (HTTPS)
 # =============================================
 
 version: '3.8'
@@ -9,7 +11,7 @@ services:
   # Redis cache/session store
   redis:
     image: redis:7-alpine
-    container_name: sync_redis
+    container_name: sync_mt_redis
     restart: always
     command: >
       redis-server 
@@ -18,9 +20,9 @@ services:
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD:-changeme}
     volumes:
-      - redis_data:/data
+      - sync_mt_redis_data:/data
     networks:
-      - sync_internal
+      - sync_mt_internal
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
@@ -36,12 +38,12 @@ services:
   # Backend API
   backend:
     image: ghcr.io/lyangend/sync/backend:${TAG:-latest}
-    container_name: sync_backend
+    container_name: sync_mt_backend
     restart: always
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-localhost}:4400/muti_tenant?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/muti_tenant?schema=public
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
-      - PORT=4000
+      - PORT=3000
       - NODE_ENV=production
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
@@ -51,20 +53,25 @@ services:
       - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
       # Email configuration
       - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-4587}
+      - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
-      # OpenAI for AI Teacher
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Azure OpenAI for AI Teacher
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
       # Payment gateway
       - LENCO_API_KEY=${LENCO_API_KEY:-}
       - LENCO_WEBHOOK_SECRET=${LENCO_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
     networks:
-      - sync_internal
-      - sync_external
+      - sync_mt_internal
+      - sync_mt_external
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s
@@ -86,10 +93,10 @@ services:
   # Frontend static files
   frontend:
     image: ghcr.io/lyangend/sync/frontend:${TAG:-latest}
-    container_name: sync_frontend
+    container_name: sync_mt_frontend
     restart: always
     networks:
-      - sync_external
+      - sync_mt_external
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
       interval: 30s
@@ -110,22 +117,22 @@ services:
   # Nginx reverse proxy
   nginx:
     image: nginx:1.25-alpine
-    container_name: sync_nginx
+    container_name: sync_mt_nginx
     restart: always
     ports:
-      - "4080:80"
-      - "4443:443"
+      - "5080:80"
+      - "5443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
-      - nginx_cache:/var/cache/nginx
+      - sync_mt_nginx_cache:/var/cache/nginx
     depends_on:
       backend:
         condition: service_healthy
       frontend:
         condition: service_healthy
     networks:
-      - sync_external
+      - sync_mt_external
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -146,10 +153,10 @@ services:
   # Landing page / Marketing website
   website:
     image: ghcr.io/lyangend/sync/website:${TAG:-latest}
-    container_name: sync_website
+    container_name: sync_mt_website
     restart: always
     networks:
-      - sync_external
+      - sync_mt_external
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
       interval: 30s
@@ -168,12 +175,12 @@ services:
         max-file: "3"
 
 networks:
-  sync_internal:
+  sync_mt_internal:
     driver: bridge
     internal: true  # No external access
-  sync_external:
+  sync_mt_external:
     driver: bridge
 
 volumes:
-  redis_data:
-  nginx_cache:
+  sync_mt_redis_data:
+  sync_mt_nginx_cache:

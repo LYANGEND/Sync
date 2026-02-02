@@ -147,7 +147,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            mkdir -p ~/app/nginx
+            mkdir -p ~/app-mt/nginx
 
       - name: Copy configuration files to server
         uses: appleboy/scp-action@v0.1.7
@@ -156,7 +156,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.prod.yml,nginx-system.conf"
-          target: "~/app"
+          target: "~/app-mt"
           strip_components: 0
 
       - name: Deploy to server
@@ -166,14 +166,25 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd ~/app
+            cd ~/app-mt
             
             # Create .env file with secure permissions
             cat > .env << 'EOF'
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            POSTGRES_DB=muti_tenant
+            POSTGRES_HOST=host.docker.internal
+            POSTGRES_PORT=5432
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
+            BASE_DOMAINS=${{ secrets.BASE_DOMAINS }}
+            AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
+            AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
+            AZURE_OPENAI_API_VERSION=2024-12-01-preview
+            AZURE_OPENAI_DEPLOYMENT=gpt-4o
+            LENCO_API_KEY=${{ secrets.LENCO_API_KEY }}
+            LENCO_WEBHOOK_SECRET=${{ secrets.LENCO_WEBHOOK_SECRET }}
             NODE_ENV=production
             EOF
             chmod 600 .env
@@ -184,17 +195,17 @@ jobs:
             # Pull latest images (force pull)
             docker-compose -f docker-compose.prod.yml pull --ignore-pull-failures
             
-            # Stop and remove containers
+            # Stop and remove containers (only multi-tenant ones)
             docker-compose -f docker-compose.prod.yml down --remove-orphans
             
-            # Clean up any orphaned containers
-            docker ps -a --filter "name=sync" --format "{{.ID}}" | xargs -r docker rm -f || true
+            # Clean up any orphaned multi-tenant containers
+            docker ps -a --filter "name=sync_mt" --format "{{.ID}}" | xargs -r docker rm -f || true
             
             # Run migrations on host PostgreSQL
             echo "🚀 Running database migrations..."
             docker-compose -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy || {
               echo "❌ Migration failed!"
-              docker logs sync_backend --tail=50
+              docker logs sync_mt_backend --tail=50
               exit 1
             }
             
@@ -204,15 +215,15 @@ jobs:
             # Wait for services to be healthy
             echo "⏳ Waiting for services to be ready..."
             
-            # Wait for backend
+            # Wait for backend (multi-tenant runs on port 5080)
             for i in {1..30}; do
-              if curl -s -f http://localhost:3002/api/health > /dev/null 2>&1; then
+              if docker exec sync_mt_backend wget -q --spider http://localhost:3000/health 2>/dev/null; then
                 echo "✅ Backend is ready!"
                 break
               fi
               if [ $i -eq 30 ]; then
                 echo "⚠️ Backend health check timeout (checking logs...)"
-                docker logs sync_backend --tail=50
+                docker logs sync_mt_backend --tail=50
                 exit 1
               fi
               sleep 3
@@ -220,40 +231,37 @@ jobs:
             
             # Wait for frontend
             for i in {1..20}; do
-              if curl -s -f http://localhost:3003 > /dev/null 2>&1; then
+              if docker exec sync_mt_frontend wget -q --spider http://localhost:80/ 2>/dev/null; then
                 echo "✅ Frontend is ready!"
                 break
               fi
               if [ $i -eq 20 ]; then
                 echo "⚠️ Frontend health check timeout (checking logs...)"
-                docker logs sync_frontend --tail=50
+                docker logs sync_mt_frontend --tail=50
                 exit 1
               fi
               sleep 2
             done
             
-            # Configure system nginx
-            echo "🔧 Configuring system nginx..."
+            # Configure system nginx for multi-tenant
+            echo "🔧 Configuring system nginx for multi-tenant..."
             
-            # Remove old/duplicate sync configs
-            sudo rm -f /etc/nginx/sites-enabled/sync-school || true
-            
-            # Only update nginx config if it has changed (preserves SSL config)
-            if ! sudo diff -q ~/app/nginx-system.conf /etc/nginx/sites-available/sync-base 2>/dev/null; then
-              echo "📝 Nginx config changed, updating..."
+            # Only update nginx config if it has changed
+            if ! sudo diff -q ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt-base 2>/dev/null; then
+              echo "📝 Multi-tenant nginx config changed, updating..."
               # Backup the base config (without SSL)
-              sudo cp ~/app/nginx-system.conf /etc/nginx/sites-available/sync-base
+              sudo cp ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt-base
               
               # If SSL config exists, preserve it; otherwise use base
-              if [ -f /etc/nginx/sites-available/sync ] && grep -q "ssl_certificate" /etc/nginx/sites-available/sync; then
+              if [ -f /etc/nginx/sites-available/sync-mt ] && grep -q "ssl_certificate" /etc/nginx/sites-available/sync-mt; then
                 echo "✅ SSL config detected, preserving..."
                 # Keep the existing config with SSL
               else
                 echo "📋 No SSL config, using base config..."
-                sudo cp ~/app/nginx-system.conf /etc/nginx/sites-available/sync
+                sudo cp ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt
               fi
               
-              sudo ln -sf /etc/nginx/sites-available/sync /etc/nginx/sites-enabled/sync
+              sudo ln -sf /etc/nginx/sites-available/sync-mt /etc/nginx/sites-enabled/sync-mt
               
               # Test nginx configuration
               sudo nginx -t || {
@@ -264,19 +272,19 @@ jobs:
               # Reload nginx
               sudo systemctl reload nginx
             else
-              echo "✅ Nginx config unchanged, skipping update"
+              echo "✅ Multi-tenant nginx config unchanged, skipping update"
             fi
             
             # Show deployment status
-            echo "📊 Deployment Status:"
+            echo "📊 Multi-Tenant Deployment Status:"
             docker-compose -f docker-compose.prod.yml ps
             
-            # Test the application
-            echo "🧪 Testing application..."
-            if curl -s -f http://localhost/health > /dev/null 2>&1; then
-              echo "✅ Application is accessible via nginx!"
+            # Test the application via multi-tenant port
+            echo "🧪 Testing multi-tenant application..."
+            if curl -s -f http://localhost:5080/health > /dev/null 2>&1; then
+              echo "✅ Multi-tenant application is accessible on port 5080!"
             else
-              echo "⚠️ Application might not be accessible via nginx"
+              echo "⚠️ Multi-tenant application might not be accessible via nginx"
             fi
             
             # Clean up old Docker images to save space
@@ -299,10 +307,10 @@ jobs:
             df -h / | tail -1
             
             # Create database backup (optional)
-            echo "💾 Creating database backup..."
-            BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql"
-            PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} pg_dump -h localhost -U ${{ secrets.POSTGRES_USER }} ${{ secrets.POSTGRES_DB }} > "$BACKUP_FILE" 2>/dev/null && \
+            echo "💾 Creating multi-tenant database backup..."
+            BACKUP_FILE="backup_mt_$(date +%Y%m%d_%H%M%S).sql"
+            PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} pg_dump -h localhost -U ${{ secrets.POSTGRES_USER }} muti_tenant > "$BACKUP_FILE" 2>/dev/null && \
             echo "✅ Backup created: $BACKUP_FILE" || \
             echo "⚠️ Backup skipped or failed"
             
-            echo "🎉 Deployment completed successfully!"
+            echo "🎉 Multi-Tenant Deployment completed successfully!"
