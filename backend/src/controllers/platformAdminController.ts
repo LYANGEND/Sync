@@ -1967,6 +1967,11 @@ export const getPlatformSettings = async (req: Request, res: Response) => {
             emailApiKey: settings.emailApiKey ? '********' : null,
             azureEmailConnectionString: settings.azureEmailConnectionString ? '********' : null,
             azureEmailAccessKey: settings.azureEmailAccessKey ? '********' : null,
+            // Mask new API keys
+            lencoApiKey: settings.lencoApiKey ? '********' : null,
+            lencoApiToken: settings.lencoApiToken ? '********' : null,
+            lencoWebhookSecret: settings.lencoWebhookSecret ? '********' : null,
+            azureOpenaiApiKey: settings.azureOpenaiApiKey ? '********' : null,
         });
     } catch (error) {
         console.error('Get platform settings error:', error);
@@ -2011,6 +2016,18 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
             allowedOrigins,
             publicApiRateLimitPerMinute,
             paymentApiRateLimitPerMinute,
+            // Lenco Payment Gateway
+            lencoApiKey,
+            lencoApiToken,
+            lencoWebhookSecret,
+            lencoApiUrl,
+            lencoTestMode,
+            // Azure OpenAI (AI Teacher)
+            azureOpenaiEnabled,
+            azureOpenaiApiKey,
+            azureOpenaiEndpoint,
+            azureOpenaiApiVersion,
+            azureOpenaiDeployment,
         } = req.body;
 
         const updateData: any = {};
@@ -2060,10 +2077,28 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
         if (publicApiRateLimitPerMinute !== undefined) updateData.publicApiRateLimitPerMinute = publicApiRateLimitPerMinute;
         if (paymentApiRateLimitPerMinute !== undefined) updateData.paymentApiRateLimitPerMinute = paymentApiRateLimitPerMinute;
 
+        // Lenco Payment Gateway Settings
+        if (lencoApiKey && lencoApiKey !== '********') updateData.lencoApiKey = lencoApiKey;
+        if (lencoApiToken && lencoApiToken !== '********') updateData.lencoApiToken = lencoApiToken;
+        if (lencoWebhookSecret && lencoWebhookSecret !== '********') updateData.lencoWebhookSecret = lencoWebhookSecret;
+        if (lencoApiUrl !== undefined) updateData.lencoApiUrl = lencoApiUrl;
+        if (lencoTestMode !== undefined) updateData.lencoTestMode = lencoTestMode;
+
+        // Azure OpenAI (AI Teacher) Settings
+        if (azureOpenaiEnabled !== undefined) updateData.azureOpenaiEnabled = azureOpenaiEnabled;
+        if (azureOpenaiApiKey && azureOpenaiApiKey !== '********') updateData.azureOpenaiApiKey = azureOpenaiApiKey;
+        if (azureOpenaiEndpoint !== undefined) updateData.azureOpenaiEndpoint = azureOpenaiEndpoint;
+        if (azureOpenaiApiVersion !== undefined) updateData.azureOpenaiApiVersion = azureOpenaiApiVersion;
+        if (azureOpenaiDeployment !== undefined) updateData.azureOpenaiDeployment = azureOpenaiDeployment;
+
         // Dynamic configuration (features and tiers)
         const { availableFeatures, availableTiers } = req.body;
         if (availableFeatures !== undefined) updateData.availableFeatures = availableFeatures;
         if (availableTiers !== undefined) updateData.availableTiers = availableTiers;
+
+        // Invalidate settings cache after update
+        const { invalidateSettingsCache } = await import('../services/settingsService');
+        invalidateSettingsCache();
 
         const settings = await prisma.platformSettings.upsert({
             where: { id: 'default' },
@@ -2080,6 +2115,11 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
                 emailApiKey: settings.emailApiKey ? '********' : null,
                 azureEmailConnectionString: settings.azureEmailConnectionString ? '********' : null,
                 azureEmailAccessKey: settings.azureEmailAccessKey ? '********' : null,
+                // Mask new API keys
+                lencoApiKey: settings.lencoApiKey ? '********' : null,
+                lencoApiToken: settings.lencoApiToken ? '********' : null,
+                lencoWebhookSecret: settings.lencoWebhookSecret ? '********' : null,
+                azureOpenaiApiKey: settings.azureOpenaiApiKey ? '********' : null,
             },
         });
     } catch (error) {

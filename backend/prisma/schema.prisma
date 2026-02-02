@@ -433,6 +433,20 @@ model PlatformSettings {
   mobileMoneyEnabled Boolean @default(true)
   allowedPaymentMethods Json @default("[\"CASH\", \"MOBILE_MONEY\", \"BANK_DEPOSIT\"]")
   
+  // Lenco Payment Gateway Configuration (API Keys)
+  lencoApiKey       String?  // Lenco API key
+  lencoApiToken     String?  // Lenco API token
+  lencoWebhookSecret String? // Lenco webhook secret
+  lencoApiUrl       String?  @default("https://api.lenco.co/access/v2/collections/mobile-money")
+  lencoTestMode     Boolean  @default(false) // Use sandbox/test API
+  
+  // Azure OpenAI Configuration (AI Teacher)
+  azureOpenaiEnabled    Boolean @default(false)
+  azureOpenaiApiKey     String?  // Azure OpenAI API key
+  azureOpenaiEndpoint   String?  // e.g., https://your-resource.cognitiveservices.azure.com/
+  azureOpenaiApiVersion String?  @default("2024-12-01-preview")
+  azureOpenaiDeployment String?  @default("gpt-4o") // Model deployment name
+  
   // CORS / Security Configuration (non-secret)
   allowedOrigins Json @default("[\"http://localhost:5173\", \"http://localhost:3000\"]") // Array of allowed origins
   

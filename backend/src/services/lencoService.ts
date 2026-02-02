@@ -1,3 +1,5 @@
+import { getLencoConfig } from './settingsService';
+
 export const initiateMobileMoneyCollection = async (
     amount: number,
     phoneNumber: string,
@@ -6,16 +8,14 @@ export const initiateMobileMoneyCollection = async (
 ) => {
     const isDebug = process.env.NODE_ENV === 'development';
     
-    const url = process.env.NODE_ENV === 'production' 
-        ? process.env.LENCO_API_URL_PROD 
-        : process.env.LENCO_API_URL_TEST;
-    const apiKey = process.env.LENCO_API_TOKEN;
-
-    if (!apiKey) {
-        throw new Error('LENCO_API_TOKEN is not configured');
+    // Get Lenco config dynamically from database or environment
+    const config = await getLencoConfig();
+    
+    if (!config.enabled || !config.apiToken) {
+        throw new Error('Lenco payment gateway is not configured. Please configure it in Platform Settings.');
     }
 
-    if (!url) {
+    if (!config.apiUrl) {
         throw new Error('Lenco API URL is not configured');
     }
 
@@ -33,13 +33,15 @@ export const initiateMobileMoneyCollection = async (
 
     if (isDebug) {
         console.log('DEBUG: Lenco API call initiated for reference:', reference);
+        console.log('DEBUG: Using API URL:', config.apiUrl);
+        console.log('DEBUG: Test mode:', config.testMode);
     }
 
     try {
-        const response = await fetch(url, {
+        const response = await fetch(config.apiUrl, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
+                'Authorization': `Bearer ${config.apiToken}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)

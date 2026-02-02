@@ -3,52 +3,82 @@ import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { TenantRequest, getTenantId, getUserId, getUserRole } from '../utils/tenantContext';
 import OpenAI, { AzureOpenAI } from 'openai';
+import { getAzureOpenAIConfig, AzureOpenAIConfig } from '../services/settingsService';
 
 const prisma = new PrismaClient() as any;
 
-// Debug logging
-console.log('=== AI Teacher Configuration ===');
-console.log('AZURE_OPENAI_API_KEY:', process.env.AZURE_OPENAI_API_KEY ? `${process.env.AZURE_OPENAI_API_KEY.slice(0, 10)}...` : 'NOT SET');
-console.log('AZURE_OPENAI_ENDPOINT:', process.env.AZURE_OPENAI_ENDPOINT || 'NOT SET');
-console.log('AZURE_OPENAI_API_VERSION:', process.env.AZURE_OPENAI_API_VERSION || 'NOT SET');
-console.log('AZURE_OPENAI_DEPLOYMENT:', process.env.AZURE_OPENAI_DEPLOYMENT || 'NOT SET');
-console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'SET' : 'NOT SET');
+// Client cache to avoid recreating on every request
+let cachedClient: OpenAI | AzureOpenAI | null = null;
+let cachedConfig: AzureOpenAIConfig | null = null;
+let configLastChecked = 0;
+const CONFIG_CHECK_INTERVAL = 60 * 1000; // Re-check config every minute
 
-// Determine which OpenAI client to use
-const isAzureConfigured = process.env.AZURE_OPENAI_API_KEY && 
-  process.env.AZURE_OPENAI_API_KEY !== 'your-azure-api-key' &&
-  process.env.AZURE_OPENAI_ENDPOINT &&
-  process.env.AZURE_OPENAI_ENDPOINT !== 'https://your-resource.openai.azure.com';
-
-const isOpenAIConfigured = process.env.OPENAI_API_KEY && 
-  process.env.OPENAI_API_KEY !== 'your-openai-api-key';
-
-console.log('isAzureConfigured:', isAzureConfigured);
-console.log('isOpenAIConfigured:', isOpenAIConfigured);
-
-// Initialize the appropriate OpenAI client
-let openai: OpenAI | AzureOpenAI | null = null;
-let DEPLOYMENT_NAME = 'gpt-4o-mini';
-
-if (isAzureConfigured) {
-  console.log('Initializing Azure OpenAI client...');
-  openai = new AzureOpenAI({
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview',
-  });
-  DEPLOYMENT_NAME = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o-mini';
-  console.log('AI Teacher: Using Azure OpenAI with deployment:', DEPLOYMENT_NAME);
-} else if (isOpenAIConfigured) {
-  openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-  DEPLOYMENT_NAME = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  console.log('AI Teacher: Using OpenAI with model:', DEPLOYMENT_NAME);
-} else {
+/**
+ * Get or create the OpenAI client dynamically
+ * Reads from database settings with fallback to environment variables
+ */
+async function getOpenAIClient(): Promise<{ client: OpenAI | AzureOpenAI | null; deployment: string }> {
+  const now = Date.now();
+  
+  // Check if we need to refresh config
+  if (cachedClient && cachedConfig && (now - configLastChecked) < CONFIG_CHECK_INTERVAL) {
+    return { client: cachedClient, deployment: cachedConfig.deployment };
+  }
+  
+  // Get fresh config from database/env
+  const config = await getAzureOpenAIConfig();
+  configLastChecked = now;
+  
+  // Check if config changed
+  const configChanged = !cachedConfig || 
+    cachedConfig.apiKey !== config.apiKey ||
+    cachedConfig.endpoint !== config.endpoint ||
+    cachedConfig.apiVersion !== config.apiVersion;
+  
+  if (!configChanged && cachedClient) {
+    return { client: cachedClient, deployment: config.deployment };
+  }
+  
+  // Create new client if config is valid
+  if (config.enabled && config.apiKey && config.endpoint) {
+    console.log('AI Teacher: Initializing Azure OpenAI client from', 
+      cachedConfig?.apiKey ? 'updated settings' : 'settings service');
+    cachedClient = new AzureOpenAI({
+      apiKey: config.apiKey,
+      endpoint: config.endpoint,
+      apiVersion: config.apiVersion,
+    });
+    cachedConfig = config;
+    console.log('AI Teacher: Using Azure OpenAI with deployment:', config.deployment);
+    return { client: cachedClient, deployment: config.deployment };
+  }
+  
+  // Try fallback to standard OpenAI
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey && openaiKey !== 'your-openai-api-key') {
+    cachedClient = new OpenAI({ apiKey: openaiKey });
+    const deployment = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    console.log('AI Teacher: Using OpenAI with model:', deployment);
+    return { client: cachedClient, deployment };
+  }
+  
   console.log('AI Teacher: No API configured - running in demo mode');
+  cachedClient = null;
+  cachedConfig = null;
+  return { client: null, deployment: 'gpt-4o-mini' };
 }
-console.log('================================');
+
+// Log initial config status
+getAzureOpenAIConfig().then(config => {
+  console.log('=== AI Teacher Configuration ===');
+  console.log('Azure OpenAI configured:', config.enabled);
+  if (config.enabled) {
+    console.log('Endpoint:', config.endpoint);
+    console.log('Deployment:', config.deployment);
+    console.log('API Version:', config.apiVersion);
+  }
+  console.log('================================');
+});
 
 // Validation schemas
 const sendMessageSchema = z.object({
@@ -499,8 +529,10 @@ export const sendMessage = async (req: TenantRequest, res: Response) => {
     let completionTokens = 0;
     let totalTokens = 0;
 
+    // Get OpenAI client dynamically (reads from DB settings or env)
+    const { client: openai, deployment } = await getOpenAIClient();
     console.log('openai client exists:', !!openai);
-    console.log('DEPLOYMENT_NAME:', DEPLOYMENT_NAME);
+    console.log('deployment:', deployment);
     console.log('Number of messages:', messages.length);
 
     if (openai) {
@@ -508,7 +540,7 @@ export const sendMessage = async (req: TenantRequest, res: Response) => {
         console.log('Calling OpenAI API...');
         // Call OpenAI API (Azure or regular)
         const completion = await openai.chat.completions.create({
-          model: DEPLOYMENT_NAME,
+          model: deployment,
           messages,
           max_completion_tokens: 1000,
         });
