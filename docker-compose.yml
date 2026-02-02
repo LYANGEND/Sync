@@ -1,45 +1,102 @@
+# =============================================
+# SYNC Development Docker Compose
+# For local development with hot-reload
+# =============================================
+
 version: '3.8'
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: sync_postgres
-    restart: always
+    container_name: sync_postgres_dev
+    restart: unless-stopped
     environment:
       POSTGRES_USER: sync_user
       POSTGRES_PASSWORD: sync_password
-      POSTGRES_DB: sync_db
+      POSTGRES_DB: muti_tenant
     ports:
-      - "5432:5432"
+      - "4400:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sync_user -d sync_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sync_dev_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sync_redis_dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "4637:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sync_dev_network
 
   backend:
-    build: ./backend
-    container_name: sync_backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: deps  # Use deps stage for dev
+    container_name: sync_backend_dev
+    restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "4000:4000"
     environment:
-      - DATABASE_URL=postgresql://sync_user:sync_password@postgres:5432/sync_db?schema=public
-      - PORT=3000
-      - JWT_SECRET=supersecretkeychangeinproduction
+      - DATABASE_URL=postgresql://sync_user:sync_password@postgres:4400/muti_tenant?schema=public
+      - REDIS_URL=redis://redis:6379
+      - PORT=4000
+      - NODE_ENV=development
+      - JWT_SECRET=dev-secret-change-in-production
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - ./backend/src:/app/src:ro
+      - ./backend/prisma:/app/prisma:ro
+      - backend_node_modules:/app/node_modules
+    command: npm run dev
+    networks:
+      - sync_dev_network
 
   frontend:
-    build: ./frontend
-    container_name: sync_frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: deps  # Use deps stage for dev
+    container_name: sync_frontend_dev
+    restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "4173:4173"
     environment:
-      - VITE_API_TARGET=http://backend:3000
+      - VITE_API_URL=http://localhost:4000
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+      - ./frontend/index.html:/app/index.html:ro
+      - frontend_node_modules:/app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    networks:
+      - sync_dev_network
+
+networks:
+  sync_dev_network:
+    driver: bridge
 
 volumes:
   postgres_data:
+  redis_data:
+  backend_node_modules:
+  frontend_node_modules:

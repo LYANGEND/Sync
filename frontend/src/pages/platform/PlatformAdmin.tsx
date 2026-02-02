@@ -124,12 +124,48 @@ interface SchoolTransaction {
     id: string;
     tenant: { name: string; slug: string };
     studentName: string;
+    admissionNumber?: string;
     amount: number;
+    mobileMoneyFee: number;
     currency: string;
     method: string;
     status: string;
     transactionId: string;
+    mobileMoneyOperator?: string;
+    mobileMoneyPhone?: string;
+    mobileMoneyStatus?: string;
     date: string;
+}
+
+interface FinanceAnalytics {
+    period: string;
+    subscriptionRevenue: {
+        current: number;
+        previous: number;
+        growth: number;
+        transactionCount: number;
+        byStatus: Array<{ status: string; amount: number; count: number }>;
+        byTier: Record<string, number>;
+    };
+    schoolCollections: {
+        current: number;
+        previous: number;
+        growth: number;
+        transactionCount: number;
+        byMethod: Array<{ method: string; amount: number; fees: number; count: number }>;
+        byStatus: Array<{ status: string; amount: number; count: number }>;
+        topSchools: Array<{ tenant: { name: string; slug: string }; amount: number; fees: number; count: number }>;
+    };
+    processingFees: {
+        current: number;
+        previous: number;
+        growth: number;
+        transactionCount: number;
+    };
+    issues: {
+        failed: Array<{ id: string; tenant: { name: string }; student: string; amount: number; transactionId: string; mobileMoneyStatus?: string; date: string }>;
+        pending: Array<{ id: string; tenant: { name: string }; student: string; amount: number; transactionId: string; date: string }>;
+    };
 }
 
 interface SmsConfig {
@@ -163,6 +199,15 @@ interface PlatformSettings {
     platformName: string;
     supportEmail: string | null;
     supportPhone: string | null;
+    // Mobile Money Settings (configurable in UI)
+    paymentGatewayProvider: string | null;
+    mobileMoneyFeePercent: number | null;
+    mobileMoneyFeeCap: number | null;
+    mobileMoneyEnabled: boolean;
+    allowedPaymentMethods: string[];
+    allowedOrigins: string[];
+    publicApiRateLimitPerMinute: number;
+    paymentApiRateLimitPerMinute: number;
 }
 
 interface Lead {
@@ -506,6 +551,15 @@ const PlatformAdmin = () => {
         paymentCurrency: 'ZMW',
         paymentWebhookUrl: '',
         autoConfirmThreshold: 0,
+        // Mobile Money Settings (non-secret, configurable in UI)
+        paymentGatewayProvider: 'lenco',
+        mobileMoneyFeePercent: 2.5,
+        mobileMoneyFeeCap: 0,
+        mobileMoneyEnabled: true,
+        allowedPaymentMethods: ['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'],
+        allowedOrigins: ['https://pay.yourdomain.com'],
+        publicApiRateLimitPerMinute: 30,
+        paymentApiRateLimitPerMinute: 10,
     });
     const [logs, setLogs] = useState<any[]>([]);
 
@@ -562,6 +616,9 @@ const PlatformAdmin = () => {
     // Payment State
     const [activePaymentType, setActivePaymentType] = useState<'subscription' | 'school'>('subscription');
     const [schoolTransactions, setSchoolTransactions] = useState<SchoolTransaction[]>([]);
+    const [schoolTransactionFeeStats, setSchoolTransactionFeeStats] = useState<{ totalFeesCollected: number; totalTransactionVolume: number; transactionCount: number } | null>(null);
+    const [financeAnalytics, setFinanceAnalytics] = useState<FinanceAnalytics | null>(null);
+    const [financeAnalyticsPeriod, setFinanceAnalyticsPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
     const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [paymentFilters, setPaymentFilters] = useState({
@@ -668,6 +725,9 @@ const PlatformAdmin = () => {
 
                 if (activePaymentType === 'school') {
                     setSchoolTransactions(data.payments);
+                    if (data.feeStats) {
+                        setSchoolTransactionFeeStats(data.feeStats);
+                    }
                 } else {
                     // Client-side filtering for search query if provided for subscription payments
                     let filteredPayments = data.payments;
@@ -688,6 +748,22 @@ const PlatformAdmin = () => {
         }
     };
 
+    // Fetch finance analytics
+    const fetchFinanceAnalytics = async () => {
+        if (!token) return;
+        try {
+            const response = await fetch(`${API_URL}/api/platform/payments/finance-analytics?period=${financeAnalyticsPeriod}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setFinanceAnalytics(data);
+            }
+        } catch (error) {
+            console.error('Failed to fetch finance analytics:', error);
+        }
+    };
+
     // Refetch payments when filters change (debounced or effect)
     useEffect(() => {
         if (activeTab === 'payments') {
@@ -697,6 +773,13 @@ const PlatformAdmin = () => {
             return () => clearTimeout(timer);
         }
     }, [paymentFilters, activeTab, activePaymentType]);
+
+    // Fetch finance analytics when period changes or tab is payments
+    useEffect(() => {
+        if (activeTab === 'payments') {
+            fetchFinanceAnalytics();
+        }
+    }, [activeTab, financeAnalyticsPeriod]);
 
     const viewPaymentDetails = (payment: Payment) => {
         setSelectedPayment(payment);
@@ -1080,6 +1163,15 @@ const PlatformAdmin = () => {
                     paymentCurrency: data.paymentCurrency || 'ZMW',
                     paymentWebhookUrl: data.paymentWebhookUrl || '',
                     autoConfirmThreshold: Number(data.autoConfirmThreshold) || 0,
+                    // Mobile Money Settings (non-secret, configurable in UI)
+                    paymentGatewayProvider: data.paymentGatewayProvider || 'lenco',
+                    mobileMoneyFeePercent: Number(data.mobileMoneyFeePercent) * 100 || 2.5, // Convert from decimal to percentage
+                    mobileMoneyFeeCap: Number(data.mobileMoneyFeeCap) || 0,
+                    mobileMoneyEnabled: data.mobileMoneyEnabled !== false,
+                    allowedPaymentMethods: data.allowedPaymentMethods || ['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'],
+                    allowedOrigins: data.allowedOrigins || [],
+                    publicApiRateLimitPerMinute: data.publicApiRateLimitPerMinute || 30,
+                    paymentApiRateLimitPerMinute: data.paymentApiRateLimitPerMinute || 10,
                 });
             }
         } catch (error) {
@@ -1106,13 +1198,19 @@ const PlatformAdmin = () => {
         if (!token) return;
         setLoading(true);
         try {
+            // Prepare payload with fee percent converted to decimal
+            const payload = {
+                ...settingsForm,
+                mobileMoneyFeePercent: settingsForm.mobileMoneyFeePercent / 100, // Convert from percentage to decimal
+            };
+            
             const response = await fetch(`${API_URL}/api/platform/settings`, {
                 method: 'PUT',
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(settingsForm),
+                body: JSON.stringify(payload),
             });
 
             if (response.ok) {
@@ -2464,7 +2562,200 @@ const PlatformAdmin = () => {
 
                     {/* Payments Tab */}
                     {activeTab === 'payments' && (
-                        <div className="space-y-4">
+                        <div className="space-y-6">
+                            {/* Finance Analytics Dashboard */}
+                            {financeAnalytics && (
+                                <div className="space-y-4">
+                                    {/* Period Selector */}
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="text-lg font-semibold text-slate-900">Finance Overview</h2>
+                                        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+                                            {(['day', 'week', 'month', 'year'] as const).map((period) => (
+                                                <button
+                                                    key={period}
+                                                    onClick={() => setFinanceAnalyticsPeriod(period)}
+                                                    className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                                                        financeAnalyticsPeriod === period
+                                                            ? 'bg-white text-purple-600 shadow-sm'
+                                                            : 'text-slate-600 hover:text-slate-900'
+                                                    }`}
+                                                >
+                                                    {period.charAt(0).toUpperCase() + period.slice(1)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Key Metrics Cards */}
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                        {/* Subscription Revenue */}
+                                        <div className="bg-white rounded-xl p-4 border shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div className="p-2 bg-purple-100 rounded-lg">
+                                                    <CreditCard className="w-5 h-5 text-purple-600" />
+                                                </div>
+                                                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                    financeAnalytics.subscriptionRevenue.growth >= 0 
+                                                        ? 'bg-green-100 text-green-700' 
+                                                        : 'bg-red-100 text-red-700'
+                                                }`}>
+                                                    {financeAnalytics.subscriptionRevenue.growth >= 0 ? '+' : ''}
+                                                    {financeAnalytics.subscriptionRevenue.growth.toFixed(1)}%
+                                                </span>
+                                            </div>
+                                            <div className="mt-3">
+                                                <p className="text-2xl font-bold text-slate-900">
+                                                    ZMW {financeAnalytics.subscriptionRevenue.current.toLocaleString()}
+                                                </p>
+                                                <p className="text-sm text-slate-500">Subscription Revenue</p>
+                                                <p className="text-xs text-slate-400 mt-1">
+                                                    {financeAnalytics.subscriptionRevenue.transactionCount} transactions
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* School Collections */}
+                                        <div className="bg-white rounded-xl p-4 border shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div className="p-2 bg-blue-100 rounded-lg">
+                                                    <DollarSign className="w-5 h-5 text-blue-600" />
+                                                </div>
+                                                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                    financeAnalytics.schoolCollections.growth >= 0 
+                                                        ? 'bg-green-100 text-green-700' 
+                                                        : 'bg-red-100 text-red-700'
+                                                }`}>
+                                                    {financeAnalytics.schoolCollections.growth >= 0 ? '+' : ''}
+                                                    {financeAnalytics.schoolCollections.growth.toFixed(1)}%
+                                                </span>
+                                            </div>
+                                            <div className="mt-3">
+                                                <p className="text-2xl font-bold text-slate-900">
+                                                    ZMW {financeAnalytics.schoolCollections.current.toLocaleString()}
+                                                </p>
+                                                <p className="text-sm text-slate-500">School Collections</p>
+                                                <p className="text-xs text-slate-400 mt-1">
+                                                    {financeAnalytics.schoolCollections.transactionCount} transactions
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Processing Fees */}
+                                        <div className="bg-white rounded-xl p-4 border shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div className="p-2 bg-emerald-100 rounded-lg">
+                                                    <Percent className="w-5 h-5 text-emerald-600" />
+                                                </div>
+                                                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                    financeAnalytics.processingFees.growth >= 0 
+                                                        ? 'bg-green-100 text-green-700' 
+                                                        : 'bg-red-100 text-red-700'
+                                                }`}>
+                                                    {financeAnalytics.processingFees.growth >= 0 ? '+' : ''}
+                                                    {financeAnalytics.processingFees.growth.toFixed(1)}%
+                                                </span>
+                                            </div>
+                                            <div className="mt-3">
+                                                <p className="text-2xl font-bold text-slate-900">
+                                                    ZMW {financeAnalytics.processingFees.current.toLocaleString()}
+                                                </p>
+                                                <p className="text-sm text-slate-500">Processing Fees Earned</p>
+                                                <p className="text-xs text-slate-400 mt-1">
+                                                    From {financeAnalytics.processingFees.transactionCount} mobile payments
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Issues */}
+                                        <div className="bg-white rounded-xl p-4 border shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <div className="p-2 bg-amber-100 rounded-lg">
+                                                    <AlertTriangle className="w-5 h-5 text-amber-600" />
+                                                </div>
+                                            </div>
+                                            <div className="mt-3">
+                                                <p className="text-2xl font-bold text-slate-900">
+                                                    {financeAnalytics.issues.failed.length + financeAnalytics.issues.pending.length}
+                                                </p>
+                                                <p className="text-sm text-slate-500">Payment Issues</p>
+                                                <div className="flex gap-3 text-xs text-slate-400 mt-1">
+                                                    <span className="text-red-500">{financeAnalytics.issues.failed.length} failed</span>
+                                                    <span className="text-amber-500">{financeAnalytics.issues.pending.length} pending</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Detailed Breakdown */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* Collections by Method */}
+                                        <div className="bg-white rounded-xl p-4 border">
+                                            <h3 className="font-medium text-slate-900 mb-3">Collections by Method</h3>
+                                            <div className="space-y-3">
+                                                {financeAnalytics.schoolCollections.byMethod.map((method) => (
+                                                    <div key={method.method} className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`w-3 h-3 rounded-full ${
+                                                                method.method === 'MOBILE_MONEY' ? 'bg-blue-500' : 'bg-green-500'
+                                                            }`}></span>
+                                                            <span className="text-sm text-slate-700">{method.method.replace('_', ' ')}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-semibold text-slate-900">ZMW {method.amount.toLocaleString()}</p>
+                                                            <p className="text-xs text-slate-400">{method.count} transactions</p>
+                                                            {method.fees > 0 && (
+                                                                <p className="text-xs text-emerald-600">+ZMW {method.fees.toLocaleString()} fees</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Top Schools */}
+                                        <div className="bg-white rounded-xl p-4 border">
+                                            <h3 className="font-medium text-slate-900 mb-3">Top Schools by Collections</h3>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {financeAnalytics.schoolCollections.topSchools.slice(0, 5).map((school, index) => (
+                                                    <div key={school.tenant.slug} className="flex items-center justify-between py-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="w-5 h-5 rounded-full bg-slate-100 text-xs flex items-center justify-center font-medium text-slate-600">
+                                                                {index + 1}
+                                                            </span>
+                                                            <span className="text-sm text-slate-700">{school.tenant.name}</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-semibold text-slate-900">ZMW {school.amount.toLocaleString()}</p>
+                                                            <p className="text-xs text-slate-400">{school.count} payments</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {financeAnalytics.schoolCollections.topSchools.length === 0 && (
+                                                    <p className="text-sm text-slate-400 text-center py-4">No collections this period</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Subscription Revenue by Tier */}
+                                    <div className="bg-white rounded-xl p-4 border">
+                                        <h3 className="font-medium text-slate-900 mb-3">Subscription Revenue by Tier</h3>
+                                        <div className="flex gap-4 flex-wrap">
+                                            {Object.entries(financeAnalytics.subscriptionRevenue.byTier).map(([tier, amount]) => (
+                                                <div key={tier} className={`px-4 py-2 rounded-lg ${
+                                                    tier === 'ENTERPRISE' ? 'bg-amber-50 border border-amber-200' :
+                                                    tier === 'PROFESSIONAL' ? 'bg-purple-50 border border-purple-200' :
+                                                    'bg-blue-50 border border-blue-200'
+                                                }`}>
+                                                    <p className="text-xs font-medium text-slate-500">{tier}</p>
+                                                    <p className="text-lg font-bold text-slate-900">ZMW {amount.toLocaleString()}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Payment Type Switcher */}
                             <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg w-fit">
                                 <button
@@ -2627,6 +2918,7 @@ const PlatformAdmin = () => {
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Student</th>
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Amount</th>
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
+                                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Fee</th>
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Transaction ID</th>
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                                                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
@@ -2635,7 +2927,7 @@ const PlatformAdmin = () => {
                                         <tbody className="divide-y divide-slate-100">
                                             {schoolTransactions.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                                                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                                                         No school transactions found.
                                                     </td>
                                                 </tr>
@@ -2646,7 +2938,12 @@ const PlatformAdmin = () => {
                                                             <div className="font-medium text-slate-900">{transaction.tenant.name}</div>
                                                             <div className="text-xs text-slate-500">{transaction.tenant.slug}</div>
                                                         </td>
-                                                        <td className="px-4 py-3 text-sm text-slate-700">{transaction.studentName}</td>
+                                                        <td className="px-4 py-3 text-sm text-slate-700">
+                                                            {transaction.studentName}
+                                                            {transaction.admissionNumber && (
+                                                                <div className="text-xs text-slate-400">{transaction.admissionNumber}</div>
+                                                            )}
+                                                        </td>
                                                         <td className="px-4 py-3 font-semibold text-slate-900">
                                                             {transaction.currency} {transaction.amount.toLocaleString()}
                                                         </td>
@@ -2658,6 +2955,12 @@ const PlatformAdmin = () => {
                                                             }`}>
                                                                 {transaction.method.replace('_', ' ')}
                                                             </span>
+                                                            {transaction.mobileMoneyOperator && (
+                                                                <div className="text-xs text-slate-400 mt-0.5">{transaction.mobileMoneyOperator.toUpperCase()}</div>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-emerald-600 font-medium">
+                                                            {transaction.mobileMoneyFee > 0 ? `+ZMW ${transaction.mobileMoneyFee.toLocaleString()}` : '-'}
                                                         </td>
                                                         <td className="px-4 py-3 text-xs font-mono text-slate-600">{transaction.transactionId}</td>
                                                         <td className="px-4 py-3">
@@ -4605,6 +4908,152 @@ const PlatformAdmin = () => {
                                                     placeholder="0"
                                                 />
                                                 <p className="text-xs text-slate-500 mt-1">Auto-confirm payments below this amount (0 = disabled)</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Mobile Money Settings */}
+                                    <div className="border-t pt-4">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h4 className="font-medium text-slate-900">Mobile Money Settings</h4>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={settingsForm.mobileMoneyEnabled}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, mobileMoneyEnabled: e.target.checked })}
+                                                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                                                />
+                                                <span className="text-sm text-slate-600">Enable Mobile Money</span>
+                                            </label>
+                                        </div>
+                                        
+                                        {settingsForm.mobileMoneyEnabled && (
+                                            <div className="space-y-4">
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-slate-700 mb-1">Payment Gateway Provider</label>
+                                                        <select
+                                                            value={settingsForm.paymentGatewayProvider}
+                                                            onChange={(e) => setSettingsForm({ ...settingsForm, paymentGatewayProvider: e.target.value })}
+                                                            className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                        >
+                                                            <option value="lenco">Lenco</option>
+                                                            <option value="mtn_momo">MTN MoMo (Direct)</option>
+                                                            <option value="airtel_money">Airtel Money (Direct)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-slate-700 mb-1">Transaction Fee (%)</label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            max="10"
+                                                            value={settingsForm.mobileMoneyFeePercent}
+                                                            onChange={(e) => setSettingsForm({ ...settingsForm, mobileMoneyFeePercent: parseFloat(e.target.value) || 0 })}
+                                                            className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                            placeholder="2.5"
+                                                        />
+                                                        <p className="text-xs text-slate-500 mt-1">Fee charged on mobile money transactions</p>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-slate-700 mb-1">Fee Cap (Max)</label>
+                                                        <input
+                                                            type="number"
+                                                            step="1"
+                                                            min="0"
+                                                            value={settingsForm.mobileMoneyFeeCap}
+                                                            onChange={(e) => setSettingsForm({ ...settingsForm, mobileMoneyFeeCap: parseFloat(e.target.value) || 0 })}
+                                                            className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                            placeholder="0"
+                                                        />
+                                                        <p className="text-xs text-slate-500 mt-1">Maximum fee amount (0 = no cap)</p>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-2">Allowed Payment Methods</label>
+                                                    <div className="flex flex-wrap gap-3">
+                                                        {['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT', 'CHEQUE', 'CARD'].map((method) => (
+                                                            <label key={method} className="flex items-center gap-2 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={settingsForm.allowedPaymentMethods?.includes(method)}
+                                                                    onChange={(e) => {
+                                                                        const methods = settingsForm.allowedPaymentMethods || [];
+                                                                        if (e.target.checked) {
+                                                                            setSettingsForm({ ...settingsForm, allowedPaymentMethods: [...methods, method] });
+                                                                        } else {
+                                                                            setSettingsForm({ ...settingsForm, allowedPaymentMethods: methods.filter((m: string) => m !== method) });
+                                                                        }
+                                                                    }}
+                                                                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                                                                />
+                                                                <span className="text-sm text-slate-600">{method.replace('_', ' ')}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* API Rate Limiting & Security */}
+                                    <div className="border-t pt-4">
+                                        <h4 className="font-medium text-slate-900 mb-4">API Rate Limiting & Security</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Public API Rate Limit</label>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="1000"
+                                                    value={settingsForm.publicApiRateLimitPerMinute}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, publicApiRateLimitPerMinute: parseInt(e.target.value) || 30 })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    placeholder="30"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-1">Requests per minute for public endpoints</p>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Payment API Rate Limit</label>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="100"
+                                                    value={settingsForm.paymentApiRateLimitPerMinute}
+                                                    onChange={(e) => setSettingsForm({ ...settingsForm, paymentApiRateLimitPerMinute: parseInt(e.target.value) || 10 })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    placeholder="10"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-1">Requests per minute for payment endpoints</p>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Allowed Origins (CORS)</label>
+                                                <input
+                                                    type="text"
+                                                    value={settingsForm.allowedOrigins?.join(', ') || ''}
+                                                    onChange={(e) => setSettingsForm({ 
+                                                        ...settingsForm, 
+                                                        allowedOrigins: e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean)
+                                                    })}
+                                                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                                                    placeholder="https://pay.yourdomain.com, https://app.yourdomain.com"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-1">Comma-separated list of allowed origins</p>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                            <div className="flex items-start gap-2">
+                                                <Shield className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                                <div>
+                                                    <p className="text-sm font-medium text-amber-800">Security Note</p>
+                                                    <p className="text-xs text-amber-700 mt-1">
+                                                        API tokens and webhook secrets should remain in environment variables for security. 
+                                                        Only non-sensitive configuration options are configurable here.
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

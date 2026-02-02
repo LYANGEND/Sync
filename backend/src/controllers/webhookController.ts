@@ -2,12 +2,57 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
 import { activateSubscriptionFromPayment } from './subscriptionController';
+import { createAuditLog, AuditAction } from '../services/auditService';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
+
+/**
+ * Verify Lenco webhook signature
+ * Lenco sends a signature in the X-Lenco-Signature header
+ */
+const verifyLencoSignature = (payload: string, signature: string | undefined): boolean => {
+    const webhookSecret = process.env.LENCO_WEBHOOK_SECRET;
+    
+    if (!webhookSecret) {
+        console.warn('LENCO_WEBHOOK_SECRET not configured - skipping signature verification');
+        return true; // Allow in dev if not configured
+    }
+
+    if (!signature) {
+        console.error('Webhook Error: No signature provided');
+        return false;
+    }
+
+    // Calculate expected signature
+    const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(payload)
+        .digest('hex');
+
+    // Constant-time comparison to prevent timing attacks
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(signature),
+            Buffer.from(expectedSignature)
+        );
+    } catch {
+        return false;
+    }
+};
 
 // This controller specifically handles Lenco Webhooks
 export const handleLencoWebhook = async (req: Request, res: Response) => {
     try {
+        // Verify webhook signature
+        const signature = req.headers['x-lenco-signature'] as string;
+        const rawBody = JSON.stringify(req.body);
+        
+        if (!verifyLencoSignature(rawBody, signature)) {
+            console.error('Webhook Error: Invalid signature');
+            return res.status(401).send('Invalid signature');
+        }
+
         const event = req.body;
 
         // Log the incoming event for debugging
@@ -120,7 +165,27 @@ const handleStudentPaymentWebhook = async (transactionId: string, status: string
         await prisma.payment.update({
             where: { id: payment.id },
             // @ts-ignore
-            data: { status: 'COMPLETED', paymentDate: new Date() }
+            data: { 
+                status: 'COMPLETED', 
+                paymentDate: new Date(),
+                mobileMoneyConfirmedAt: new Date()
+            }
+        });
+
+        // Audit log the successful payment confirmation
+        await createAuditLog({
+            tenantId: payment.tenantId,
+            userId: 'SYSTEM',
+            action: AuditAction.PAYMENT,
+            entityType: 'Payment',
+            entityId: payment.id,
+            newValue: {
+                transactionId,
+                status: 'COMPLETED',
+                confirmedVia: 'webhook',
+                amount: payment.amount,
+            },
+            metadata: { source: 'lenco_webhook' }
         });
 
         console.log(`Payment ${transactionId} marked as COMPLETED.`);

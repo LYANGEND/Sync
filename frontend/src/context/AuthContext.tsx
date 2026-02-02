@@ -1,12 +1,25 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import api from '../utils/api';
 
+interface SubscriptionInfo {
+  tier: string;
+  status: string;
+  features: {
+    aiLessonPlanEnabled: boolean;
+    aiTutorEnabled: boolean;
+    aiAnalyticsEnabled: boolean;
+    aiReportCardsEnabled: boolean;
+    aiAssessmentsEnabled: boolean;
+  };
+}
+
 interface User {
   id: string;
   email: string;
   fullName: string;
   role: string;
   profilePictureUrl?: string;
+  subscription?: SubscriptionInfo | null;
 }
 
 interface AuthContextType {

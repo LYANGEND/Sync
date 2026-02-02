@@ -8,6 +8,8 @@ const prisma = new PrismaClient();
 export const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
+    const tenantId = (req as any).user?.tenantId;
+    
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -24,7 +26,37 @@ export const getProfile = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json(user);
+    // Get tenant subscription info for feature gating
+    let subscription = null;
+    if (tenantId) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          tier: true,
+          status: true,
+          aiLessonPlanEnabled: true,
+          aiTutorEnabled: true,
+          aiAnalyticsEnabled: true,
+          aiReportCardsEnabled: true,
+          aiAssessmentsEnabled: true,
+        }
+      });
+      if (tenant) {
+        subscription = {
+          tier: tenant.tier,
+          status: tenant.status,
+          features: {
+            aiLessonPlanEnabled: tenant.aiLessonPlanEnabled,
+            aiTutorEnabled: tenant.aiTutorEnabled,
+            aiAnalyticsEnabled: tenant.aiAnalyticsEnabled,
+            aiReportCardsEnabled: tenant.aiReportCardsEnabled,
+            aiAssessmentsEnabled: tenant.aiAssessmentsEnabled,
+          }
+        };
+      }
+    }
+
+    res.json({ ...user, subscription });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch profile' });
   }

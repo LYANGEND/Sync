@@ -76,6 +76,63 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
                                 {payment.transactionId || '-'}
                             </p>
                         </div>
+                        {/* Mobile Money Details */}
+                        {payment.method === 'MOBILE_MONEY' && payment.mobileMoneyOperator && (
+                            <div className="col-span-2 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-3">Mobile Money Details</p>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                            payment.mobileMoneyOperator === 'mtn' 
+                                                ? 'bg-yellow-400' 
+                                                : 'bg-red-500'
+                                        }`}>
+                                            <span className="font-bold text-white text-xs">
+                                                {payment.mobileMoneyOperator === 'mtn' ? 'MTN' : 'Airtel'}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-slate-500">Operator</p>
+                                            <p className="font-medium text-slate-900 capitalize">
+                                                {payment.mobileMoneyOperator === 'mtn' ? 'MTN MoMo' : 'Airtel Money'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {payment.mobileMoneyPhone && (
+                                        <div>
+                                            <p className="text-xs text-slate-500">Phone Number</p>
+                                            <p className="font-medium text-slate-900">{payment.mobileMoneyPhone}</p>
+                                        </div>
+                                    )}
+                                    {payment.mobileMoneyRef && (
+                                        <div className="col-span-2">
+                                            <p className="text-xs text-slate-500">Reference</p>
+                                            <p className="font-mono text-sm text-slate-700">{payment.mobileMoneyRef}</p>
+                                        </div>
+                                    )}
+                                    {payment.mobileMoneyFee && Number(payment.mobileMoneyFee) > 0 && (
+                                        <div>
+                                            <p className="text-xs text-slate-500">Processing Fee</p>
+                                            <p className="font-medium text-slate-900">ZMW {Number(payment.mobileMoneyFee).toFixed(2)}</p>
+                                        </div>
+                                    )}
+                                    {payment.mobileMoneyStatus && (
+                                        <div>
+                                            <p className="text-xs text-slate-500">Status</p>
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                                payment.mobileMoneyStatus === 'SUCCESS' 
+                                                    ? 'bg-green-100 text-green-700' 
+                                                    : payment.mobileMoneyStatus === 'PENDING'
+                                                        ? 'bg-yellow-100 text-yellow-700'
+                                                        : 'bg-red-100 text-red-700'
+                                            }`}>
+                                                {payment.mobileMoneyStatus}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         {payment.notes && (
                             <div className="col-span-2">
                                 <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Notes</p>

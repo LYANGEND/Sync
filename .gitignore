@@ -1,5 +1,6 @@
 /frontend/node_modules
 /backend/node_modules
+node_modules
 .DS_Store
 .env
 /logs
@@ -7,6 +8,9 @@
 /build
 /dist
 /coverage
+.cache
+.next
+out
 .idea
 .vscode
 *.iml
@@ -20,6 +24,9 @@ yarn-error.log*
 .env.production.local
 .vscode/settings.json
 /frontend/src/config/localConfig.ts
+
+# Docs
+*.md
 
 # Ignore generated Prisma client
 package-lock.json
@@ -45,3 +52,5 @@ package-lock.json
 frontend/package-lock.json
 package-lock.json
 package-lock.json
+# PDF files
+*.pdf

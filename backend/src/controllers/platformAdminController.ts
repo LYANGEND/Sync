@@ -1462,6 +1462,319 @@ export const rejectPayment = async (req: Request, res: Response) => {
 };
 
 /**
+ * Get comprehensive finance analytics for Ops dashboard
+ * Includes both subscription revenue and school collections
+ */
+export const getFinanceAnalytics = async (req: Request, res: Response) => {
+    try {
+        const period = req.query.period as string || 'month'; // 'day', 'week', 'month', 'year'
+        
+        // Calculate date ranges
+        const now = new Date();
+        let startDate: Date;
+        let previousStartDate: Date;
+        let previousEndDate: Date;
+        
+        switch (period) {
+            case 'day':
+                startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                previousStartDate = new Date(startDate);
+                previousStartDate.setDate(previousStartDate.getDate() - 1);
+                previousEndDate = startDate;
+                break;
+            case 'week':
+                startDate = new Date(now);
+                startDate.setDate(now.getDate() - 7);
+                previousStartDate = new Date(startDate);
+                previousStartDate.setDate(previousStartDate.getDate() - 7);
+                previousEndDate = startDate;
+                break;
+            case 'year':
+                startDate = new Date(now.getFullYear(), 0, 1);
+                previousStartDate = new Date(now.getFullYear() - 1, 0, 1);
+                previousEndDate = startDate;
+                break;
+            default: // month
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                previousEndDate = startDate;
+        }
+
+        // Fetch all analytics in parallel
+        const [
+            // Subscription payments (platform revenue)
+            subscriptionCurrent,
+            subscriptionPrevious,
+            subscriptionByStatus,
+            subscriptionByTier,
+            
+            // School collections (fee revenue via gateway)
+            collectionsCurrent,
+            collectionsPrevious,
+            collectionsByMethod,
+            collectionsByStatus,
+            collectionsBySchool,
+            
+            // Mobile money fee analytics
+            feesCurrent,
+            feesPrevious,
+            
+            // Failed payments
+            failedPayments,
+            pendingPayments,
+        ] = await Promise.all([
+            // Current period subscription revenue
+            prisma.subscriptionPayment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    paidAt: { gte: startDate },
+                },
+                _sum: { totalAmount: true },
+                _count: true,
+            }),
+            // Previous period subscription revenue
+            prisma.subscriptionPayment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    paidAt: { gte: previousStartDate, lt: previousEndDate },
+                },
+                _sum: { totalAmount: true },
+                _count: true,
+            }),
+            // Subscription by status
+            prisma.subscriptionPayment.groupBy({
+                by: ['status'],
+                _sum: { totalAmount: true },
+                _count: true,
+            }),
+            // Subscription by tier (via plan)
+            prisma.subscriptionPayment.findMany({
+                where: { status: 'COMPLETED', paidAt: { gte: startDate } },
+                include: { plan: { select: { tier: true, name: true } } },
+            }),
+            
+            // Current period school collections
+            prisma.payment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+                    paymentDate: { gte: startDate },
+                },
+                _sum: { amount: true, mobileMoneyFee: true },
+                _count: true,
+            }),
+            // Previous period school collections
+            prisma.payment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+                    paymentDate: { gte: previousStartDate, lt: previousEndDate },
+                },
+                _sum: { amount: true, mobileMoneyFee: true },
+                _count: true,
+            }),
+            // Collections by payment method
+            prisma.payment.groupBy({
+                by: ['method'],
+                where: {
+                    method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+                    paymentDate: { gte: startDate },
+                },
+                _sum: { amount: true, mobileMoneyFee: true },
+                _count: true,
+            }),
+            // Collections by status
+            prisma.payment.groupBy({
+                by: ['status'],
+                where: {
+                    method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+                    paymentDate: { gte: startDate },
+                },
+                _sum: { amount: true },
+                _count: true,
+            }),
+            // Top 10 schools by collections
+            prisma.payment.groupBy({
+                by: ['tenantId'],
+                where: {
+                    status: 'COMPLETED',
+                    method: { in: ['MOBILE_MONEY', 'BANK_DEPOSIT'] },
+                    paymentDate: { gte: startDate },
+                },
+                _sum: { amount: true, mobileMoneyFee: true },
+                _count: true,
+                orderBy: { _sum: { amount: 'desc' } },
+                take: 10,
+            }),
+            
+            // Current fees collected
+            prisma.payment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    method: 'MOBILE_MONEY',
+                    paymentDate: { gte: startDate },
+                },
+                _sum: { mobileMoneyFee: true },
+                _count: true,
+            }),
+            // Previous fees collected
+            prisma.payment.aggregate({
+                where: {
+                    status: 'COMPLETED',
+                    method: 'MOBILE_MONEY',
+                    paymentDate: { gte: previousStartDate, lt: previousEndDate },
+                },
+                _sum: { mobileMoneyFee: true },
+                _count: true,
+            }),
+            
+            // Failed payments (last 30 days)
+            prisma.payment.findMany({
+                where: {
+                    status: 'FAILED',
+                    method: 'MOBILE_MONEY',
+                    paymentDate: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+                },
+                include: {
+                    tenant: { select: { name: true, slug: true } },
+                    student: { select: { firstName: true, lastName: true } },
+                },
+                orderBy: { paymentDate: 'desc' },
+                take: 20,
+            }),
+            // Pending payments
+            prisma.payment.findMany({
+                where: {
+                    status: 'PENDING',
+                    method: 'MOBILE_MONEY',
+                },
+                include: {
+                    tenant: { select: { name: true, slug: true } },
+                    student: { select: { firstName: true, lastName: true } },
+                },
+                orderBy: { paymentDate: 'desc' },
+                take: 20,
+            }),
+        ]);
+
+        // Get tenant names for top schools
+        const topSchoolIds = collectionsBySchool.map(s => s.tenantId);
+        const tenants = await prisma.tenant.findMany({
+            where: { id: { in: topSchoolIds } },
+            select: { id: true, name: true, slug: true },
+        });
+        const tenantMap = new Map(tenants.map(t => [t.id, t]));
+
+        // Calculate subscription revenue by tier
+        const revenueByTier: Record<string, number> = {};
+        subscriptionByTier.forEach(p => {
+            const tier = p.plan.tier;
+            revenueByTier[tier] = (revenueByTier[tier] || 0) + Number(p.totalAmount);
+        });
+
+        // Calculate growth percentages
+        const subscriptionCurrentAmount = Number(subscriptionCurrent._sum.totalAmount || 0);
+        const subscriptionPreviousAmount = Number(subscriptionPrevious._sum.totalAmount || 0);
+        const subscriptionGrowth = subscriptionPreviousAmount > 0 
+            ? ((subscriptionCurrentAmount - subscriptionPreviousAmount) / subscriptionPreviousAmount) * 100 
+            : 0;
+
+        const collectionsCurrentAmount = Number(collectionsCurrent._sum.amount || 0);
+        const collectionsPreviousAmount = Number(collectionsPrevious._sum.amount || 0);
+        const collectionsGrowth = collectionsPreviousAmount > 0 
+            ? ((collectionsCurrentAmount - collectionsPreviousAmount) / collectionsPreviousAmount) * 100 
+            : 0;
+
+        const feesCurrentAmount = Number(feesCurrent._sum.mobileMoneyFee || 0);
+        const feesPreviousAmount = Number(feesPrevious._sum.mobileMoneyFee || 0);
+        const feesGrowth = feesPreviousAmount > 0 
+            ? ((feesCurrentAmount - feesPreviousAmount) / feesPreviousAmount) * 100 
+            : 0;
+
+        res.json({
+            period,
+            dateRange: {
+                start: startDate,
+                end: now,
+                previousStart: previousStartDate,
+                previousEnd: previousEndDate,
+            },
+            
+            // Subscription Revenue (Platform Income)
+            subscriptionRevenue: {
+                current: subscriptionCurrentAmount,
+                previous: subscriptionPreviousAmount,
+                growth: subscriptionGrowth,
+                transactionCount: subscriptionCurrent._count,
+                byStatus: subscriptionByStatus.map(s => ({
+                    status: s.status,
+                    amount: Number(s._sum.totalAmount || 0),
+                    count: s._count,
+                })),
+                byTier: revenueByTier,
+            },
+            
+            // School Collections (Fee Revenue via Gateway)
+            schoolCollections: {
+                current: collectionsCurrentAmount,
+                previous: collectionsPreviousAmount,
+                growth: collectionsGrowth,
+                transactionCount: collectionsCurrent._count,
+                byMethod: collectionsByMethod.map(m => ({
+                    method: m.method,
+                    amount: Number(m._sum.amount || 0),
+                    fees: Number(m._sum.mobileMoneyFee || 0),
+                    count: m._count,
+                })),
+                byStatus: collectionsByStatus.map(s => ({
+                    status: s.status,
+                    amount: Number(s._sum.amount || 0),
+                    count: s._count,
+                })),
+                topSchools: collectionsBySchool.map(s => ({
+                    tenant: tenantMap.get(s.tenantId) || { name: 'Unknown', slug: '' },
+                    amount: Number(s._sum.amount || 0),
+                    fees: Number(s._sum.mobileMoneyFee || 0),
+                    count: s._count,
+                })),
+            },
+            
+            // Processing Fees (Platform Revenue from Gateway)
+            processingFees: {
+                current: feesCurrentAmount,
+                previous: feesPreviousAmount,
+                growth: feesGrowth,
+                transactionCount: feesCurrent._count,
+            },
+            
+            // Payment Issues
+            issues: {
+                failed: failedPayments.map(p => ({
+                    id: p.id,
+                    tenant: p.tenant,
+                    student: `${p.student.firstName} ${p.student.lastName}`,
+                    amount: Number(p.amount),
+                    transactionId: p.transactionId,
+                    mobileMoneyStatus: p.mobileMoneyStatus,
+                    date: p.paymentDate,
+                })),
+                pending: pendingPayments.map(p => ({
+                    id: p.id,
+                    tenant: p.tenant,
+                    student: `${p.student.firstName} ${p.student.lastName}`,
+                    amount: Number(p.amount),
+                    transactionId: p.transactionId,
+                    date: p.paymentDate,
+                })),
+            },
+        });
+    } catch (error) {
+        console.error('Get finance analytics error:', error);
+        res.status(500).json({ error: 'Failed to fetch finance analytics' });
+    }
+};
+
+/**
  * Get all school transactions (Fees collected by tenants)
  * Only shows Mobile Money and Bank Deposit transactions (excludes Cash)
  */
@@ -1495,7 +1808,7 @@ export const getAllSchoolTransactions = async (req: Request, res: Response) => {
             ];
         }
 
-        const [payments, total] = await Promise.all([
+        const [payments, total, feeStats] = await Promise.all([
             prisma.payment.findMany({
                 where,
                 skip,
@@ -1507,6 +1820,19 @@ export const getAllSchoolTransactions = async (req: Request, res: Response) => {
                 },
             }),
             prisma.payment.count({ where }),
+            // Get fee statistics for completed mobile money payments
+            prisma.payment.aggregate({
+                where: {
+                    method: 'MOBILE_MONEY',
+                    status: 'COMPLETED',
+                    ...(tenantId ? { tenantId } : {}),
+                },
+                _sum: {
+                    mobileMoneyFee: true,
+                    amount: true,
+                },
+                _count: true,
+            }),
         ]);
 
         res.json({
@@ -1514,13 +1840,23 @@ export const getAllSchoolTransactions = async (req: Request, res: Response) => {
                 id: p.id,
                 tenant: p.tenant,
                 studentName: `${p.student.firstName} ${p.student.lastName}`,
+                admissionNumber: p.student.admissionNumber,
                 amount: Number(p.amount),
+                mobileMoneyFee: p.mobileMoneyFee ? Number(p.mobileMoneyFee) : 0,
                 currency: 'ZMW',
                 method: p.method,
                 status: p.status,
                 transactionId: p.transactionId,
+                mobileMoneyOperator: p.mobileMoneyOperator,
+                mobileMoneyPhone: p.mobileMoneyPhone,
+                mobileMoneyStatus: p.mobileMoneyStatus,
                 date: p.paymentDate,
             })),
+            feeStats: {
+                totalFeesCollected: Number(feeStats._sum.mobileMoneyFee || 0),
+                totalTransactionVolume: Number(feeStats._sum.amount || 0),
+                transactionCount: feeStats._count,
+            },
             pagination: {
                 page,
                 limit,
@@ -1666,6 +2002,15 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
             azureEmailFromAddress,
             azureEmailEndpoint,
             azureEmailAccessKey,
+            // Mobile Money Settings (non-secret, configurable in UI)
+            paymentGatewayProvider,
+            mobileMoneyFeePercent,
+            mobileMoneyFeeCap,
+            mobileMoneyEnabled,
+            allowedPaymentMethods,
+            allowedOrigins,
+            publicApiRateLimitPerMinute,
+            paymentApiRateLimitPerMinute,
         } = req.body;
 
         const updateData: any = {};
@@ -1704,6 +2049,16 @@ export const updatePlatformSettings = async (req: Request, res: Response) => {
         // Feature toggles
         if (allowTenantCustomSms !== undefined) updateData.allowTenantCustomSms = allowTenantCustomSms;
         if (allowTenantCustomEmail !== undefined) updateData.allowTenantCustomEmail = allowTenantCustomEmail;
+
+        // Mobile Money Settings (non-secret, configurable)
+        if (paymentGatewayProvider !== undefined) updateData.paymentGatewayProvider = paymentGatewayProvider;
+        if (mobileMoneyFeePercent !== undefined) updateData.mobileMoneyFeePercent = mobileMoneyFeePercent;
+        if (mobileMoneyFeeCap !== undefined) updateData.mobileMoneyFeeCap = mobileMoneyFeeCap || null;
+        if (mobileMoneyEnabled !== undefined) updateData.mobileMoneyEnabled = mobileMoneyEnabled;
+        if (allowedPaymentMethods !== undefined) updateData.allowedPaymentMethods = allowedPaymentMethods;
+        if (allowedOrigins !== undefined) updateData.allowedOrigins = allowedOrigins;
+        if (publicApiRateLimitPerMinute !== undefined) updateData.publicApiRateLimitPerMinute = publicApiRateLimitPerMinute;
+        if (paymentApiRateLimitPerMinute !== undefined) updateData.paymentApiRateLimitPerMinute = paymentApiRateLimitPerMinute;
 
         // Dynamic configuration (features and tiers)
         const { availableFeatures, availableTiers } = req.body;

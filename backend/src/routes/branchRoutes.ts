@@ -25,6 +25,7 @@ import {
     getAllBranchesPerformance
 } from '../controllers/branchController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { tenantHandler } from '../utils/routeTypes';
 
 const router = express.Router();
 
@@ -33,85 +34,85 @@ router.use(authenticateToken);
 
 // ==================== Branch CRUD ====================
 // Get all branches
-router.get('/', getAllBranches);
+router.get('/', tenantHandler(getAllBranches));
 
 // Get branch by ID
-router.get('/:id', getBranchById);
+router.get('/:id', tenantHandler(getBranchById));
 
 // Create a new branch (SUPER_ADMIN only)
-router.post('/', authorizeRole(['SUPER_ADMIN']), createBranch);
+router.post('/', authorizeRole(['SUPER_ADMIN']), tenantHandler(createBranch));
 
 // Update a branch
-router.put('/:id', authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']), updateBranch);
+router.put('/:id', authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']), tenantHandler(updateBranch));
 
 // Delete a branch (SUPER_ADMIN only)
-router.delete('/:id', authorizeRole(['SUPER_ADMIN']), deleteBranch);
+router.delete('/:id', authorizeRole(['SUPER_ADMIN']), tenantHandler(deleteBranch));
 
 // ==================== Branch Analytics ====================
 // System-wide analytics (must come before :id routes)
-router.get('/analytics/performance', getAllBranchesPerformance);
+router.get('/analytics/performance', tenantHandler(getAllBranchesPerformance));
 
 // Individual branch analytics
-router.get('/:id/analytics', getBranchAnalytics);
-router.get('/:id/financial-summary', getBranchFinancialSummary);
-router.get('/:id/performance', getBranchPerformanceMetrics);
-router.get('/:id/transfers', getBranchTransfers);
-router.get('/:id/students', getBranchStudents);
-router.get('/:id/users', getBranchUsers);
-router.get('/:id/classes', getBranchClasses);
+router.get('/:id/analytics', tenantHandler(getBranchAnalytics));
+router.get('/:id/financial-summary', tenantHandler(getBranchFinancialSummary));
+router.get('/:id/performance', tenantHandler(getBranchPerformanceMetrics));
+router.get('/:id/transfers', tenantHandler(getBranchTransfers));
+router.get('/:id/students', tenantHandler(getBranchStudents));
+router.get('/:id/users', tenantHandler(getBranchUsers));
+router.get('/:id/classes', tenantHandler(getBranchClasses));
 
 // ==================== User Branch Assignments ====================
 router.get('/users/:userId/branches',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']),
-    getUserBranchAssignments
+    tenantHandler(getUserBranchAssignments)
 );
 
 router.post('/users/:userId/branches',
     authorizeRole(['SUPER_ADMIN']),
-    assignUserToBranch
+    tenantHandler(assignUserToBranch)
 );
 
 router.delete('/users/:userId/branches/:branchId',
     authorizeRole(['SUPER_ADMIN']),
-    removeUserFromBranch
+    tenantHandler(removeUserFromBranch)
 );
 
 // ==================== Student Branch Enrollments ====================
 router.get('/students/:studentId/branches',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'SECRETARY']),
-    getStudentBranchEnrollments
+    tenantHandler(getStudentBranchEnrollments)
 );
 
 router.post('/students/:studentId/branches',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']),
-    enrollStudentInBranch
+    tenantHandler(enrollStudentInBranch)
 );
 
 router.delete('/students/:studentId/branches/:branchId',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']),
-    removeStudentFromBranch
+    tenantHandler(removeStudentFromBranch)
 );
 
 // ==================== Transfers ====================
 router.post('/transfer-student',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']),
-    transferStudent
+    tenantHandler(transferStudent)
 );
 
 // ==================== Bulk Operations ====================
 router.post('/bulk/transfer-students',
     authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']),
-    bulkTransferStudents
+    tenantHandler(bulkTransferStudents)
 );
 
 router.post('/bulk/assign-users',
     authorizeRole(['SUPER_ADMIN']),
-    bulkAssignUsers
+    tenantHandler(bulkAssignUsers)
 );
 
 router.post('/bulk/update-status',
     authorizeRole(['SUPER_ADMIN']),
-    bulkUpdateBranchStatus
+    tenantHandler(bulkUpdateBranchStatus)
 );
 
 export default router;

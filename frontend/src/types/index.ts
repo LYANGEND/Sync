@@ -8,6 +8,13 @@ export interface Payment {
     notes?: string;
     status: 'COMPLETED' | 'CANCELLED' | 'PENDING';
     voidReason?: string;
+    // Mobile Money fields
+    mobileMoneyOperator?: string;
+    mobileMoneyPhone?: string;
+    mobileMoneyRef?: string;
+    mobileMoneyStatus?: string;
+    mobileMoneyConfirmedAt?: string;
+    mobileMoneyFee?: number;
     student: {
         firstName: string;
         lastName: string;

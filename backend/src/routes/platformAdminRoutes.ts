@@ -14,6 +14,7 @@ import {
     confirmPayment,
     rejectPayment,
     getAllSchoolTransactions,
+    getFinanceAnalytics,
     createPlatformUser,
     getPlatformUsers,
     getPlatformSettings,
@@ -71,6 +72,7 @@ router.post('/tenants/:tenantId/activate', authorizePlatformRole(['PLATFORM_SUPE
 // Payment management
 router.get('/payments', getAllPayments);
 router.get('/payments/school-transactions', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), getAllSchoolTransactions);
+router.get('/payments/finance-analytics', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), getFinanceAnalytics);
 router.post('/payments/:paymentId/confirm', authorizePlatformRole(['PLATFORM_SUPERADMIN', 'PLATFORM_SALES']), confirmPayment);
 router.post('/payments/:paymentId/reject', authorizePlatformRole(['PLATFORM_SUPERADMIN']), rejectPayment);
 

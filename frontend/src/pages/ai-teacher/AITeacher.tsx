@@ -419,6 +419,44 @@ const AITeacher = () => {
   const selectedSubjectName = subjects.find(s => s.id === selectedSubject)?.name;
   const selectedTopicName = topics.find(t => t.id === selectedTopic)?.name;
 
+  // Check if user has AI Tutor access (Professional/Enterprise only)
+  const hasAITutorAccess = user?.subscription?.tier === 'PROFESSIONAL' || 
+                           user?.subscription?.tier === 'ENTERPRISE' ||
+                           user?.subscription?.features?.aiTutorEnabled;
+
+  // Show upgrade prompt if no AI access
+  if (!hasAITutorAccess) {
+    return (
+      <div className="h-[calc(100vh-64px)] bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 flex items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+            <Bot size={32} className="text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+            AI Teacher - Premium Feature
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            The AI Teacher is available exclusively for <strong>Professional</strong> and <strong>Enterprise</strong> subscribers. 
+            Ask your school administrator to upgrade the plan to unlock personalized AI tutoring.
+          </p>
+          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 mb-6">
+            <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What you'll get:</h3>
+            <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 text-left">
+              <li>🎓 Personalized AI Tutoring</li>
+              <li>📚 Interactive Lessons</li>
+              <li>🗣️ Voice Chat Support</li>
+              <li>✨ Visual Explanations</li>
+              <li>📝 Topic-Based Learning</li>
+            </ul>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-500 mt-4">
+            Current plan: <span className="font-medium">{user?.subscription?.tier || 'FREE'}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[calc(100vh-64px)] md:h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
       {/* Sidebar - Conversations */}

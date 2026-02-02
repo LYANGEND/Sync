@@ -482,7 +482,17 @@
                 <p class="section-subtitle">Choose the plan that fits your institution's size. All plans include free training and setup.</p>
             </div>
 
-            <div class="pricing-grid">
+            <!-- Dynamic pricing container - loaded from API -->
+            <div class="pricing-grid" id="pricing-grid">
+                <!-- Loading state -->
+                <div class="pricing-loading" id="pricing-loading">
+                    <div class="loading-spinner"></div>
+                    <p>Loading pricing...</p>
+                </div>
+            </div>
+
+            <!-- Fallback pricing (shown if API fails) -->
+            <div class="pricing-grid pricing-fallback" id="pricing-fallback" style="display: none;">
                 <div class="pricing-card">
                     <div class="pricing-header">
                         <h3>Starter</h3>
@@ -495,6 +505,7 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Up to 300 students</li>
+                        <li><span class="check">✓</span> AI Lesson Planning</li>
                         <li><span class="check">✓</span> Student & Staff Management</li>
                         <li><span class="check">✓</span> Basic Fee Tracking</li>
                         <li><span class="check">✓</span> Digital Attendance</li>
@@ -516,7 +527,7 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Up to 1,000 students</li>
-                        <li><span class="check">✓</span> <strong>AI Teacher Assistant</strong></li>
+                        <li><span class="check">✓</span> AI Teacher Assistant</li>
                         <li><span class="check">✓</span> SMS & WhatsApp Messages</li>
                         <li><span class="check">✓</span> Mobile Money Integration</li>
                         <li><span class="check">✓</span> Parent Portal Access</li>
@@ -537,11 +548,11 @@
                     </div>
                     <ul class="pricing-features">
                         <li><span class="check">✓</span> Unlimited students</li>
+                        <li><span class="check">✓</span> AI Tutor & Analytics</li>
                         <li><span class="check">✓</span> Multi-campus support</li>
                         <li><span class="check">✓</span> Custom Reports & Domain</li>
                         <li><span class="check">✓</span> Dedicated Account Manager</li>
                         <li><span class="check">✓</span> On-site Staff Training</li>
-                        <li><span class="check">✓</span> 99.9% SLA Uptime</li>
                     </ul>
                     <a href="#contact" class="btn btn-outline btn-block">Contact Sales</a>
                 </div>

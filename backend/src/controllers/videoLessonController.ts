@@ -622,3 +622,260 @@ export const getTeacherJitsiConfig = async (req: TenantRequest, res: Response) =
     res.status(500).json({ error: 'Failed to get Jitsi config' });
   }
 };
+
+// ===================== CHAT FEATURES =====================
+
+// Send a chat message (Teacher or Student)
+export const sendChatMessage = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const userRole = getUserRole(req);
+    const { lessonId } = req.params;
+    const { message, studentId, senderName } = req.body;
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Verify lesson exists and is live
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId, status: 'LIVE' },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Live lesson not found' });
+    }
+
+    let senderId: string;
+    let senderType: string;
+    let finalSenderName: string;
+
+    if (userRole === 'TEACHER') {
+      senderId = userId;
+      senderType = 'TEACHER';
+      const teacher = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
+      finalSenderName = teacher?.fullName || 'Teacher';
+    } else {
+      // Parent sending on behalf of student
+      if (!studentId) {
+        return res.status(400).json({ error: 'Student ID is required' });
+      }
+      senderId = studentId;
+      senderType = 'STUDENT';
+      finalSenderName = senderName || 'Student';
+    }
+
+    const chatMessage = await prisma.videoLessonChat.create({
+      data: {
+        videoLessonId: lessonId,
+        senderId,
+        senderType,
+        senderName: finalSenderName,
+        message: message.trim(),
+      },
+    });
+
+    res.status(201).json(chatMessage);
+  } catch (error) {
+    console.error('Send chat message error:', error);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+};
+
+// Get chat messages for a lesson
+export const getChatMessages = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { lessonId } = req.params;
+    const { since } = req.query;
+
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+
+    const where: any = { videoLessonId: lessonId };
+    if (since) {
+      where.createdAt = { gt: new Date(since as string) };
+    }
+
+    const messages = await prisma.videoLessonChat.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+
+    res.json(messages);
+  } catch (error) {
+    console.error('Get chat messages error:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+};
+
+// ===================== RAISE HAND FEATURES =====================
+
+// Raise hand (Student only)
+export const raiseHand = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { lessonId } = req.params;
+    const { studentId, studentName } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Student ID is required' });
+    }
+
+    // Verify lesson is live
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId, status: 'LIVE' },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Live lesson not found' });
+    }
+
+    // Check if already has active raised hand
+    const existingHand = await prisma.videoLessonRaisedHand.findFirst({
+      where: { videoLessonId: lessonId, studentId, isActive: true },
+    });
+
+    if (existingHand) {
+      return res.status(400).json({ error: 'Hand already raised' });
+    }
+
+    const raisedHand = await prisma.videoLessonRaisedHand.create({
+      data: {
+        videoLessonId: lessonId,
+        studentId,
+        studentName: studentName || 'Student',
+        isActive: true,
+      },
+    });
+
+    res.status(201).json(raisedHand);
+  } catch (error) {
+    console.error('Raise hand error:', error);
+    res.status(500).json({ error: 'Failed to raise hand' });
+  }
+};
+
+// Lower hand (Student only)
+export const lowerHand = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { lessonId } = req.params;
+    const { studentId } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Student ID is required' });
+    }
+
+    const raisedHand = await prisma.videoLessonRaisedHand.findFirst({
+      where: { videoLessonId: lessonId, studentId, isActive: true },
+    });
+
+    if (!raisedHand) {
+      return res.status(404).json({ error: 'No active raised hand found' });
+    }
+
+    const updated = await prisma.videoLessonRaisedHand.update({
+      where: { id: raisedHand.id },
+      data: { isActive: false, loweredAt: new Date() },
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Lower hand error:', error);
+    res.status(500).json({ error: 'Failed to lower hand' });
+  }
+};
+
+// Get raised hands for a lesson (Teacher view)
+export const getRaisedHands = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { lessonId } = req.params;
+
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+
+    const raisedHands = await prisma.videoLessonRaisedHand.findMany({
+      where: { videoLessonId: lessonId, isActive: true },
+      orderBy: { raisedAt: 'asc' },
+      include: {
+        student: {
+          select: { firstName: true, lastName: true },
+        },
+      },
+    });
+
+    res.json(raisedHands);
+  } catch (error) {
+    console.error('Get raised hands error:', error);
+    res.status(500).json({ error: 'Failed to fetch raised hands' });
+  }
+};
+
+// Acknowledge raised hand (Teacher only)
+export const acknowledgeHand = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const teacherId = getUserId(req);
+    const { lessonId, handId } = req.params;
+
+    // Verify teacher owns this lesson
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId, teacherId },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+
+    const raisedHand = await prisma.videoLessonRaisedHand.update({
+      where: { id: handId },
+      data: { acknowledgedAt: new Date(), isActive: false, loweredAt: new Date() },
+    });
+
+    res.json(raisedHand);
+  } catch (error) {
+    console.error('Acknowledge hand error:', error);
+    res.status(500).json({ error: 'Failed to acknowledge hand' });
+  }
+};
+
+// Dismiss all raised hands (Teacher only)
+export const dismissAllHands = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const teacherId = getUserId(req);
+    const { lessonId } = req.params;
+
+    const videoLesson = await prisma.videoLesson.findFirst({
+      where: { id: lessonId, tenantId, teacherId },
+    });
+
+    if (!videoLesson) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+
+    await prisma.videoLessonRaisedHand.updateMany({
+      where: { videoLessonId: lessonId, isActive: true },
+      data: { isActive: false, loweredAt: new Date() },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Dismiss all hands error:', error);
+    res.status(500).json({ error: 'Failed to dismiss hands' });
+  }
+};

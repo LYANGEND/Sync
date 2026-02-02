@@ -37,7 +37,7 @@ async function main() {
             maxUsers: 20,
             maxClasses: 10,
             maxStorageGB: 5,
-            features: ['attendance', 'report_cards', 'email_notifications', 'fee_management', 'basic_reports'],
+            features: ['attendance', 'report_cards', 'email_notifications', 'fee_management', 'basic_reports', 'ai_lesson_planner'],
             isPopular: false
         },
         {
@@ -54,7 +54,7 @@ async function main() {
             maxUsers: 50,
             maxClasses: 25,
             maxStorageGB: 20,
-            features: ['attendance', 'report_cards', 'email_notifications', 'sms_notifications', 'fee_management', 'parent_portal', 'advanced_reports'],
+            features: ['attendance', 'report_cards', 'email_notifications', 'sms_notifications', 'fee_management', 'parent_portal', 'advanced_reports', 'ai_lesson_planner', 'ai_assessments', 'ai_report_cards', 'crm_basic'],
             isPopular: true
         },
         {
@@ -71,7 +71,7 @@ async function main() {
             maxUsers: 1000,
             maxClasses: 100,
             maxStorageGB: 100,
-            features: ['white_label', 'api_access', 'dedicated_support', 'custom_integrations', 'priority_support', 'syllabus_tracking', 'timetable'],
+            features: ['white_label', 'api_access', 'dedicated_support', 'custom_integrations', 'priority_support', 'syllabus_tracking', 'timetable', 'ai_lesson_planner', 'ai_assessments', 'ai_report_cards', 'ai_tutor', 'ai_analytics', 'crm_advanced', 'teacher_ai_assistant'],
             isPopular: false
         },
     ];
@@ -96,9 +96,9 @@ async function main() {
     // Seed Plans
     for (const p of plans) {
         const description = p.tier === 'FREE' ? 'Get started with basic features' :
-            p.tier === 'STARTER' ? 'Perfect for small schools' :
-                p.tier === 'PROFESSIONAL' ? 'Best for growing institutions' :
-                    'For large school networks';
+            p.tier === 'STARTER' ? 'Perfect for small schools. Includes AI Lesson Planning.' :
+                p.tier === 'PROFESSIONAL' ? 'Best for growing institutions. Full AI Suite used by best teachers.' :
+                    'For large school networks. Complete AI & Analytics.';
 
         try {
             const existing = await prisma.subscriptionPlan.findFirst({

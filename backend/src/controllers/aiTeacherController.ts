@@ -417,11 +417,18 @@ export const sendMessage = async (req: TenantRequest, res: Response) => {
       });
     }
 
-    // Get tenant info for school name
+    // Get tenant info for school name and feature check
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { name: true },
+      select: { name: true, aiTutorEnabled: true },
     });
+
+    if (!tenant?.aiTutorEnabled) {
+      return res.status(403).json({ 
+        error: 'AI Tutor is not included in your current subscription plan.',
+        requiresUpgrade: true 
+      });
+    }
 
     // Get or create conversation
     let conversation;

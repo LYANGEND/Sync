@@ -1,13 +1,58 @@
+# Dependencies
 node_modules
-npm-debug.log
+npm-debug.log*
+yarn-error.log*
+
+# Environment files
 .env
-.git
-.gitignore
-README.md
-Dockerfile
-docker-compose*
-.vscode
-.idea
+.env.*
+!.env.example
+
+# Build outputs
 dist
 coverage
+*.tsbuildinfo
+
+# IDE/Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation
 *.md
+docs
+
+# PDF files
+*.pdf
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__
+
+# Misc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Upload folders (will be mounted as volume)
+uploads
+
+# Seed data (not needed in production)
+Finalised*
+*.sql
+seed_error.log
+test_write.txt

@@ -159,6 +159,12 @@ export const getSubscriptionStatus = async (req: TenantRequest, res: Response) =
                 syllabusEnabled: tenant.syllabusEnabled,
                 apiAccessEnabled: tenant.apiAccessEnabled,
                 advancedReportsEnabled: tenant.advancedReportsEnabled,
+                // AI Features
+                aiLessonPlanEnabled: tenant.aiLessonPlanEnabled,
+                aiTutorEnabled: tenant.aiTutorEnabled,
+                aiAnalyticsEnabled: tenant.aiAnalyticsEnabled,
+                aiReportCardsEnabled: tenant.aiReportCardsEnabled,
+                aiAssessmentsEnabled: tenant.aiAssessmentsEnabled,
             },
             recentPayments,
         });
@@ -480,6 +486,12 @@ export const activateSubscriptionFromPayment = async (paymentId: string) => {
             apiAccessEnabled: payment.plan.features.includes('api_access'),
             timetableEnabled: payment.plan.features.includes('timetable'),
             syllabusEnabled: payment.plan.features.includes('syllabus_tracking'),
+            // AI Features
+            aiLessonPlanEnabled: payment.plan.features.includes('ai_lesson_planner'),
+            aiTutorEnabled: payment.plan.features.includes('ai_tutor'),
+            aiAnalyticsEnabled: payment.plan.features.includes('ai_analytics'),
+            aiReportCardsEnabled: payment.plan.features.includes('ai_report_cards'),
+            aiAssessmentsEnabled: payment.plan.features.includes('ai_assessments'),
         },
     });
 
@@ -540,6 +552,12 @@ export const confirmPayment = async (req: TenantRequest, res: Response) => {
                 apiAccessEnabled: payment.plan.features.includes('api_access'),
                 timetableEnabled: payment.plan.features.includes('timetable'),
                 syllabusEnabled: payment.plan.features.includes('syllabus_tracking'),
+                // AI Features
+                aiLessonPlanEnabled: payment.plan.features.includes('ai_lesson_planner'),
+                aiTutorEnabled: payment.plan.features.includes('ai_tutor'),
+                aiAnalyticsEnabled: payment.plan.features.includes('ai_analytics'),
+                aiReportCardsEnabled: payment.plan.features.includes('ai_report_cards'),
+                aiAssessmentsEnabled: payment.plan.features.includes('ai_assessments'),
             },
         });
 

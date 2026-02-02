@@ -1,0 +1,13 @@
+DATABASE_URL="postgresql://sync_user:sync_password@localhost:5432/sync_db?schema=public"
+JWT_SECRET="your-secret-key-here"
+PORT=4000
+VAPID_PUBLIC_KEY="your-vapid-public-key"
+VAPID_PRIVATE_KEY="your-vapid-private-key"
+VAPID_EMAIL="mailto:admin@yourschool.com"
+LENCO_API_URL="https://api.lenco.co/access/v2/collections/mobile-money"
+LENCO_API_URL_TEST="https://sandbox.lenco.co/access/V2/collections/mobile-money"
+LENCO_API_TOKEN="your-lenco-api-token"
+AZURE_OPENAI_API_KEY=your-azure-openai-api-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_DEPLOYMENT=gpt-4o

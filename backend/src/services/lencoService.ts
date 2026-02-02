@@ -4,34 +4,36 @@ export const initiateMobileMoneyCollection = async (
     reference: string,
     operator: 'mtn' | 'airtel'
 ) => {
-    // DEBUG: Log env variable status
-    console.log('DEBUG: LENCO_API_TOKEN exists?', !!process.env.LENCO_API_TOKEN);
-    console.log('DEBUG: LENCO_API_URL_TEST exists?', !!process.env.LENCO_API_URL_TEST);
-    console.log('DEBUG: All LENCO env vars:', Object.keys(process.env).filter(k => k.includes('LENCO')));
-
-    const url = process.env.LENCO_API_URL_TEST;
-    const apiKey = process.env.LENCO_API_TOKEN; // Make sure to add this to your .env
+    const isDebug = process.env.NODE_ENV === 'development';
+    
+    const url = process.env.NODE_ENV === 'production' 
+        ? process.env.LENCO_API_URL_PROD 
+        : process.env.LENCO_API_URL_TEST;
+    const apiKey = process.env.LENCO_API_TOKEN;
 
     if (!apiKey) {
         throw new Error('LENCO_API_TOKEN is not configured');
     }
 
     if (!url) {
-        throw new Error('LENCO_API_URL_TEST is not configured');
+        throw new Error('Lenco API URL is not configured');
     }
+
+    // Sanitize phone number - remove spaces, dashes
+    const sanitizedPhone = phoneNumber.replace(/[\s-]/g, '');
 
     const payload = {
         amount,
-        phone: phoneNumber,
+        phone: sanitizedPhone,
         reference,
         operator,
-        country: 'zm', // Defaulting to Zambia
-        bearer: 'merchant' // You pay the fees (standard for billing), or change to 'customer'
+        country: 'zm',
+        bearer: 'merchant'
     };
 
-    console.log('DEBUG: initiateMobileMoneyCollection called');
-    console.log('DEBUG: Lenco API URL:', url);
-    console.log('DEBUG: Lenco API Payload:', JSON.stringify(payload, null, 2));
+    if (isDebug) {
+        console.log('DEBUG: Lenco API call initiated for reference:', reference);
+    }
 
     try {
         const response = await fetch(url, {
@@ -43,12 +45,14 @@ export const initiateMobileMoneyCollection = async (
             body: JSON.stringify(payload)
         });
 
-        console.log('DEBUG: Lenco API Response Status:', response.status);
         const data = await response.json();
-        console.log('DEBUG: Lenco API Response Body:', JSON.stringify(data, null, 2));
+        
+        if (isDebug) {
+            console.log('DEBUG: Lenco API Response Status:', response.status);
+        }
 
         if (!response.ok) {
-            console.error('DEBUG: Lenco API Error Message:', data.message);
+            console.error('Lenco API Error:', data.message || 'Unknown error');
             throw new Error(data.message || 'Failed to initiate mobile money payment');
         }
 

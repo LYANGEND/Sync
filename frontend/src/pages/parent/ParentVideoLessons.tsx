@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Video,
   Calendar,
@@ -13,6 +13,10 @@ import {
   RefreshCw,
   Bell,
   User,
+  MessageCircle,
+  Hand,
+  Send,
+  X,
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -49,6 +53,15 @@ interface Student {
   lastName: string;
 }
 
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderType: 'TEACHER' | 'STUDENT';
+  senderName: string;
+  message: string;
+  createdAt: string;
+}
+
 const ParentVideoLessons: React.FC = () => {
   const [lessons, setLessons] = useState<VideoLesson[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -58,6 +71,15 @@ const ParentVideoLessons: React.FC = () => {
   const [activeLesson, setActiveLesson] = useState<VideoLesson | null>(null);
   const [showJitsi, setShowJitsi] = useState(false);
   const [joiningLesson, setJoiningLesson] = useState<string | null>(null);
+  
+  // Chat and raise hand state
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
+  const [raisingHand, setRaisingHand] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchStudents();
@@ -71,6 +93,20 @@ const ParentVideoLessons: React.FC = () => {
       return () => clearInterval(interval);
     }
   }, [selectedStudentId]);
+
+  // Poll for chat messages when in a live lesson
+  useEffect(() => {
+    if (showJitsi && activeLesson) {
+      fetchChatMessages();
+      const interval = setInterval(fetchChatMessages, 3000); // Poll every 3 seconds
+      return () => clearInterval(interval);
+    }
+  }, [showJitsi, activeLesson?.id]);
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const fetchStudents = async () => {
     try {
@@ -127,6 +163,17 @@ const ParentVideoLessons: React.FC = () => {
   const handleLeaveLesson = async () => {
     if (!activeLesson) return;
 
+    // Lower hand if raised before leaving
+    if (handRaised) {
+      try {
+        await api.post(`/video-lessons/${activeLesson.id}/lower-hand`, {
+          studentId: selectedStudentId,
+        });
+      } catch (err) {
+        console.error('Failed to lower hand:', err);
+      }
+    }
+
     try {
       await api.post(`/video-lessons/${activeLesson.id}/leave`, {
         studentId: selectedStudentId,
@@ -137,7 +184,71 @@ const ParentVideoLessons: React.FC = () => {
     
     setShowJitsi(false);
     setActiveLesson(null);
+    setShowChat(false);
+    setChatMessages([]);
+    setHandRaised(false);
     fetchLessons();
+  };
+
+  // Chat functions
+  const fetchChatMessages = async () => {
+    if (!activeLesson) return;
+    try {
+      const response = await api.get(`/video-lessons/${activeLesson.id}/chat`);
+      setChatMessages(response.data || []);
+    } catch (err) {
+      console.error('Failed to fetch chat messages:', err);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!activeLesson || !newMessage.trim() || sendingMessage) return;
+    
+    const student = students.find(s => s.id === selectedStudentId);
+    const senderName = student ? `${student.firstName} ${student.lastName}` : 'Student';
+    
+    setSendingMessage(true);
+    try {
+      await api.post(`/video-lessons/${activeLesson.id}/chat`, {
+        message: newMessage.trim(),
+        studentId: selectedStudentId,
+        senderName,
+      });
+      setNewMessage('');
+      fetchChatMessages();
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Raise hand functions
+  const toggleRaiseHand = async () => {
+    if (!activeLesson || raisingHand) return;
+    
+    const student = students.find(s => s.id === selectedStudentId);
+    const studentName = student ? `${student.firstName} ${student.lastName}` : 'Student';
+    
+    setRaisingHand(true);
+    try {
+      if (handRaised) {
+        await api.post(`/video-lessons/${activeLesson.id}/lower-hand`, {
+          studentId: selectedStudentId,
+        });
+        setHandRaised(false);
+      } else {
+        await api.post(`/video-lessons/${activeLesson.id}/raise-hand`, {
+          studentId: selectedStudentId,
+          studentName,
+        });
+        setHandRaised(true);
+      }
+    } catch (err: any) {
+      console.error('Failed to toggle hand:', err);
+    } finally {
+      setRaisingHand(false);
+    }
   };
 
   const openInNewWindow = () => {
@@ -229,7 +340,7 @@ const ParentVideoLessons: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           {/* Header */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
                   <Video className="w-5 h-5 text-red-600 dark:text-red-400" />
@@ -248,6 +359,33 @@ const ParentVideoLessons: React.FC = () => {
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                {/* Raise Hand Button */}
+                <button
+                  onClick={toggleRaiseHand}
+                  disabled={raisingHand}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    handRaised
+                      ? 'bg-yellow-500 text-white hover:bg-yellow-600'
+                      : 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <Hand className={`w-4 h-4 ${handRaised ? 'animate-bounce' : ''}`} />
+                  {handRaised ? 'Hand Raised' : 'Raise Hand'}
+                </button>
+                
+                {/* Chat Toggle Button */}
+                <button
+                  onClick={() => setShowChat(!showChat)}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    showChat
+                      ? 'bg-blue-600 text-white'
+                      : 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Chat
+                </button>
+                
                 <button
                   onClick={openInNewWindow}
                   className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -265,14 +403,107 @@ const ParentVideoLessons: React.FC = () => {
             </div>
           </div>
 
-          {/* Jitsi Embed */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
-            <iframe
-              src={jitsiUrl}
-              allow="camera; microphone; fullscreen; display-capture; autoplay"
-              className="w-full h-full border-0"
-              title="Video Lesson"
-            />
+          {/* Main Content Area */}
+          <div className="flex gap-4" style={{ height: 'calc(100vh - 180px)' }}>
+            {/* Jitsi Embed */}
+            <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden transition-all ${showChat ? 'flex-1' : 'w-full'}`}>
+              <iframe
+                src={jitsiUrl}
+                allow="camera; microphone; fullscreen; display-capture; autoplay"
+                className="w-full h-full border-0"
+                title="Video Lesson"
+              />
+            </div>
+
+            {/* Chat Panel */}
+            {showChat && (
+              <div className="w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg flex flex-col">
+                {/* Chat Header */}
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    <span className="font-semibold text-gray-900 dark:text-white">Class Chat</span>
+                  </div>
+                  <button
+                    onClick={() => setShowChat(false)}
+                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                  {chatMessages.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No messages yet</p>
+                      <p className="text-xs">Be the first to say hello!</p>
+                    </div>
+                  ) : (
+                    chatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col ${
+                          msg.senderId === selectedStudentId ? 'items-end' : 'items-start'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 mb-1">
+                          <span className={`text-xs font-medium ${
+                            msg.senderType === 'TEACHER' 
+                              ? 'text-purple-600 dark:text-purple-400' 
+                              : 'text-gray-600 dark:text-gray-400'
+                          }`}>
+                            {msg.senderType === 'TEACHER' && '👨‍🏫 '}
+                            {msg.senderName}
+                          </span>
+                        </div>
+                        <div
+                          className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+                            msg.senderId === selectedStudentId
+                              ? 'bg-blue-600 text-white'
+                              : msg.senderType === 'TEACHER'
+                              ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-900 dark:text-purple-100'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                          }`}
+                        >
+                          {msg.message}
+                        </div>
+                        <span className="text-[10px] text-gray-400 mt-1">
+                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Message Input */}
+                <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                      placeholder="Type a message..."
+                      className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={sendMessage}
+                      disabled={!newMessage.trim() || sendingMessage}
+                      className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {sendingMessage ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

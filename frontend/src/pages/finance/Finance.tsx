@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import FinanceReports from './FinanceReports';
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone } from 'lucide-react';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
 import BulkImportModal from '../../components/BulkImportModal';
@@ -11,6 +11,7 @@ import QRCode from 'qrcode';
 import { Payment, FeeTemplate, AcademicTerm, Class } from '../../types';
 import SendReceiptModal from '../../components/finance/SendReceiptModal';
 import TransactionDetailsModal from '../../components/finance/TransactionDetailsModal';
+import MobileMoneyPayments from '../../components/finance/MobileMoneyPayments';
 
 
 
@@ -20,7 +21,7 @@ const getGradeLabel = (grade: number) => {
 };
 
 const Finance = () => {
-  const [activeTab, setActiveTab] = useState<'payments' | 'fees' | 'scholarships' | 'reminders' | 'reports'>('payments');
+  const [activeTab, setActiveTab] = useState<'payments' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'mobile-money'>('payments');
   const [payments, setPayments] = useState<Payment[]>([]);
   const [feeTemplates, setFeeTemplates] = useState<FeeTemplate[]>([]);
   const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
@@ -58,7 +59,9 @@ const Finance = () => {
     amount: '',
     method: 'CASH',
     transactionId: '',
-    notes: ''
+    notes: '',
+    operator: 'mtn',
+    phoneNumber: ''
   });
   const [selectedTransaction, setSelectedTransaction] = useState<Payment | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -246,7 +249,7 @@ const Finance = () => {
         amount: Number(paymentForm.amount)
       });
       setShowAddModal(false);
-      setPaymentForm({ studentId: '', amount: '', method: 'CASH', transactionId: '', notes: '' });
+      setPaymentForm({ studentId: '', amount: '', method: 'CASH', transactionId: '', notes: '', operator: 'mtn', phoneNumber: '' });
       setStudentSearch('');
       fetchPayments();
       fetchStats();
@@ -587,6 +590,16 @@ const Finance = () => {
           Reports
         </button>
         <button
+          onClick={() => setActiveTab('mobile-money')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'mobile-money'
+            ? 'bg-white text-slate-800 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+            }`}
+        >
+          <Smartphone size={16} />
+          Mobile Money
+        </button>
+        <button
           onClick={() => {
             setActiveTab('reminders');
             fetchDebtors();
@@ -603,6 +616,8 @@ const Finance = () => {
 
       {activeTab === 'reports' ? (
         <FinanceReports />
+      ) : activeTab === 'mobile-money' ? (
+        <MobileMoneyPayments />
       ) : activeTab === 'scholarships' ? (
         <Scholarships />
       ) : activeTab === 'reminders' ? (
@@ -1276,6 +1291,64 @@ const Finance = () => {
                   <option value="BANK_DEPOSIT">Bank Deposit</option>
                 </select>
               </div>
+
+              {/* Mobile Money Details - only show when MOBILE_MONEY is selected */}
+              {paymentForm.method === 'MOBILE_MONEY' && (
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+                  <div className="flex items-center gap-2 text-slate-700 font-medium text-sm">
+                    <CreditCard size={16} />
+                    Mobile Money Details
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Operator</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentForm({ ...paymentForm, operator: 'mtn' })}
+                        className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                          paymentForm.operator === 'mtn' 
+                            ? 'border-yellow-400 bg-yellow-50 ring-2 ring-yellow-200' 
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="w-10 h-10 bg-yellow-400 rounded-lg flex items-center justify-center">
+                          <span className="font-bold text-white text-sm">MTN</span>
+                        </div>
+                        <span className="text-sm font-medium text-slate-900">MTN MoMo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentForm({ ...paymentForm, operator: 'airtel' })}
+                        className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                          paymentForm.operator === 'airtel' 
+                            ? 'border-red-400 bg-red-50 ring-2 ring-red-200' 
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center">
+                          <span className="font-bold text-white text-xs">Airtel</span>
+                        </div>
+                        <span className="text-sm font-medium text-slate-900">Airtel Money</span>
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                    <input
+                      type="tel"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="260 9XX XXX XXX"
+                      value={paymentForm.phoneNumber}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, phoneNumber: e.target.value })}
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Phone number used for {paymentForm.operator === 'mtn' ? 'MTN MoMo' : 'Airtel Money'}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Transaction ID</label>

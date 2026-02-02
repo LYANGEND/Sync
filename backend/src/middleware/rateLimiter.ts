@@ -267,9 +267,54 @@ export const reportRateLimiter = createEndpointRateLimiter(
     'Report generation limit reached. Please wait before generating more reports.'
 );
 
+/**
+ * Public API rate limiter (for unauthenticated public endpoints)
+ * Uses IP-based limiting
+ */
+export const publicRateLimiter = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    try {
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        const path = req.path;
+
+        // Conservative limits for public endpoints
+        const config: RateLimitConfig = {
+            windowMs: 60000,         // 1 minute
+            maxRequests: 30,         // 30 requests per minute per IP
+            message: 'Too many requests. Please try again later.',
+        };
+
+        const limitKey = `public:${ip}:${path}`;
+        const result = await checkRateLimit(limitKey, config.maxRequests, config.windowMs);
+
+        res.setHeader('X-RateLimit-Limit', config.maxRequests.toString());
+        res.setHeader('X-RateLimit-Remaining', result.remaining.toString());
+        res.setHeader('X-RateLimit-Reset', Math.ceil(result.resetIn / 1000).toString());
+
+        if (!result.allowed) {
+            res.setHeader('Retry-After', Math.ceil(result.resetIn / 1000).toString());
+            res.status(429).json({
+                error: 'Too Many Requests',
+                message: config.message,
+                retryAfter: Math.ceil(result.resetIn / 1000),
+            });
+            return;
+        }
+
+        next();
+    } catch (error) {
+        console.error('Public rate limiter error:', error);
+        next();
+    }
+};
+
 export default {
     rateLimiter,
     strictRateLimiter,
+    publicRateLimiter,
     createEndpointRateLimiter,
     smsRateLimiter,
     emailRateLimiter,

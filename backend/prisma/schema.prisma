@@ -135,6 +135,13 @@ model Tenant {
   apiAccessEnabled        Boolean @default(false)
   timetableEnabled        Boolean @default(true)
   syllabusEnabled         Boolean @default(false)
+
+  // AI Feature Flags
+  aiLessonPlanEnabled     Boolean @default(false)
+  aiTutorEnabled          Boolean @default(false)
+  aiAnalyticsEnabled      Boolean @default(false)
+  aiReportCardsEnabled    Boolean @default(false)
+  aiAssessmentsEnabled    Boolean @default(false)
   
   // SMTP Settings (per-tenant email configuration)
   emailProvider   String?  @default("smtp") // "smtp", "ses", "sendgrid"
@@ -213,6 +220,11 @@ model Tenant {
   teacherAIConversations TeacherAIConversation[] @relation("TenantTeacherAIConversations")
   teacherAITemplates     TeacherAITemplate[]     @relation("TenantTeacherAITemplates")
   teacherAIUsage         TeacherAIUsage[]        @relation("TenantTeacherAIUsage")
+  teacherAIFavoritePrompts TeacherAIFavoritePrompt[] @relation("TenantTeacherAIFavoritePrompts")
+  teacherAIDrafts        TeacherAIDraft[]        @relation("TenantTeacherAIDrafts")
+  curriculumStandards    CurriculumStandard[]    @relation("TenantCurriculumStandards")
+  commonMisconceptions   CommonMisconception[]   @relation("TenantCommonMisconceptions")
+  academicVocabulary     AcademicVocabulary[]    @relation("TenantAcademicVocabulary")
   
   // Branch Relations
   branches          Branch[]
@@ -413,6 +425,20 @@ model PlatformSettings {
   azureEmailFromAddress String?
   azureEmailEndpoint String?
   azureEmailAccessKey String?
+  
+  // Payment Gateway Configuration (NON-SECRET configs only)
+  paymentGatewayProvider String @default("lenco") // "lenco", "dpo", "paystack"
+  mobileMoneyFeePercent Decimal @db.Decimal(5, 4) @default(0.025) // 2.5% default
+  mobileMoneyFeeCap Decimal? @db.Decimal(10, 2) // Optional max fee cap
+  mobileMoneyEnabled Boolean @default(true)
+  allowedPaymentMethods Json @default("[\"CASH\", \"MOBILE_MONEY\", \"BANK_DEPOSIT\"]")
+  
+  // CORS / Security Configuration (non-secret)
+  allowedOrigins Json @default("[\"http://localhost:5173\", \"http://localhost:3000\"]") // Array of allowed origins
+  
+  // Rate Limiting Configuration (can be adjusted from ops admin)
+  publicApiRateLimitPerMinute Int @default(30)
+  paymentApiRateLimitPerMinute Int @default(10)
   
   // Platform Branding
   platformName    String   @default("Sync School Management")
@@ -874,6 +900,8 @@ model User {
   teacherAIConversations   TeacherAIConversation[] @relation("TeacherAIConversations")
   teacherAITemplates       TeacherAITemplate[]     @relation("TeacherAITemplates")
   teacherAIUsage           TeacherAIUsage[]        @relation("TeacherAIUsage")
+  teacherAIFavoritePrompts TeacherAIFavoritePrompt[] @relation("TeacherAIFavoritePrompts")
+  teacherAIDrafts          TeacherAIDraft[]        @relation("TeacherAIDrafts")
   
   // Branch Relations
   branchId                 String?
@@ -944,6 +972,7 @@ model Student {
   submissions     AssessmentSubmission[]
   homeworkSubmissions HomeworkSubmission[]
   videoLessonAttendance VideoLessonAttendee[]
+  videoLessonRaisedHands VideoLessonRaisedHand[]
   aiConversations   AIConversation[] @relation("AIStudentConversations")
   
   // Branch Relations
@@ -1169,6 +1198,14 @@ model Payment {
   // Branch Relations
   branchId        String?
   branch          Branch?       @relation(fields: [branchId], references: [id])
+  
+  // Mobile Money specific fields
+  mobileMoneyOperator   String?   // "mtn", "airtel", "zamtel"
+  mobileMoneyPhone      String?   // Phone number used for payment
+  mobileMoneyRef        String?   // Reference from mobile money provider
+  mobileMoneyStatus     String?   // Status from mobile money provider (e.g., "TS" for success)
+  mobileMoneyConfirmedAt DateTime? // When the payment was confirmed by mobile money provider
+  mobileMoneyFee        Decimal?  @db.Decimal(10, 2) // Transaction fee charged
 
   @@index([tenantId])
   @@index([tenantId, paymentDate])        // Financial reports
@@ -1177,6 +1214,7 @@ model Payment {
   @@index([transactionId])                // Transaction lookup
   @@index([status])                       // Filter by status
   @@index([branchId])                     // Filter by branch
+  @@index([mobileMoneyRef])               // Mobile money reference lookup
   @@map("payments")
 }
 
@@ -2744,6 +2782,10 @@ model VideoLesson {
   // Attendance tracking
   attendees       VideoLessonAttendee[]
   
+  // Chat and raised hands
+  chatMessages    VideoLessonChat[]
+  raisedHands     VideoLessonRaisedHand[]
+  
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -2772,6 +2814,49 @@ model VideoLessonAttendee {
   @@index([videoLessonId])
   @@index([studentId])
   @@map("video_lesson_attendees")
+}
+
+// Chat messages during video lessons
+model VideoLessonChat {
+  id              String   @id @default(uuid())
+  
+  videoLessonId   String
+  videoLesson     VideoLesson @relation(fields: [videoLessonId], references: [id], onDelete: Cascade)
+  
+  // Sender can be teacher (userId) or student (studentId)
+  senderId        String
+  senderType      String   // "TEACHER" or "STUDENT"
+  senderName      String
+  
+  message         String
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([videoLessonId])
+  @@index([createdAt])
+  @@map("video_lesson_chats")
+}
+
+// Raised hands during video lessons
+model VideoLessonRaisedHand {
+  id              String   @id @default(uuid())
+  
+  videoLessonId   String
+  videoLesson     VideoLesson @relation(fields: [videoLessonId], references: [id], onDelete: Cascade)
+  
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  studentName     String
+  
+  raisedAt        DateTime @default(now())
+  loweredAt       DateTime?
+  acknowledgedAt  DateTime?  // When teacher acknowledged
+  isActive        Boolean  @default(true)
+  
+  @@index([videoLessonId])
+  @@index([studentId])
+  @@index([isActive])
+  @@map("video_lesson_raised_hands")
 }
 
 // ==================== AI TEACHER ====================
@@ -2877,6 +2962,9 @@ model TeacherAIConversation {
   teacher     User                        @relation("TeacherAIConversations", fields: [teacherId], references: [id], onDelete: Cascade)
   tenant      Tenant                      @relation("TenantTeacherAIConversations", fields: [tenantId], references: [id], onDelete: Cascade)
   messages    TeacherAIMessage[]
+  lessonStandards LessonStandard[]
+  bloomsQuestions BloomsQuestion[]
+  differentiatedContent DifferentiatedContent[]
   
   @@index([teacherId])
   @@index([tenantId])
@@ -2936,4 +3024,171 @@ model TeacherAIUsage {
   @@index([tenantId])
   @@index([date])
   @@map("teacher_ai_usage")
+}
+
+model TeacherAIFavoritePrompt {
+  id          String    @id @default(uuid())
+  teacherId   String
+  tenantId    String
+  title       String
+  prompt      String    @db.Text
+  category    String?   // 'lesson-plan', 'quiz', 'email', 'chat', 'general'
+  icon        String?
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  teacher     User      @relation("TeacherAIFavoritePrompts", fields: [teacherId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation("TenantTeacherAIFavoritePrompts", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([teacherId])
+  @@index([tenantId])
+  @@map("teacher_ai_favorite_prompts")
+}
+
+model TeacherAIDraft {
+  id          String    @id @default(uuid())
+  teacherId   String
+  tenantId    String
+  type        String    // 'chat', 'lesson-plan', 'quiz', 'email'
+  content     String    @db.Text
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  teacher     User      @relation("TeacherAIDrafts", fields: [teacherId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation("TenantTeacherAIDrafts", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([teacherId])
+  @@index([tenantId])
+  @@index([type])
+  @@map("teacher_ai_drafts")
+}
+
+model CurriculumStandard {
+  id              String    @id @default(uuid())
+  tenantId        String
+  code            String    // e.g., "CCSS.MATH.5.NF.A.1"
+  framework       String    // 'CCSS', 'NGSS', 'State', etc.
+  subject         String
+  gradeLevel      Int
+  domain          String?   // e.g., "Number & Operations - Fractions"
+  cluster         String?   // e.g., "Use equivalent fractions"
+  description     String    @db.Text
+  fullText        String?   @db.Text
+  prerequisites   String[]  // Array of prerequisite standard codes
+  nextStandards   String[]  // Array of next standard codes
+  bloomsLevel     String?   // Primary cognitive level
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant          Tenant    @relation("TenantCurriculumStandards", fields: [tenantId], references: [id], onDelete: Cascade)
+  lessonStandards LessonStandard[]
+  
+  @@unique([tenantId, code, framework])
+  @@index([tenantId])
+  @@index([framework])
+  @@index([subject])
+  @@index([gradeLevel])
+  @@map("curriculum_standards")
+}
+
+model LessonStandard {
+  id            String              @id @default(uuid())
+  conversationId String
+  standardId    String
+  alignment     String              // 'primary', 'secondary', 'prerequisite'
+  createdAt     DateTime            @default(now())
+
+  conversation  TeacherAIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  standard      CurriculumStandard    @relation(fields: [standardId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([standardId])
+  @@map("lesson_standards")
+}
+
+model BloomsQuestion {
+  id              String    @id @default(uuid())
+  conversationId  String
+  questionText    String    @db.Text
+  bloomsLevel     String    // 'remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'
+  dokLevel        Int?      // Depth of Knowledge: 1-4
+  questionType    String    // 'multiple-choice', 'short-answer', 'essay', etc.
+  correctAnswer   String?   @db.Text
+  distractors     String[]  // For multiple choice
+  rubric          Json?     // For open-ended questions
+  difficulty      String    // 'easy', 'medium', 'hard'
+  createdAt       DateTime  @default(now())
+
+  conversation    TeacherAIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([bloomsLevel])
+  @@map("blooms_questions")
+}
+
+model DifferentiatedContent {
+  id              String    @id @default(uuid())
+  conversationId  String
+  originalContent String    @db.Text
+  level           String    // 'below', 'on-level', 'above', 'ell', 'accessible'
+  content         String    @db.Text
+  modifications   Json      // Details about what was changed
+  createdAt       DateTime  @default(now())
+
+  conversation    TeacherAIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([level])
+  @@map("differentiated_content")
+}
+
+model CommonMisconception {
+  id              String    @id @default(uuid())
+  tenantId        String
+  subject         String
+  topic           String
+  gradeLevel      Int
+  misconception   String    @db.Text
+  whyItHappens    String    @db.Text
+  intervention    String    @db.Text
+  checkQuestions  String[]
+  resources       Json?
+  usageCount      Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant          Tenant    @relation("TenantCommonMisconceptions", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([subject])
+  @@index([topic])
+  @@index([gradeLevel])
+  @@map("common_misconceptions")
+}
+
+model AcademicVocabulary {
+  id              String    @id @default(uuid())
+  tenantId        String
+  word            String
+  tier            Int       // 1 (basic), 2 (academic), 3 (content-specific)
+  subject         String
+  gradeLevel      Int
+  definition      String    @db.Text
+  studentFriendly String    @db.Text
+  examples        String[]
+  nonExamples     String[]
+  visualUrl       String?
+  synonyms        String[]
+  relatedWords    String[]
+  createdAt       DateTime  @default(now())
+
+  tenant          Tenant    @relation("TenantAcademicVocabulary", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([subject])
+  @@index([gradeLevel])
+  @@index([tier])
+  @@map("academic_vocabulary")
 }

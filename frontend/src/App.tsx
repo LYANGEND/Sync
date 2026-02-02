@@ -37,6 +37,7 @@ import TeacherAIAssistant from './pages/teacher-assistant/TeacherAIAssistant';
 import AITeacher from './pages/ai-teacher/AITeacher';
 import MyChildren from './pages/parents/MyChildren';
 import AcademicReports from './pages/parents/AcademicReports';
+import PublicPayment from './pages/public/PublicPayment';
 import ForumList from './pages/forums/ForumList';
 import ForumView from './pages/forums/ForumView';
 import TopicView from './pages/forums/TopicView';
@@ -63,6 +64,9 @@ function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/ops" element={<PlatformAdmin />} />
+              
+              {/* Public payment page - no auth required */}
+              <Route path="/pay/:schoolSlug" element={<PublicPayment />} />
 
               <Route element={<ProtectedRoute />}>
                 <Route path="/student/quiz/:assessmentId" element={<StudentQuiz />} />

@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+
+# Version control
+.git
+.gitignore
+
+# Documentation
+*.md
+
+# PDF files
+*.pdf
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# IDE/Editor
+.vscode
+.idea
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore

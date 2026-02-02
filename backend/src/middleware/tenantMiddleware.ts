@@ -151,13 +151,13 @@ export const resolveTenant = async (
  * Extract subdomain from hostname
  */
 const extractSubdomain = (hostname: string): string | null => {
-    const baseDomains = (process.env.BASE_DOMAINS || 'localhost,sync.app,amenshi.com').split(',');
+    const baseDomains = (process.env.BASE_DOMAINS || 'localhost,bwangubwangu.net').split(',');
 
     for (const baseDomain of baseDomains) {
         if (hostname.endsWith(`.${baseDomain.trim()}`)) {
             const subdomain = hostname.replace(`.${baseDomain.trim()}`, '');
             // Make sure it's not www or other reserved subdomains
-            if (!['www', 'api', 'admin', 'platform'].includes(subdomain)) {
+            if (!['www', 'api', 'admin', 'platform', 'sync'].includes(subdomain)) {
                 return subdomain;
             }
         }

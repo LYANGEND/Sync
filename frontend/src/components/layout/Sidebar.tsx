@@ -155,9 +155,27 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
     },
   ];
 
-  const filteredMenuItems = menuItems.filter(item =>
-    user && item.roles.includes(user.role)
-  );
+  // Check if user has access to AI features (Professional or Enterprise tier only)
+  const hasAIAccess = user?.subscription?.tier === 'PROFESSIONAL' || 
+                      user?.subscription?.tier === 'ENTERPRISE' ||
+                      user?.subscription?.features?.aiLessonPlanEnabled;
+
+  const filteredMenuItems = menuItems.filter(item => {
+    // Check role access
+    if (!user || !item.roles.includes(user.role)) return false;
+    
+    // Gate AI features to Professional/Enterprise tiers
+    if (item.path === '/teacher/ai-assistant' && !hasAIAccess) return false;
+    if (item.path === '/ai-teacher' && !user?.subscription?.features?.aiTutorEnabled) {
+      // AI Teacher for students/parents - check if aiTutorEnabled
+      // Allow for now if tier is Professional/Enterprise
+      if (user?.subscription?.tier !== 'PROFESSIONAL' && user?.subscription?.tier !== 'ENTERPRISE') {
+        return false;
+      }
+    }
+    
+    return true;
+  });
 
   return (
     <>

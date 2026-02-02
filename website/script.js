@@ -98,6 +98,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================
+    // DYNAMIC PRICING FROM API
+    // ==========================================
+    loadPricing();
+
+    // ==========================================
     // CONTACT FORM SUBMISSION
     // ==========================================
     const contactForm = document.getElementById('contact-form');
@@ -467,3 +472,135 @@ window.addEventListener('load', () => {
         setTimeout(() => preloader.remove(), 300);
     }
 });
+
+// ==========================================
+// DYNAMIC PRICING FUNCTIONS
+// ==========================================
+
+/**
+ * Format price with thousands separator
+ */
+function formatPrice(amount) {
+    if (amount === 0 || amount === 'Custom') return 'Custom';
+    return new Intl.NumberFormat('en-ZM').format(amount);
+}
+
+/**
+ * Get feature display name from feature key
+ */
+function getFeatureLabel(feature) {
+    const labels = {
+        'sms': 'SMS & WhatsApp Messages',
+        'email': 'Email Notifications',
+        'parent_portal': 'Parent Portal Access',
+        'online_assessments': 'Online Assessments',
+        'report_cards': 'Report Cards',
+        'attendance': 'Digital Attendance',
+        'fee_management': 'Fee Management',
+        'chat': 'In-App Messaging',
+        'advanced_reports': 'Advanced Analytics',
+        'api_access': 'API Access',
+        'timetable': 'Timetable Management',
+        'syllabus': 'Syllabus Tracking',
+        'ai_lesson_plan': 'AI Lesson Planning',
+        'ai_tutor': 'AI Tutor for Students',
+        'ai_analytics': 'AI Analytics',
+        'ai_report_cards': 'AI Report Cards',
+        'ai_assessments': 'AI Quiz Generation',
+        'multi_branch': 'Multi-Campus Support',
+        'custom_domain': 'Custom Domain',
+        'priority_support': 'Priority Support',
+        'dedicated_manager': 'Dedicated Account Manager',
+        'onsite_training': 'On-site Training',
+        'sla_uptime': '99.9% SLA Uptime'
+    };
+    return labels[feature] || feature.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
+/**
+ * Create pricing card HTML
+ */
+function createPricingCard(plan) {
+    const isPopular = plan.isPopular;
+    const isCustom = plan.price.monthly.zmw === 0 || plan.tier.toUpperCase() === 'ENTERPRISE';
+    
+    const priceHtml = isCustom 
+        ? `<span class="currency"></span><span class="amount">Custom</span><span class="period"></span>`
+        : `<span class="currency">ZMW</span><span class="amount">${formatPrice(plan.price.monthly.zmw)}</span><span class="period">/month</span>`;
+    
+    const studentLimit = plan.limits.students === 'Unlimited' || plan.limits.students === 0
+        ? 'Unlimited students'
+        : `Up to ${formatPrice(plan.limits.students)} students`;
+    
+    // Build features list
+    let featuresHtml = `<li><span class="check">✓</span> ${studentLimit}</li>`;
+    
+    // Add key features from the features array
+    const featuresArray = plan.features || [];
+    featuresArray.slice(0, 6).forEach(feature => {
+        const label = getFeatureLabel(feature);
+        const isAiFeature = feature.startsWith('ai_');
+        featuresHtml += `<li><span class="check">✓</span> ${isAiFeature ? `<strong>${label}</strong>` : label}</li>`;
+    });
+    
+    const buttonClass = isPopular ? 'btn btn-primary btn-block' : 'btn btn-outline btn-block';
+    const buttonText = isCustom ? 'Contact Sales' : 'Get Started';
+    
+    return `
+        <div class="pricing-card ${isPopular ? 'popular' : ''}">
+            ${isPopular ? '<div class="popular-badge">Most Popular</div>' : ''}
+            <div class="pricing-header">
+                <h3>${plan.name}</h3>
+                <p>${plan.description || ''}</p>
+            </div>
+            <div class="pricing-price">
+                ${priceHtml}
+            </div>
+            <ul class="pricing-features">
+                ${featuresHtml}
+            </ul>
+            <a href="#contact" class="${buttonClass}">${buttonText}</a>
+        </div>
+    `;
+}
+
+/**
+ * Load pricing from API
+ */
+async function loadPricing() {
+    const pricingGrid = document.getElementById('pricing-grid');
+    const pricingLoading = document.getElementById('pricing-loading');
+    const pricingFallback = document.getElementById('pricing-fallback');
+    
+    if (!pricingGrid) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/website/pricing`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch pricing');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success && data.plans && data.plans.length > 0) {
+            // Hide loading
+            if (pricingLoading) pricingLoading.style.display = 'none';
+            
+            // Render pricing cards
+            const cardsHtml = data.plans.map(plan => createPricingCard(plan)).join('');
+            pricingGrid.innerHTML = cardsHtml;
+            
+            console.log('✅ Pricing loaded from API');
+        } else {
+            throw new Error('No pricing plans available');
+        }
+    } catch (error) {
+        console.warn('⚠️ Could not load pricing from API, using fallback:', error.message);
+        
+        // Hide loading and show fallback
+        if (pricingLoading) pricingLoading.style.display = 'none';
+        if (pricingGrid) pricingGrid.style.display = 'none';
+        if (pricingFallback) pricingFallback.style.display = '';
+    }
+}

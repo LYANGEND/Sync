@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Video,
   Plus,
@@ -13,6 +13,11 @@ import {
   ExternalLink,
   CheckCircle,
   XCircle,
+  MessageCircle,
+  Hand,
+  Send,
+  Loader2,
+  Check,
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -43,6 +48,23 @@ interface SubjectOption {
   name: string;
 }
 
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderType: 'TEACHER' | 'STUDENT';
+  senderName: string;
+  message: string;
+  createdAt: string;
+}
+
+interface RaisedHand {
+  id: string;
+  studentId: string;
+  studentName: string;
+  raisedAt: string;
+  student?: { firstName: string; lastName: string };
+}
+
 const TeacherVideoLessons = () => {
   const [lessons, setLessons] = useState<VideoLesson[]>([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
@@ -62,12 +84,40 @@ const TeacherVideoLessons = () => {
     roomPassword: '',
     isRecordingEnabled: false,
   });
+  
+  // Chat and raised hands state
+  const [showChat, setShowChat] = useState(false);
+  const [showRaisedHands, setShowRaisedHands] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [raisedHands, setRaisedHands] = useState<RaisedHand[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchLessons();
     fetchClasses();
     fetchSubjects();
   }, []);
+
+  // Poll for chat and raised hands when teaching
+  useEffect(() => {
+    if (showJitsi && activeLesson) {
+      fetchChatMessages();
+      fetchRaisedHands();
+      const chatInterval = setInterval(fetchChatMessages, 3000);
+      const handsInterval = setInterval(fetchRaisedHands, 5000);
+      return () => {
+        clearInterval(chatInterval);
+        clearInterval(handsInterval);
+      };
+    }
+  }, [showJitsi, activeLesson?.id]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const fetchLessons = async () => {
     try {
@@ -96,6 +146,65 @@ const TeacherVideoLessons = () => {
       setSubjects(response.data);
     } catch (error) {
       console.error('Failed to fetch subjects:', error);
+    }
+  };
+
+  // Chat functions
+  const fetchChatMessages = async () => {
+    if (!activeLesson) return;
+    try {
+      const response = await api.get(`/video-lessons/${activeLesson.id}/chat`);
+      setChatMessages(response.data || []);
+    } catch (err) {
+      console.error('Failed to fetch chat messages:', err);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!activeLesson || !newMessage.trim() || sendingMessage) return;
+    
+    setSendingMessage(true);
+    try {
+      await api.post(`/video-lessons/${activeLesson.id}/chat`, {
+        message: newMessage.trim(),
+      });
+      setNewMessage('');
+      fetchChatMessages();
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Raised hands functions
+  const fetchRaisedHands = async () => {
+    if (!activeLesson) return;
+    try {
+      const response = await api.get(`/video-lessons/${activeLesson.id}/raised-hands`);
+      setRaisedHands(response.data || []);
+    } catch (err) {
+      console.error('Failed to fetch raised hands:', err);
+    }
+  };
+
+  const acknowledgeHand = async (handId: string) => {
+    if (!activeLesson) return;
+    try {
+      await api.post(`/video-lessons/${activeLesson.id}/raised-hands/${handId}/acknowledge`);
+      fetchRaisedHands();
+    } catch (err) {
+      console.error('Failed to acknowledge hand:', err);
+    }
+  };
+
+  const dismissAllHands = async () => {
+    if (!activeLesson) return;
+    try {
+      await api.post(`/video-lessons/${activeLesson.id}/raised-hands/dismiss-all`);
+      fetchRaisedHands();
+    } catch (err) {
+      console.error('Failed to dismiss hands:', err);
     }
   };
 
@@ -645,7 +754,7 @@ const TeacherVideoLessons = () => {
         </div>
       )}
 
-      {/* Jitsi Embed (Full Screen Overlay) */}
+      {/* Jitsi Embed (Full Screen Overlay) with Chat and Raised Hands */}
       {showJitsi && activeLesson && (
         <div className="fixed inset-0 bg-black z-50 flex flex-col">
           <div className="bg-slate-900 px-4 py-2 flex items-center justify-between">
@@ -656,12 +765,38 @@ const TeacherVideoLessons = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {/* Raised Hands Toggle */}
+              <button
+                onClick={() => setShowRaisedHands(!showRaisedHands)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition-colors ${
+                  showRaisedHands
+                    ? 'bg-yellow-500 text-white'
+                    : 'bg-slate-700 text-white hover:bg-slate-600'
+                }`}
+              >
+                <Hand className={`w-4 h-4 ${raisedHands.length > 0 ? 'animate-bounce' : ''}`} />
+                Hands {raisedHands.length > 0 && `(${raisedHands.length})`}
+              </button>
+              
+              {/* Chat Toggle */}
+              <button
+                onClick={() => setShowChat(!showChat)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition-colors ${
+                  showChat
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 text-white hover:bg-slate-600'
+                }`}
+              >
+                <MessageCircle className="w-4 h-4" />
+                Chat
+              </button>
+              
               <button
                 onClick={() => openJitsiWindow(activeLesson)}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm"
+                className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-white rounded text-sm hover:bg-slate-600"
               >
                 <ExternalLink className="w-4 h-4" />
-                Open in New Window
+                Pop Out
               </button>
               <button
                 onClick={() => handleEndLesson(activeLesson.id)}
@@ -672,11 +807,171 @@ const TeacherVideoLessons = () => {
               </button>
             </div>
           </div>
-          <iframe
-            src={`https://meet.jit.si/${activeLesson.roomId}#config.prejoinPageEnabled=false&userInfo.displayName=Teacher`}
-            className="flex-1 w-full"
-            allow="camera; microphone; fullscreen; display-capture; autoplay"
-          />
+          
+          {/* Main Content */}
+          <div className="flex-1 flex">
+            {/* Video Area */}
+            <iframe
+              src={`https://meet.jit.si/${activeLesson.roomId}#config.prejoinPageEnabled=false&userInfo.displayName=Teacher`}
+              className="flex-1"
+              allow="camera; microphone; fullscreen; display-capture; autoplay"
+            />
+            
+            {/* Side Panels */}
+            {(showChat || showRaisedHands) && (
+              <div className="w-80 bg-slate-800 flex flex-col">
+                {/* Tabs */}
+                <div className="flex border-b border-slate-700">
+                  <button
+                    onClick={() => { setShowRaisedHands(true); setShowChat(false); }}
+                    className={`flex-1 px-4 py-2 text-sm font-medium flex items-center justify-center gap-2 ${
+                      showRaisedHands
+                        ? 'bg-slate-700 text-white border-b-2 border-yellow-500'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Hand className="w-4 h-4" />
+                    Hands {raisedHands.length > 0 && <span className="bg-yellow-500 text-black text-xs px-1.5 rounded-full">{raisedHands.length}</span>}
+                  </button>
+                  <button
+                    onClick={() => { setShowChat(true); setShowRaisedHands(false); }}
+                    className={`flex-1 px-4 py-2 text-sm font-medium flex items-center justify-center gap-2 ${
+                      showChat
+                        ? 'bg-slate-700 text-white border-b-2 border-blue-500'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Chat
+                  </button>
+                </div>
+
+                {/* Raised Hands Panel */}
+                {showRaisedHands && (
+                  <div className="flex-1 flex flex-col">
+                    {raisedHands.length > 0 && (
+                      <div className="p-2 border-b border-slate-700">
+                        <button
+                          onClick={dismissAllHands}
+                          className="w-full px-3 py-1.5 text-xs bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
+                        >
+                          Dismiss All Hands
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex-1 overflow-y-auto p-3">
+                      {raisedHands.length === 0 ? (
+                        <div className="text-center py-8 text-slate-400">
+                          <Hand className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">No raised hands</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {raisedHands.map((hand, index) => (
+                            <div
+                              key={hand.id}
+                              className="flex items-center justify-between p-3 bg-slate-700 rounded-lg"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center text-black font-bold text-sm">
+                                  {index + 1}
+                                </div>
+                                <div>
+                                  <p className="text-white text-sm font-medium">
+                                    {hand.student ? `${hand.student.firstName} ${hand.student.lastName}` : hand.studentName}
+                                  </p>
+                                  <p className="text-xs text-slate-400">
+                                    {new Date(hand.raisedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => acknowledgeHand(hand.id)}
+                                className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors"
+                                title="Acknowledge"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Chat Panel */}
+                {showChat && (
+                  <div className="flex-1 flex flex-col">
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                      {chatMessages.length === 0 ? (
+                        <div className="text-center py-8 text-slate-400">
+                          <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">No messages yet</p>
+                        </div>
+                      ) : (
+                        chatMessages.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className={`flex flex-col ${
+                              msg.senderType === 'TEACHER' ? 'items-end' : 'items-start'
+                            }`}
+                          >
+                            <span className={`text-xs font-medium mb-1 ${
+                              msg.senderType === 'TEACHER'
+                                ? 'text-purple-400'
+                                : 'text-slate-400'
+                            }`}>
+                              {msg.senderType === 'TEACHER' ? '👨‍🏫 You' : msg.senderName}
+                            </span>
+                            <div
+                              className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+                                msg.senderType === 'TEACHER'
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-slate-700 text-white'
+                              }`}
+                            >
+                              {msg.message}
+                            </div>
+                            <span className="text-[10px] text-slate-500 mt-1">
+                              {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Message Input */}
+                    <div className="p-3 border-t border-slate-700">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newMessage}
+                          onChange={(e) => setNewMessage(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                          placeholder="Type a message..."
+                          className="flex-1 px-3 py-2 text-sm bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <button
+                          onClick={sendMessage}
+                          disabled={!newMessage.trim() || sendingMessage}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {sendingMessage ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Send className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

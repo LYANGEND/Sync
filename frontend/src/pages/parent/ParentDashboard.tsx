@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { User, BookOpen, CheckCircle, Clock, AlertCircle, Calendar, ClipboardList, FileText } from 'lucide-react';
+import { User, BookOpen, CheckCircle, Clock, AlertCircle, Calendar, ClipboardList, FileText, Video } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ParentHomework from './ParentHomework';
 import ParentQuizzes from './ParentQuizzes';
 import ParentTimetable from './ParentTimetable';
 import ParentGrades from './ParentGrades';
+import ParentVideoLessons from './ParentVideoLessons';
 import api from '../../services/api';
 
 interface Child {
@@ -18,7 +19,7 @@ interface Child {
 }
 
 const ParentDashboard = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'homework' | 'quizzes' | 'grades' | 'timetable'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'homework' | 'quizzes' | 'grades' | 'timetable' | 'video-lessons'>('overview');
   const [children, setChildren] = useState<Child[]>([]);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null);
   const [loading, setLoading] = useState(false);
@@ -107,6 +108,17 @@ const ParentDashboard = () => {
             >
               Timetable
             </button>
+            <button
+              onClick={() => setActiveTab('video-lessons')}
+              className={`py-3 px-4 border-b-2 font-medium whitespace-nowrap flex items-center gap-2 ${
+                activeTab === 'video-lessons'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Video className="w-4 h-4" />
+              Live Lessons
+            </button>
           </div>
         </div>
       </div>
@@ -149,7 +161,7 @@ const ParentDashboard = () => {
             </div>
 
             {/* Quick Actions */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
               <button
                 onClick={() => setActiveTab('homework')}
                 className="bg-white dark:bg-slate-800 rounded-lg border dark:border-slate-700 p-4 text-left hover:shadow-md transition-shadow"
@@ -192,6 +204,17 @@ const ParentDashboard = () => {
                 </div>
                 <h3 className="font-medium text-slate-900 dark:text-white">Timetable</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Class schedule</p>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('video-lessons')}
+                className="bg-white dark:bg-slate-800 rounded-lg border dark:border-slate-700 p-4 text-left hover:shadow-md transition-shadow"
+              >
+                <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center mb-3">
+                  <Video className="w-5 h-5 text-red-600 dark:text-red-400" />
+                </div>
+                <h3 className="font-medium text-slate-900 dark:text-white">Live Lessons</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Join video classes</p>
               </button>
             </div>
 
@@ -275,6 +298,8 @@ const ParentDashboard = () => {
         {activeTab === 'grades' && <ParentGrades />}
 
         {activeTab === 'timetable' && <ParentTimetable />}
+
+        {activeTab === 'video-lessons' && <ParentVideoLessons />}
       </div>
     </div>
   );

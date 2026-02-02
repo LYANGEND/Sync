@@ -44,16 +44,24 @@ import videoLessonRoutes from './routes/videoLessonRoutes';
 import aiTeacherRoutes from './routes/aiTeacherRoutes';
 import teacherAssistantRoutes from './routes/teacherAssistantRoutes';
 import branchRoutes from './routes/branchRoutes';
+import publicPaymentRoutes from './routes/publicPaymentRoutes';
 
 import path from 'path';
 
 const app: Application = express();
 
 // Middleware
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',') 
+  : ['http://localhost:5173', 'http://localhost:3000'];
+
 app.use(cors({
-  origin: '*', // Allow all origins for development
+  origin: process.env.NODE_ENV === 'production' 
+    ? allowedOrigins
+    : '*', // Allow all origins only in development
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID'],
+  credentials: true
 }));
 app.use(express.json({ limit: '50mb' })); // Increased limit for bulk imports
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -65,6 +73,9 @@ app.use(resolveTenant);
 
 // Serve static files (uploaded images)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Public routes (no authentication required)
+app.use('/api/public/payments', publicPaymentRoutes);
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
@@ -114,19 +125,71 @@ app.use('/api/v1/ai-teacher', aiTeacherRoutes);
 app.use('/api/v1/teacher-assistant', teacherAssistantRoutes);
 app.use('/api/v1/branches', branchRoutes);
 
-// Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
+// Health check endpoint - basic
+app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Health check endpoint - detailed (for monitoring)
+app.get('/api/health', async (req: Request, res: Response) => {
+  const healthCheck: Record<string, any> = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    version: process.env.npm_package_version || '1.0.0',
+    checks: {
+      database: 'unknown',
+      redis: 'unknown',
+      memory: 'unknown'
+    }
+  };
+
+  try {
+    // Check database connection
+    const prisma = (await import('@prisma/client')).PrismaClient;
+    const db = new prisma();
+    await db.$queryRaw`SELECT 1`;
+    await db.$disconnect();
+    healthCheck.checks.database = 'healthy';
+  } catch (error) {
+    healthCheck.checks.database = 'unhealthy';
+    healthCheck.status = 'degraded';
+  }
+
+  try {
+    // Check Redis connection if available
+    if (process.env.REDIS_URL) {
+      const Redis = (await import('ioredis')).default;
+      const redis = new Redis(process.env.REDIS_URL);
+      await redis.ping();
+      await redis.quit();
+      healthCheck.checks.redis = 'healthy';
+    } else {
+      healthCheck.checks.redis = 'not configured';
+    }
+  } catch (error) {
+    healthCheck.checks.redis = 'unhealthy';
+    healthCheck.status = 'degraded';
+  }
+
+  // Check memory usage
+  const memoryUsage = process.memoryUsage();
+  const memoryUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+  const memoryTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
+  healthCheck.checks.memory = {
+    used: `${memoryUsedMB}MB`,
+    total: `${memoryTotalMB}MB`,
+    percentage: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100)
+  };
+
+  const statusCode = healthCheck.status === 'ok' ? 200 : 503;
+  res.status(statusCode).json(healthCheck);
 });
 
 // Basic Route
 app.get('/', (req: Request, res: Response) => {
   res.json({ message: 'Welcome to Sync School Management System API' });
-});
-
-// Health Check
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok' });
 });
 
 export default app;

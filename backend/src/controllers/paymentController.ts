@@ -4,18 +4,23 @@ import { z } from 'zod';
 import { TenantRequest, getTenantId, getUserId, getUserRole, handleControllerError } from '../utils/tenantContext';
 import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
 import { initiateMobileMoneyCollection } from '../services/lencoService';
+import { logPayment } from '../services/auditService';
 
 const prisma = new PrismaClient();
 
+// Phone number regex for Zambian numbers (MTN: 096/076, Airtel: 097/077)
+const zambianPhoneRegex = /^(260|0)?(9[67]|7[67])\d{7}$/;
+
 const createPaymentSchema = z.object({
   studentId: z.string().uuid(),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(1000000, 'Amount exceeds maximum allowed'),
   method: z.enum(['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT']),
-  transactionId: z.string().optional(),
-  notes: z.string().optional(),
+  transactionId: z.string().max(50).optional(),
+  notes: z.string().max(500).optional(),
   operator: z.enum(['mtn', 'airtel']).optional(),
-  phoneNumber: z.string().optional(),
+  phoneNumber: z.string().regex(zambianPhoneRegex, 'Invalid Zambian mobile number').optional(),
   branchId: z.string().uuid().optional(),
+  idempotencyKey: z.string().max(64).optional(), // Prevent duplicate submissions
 });
 
 export const createPayment = async (req: TenantRequest, res: Response) => {
@@ -23,10 +28,32 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
     const userRole = getUserRole(req);
-    console.log(`DEBUG: createPayment called by user ${userId} (${userRole}) for tenant ${tenantId}`);
-    console.log('DEBUG: Request Body:', JSON.stringify(req.body, null, 2));
+    const isDebug = process.env.NODE_ENV === 'development';
+    
+    if (isDebug) {
+      console.log(`DEBUG: createPayment called by user ${userId} (${userRole}) for tenant ${tenantId}`);
+    }
 
-    const { studentId, amount, method, notes, transactionId: providedTxnId, operator, phoneNumber, branchId: providedBranchId } = createPaymentSchema.parse(req.body);
+    const { studentId, amount, method, notes, transactionId: providedTxnId, operator, phoneNumber, branchId: providedBranchId, idempotencyKey } = createPaymentSchema.parse(req.body);
+
+    // Idempotency check - prevent duplicate payment submissions
+    if (idempotencyKey) {
+      const existingPayment = await prisma.payment.findFirst({
+        where: {
+          tenantId,
+          transactionId: idempotencyKey,
+        },
+      });
+
+      if (existingPayment) {
+        // Return the existing payment instead of creating a duplicate
+        return res.status(200).json({
+          message: 'Payment already processed',
+          payment: existingPayment,
+          duplicate: true,
+        });
+      }
+    }
 
     // Check if student exists in this tenant
     const student = await prisma.student.findFirst({
@@ -76,21 +103,36 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
       }
     }
 
-    const transactionId = providedTxnId || 'TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+    const transactionId = providedTxnId || idempotencyKey || 'TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
     // Mobile Money Validation
     if (method === 'MOBILE_MONEY' && !operator) {
       return res.status(400).json({ message: 'Operator (mtn or airtel) is required for mobile money' });
     }
 
-    // Calculate Fees if Mobile Money
+    // Get platform settings for fee configuration
+    const platformSettings = await prisma.platformSettings.findUnique({
+      where: { id: 'default' }
+    });
+    
+    // Calculate Fees if Mobile Money (use configured fee or default 2.5%)
     let finalAmount = amount;
     let finalNotes = notes || '';
+    let mobileMoneyFee = 0;
+    const feePercent = platformSettings?.mobileMoneyFeePercent 
+      ? Number(platformSettings.mobileMoneyFeePercent) 
+      : 0.025;
 
     if (method === 'MOBILE_MONEY') {
-      const fee = amount * 0.025; // 2.5% fee
-      finalAmount = amount + fee;
-      // We are silently adding the fee to the total, as requested
+      mobileMoneyFee = amount * feePercent;
+      
+      // Apply fee cap if configured
+      if (platformSettings?.mobileMoneyFeeCap) {
+        const feeCap = Number(platformSettings.mobileMoneyFeeCap);
+        mobileMoneyFee = Math.min(mobileMoneyFee, feeCap);
+      }
+      
+      finalAmount = amount + mobileMoneyFee;
     }
 
     // @ts-ignore
@@ -107,7 +149,11 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
         transactionId,
         recordedByUserId: userId,
         // @ts-ignore
-        status: initialStatus
+        status: initialStatus,
+        // Mobile money specific fields
+        mobileMoneyOperator: method === 'MOBILE_MONEY' ? operator : null,
+        mobileMoneyPhone: method === 'MOBILE_MONEY' ? (phoneNumber || student.guardianPhone) : null,
+        mobileMoneyFee: method === 'MOBILE_MONEY' ? mobileMoneyFee : null,
       },
       include: {
         student: {
@@ -139,6 +185,23 @@ export const createPayment = async (req: TenantRequest, res: Response) => {
         },
       },
     });
+
+    // Audit log the payment
+    await logPayment(
+      tenantId,
+      userId,
+      payment.id,
+      {
+        studentId,
+        studentName: `${payment.student.firstName} ${payment.student.lastName}`,
+        amount: finalAmount,
+        method,
+        operator: operator || null,
+        transactionId,
+        status: initialStatus,
+      },
+      req
+    );
 
     // Handle Mobile Money Initiation
     if (method === 'MOBILE_MONEY') {
@@ -647,5 +710,159 @@ export const getFinancialReport = async (req: TenantRequest, res: Response) => {
 
   } catch (error) {
     handleControllerError(res, error, 'getFinancialReport');
+  }
+};
+
+// Mobile Money Payments - List with filtering and export support
+export const getMobileMoneyPayments = async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const search = req.query.search as string;
+    const operator = req.query.operator as string; // 'mtn' | 'airtel' | 'all'
+    const status = req.query.status as string; // 'PENDING' | 'COMPLETED' | 'FAILED' | 'all'
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const exportAll = req.query.exportAll === 'true'; // For exporting all data
+
+    const where: any = { 
+      tenantId,
+      method: 'MOBILE_MONEY'
+    };
+
+    // Search filter
+    if (search && typeof search === 'string') {
+      where.OR = [
+        { student: { firstName: { contains: search, mode: 'insensitive' } } },
+        { student: { lastName: { contains: search, mode: 'insensitive' } } },
+        { student: { admissionNumber: { contains: search, mode: 'insensitive' } } },
+        { transactionId: { contains: search, mode: 'insensitive' } },
+        { mobileMoneyRef: { contains: search, mode: 'insensitive' } },
+        { mobileMoneyPhone: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+
+    // Operator filter
+    if (operator && operator !== 'all') {
+      where.mobileMoneyOperator = operator;
+    }
+
+    // Status filter
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      where.paymentDate = {};
+      if (startDate) {
+        where.paymentDate.gte = new Date(startDate);
+      }
+      if (endDate) {
+        // Set end date to end of day
+        const endOfDay = new Date(endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        where.paymentDate.lte = endOfDay;
+      }
+    }
+
+    // Get stats for mobile money payments
+    const stats = await prisma.payment.aggregate({
+      where: { ...where },
+      _count: { id: true },
+      _sum: { amount: true, mobileMoneyFee: true }
+    });
+
+    // Get breakdown by operator
+    const operatorStats = await prisma.payment.groupBy({
+      by: ['mobileMoneyOperator'],
+      where: { tenantId, method: 'MOBILE_MONEY' },
+      _count: { id: true },
+      _sum: { amount: true }
+    });
+
+    // Get breakdown by status
+    const statusStats = await prisma.payment.groupBy({
+      by: ['status'],
+      where: { tenantId, method: 'MOBILE_MONEY' },
+      _count: { id: true },
+      _sum: { amount: true }
+    });
+
+    // Query for list
+    const queryOptions: any = {
+      where,
+      include: {
+        student: {
+          select: {
+            firstName: true,
+            lastName: true,
+            admissionNumber: true,
+            guardianPhone: true,
+            class: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        recordedBy: {
+          select: {
+            fullName: true,
+          },
+        },
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
+        }
+      },
+      orderBy: {
+        paymentDate: 'desc' as const
+      },
+    };
+
+    // If exporting all, don't paginate
+    if (!exportAll) {
+      queryOptions.skip = (page - 1) * limit;
+      queryOptions.take = limit;
+    }
+
+    const [payments, total] = await prisma.$transaction([
+      prisma.payment.findMany(queryOptions),
+      prisma.payment.count({ where })
+    ]);
+
+    res.json({
+      data: payments,
+      meta: {
+        total,
+        page: exportAll ? 1 : page,
+        limit: exportAll ? total : limit,
+        totalPages: exportAll ? 1 : Math.ceil(total / limit)
+      },
+      stats: {
+        totalTransactions: stats._count.id || 0,
+        totalAmount: Number(stats._sum.amount || 0),
+        totalFees: Number(stats._sum.mobileMoneyFee || 0),
+        byOperator: operatorStats.map(o => ({
+          operator: o.mobileMoneyOperator,
+          count: o._count.id,
+          amount: Number(o._sum.amount || 0)
+        })),
+        byStatus: statusStats.map(s => ({
+          status: s.status,
+          count: s._count.id,
+          amount: Number(s._sum.amount || 0)
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('DEBUG: getMobileMoneyPayments Error:', error);
+    handleControllerError(res, error, 'getMobileMoneyPayments');
   }
 };

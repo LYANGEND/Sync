@@ -598,6 +598,14 @@ const MyChildren = () => {
             </div>
 
             <form onSubmit={submitPayment} className="p-6 space-y-4">
+              {/* Balance Info */}
+              <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                <span className="text-sm text-slate-600">Outstanding Balance</span>
+                <span className={`font-bold ${selectedChild.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  ZMW {selectedChild.balance.toLocaleString()}
+                </span>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Amount (ZMW)</label>
                 <input
@@ -608,50 +616,97 @@ const MyChildren = () => {
                   placeholder="0.00"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">A 2.5% processing fee will be added</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Money Operator</label>
-                <select
-                  value={paymentOperator}
-                  onChange={(e) => setPaymentOperator(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="mtn">MTN Money</option>
-                  <option value="airtel">Airtel Money</option>
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Mobile Money</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOperator('mtn')}
+                    className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      paymentOperator === 'mtn' 
+                        ? 'border-yellow-400 bg-yellow-50 ring-2 ring-yellow-200' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="w-10 h-10 bg-yellow-400 rounded-lg flex items-center justify-center">
+                      <span className="font-bold text-white text-sm">MTN</span>
+                    </div>
+                    <span className="text-sm font-medium text-slate-900">MTN MoMo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOperator('airtel')}
+                    className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      paymentOperator === 'airtel' 
+                        ? 'border-red-400 bg-red-50 ring-2 ring-red-200' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center">
+                      <span className="font-bold text-white text-xs">Airtel</span>
+                    </div>
+                    <span className="text-sm font-medium text-slate-900">Airtel Money</span>
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
                 <input
-                  type="text"
+                  type="tel"
                   value={paymentPhone}
                   onChange={(e) => setPaymentPhone(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="2609..."
+                  placeholder="260 9XX XXX XXX"
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">Enter number in format 260xxxxxxxxx</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter the {paymentOperator === 'mtn' ? 'MTN MoMo' : 'Airtel Money'} registered number
+                </p>
               </div>
 
-              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-800">
-                <p>A prompt will be sent to your phone. Approve the transaction to complete payment.</p>
-                <p className="text-xs mt-1 opacity-75">+3.5% processing fee applies.</p>
-              </div>
+              {/* Payment Summary */}
+              {paymentAmount && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-blue-800">Amount</span>
+                    <span className="font-medium">ZMW {Number(paymentAmount).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-blue-800">Processing Fee (2.5%)</span>
+                    <span className="font-medium">ZMW {(Number(paymentAmount) * 0.025).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-2 border-t border-blue-200">
+                    <span className="font-semibold text-blue-900">Total to Pay</span>
+                    <span className="font-bold text-blue-900">
+                      ZMW {(Number(paymentAmount) * 1.025).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-center text-slate-500">
+                A payment prompt will be sent to your phone. Enter your PIN to authorize.
+              </p>
 
               <button
                 type="submit"
-                disabled={processingPayment}
+                disabled={processingPayment || !paymentAmount || !paymentPhone}
                 className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {processingPayment ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Processing...
+                    Sending to phone...
                   </>
                 ) : (
-                  'Make Payment'
+                  <>
+                    <CreditCard size={18} />
+                    Pay Now
+                  </>
                 )}
               </button>
             </form>

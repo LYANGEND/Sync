@@ -106,6 +106,15 @@ const templateSchema = z.object({
   isPublic: z.boolean().default(false),
 });
 
+// Check feature access
+async function checkFeatureAccess(tenantId: string, feature: 'aiLessonPlanEnabled' | 'aiAssessmentsEnabled' | 'aiReportCardsEnabled' | 'aiAnalyticsEnabled' | 'aiTutorEnabled'): Promise<boolean> {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { [feature]: true },
+  });
+  return !!tenant?.[feature];
+}
+
 // Check rate limits
 async function checkRateLimits(tenantId: string, userId: string): Promise<{ allowed: boolean; error?: string }> {
   const today = new Date();
@@ -183,6 +192,10 @@ export async function chat(req: TenantRequest, res: Response) {
 
     const validatedData = chatMessageSchema.parse(req.body);
     const { conversationId, message } = validatedData;
+
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Assistant is not included in your plan.', requiresUpgrade: true });
+    }
 
     // Check rate limits
     const rateCheck = await checkRateLimits(tenantId, userId);
@@ -317,6 +330,10 @@ export async function generateLessonPlan(req: TenantRequest, res: Response) {
 
     const validatedData = lessonPlanSchema.parse(req.body);
 
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Lesson Planner is not included in your plan.', requiresUpgrade: true });
+    }
+
     // Verify user exists
     const user = await prisma.user.findFirst({
       where: { id: userId, tenantId },
@@ -422,6 +439,10 @@ export async function generateQuiz(req: TenantRequest, res: Response) {
 
     const validatedData = quizSchema.parse(req.body);
 
+    if (!(await checkFeatureAccess(tenantId, 'aiAssessmentsEnabled'))) {
+      return res.status(403).json({ error: 'AI Assessments are not included in your plan.', requiresUpgrade: true });
+    }
+
     // Verify user exists
     const user = await prisma.user.findFirst({
       where: { id: userId, tenantId },
@@ -526,6 +547,10 @@ export async function draftEmail(req: TenantRequest, res: Response) {
     }
 
     const validatedData = emailSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Assistant is not included in your plan.', requiresUpgrade: true });
+    }
 
     // Verify user exists
     const user = await prisma.user.findFirst({
@@ -1074,5 +1099,905 @@ export async function exportConversationWord(req: TenantRequest, res: Response) 
   } catch (error) {
     console.error('Export Word error:', error);
     res.status(500).json({ error: 'Failed to export Word document' });
+  }
+}
+
+// ==================== FAVORITE PROMPTS ====================
+
+const favoritePromptSchema = z.object({
+  title: z.string().min(1).max(100),
+  prompt: z.string().min(1).max(1000),
+  category: z.enum(['lesson-plan', 'quiz', 'email', 'chat', 'general']).optional(),
+  icon: z.string().optional(),
+});
+
+export async function getFavoritePrompts(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const prompts = await prisma.teacherAIFavoritePrompt.findMany({
+      where: { teacherId: userId, tenantId },
+      orderBy: { usageCount: 'desc' },
+    });
+
+    res.json(prompts);
+  } catch (error) {
+    console.error('Get favorite prompts error:', error);
+    res.status(500).json({ error: 'Failed to fetch favorite prompts' });
+  }
+}
+
+export async function saveFavoritePrompt(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const validatedData = favoritePromptSchema.parse(req.body);
+
+    const prompt = await prisma.teacherAIFavoritePrompt.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        ...validatedData,
+      },
+    });
+
+    res.json(prompt);
+  } catch (error: any) {
+    console.error('Save favorite prompt error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to save favorite prompt' });
+  }
+}
+
+export async function deleteFavoritePrompt(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    const prompt = await prisma.teacherAIFavoritePrompt.findFirst({
+      where: { id, teacherId: userId, tenantId },
+    });
+
+    if (!prompt) {
+      return res.status(404).json({ error: 'Favorite prompt not found' });
+    }
+
+    await prisma.teacherAIFavoritePrompt.delete({ where: { id } });
+
+    res.json({ message: 'Favorite prompt deleted successfully' });
+  } catch (error) {
+    console.error('Delete favorite prompt error:', error);
+    res.status(500).json({ error: 'Failed to delete favorite prompt' });
+  }
+}
+
+// ==================== DRAFTS (AUTO-SAVE) ====================
+
+const draftSchema = z.object({
+  type: z.enum(['chat', 'lesson-plan', 'quiz', 'email']),
+  content: z.string().min(1),
+  metadata: z.any().optional(),
+});
+
+export async function getDrafts(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const { type } = req.query;
+
+    const where: any = { teacherId: userId, tenantId };
+    if (type) {
+      where.type = type;
+    }
+
+    const drafts = await prisma.teacherAIDraft.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: 10,
+    });
+
+    res.json(drafts);
+  } catch (error) {
+    console.error('Get drafts error:', error);
+    res.status(500).json({ error: 'Failed to fetch drafts' });
+  }
+}
+
+export async function saveDraft(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const validatedData = draftSchema.parse(req.body);
+
+    // Check if draft already exists for this type
+    const existingDraft = await prisma.teacherAIDraft.findFirst({
+      where: {
+        teacherId: userId,
+        tenantId,
+        type: validatedData.type,
+      },
+    });
+
+    let draft;
+    if (existingDraft) {
+      // Update existing draft
+      draft = await prisma.teacherAIDraft.update({
+        where: { id: existingDraft.id },
+        data: {
+          content: validatedData.content,
+          metadata: validatedData.metadata,
+        },
+      });
+    } else {
+      // Create new draft
+      draft = await prisma.teacherAIDraft.create({
+        data: {
+          teacher: { connect: { id: userId } },
+          tenant: { connect: { id: tenantId } },
+          ...validatedData,
+        },
+      });
+    }
+
+    res.json(draft);
+  } catch (error: any) {
+    console.error('Save draft error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to save draft' });
+  }
+}
+
+export async function deleteDraft(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    const draft = await prisma.teacherAIDraft.findFirst({
+      where: { id, teacherId: userId, tenantId },
+    });
+
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    await prisma.teacherAIDraft.delete({ where: { id } });
+
+    res.json({ message: 'Draft deleted successfully' });
+  } catch (error) {
+    console.error('Delete draft error:', error);
+    res.status(500).json({ error: 'Failed to delete draft' });
+  }
+}
+
+// ==================== DIRECT-TO-HOMEWORK INTEGRATION ====================
+
+const publishHomeworkSchema = z.object({
+  classId: z.string().uuid(),
+  title: z.string().min(1).max(200),
+  description: z.string().optional(),
+  dueDate: z.string().datetime(),
+  totalMarks: z.number().int().min(1).optional(),
+});
+
+export async function publishQuizToHomework(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const { conversationId } = req.params;
+
+    const validatedData = publishHomeworkSchema.parse(req.body);
+
+    // Get the conversation (must be a QUIZ type)
+    const conversation = await prisma.teacherAIConversation.findFirst({
+      where: {
+        id: conversationId,
+        teacherId: userId,
+        tenantId,
+        type: 'QUIZ',
+      },
+      include: {
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Quiz conversation not found' });
+    }
+
+    // Get the quiz content (assistant's message)
+    const assistantMessage = conversation.messages.find((m: any) => m.role === 'assistant');
+    if (!assistantMessage) {
+      return res.status(404).json({ error: 'Quiz content not found' });
+    }
+
+    const quizContent = assistantMessage.content;
+    const metadata = conversation.metadata as any || {};
+
+    // Create homework
+    const homework = await prisma.homework.create({
+      data: {
+        class: { connect: { id: validatedData.classId } },
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: validatedData.title,
+        description: validatedData.description || quizContent,
+        dueDate: new Date(validatedData.dueDate),
+        totalMarks: validatedData.totalMarks || metadata.questionCount * 10 || 100,
+        subject: metadata.subject || 'General',
+      },
+    });
+
+    // Update conversation metadata to track homework link
+    await prisma.teacherAIConversation.update({
+      where: { id: conversationId },
+      data: {
+        metadata: {
+          ...metadata,
+          publishedAsHomework: true,
+          homeworkId: homework.id,
+          publishedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    res.json({
+      message: 'Quiz published as homework successfully',
+      homework: {
+        id: homework.id,
+        title: homework.title,
+        dueDate: homework.dueDate,
+      },
+    });
+  } catch (error: any) {
+    console.error('Publish to homework error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to publish quiz as homework' });
+  }
+}
+
+// ==================== ACADEMIC FEATURES ====================
+
+import {
+  standardsAlignedSystemPrompt,
+  generateStandardsAlignedPrompt,
+  bloomsQuestionSystemPrompt,
+  generateBloomsQuestionsPrompt,
+  differentiationSystemPrompt,
+  generateDifferentiatedContentPrompt,
+  misconceptionSystemPrompt,
+  generateMisconceptionAnalysisPrompt,
+  formativeAssessmentSystemPrompt,
+  generateFormativeAssessmentPrompt,
+  generateDemoStandardsLesson,
+  generateDemoBloomsQuestions,
+} from '../services/academicAIService';
+
+// Validation schemas for academic features
+const standardsAlignedSchema = z.object({
+  standards: z.array(z.string()).min(1),
+  subject: z.string().min(1),
+  gradeLevel: z.number().int().min(1).max(12),
+  duration: z.number().int().min(15).max(180),
+  teachingStyle: z.string().optional(),
+});
+
+const bloomsQuestionsSchema = z.object({
+  topic: z.string().min(1),
+  subject: z.string().min(1),
+  gradeLevel: z.number().int().min(1).max(12),
+  distribution: z.object({
+    remember: z.number().int().min(0).optional(),
+    understand: z.number().int().min(0).optional(),
+    apply: z.number().int().min(0).optional(),
+    analyze: z.number().int().min(0).optional(),
+    evaluate: z.number().int().min(0).optional(),
+    create: z.number().int().min(0).optional(),
+  }),
+  questionType: z.enum(['multiple-choice', 'short-answer', 'essay', 'mixed']),
+});
+
+const differentiationSchema = z.object({
+  originalContent: z.string().min(1),
+  subject: z.string().min(1),
+  gradeLevel: z.number().int().min(1).max(12),
+  levels: z.array(z.enum(['below', 'on-level', 'above', 'ell', 'accessible'])).min(1),
+});
+
+const misconceptionSchema = z.object({
+  topic: z.string().min(1),
+  subject: z.string().min(1),
+  gradeLevel: z.number().int().min(1).max(12),
+});
+
+const formativeAssessmentSchema = z.object({
+  topic: z.string().min(1),
+  learningObjectives: z.array(z.string()).min(1),
+  assessmentType: z.enum(['exit-ticket', 'think-pair-share', 'quick-quiz', 'whiteboard-check', 'four-corners']),
+  duration: z.number().int().min(1).max(30),
+});
+
+// ==================== STANDARDS-ALIGNED LESSON ====================
+
+export async function generateStandardsAlignedLesson(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (role !== 'TEACHER' && role !== 'BURSAR' && role !== 'SECRETARY' && role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only teachers can use this feature' });
+    }
+
+    const validatedData = standardsAlignedSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Standard Aligned Lessons are not included in your plan.', requiresUpgrade: true });
+    }
+
+    // Check rate limits
+    const rateCheck = await checkRateLimits(tenantId, userId);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ error: rateCheck.error });
+    }
+
+    const prompt = generateStandardsAlignedPrompt(validatedData);
+
+    let lessonContent: string;
+    let tokensUsed = 0;
+
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: DEPLOYMENT_NAME,
+        messages: [
+          { role: 'system', content: standardsAlignedSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_completion_tokens: 3500,
+      });
+
+      lessonContent = completion.choices[0]?.message?.content || 'Failed to generate lesson.';
+      tokensUsed = completion.usage?.total_tokens || 0;
+    } else {
+      // Demo mode
+      lessonContent = generateDemoStandardsLesson(validatedData);
+      tokensUsed = 250;
+    }
+
+    // Create conversation record
+    const conversation = await prisma.teacherAIConversation.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: `Standards-Aligned Lesson: ${validatedData.subject}`,
+        type: 'LESSON_PLAN',
+        metadata: validatedData,
+      },
+    });
+
+    // Save messages
+    await prisma.teacherAIMessage.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          role: 'user',
+          content: prompt,
+          metadata: validatedData,
+        },
+        {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: lessonContent,
+          promptTokens: tokensUsed * 0.3,
+          completionTokens: tokensUsed * 0.7,
+        },
+      ],
+    });
+
+    // Link standards to conversation
+    // Note: This requires standards to exist in the database
+    // For now, we'll store them in metadata
+
+    // Track usage
+    await trackUsage(tenantId, userId, 'standards-aligned-lesson', tokensUsed);
+
+    res.json({
+      conversationId: conversation.id,
+      lesson: lessonContent,
+      metadata: validatedData,
+    });
+  } catch (error: any) {
+    console.error('Standards-aligned lesson generation error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to generate standards-aligned lesson' });
+  }
+}
+
+// ==================== BLOOM'S TAXONOMY QUESTIONS ====================
+
+export async function generateBloomsQuestions(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (role !== 'TEACHER' && role !== 'BURSAR' && role !== 'SECRETARY' && role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only teachers can use this feature' });
+    }
+
+    const validatedData = bloomsQuestionsSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiAssessmentsEnabled'))) {
+      return res.status(403).json({ error: 'AI Assessments are not included in your plan.', requiresUpgrade: true });
+    }
+
+    // Check rate limits
+    const rateCheck = await checkRateLimits(tenantId, userId);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ error: rateCheck.error });
+    }
+
+    const prompt = generateBloomsQuestionsPrompt(validatedData);
+
+    let questionsContent: string;
+    let tokensUsed = 0;
+
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: DEPLOYMENT_NAME,
+        messages: [
+          { role: 'system', content: bloomsQuestionSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_completion_tokens: 3500,
+      });
+
+      questionsContent = completion.choices[0]?.message?.content || 'Failed to generate questions.';
+      tokensUsed = completion.usage?.total_tokens || 0;
+    } else {
+      // Demo mode
+      questionsContent = generateDemoBloomsQuestions(validatedData);
+      tokensUsed = 250;
+    }
+
+    // Create conversation record
+    const conversation = await prisma.teacherAIConversation.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: `Bloom's Questions: ${validatedData.topic}`,
+        type: 'QUIZ',
+        metadata: validatedData,
+      },
+    });
+
+    // Save messages
+    await prisma.teacherAIMessage.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          role: 'user',
+          content: prompt,
+          metadata: validatedData,
+        },
+        {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: questionsContent,
+          promptTokens: tokensUsed * 0.3,
+          completionTokens: tokensUsed * 0.7,
+        },
+      ],
+    });
+
+    // Track usage
+    await trackUsage(tenantId, userId, 'blooms-questions', tokensUsed);
+
+    res.json({
+      conversationId: conversation.id,
+      questions: questionsContent,
+      metadata: validatedData,
+    });
+  } catch (error: any) {
+    console.error('Blooms questions generation error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to generate Bloom\'s taxonomy questions' });
+  }
+}
+
+// ==================== DIFFERENTIATED CONTENT ====================
+
+export async function generateDifferentiatedContent(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (role !== 'TEACHER' && role !== 'BURSAR' && role !== 'SECRETARY' && role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only teachers can use this feature' });
+    }
+
+    const validatedData = differentiationSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Differentiation is not included in your plan.', requiresUpgrade: true });
+    }
+
+    // Check rate limits
+    const rateCheck = await checkRateLimits(tenantId, userId);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ error: rateCheck.error });
+    }
+
+    const prompt = generateDifferentiatedContentPrompt(validatedData);
+
+    let differentiatedContent: string;
+    let tokensUsed = 0;
+
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: DEPLOYMENT_NAME,
+        messages: [
+          { role: 'system', content: differentiationSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_completion_tokens: 4000,
+      });
+
+      differentiatedContent = completion.choices[0]?.message?.content || 'Failed to generate differentiated content.';
+      tokensUsed = completion.usage?.total_tokens || 0;
+    } else {
+      // Demo mode
+      differentiatedContent = `# Differentiated Content
+
+## Below Grade Level
+[Simplified version with more scaffolding]
+
+## On Grade Level
+${validatedData.originalContent}
+
+## Above Grade Level
+[Extended version with more challenge]
+
+## ELL Version
+[Simplified language with visual supports]
+
+## Accessible Version
+[Clear formatting with assistive technology support]`;
+      tokensUsed = 300;
+    }
+
+    // Create conversation record
+    const conversation = await prisma.teacherAIConversation.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: `Differentiated Content: ${validatedData.subject}`,
+        type: 'LESSON_PLAN',
+        metadata: validatedData,
+      },
+    });
+
+    // Save messages
+    await prisma.teacherAIMessage.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          role: 'user',
+          content: prompt,
+          metadata: validatedData,
+        },
+        {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: differentiatedContent,
+          promptTokens: tokensUsed * 0.3,
+          completionTokens: tokensUsed * 0.7,
+        },
+      ],
+    });
+
+    // Track usage
+    await trackUsage(tenantId, userId, 'differentiation', tokensUsed);
+
+    res.json({
+      conversationId: conversation.id,
+      content: differentiatedContent,
+      metadata: validatedData,
+    });
+  } catch (error: any) {
+    console.error('Differentiation generation error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to generate differentiated content' });
+  }
+}
+
+// ==================== MISCONCEPTION ANALYSIS ====================
+
+export async function analyzeMisconceptions(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (role !== 'TEACHER' && role !== 'BURSAR' && role !== 'SECRETARY' && role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only teachers can use this feature' });
+    }
+
+    const validatedData = misconceptionSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiLessonPlanEnabled'))) {
+      return res.status(403).json({ error: 'AI Misconception Analysis is not included in your plan.', requiresUpgrade: true });
+    }
+
+    // Check rate limits
+    const rateCheck = await checkRateLimits(tenantId, userId);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ error: rateCheck.error });
+    }
+
+    const prompt = generateMisconceptionAnalysisPrompt(validatedData);
+
+    let misconceptionAnalysis: string;
+    let tokensUsed = 0;
+
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: DEPLOYMENT_NAME,
+        messages: [
+          { role: 'system', content: misconceptionSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_completion_tokens: 3500,
+      });
+
+      misconceptionAnalysis = completion.choices[0]?.message?.content || 'Failed to analyze misconceptions.';
+      tokensUsed = completion.usage?.total_tokens || 0;
+    } else {
+      // Demo mode
+      misconceptionAnalysis = `# Common Misconceptions: ${validatedData.topic}
+
+## Misconception #1: [Common Error]
+**Why it happens:** Students apply prior knowledge incorrectly
+**Intervention:** Use visual models and concrete examples
+**Diagnostic Question:** [Question to check for this misconception]
+
+## Misconception #2: [Another Error]
+**Why it happens:** Developmental stage limitations
+**Intervention:** Provide scaffolding and step-by-step guidance
+**Diagnostic Question:** [Question to check for this misconception]`;
+      tokensUsed = 200;
+    }
+
+    // Create conversation record
+    const conversation = await prisma.teacherAIConversation.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: `Misconceptions: ${validatedData.topic}`,
+        type: 'CHAT',
+        metadata: validatedData,
+      },
+    });
+
+    // Save messages
+    await prisma.teacherAIMessage.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          role: 'user',
+          content: prompt,
+          metadata: validatedData,
+        },
+        {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: misconceptionAnalysis,
+          promptTokens: tokensUsed * 0.3,
+          completionTokens: tokensUsed * 0.7,
+        },
+      ],
+    });
+
+    // Track usage
+    await trackUsage(tenantId, userId, 'misconception-analysis', tokensUsed);
+
+    res.json({
+      conversationId: conversation.id,
+      analysis: misconceptionAnalysis,
+      metadata: validatedData,
+    });
+  } catch (error: any) {
+    console.error('Misconception analysis error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to analyze misconceptions' });
+  }
+}
+
+// ==================== FORMATIVE ASSESSMENT ====================
+
+export async function generateFormativeAssessment(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (role !== 'TEACHER' && role !== 'BURSAR' && role !== 'SECRETARY' && role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Only teachers can use this feature' });
+    }
+
+    const validatedData = formativeAssessmentSchema.parse(req.body);
+
+    if (!(await checkFeatureAccess(tenantId, 'aiAssessmentsEnabled'))) {
+      return res.status(403).json({ error: 'AI Assessments are not included in your plan.', requiresUpgrade: true });
+    }
+
+    // Check rate limits
+    const rateCheck = await checkRateLimits(tenantId, userId);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ error: rateCheck.error });
+    }
+
+    const prompt = generateFormativeAssessmentPrompt(validatedData);
+
+    let assessmentContent: string;
+    let tokensUsed = 0;
+
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: DEPLOYMENT_NAME,
+        messages: [
+          { role: 'system', content: formativeAssessmentSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_completion_tokens: 2500,
+      });
+
+      assessmentContent = completion.choices[0]?.message?.content || 'Failed to generate assessment.';
+      tokensUsed = completion.usage?.total_tokens || 0;
+    } else {
+      // Demo mode
+      assessmentContent = `# Formative Assessment: ${validatedData.topic}
+
+## Exit Ticket (${validatedData.duration} minutes)
+
+**Question 1:** [Quick check question]
+**Question 2:** [Application question]
+**Question 3:** [Reflection question]
+
+## Success Criteria
+- Mastery: All 3 correct
+- Partial: 2 correct
+- Needs support: 0-1 correct
+
+## Next Steps
+- If most succeed: Move to next topic
+- If some struggle: Small group intervention
+- If most struggle: Re-teach tomorrow`;
+      tokensUsed = 150;
+    }
+
+    // Create conversation record
+    const conversation = await prisma.teacherAIConversation.create({
+      data: {
+        teacher: { connect: { id: userId } },
+        tenant: { connect: { id: tenantId } },
+        title: `Formative Assessment: ${validatedData.topic}`,
+        type: 'QUIZ',
+        metadata: validatedData,
+      },
+    });
+
+    // Save messages
+    await prisma.teacherAIMessage.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          role: 'user',
+          content: prompt,
+          metadata: validatedData,
+        },
+        {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: assessmentContent,
+          promptTokens: tokensUsed * 0.3,
+          completionTokens: tokensUsed * 0.7,
+        },
+      ],
+    });
+
+    // Track usage
+    await trackUsage(tenantId, userId, 'formative-assessment', tokensUsed);
+
+    res.json({
+      conversationId: conversation.id,
+      assessment: assessmentContent,
+      metadata: validatedData,
+    });
+  } catch (error: any) {
+    console.error('Formative assessment generation error:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
+    res.status(500).json({ error: 'Failed to generate formative assessment' });
+  }
+}
+
+// ==================== STANDARDS MANAGEMENT ====================
+
+export async function getStandards(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const { framework, subject, gradeLevel } = req.query;
+
+    const where: any = { tenantId };
+    if (framework) where.framework = framework;
+    if (subject) where.subject = subject;
+    if (gradeLevel) where.gradeLevel = parseInt(gradeLevel as string);
+
+    const standards = await prisma.curriculumStandard.findMany({
+      where,
+      orderBy: [{ gradeLevel: 'asc' }, { code: 'asc' }],
+      take: 100,
+    });
+
+    res.json(standards);
+  } catch (error) {
+    console.error('Get standards error:', error);
+    res.status(500).json({ error: 'Failed to fetch standards' });
+  }
+}
+
+export async function searchStandards(req: TenantRequest, res: Response) {
+  try {
+    const tenantId = getTenantId(req);
+    const { query, framework, subject, gradeLevel } = req.query;
+
+    if (!query) {
+      return res.status(400).json({ error: 'Search query required' });
+    }
+
+    const where: any = {
+      tenantId,
+      OR: [
+        { code: { contains: query as string, mode: 'insensitive' } },
+        { description: { contains: query as string, mode: 'insensitive' } },
+        { fullText: { contains: query as string, mode: 'insensitive' } },
+      ],
+    };
+
+    if (framework) where.framework = framework;
+    if (subject) where.subject = subject;
+    if (gradeLevel) where.gradeLevel = parseInt(gradeLevel as string);
+
+    const standards = await prisma.curriculumStandard.findMany({
+      where,
+      orderBy: [{ gradeLevel: 'asc' }, { code: 'asc' }],
+      take: 50,
+    });
+
+    res.json(standards);
+  } catch (error) {
+    console.error('Search standards error:', error);
+    res.status(500).json({ error: 'Failed to search standards' });
   }
 }

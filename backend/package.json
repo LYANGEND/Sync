@@ -9,10 +9,12 @@
     "migrate": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
-    "test": "jest"
+    "test": "jest",
+    "seed": "ts-node prisma/seed-all.ts",
+    "seed:all": "ts-node prisma/seed-all.ts"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed-all.ts"
   },
   "keywords": [],
   "author": "",

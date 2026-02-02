@@ -74,6 +74,12 @@ export async function getTenantSubscription(tenantId: string) {
             syllabusEnabled: true,
             apiAccessEnabled: true,
             advancedReportsEnabled: true,
+            // AI Features
+            aiLessonPlanEnabled: true,
+            aiTutorEnabled: true,
+            aiAnalyticsEnabled: true,
+            aiReportCardsEnabled: true,
+            aiAssessmentsEnabled: true,
         },
     });
 
