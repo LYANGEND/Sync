@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ master ]
+    branches: [ power ]
   pull_request:
-    branches: [ master ]
+    branches: [ power ]
 
 env:
   REGISTRY: ghcr.io
@@ -134,7 +134,7 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/power'
     
     steps:
       - name: Checkout repository
