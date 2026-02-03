@@ -1,344 +1,111 @@
-name: CI/CD Pipeline
+name: Build and Deploy SYNC
 
 on:
   push:
-    branches: [ power ]
-  pull_request:
-    branches: [ power ]
+    branches:
+      - master  # Single-tenant system
+      - power   # Multi-tenant system (ops platform)
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: lyangend/sync
+  IMAGE_PREFIX: lyangend/sync
 
 jobs:
-  # Run tests and linting before building
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
-
-      - name: Install backend dependencies
-        working-directory: ./backend
-        run: npm ci
-
-      - name: Run backend type check
-        working-directory: ./backend
-        run: npx tsc --noEmit
-        continue-on-error: true
-
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: npm ci
-
-      - name: Run frontend type check
-        working-directory: ./frontend
-        run: npx tsc --noEmit
-        continue-on-error: true
-
   build-and-push:
-    needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        service: [frontend, backend, website]
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the Container registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Backend
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
+      - name: Determine deployment configuration
+        id: config
+        run: |
+          if [ "${{ github.ref_name }}" == "master" ]; then
+            # Single-tenant configuration
+            echo "tag=master" >> $GITHUB_OUTPUT
+            echo "vite_api_url=" >> $GITHUB_OUTPUT
+            echo "deployment=single-tenant" >> $GITHUB_OUTPUT
+          else
+            # Multi-tenant configuration
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "vite_api_url=/api" >> $GITHUB_OUTPUT
+            echo "deployment=multi-tenant" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build and push Backend image
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: ./${{ matrix.service }}
           push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:buildcache,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.config.outputs.tag }}
           build-args: |
-            NODE_ENV=production
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            GIT_SHA=${{ github.sha }}
+            VITE_API_URL=${{ steps.config.outputs.vite_api_url }}
+          cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.service }}
+          platforms: linux/amd64
 
-      - name: Extract metadata for Frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
+      - name: Image details
+        run: |
+          echo "✅ Built: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.config.outputs.tag }}"
+          echo "📦 Deployment: ${{ steps.config.outputs.deployment }}"
+          echo "🔧 VITE_API_URL: ${{ steps.config.outputs.vite_api_url || '(default)' }}"
 
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:buildcache,mode=max
-
-      - name: Extract metadata for Website
-        id: meta-website
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/website
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
-
-      - name: Build and push Website image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./website
-          push: true
-          tags: ${{ steps.meta-website.outputs.tags }}
-          labels: ${{ steps.meta-website.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/website:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/website:buildcache,mode=max
-
-  deploy:
+  summary:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/power'
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Ensure nginx directory exists on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            mkdir -p ~/app-mt/nginx
-
-      - name: Copy configuration files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.prod.yml,nginx-system.conf"
-          target: "~/app-mt"
-          strip_components: 0
-
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd ~/app-mt
-            
-            # Get the server's actual IP (for PostgreSQL connection from Docker)
-            # Try eth0, then ens3, then fall back to first non-loopback interface
-            DOCKER_HOST_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || \
-                             ip -4 addr show ens3 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || \
-                             hostname -I | awk '{print $1}')
-            echo "📌 Server IP for Docker: $DOCKER_HOST_IP"
-            
-            # Create .env file with secure permissions
-            cat > .env << EOF
-            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            POSTGRES_DB=muti_tenant
-            POSTGRES_HOST=$DOCKER_HOST_IP
-            POSTGRES_PORT=${{ secrets.POSTGRES_PORT || '5432' }}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
-            BASE_DOMAINS=${{ secrets.BASE_DOMAINS }}
-            AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
-            AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
-            AZURE_OPENAI_API_VERSION=2024-12-01-preview
-            AZURE_OPENAI_DEPLOYMENT=gpt-4o
-            LENCO_API_KEY=${{ secrets.LENCO_API_KEY }}
-            LENCO_WEBHOOK_SECRET=${{ secrets.LENCO_WEBHOOK_SECRET }}
-            NODE_ENV=production
-            EOF
-            chmod 600 .env
-            
-            # Debug: show PostgreSQL connection info (without password)
-            echo "📌 PostgreSQL connection: $DOCKER_HOST_IP:${{ secrets.POSTGRES_PORT || '5432' }}"
-            
-            # Login to GHCR
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Pull latest images (force pull)
-            docker-compose -f docker-compose.prod.yml pull --ignore-pull-failures
-            
-            # Stop and remove containers (only multi-tenant ones)
-            docker-compose -f docker-compose.prod.yml down --remove-orphans
-            
-            # Clean up any orphaned multi-tenant containers
-            docker ps -a --filter "name=sync_mt" --format "{{.ID}}" | xargs -r docker rm -f || true
-            
-            # Test database connectivity (using host network)
-            echo "🔍 Testing database connectivity..."
-            docker run --rm --network host ghcr.io/lyangend/sync/backend:latest sh -c "nc -zv localhost 5432" || {
-              echo "⚠️ Cannot connect to database on localhost:5432"
-              echo "💡 Make sure PostgreSQL is running and listening on all interfaces"
-              echo "💡 Check: sudo -u postgres psql -c \"ALTER SYSTEM SET listen_addresses = '*';\""
-            }
-            
-            # Run migrations using host network (bypasses docker-compose network isolation)
-            echo "🚀 Running database migrations..."
-            docker run --rm --network host \
-              -e DATABASE_URL="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/muti_tenant?schema=public" \
-              ghcr.io/lyangend/sync/backend:latest \
-              npx prisma migrate deploy || {
-              echo "⚠️ Migration failed - schema may already exist, continuing..."
-            }
-            
-            # Seed ops platform (Admin + Plans only, safe to run multiple times)
-            echo "🌱 Seeding Ops Platform..."
-            docker run --rm --network host \
-              -e DATABASE_URL="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/muti_tenant?schema=public" \
-              ghcr.io/lyangend/sync/backend:latest \
-              npx ts-node prisma/seed-ops-only.ts || {
-              echo "⚠️ Seeding failed or already done, continuing..."
-            }
-            
-            # Start all services with latest images (force recreate)
-            docker-compose -f docker-compose.prod.yml up -d --force-recreate
-            
-            # Wait for services to be healthy
-            echo "⏳ Waiting for services to be ready..."
-            
-            # Wait for backend (multi-tenant runs on port 5080)
-            for i in {1..30}; do
-              if docker exec sync_mt_backend wget -q --spider http://localhost:3000/health 2>/dev/null; then
-                echo "✅ Backend is ready!"
-                break
-              fi
-              if [ $i -eq 30 ]; then
-                echo "⚠️ Backend health check timeout (checking logs...)"
-                docker logs sync_mt_backend --tail=50
-                exit 1
-              fi
-              sleep 3
-            done
-            
-            # Wait for frontend
-            for i in {1..20}; do
-              if docker exec sync_mt_frontend wget -q --spider http://localhost:80/ 2>/dev/null; then
-                echo "✅ Frontend is ready!"
-                break
-              fi
-              if [ $i -eq 20 ]; then
-                echo "⚠️ Frontend health check timeout (checking logs...)"
-                docker logs sync_mt_frontend --tail=50
-                exit 1
-              fi
-              sleep 2
-            done
-            
-            # Configure system nginx for multi-tenant
-            echo "🔧 Configuring system nginx for multi-tenant..."
-            
-            # Only update nginx config if it has changed
-            if ! sudo diff -q ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt-base 2>/dev/null; then
-              echo "📝 Multi-tenant nginx config changed, updating..."
-              # Backup the base config (without SSL)
-              sudo cp ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt-base
-              
-              # If SSL config exists, preserve it; otherwise use base
-              if [ -f /etc/nginx/sites-available/sync-mt ] && grep -q "ssl_certificate" /etc/nginx/sites-available/sync-mt; then
-                echo "✅ SSL config detected, preserving..."
-                # Keep the existing config with SSL
-              else
-                echo "📋 No SSL config, using base config..."
-                sudo cp ~/app-mt/nginx-system.conf /etc/nginx/sites-available/sync-mt
-              fi
-              
-              sudo ln -sf /etc/nginx/sites-available/sync-mt /etc/nginx/sites-enabled/sync-mt
-              
-              # Test nginx configuration
-              sudo nginx -t || {
-                echo "❌ nginx configuration error"
-                exit 1
-              }
-              
-              # Reload nginx
-              sudo systemctl reload nginx
-            else
-              echo "✅ Multi-tenant nginx config unchanged, skipping update"
-            fi
-            
-            # Show deployment status
-            echo "📊 Multi-Tenant Deployment Status:"
-            docker-compose -f docker-compose.prod.yml ps
-            
-            # Test the application via multi-tenant port
-            echo "🧪 Testing multi-tenant application..."
-            if curl -s -f http://localhost:5080/health > /dev/null 2>&1; then
-              echo "✅ Multi-tenant application is accessible on port 5080!"
-            else
-              echo "⚠️ Multi-tenant application might not be accessible via nginx"
-            fi
-            
-            # Clean up old Docker images to save space
-            echo "🧹 Cleaning up old Docker images..."
-            
-            # Remove dangling images
-            docker image prune -f
-            
-            # Remove old sync images (keep only latest 2)
-            echo "Removing old sync/backend images..."
-            docker images ghcr.io/lyangend/sync/backend --format "{{.ID}} {{.CreatedAt}}" | \
-              tail -n +3 | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
-            
-            echo "Removing old sync/frontend images..."
-            docker images ghcr.io/lyangend/sync/frontend --format "{{.ID}} {{.CreatedAt}}" | \
-              tail -n +3 | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
-            
-            # Show disk space saved
-            echo "✅ Cleanup complete"
-            df -h / | tail -1
-            
-            # Create database backup (optional)
-            echo "💾 Creating multi-tenant database backup..."
-            BACKUP_FILE="backup_mt_$(date +%Y%m%d_%H%M%S).sql"
-            PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} pg_dump -h localhost -U ${{ secrets.POSTGRES_USER }} muti_tenant > "$BACKUP_FILE" 2>/dev/null && \
-            echo "✅ Backup created: $BACKUP_FILE" || \
-            echo "⚠️ Backup skipped or failed"
-            
-            echo "🎉 Multi-Tenant Deployment completed successfully!"
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.ref_name }}" == "master" ]; then
+            echo "**System:** Single-tenant" >> $GITHUB_STEP_SUMMARY
+            echo "**Tag:** \`:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/frontend:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/backend:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/website:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "cd ~/app" >> $GITHUB_STEP_SUMMARY
+            echo "TAG=master docker compose pull" >> $GITHUB_STEP_SUMMARY
+            echo "TAG=master docker compose up -d" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**System:** Multi-tenant (Ops Platform)" >> $GITHUB_STEP_SUMMARY
+            echo "**Tag:** \`:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/frontend:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/backend:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/website:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "cd ~/app-mt" >> $GITHUB_STEP_SUMMARY
+            echo "docker compose -f docker-compose.prod.yml pull" >> $GITHUB_STEP_SUMMARY
+            echo "docker compose -f docker-compose.prod.yml up -d" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
