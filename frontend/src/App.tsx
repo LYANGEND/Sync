@@ -54,7 +54,41 @@ import PlatformAdmin from './pages/platform/PlatformAdmin';
 import { Toaster } from 'react-hot-toast';
 import { BranchProvider } from './context/BranchContext';
 
+// Helper to detect if we're on the ops/admin subdomain
+function isOpsSubdomain(): boolean {
+  const hostname = window.location.hostname;
+  const subdomain = hostname.split('.')[0];
+  return subdomain === 'ops' || subdomain === 'admin';
+}
+
+// Component that shows PlatformAdmin for ops subdomain, otherwise redirects
+function ConditionalHome() {
+  if (isOpsSubdomain()) {
+    return <PlatformAdmin />;
+  }
+  // For school subdomains, show the regular dashboard (protected)
+  return <Navigate to="/login" replace />;
+}
+
 function App() {
+  // If on ops subdomain, render a simplified router for ops only
+  if (isOpsSubdomain()) {
+    return (
+      <AuthProvider>
+        <ThemeProvider>
+          <BranchProvider>
+            <Router>
+              <Toaster position="top-right" />
+              <Routes>
+                <Route path="/*" element={<PlatformAdmin />} />
+              </Routes>
+            </Router>
+          </BranchProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <ThemeProvider>
@@ -63,7 +97,7 @@ function App() {
             <Toaster position="top-right" />
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route path="/ops" element={<PlatformAdmin />} />
+              <Route path="/ops/*" element={<PlatformAdmin />} />
               
               {/* Public payment page - no auth required */}
               <Route path="/pay/:schoolSlug" element={<PublicPayment />} />
