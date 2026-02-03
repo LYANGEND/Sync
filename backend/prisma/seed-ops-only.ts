@@ -5,8 +5,8 @@
  */
 
 import 'dotenv/config';
-import { PrismaClient, PlatformRole, SubscriptionTier } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
+import { PrismaClient, PlatformRole } from '@prisma/client';
+const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 
@@ -74,7 +74,7 @@ const PER_STUDENT_USD = Number((PER_STUDENT_ZMW / EXCHANGE_RATE).toFixed(2));
 const plans = [
     {
         name: 'Free',
-        tier: SubscriptionTier.FREE,
+        tier: 'FREE',
         description: 'Perfect for small schools just getting started',
         monthlyPriceZMW: 0,
         yearlyPriceZMW: 0,
@@ -93,7 +93,7 @@ const plans = [
     },
     {
         name: 'Starter',
-        tier: SubscriptionTier.STARTER,
+        tier: 'STARTER',
         description: 'Ideal for growing schools with essential features',
         monthlyPriceZMW: 3500,
         yearlyPriceZMW: 35000,
@@ -112,7 +112,7 @@ const plans = [
     },
     {
         name: 'Professional',
-        tier: SubscriptionTier.PROFESSIONAL,
+        tier: 'PROFESSIONAL',
         description: 'Full-featured solution for established schools',
         monthlyPriceZMW: 9500,
         yearlyPriceZMW: 95000,
@@ -131,7 +131,7 @@ const plans = [
     },
     {
         name: 'Enterprise',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: 'ENTERPRISE',
         description: 'Unlimited access for large institutions',
         monthlyPriceZMW: 15000,
         yearlyPriceZMW: 150000,
@@ -148,7 +148,7 @@ const plans = [
         isPopular: false,
         sortOrder: 3,
     },
-];
+] as const;
 
 async function seedSubscriptionPlans() {
     console.log('\n💰 Seeding Subscription Plans...\n');
