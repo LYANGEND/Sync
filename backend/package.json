@@ -12,7 +12,7 @@
     "test": "jest",
     "seed": "ts-node prisma/seed-all.ts",
     "seed:all": "ts-node prisma/seed-all.ts",
-    "seed:ops": "ts-node prisma/seed-ops-only.ts"
+    "seed:ops": "node prisma/seed-ops-only.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed-all.ts"
