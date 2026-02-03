@@ -148,7 +148,7 @@ const plans = [
         isPopular: false,
         sortOrder: 3,
     },
-] as const;
+];
 
 async function seedSubscriptionPlans() {
     console.log('\n💰 Seeding Subscription Plans...\n');
@@ -160,30 +160,42 @@ async function seedSubscriptionPlans() {
         const yearlyPriceUSD = Number((plan.yearlyPriceZMW / EXCHANGE_RATE).toFixed(2));
 
         const existing = await prisma.subscriptionPlan.findFirst({
-            where: { tier: plan.tier },
+            where: { tier: plan.tier as any },
         });
+
+        const planData = {
+            name: plan.name,
+            tier: plan.tier as any,
+            description: plan.description,
+            monthlyPriceZMW: plan.monthlyPriceZMW,
+            yearlyPriceZMW: plan.yearlyPriceZMW,
+            monthlyPriceUSD,
+            yearlyPriceUSD,
+            includedStudents: plan.includedStudents,
+            maxStudents: plan.maxStudents,
+            maxTeachers: plan.maxTeachers,
+            maxUsers: plan.maxUsers,
+            maxClasses: plan.maxClasses,
+            maxStorageGB: plan.maxStorageGB,
+            includedSmsPerMonth: plan.includedSmsPerMonth,
+            includedEmailsPerMonth: plan.includedEmailsPerMonth,
+            features: plan.features,
+            isActive: plan.isActive,
+            isPopular: plan.isPopular,
+            sortOrder: plan.sortOrder,
+            pricePerStudentZMW: PER_STUDENT_ZMW,
+            pricePerStudentUSD: PER_STUDENT_USD,
+        };
 
         if (existing) {
             await prisma.subscriptionPlan.update({
                 where: { id: existing.id },
-                data: {
-                    ...plan,
-                    monthlyPriceUSD,
-                    yearlyPriceUSD,
-                    pricePerStudentZMW: PER_STUDENT_ZMW,
-                    pricePerStudentUSD: PER_STUDENT_USD,
-                },
+                data: planData,
             });
             console.log(`   ✅ Updated: ${plan.name} - K${plan.monthlyPriceZMW}/mo`);
         } else {
             await prisma.subscriptionPlan.create({
-                data: {
-                    ...plan,
-                    monthlyPriceUSD,
-                    yearlyPriceUSD,
-                    pricePerStudentZMW: PER_STUDENT_ZMW,
-                    pricePerStudentUSD: PER_STUDENT_USD,
-                },
+                data: planData,
             });
             console.log(`   ✅ Created: ${plan.name} - K${plan.monthlyPriceZMW}/mo`);
         }
