@@ -168,12 +168,16 @@ jobs:
           script: |
             cd ~/app-mt
             
+            # Get Docker bridge gateway IP (for connecting to host PostgreSQL)
+            DOCKER_HOST_IP=$(ip -4 addr show docker0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
+            echo "📌 Docker host IP: $DOCKER_HOST_IP"
+            
             # Create .env file with secure permissions
-            cat > .env << 'EOF'
+            cat > .env << EOF
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=muti_tenant
-            POSTGRES_HOST=${{ secrets.POSTGRES_HOST || 'host.docker.internal' }}
+            POSTGRES_HOST=$DOCKER_HOST_IP
             POSTGRES_PORT=${{ secrets.POSTGRES_PORT || '5432' }}
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
@@ -190,7 +194,7 @@ jobs:
             chmod 600 .env
             
             # Debug: show PostgreSQL connection info (without password)
-            echo "📌 PostgreSQL connection: ${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}"
+            echo "📌 PostgreSQL connection: $DOCKER_HOST_IP:${{ secrets.POSTGRES_PORT || '5432' }}"
             
             # Login to GHCR
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -206,12 +210,12 @@ jobs:
             
             # Test database connectivity before running migrations
             echo "🔍 Testing database connectivity..."
-            docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'npx prisma db execute --stdin <<< "SELECT 1"' || {
+            docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'echo "SELECT 1" | npx prisma db execute --stdin' || {
               echo "⚠️ Cannot connect to database. Checking if PostgreSQL is reachable..."
-              docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'nc -zv ${POSTGRES_HOST:-host.docker.internal} ${POSTGRES_PORT:-5432}' 2>&1 || true
+              docker-compose -f docker-compose.prod.yml run --rm backend sh -c "nc -zv $DOCKER_HOST_IP 5432" 2>&1 || true
               echo "💡 Make sure PostgreSQL is running and accepts connections from Docker"
               echo "💡 Check: sudo -u postgres psql -c \"ALTER SYSTEM SET listen_addresses = '*';\""
-              echo "💡 Check pg_hba.conf allows: host all all 172.0.0.0/8 md5"
+              echo "💡 Check pg_hba.conf allows: host all all 172.17.0.0/16 md5"
             }
             
             # Run migrations on host PostgreSQL
