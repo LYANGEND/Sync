@@ -64,6 +64,8 @@ services:
       # Payment gateway
       - LENCO_API_KEY=${LENCO_API_KEY:-}
       - LENCO_WEBHOOK_SECRET=${LENCO_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "dbhost:${POSTGRES_HOST}"
     depends_on:
       redis:
         condition: service_healthy

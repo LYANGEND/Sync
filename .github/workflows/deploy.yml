@@ -168,9 +168,12 @@ jobs:
           script: |
             cd ~/app-mt
             
-            # Get Docker bridge gateway IP (for connecting to host PostgreSQL)
-            DOCKER_HOST_IP=$(ip -4 addr show docker0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
-            echo "📌 Docker host IP: $DOCKER_HOST_IP"
+            # Get the server's actual IP (for PostgreSQL connection from Docker)
+            # Try eth0, then ens3, then fall back to first non-loopback interface
+            DOCKER_HOST_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || \
+                             ip -4 addr show ens3 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || \
+                             hostname -I | awk '{print $1}')
+            echo "📌 Server IP for Docker: $DOCKER_HOST_IP"
             
             # Create .env file with secure permissions
             cat > .env << EOF
@@ -208,21 +211,21 @@ jobs:
             # Clean up any orphaned multi-tenant containers
             docker ps -a --filter "name=sync_mt" --format "{{.ID}}" | xargs -r docker rm -f || true
             
-            # Test database connectivity before running migrations
+            # Test database connectivity (using host network)
             echo "🔍 Testing database connectivity..."
-            docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'echo "SELECT 1" | npx prisma db execute --stdin' || {
-              echo "⚠️ Cannot connect to database. Checking if PostgreSQL is reachable..."
-              docker-compose -f docker-compose.prod.yml run --rm backend sh -c "nc -zv $DOCKER_HOST_IP 5432" 2>&1 || true
-              echo "💡 Make sure PostgreSQL is running and accepts connections from Docker"
+            docker run --rm --network host ghcr.io/lyangend/sync/backend:latest sh -c "nc -zv localhost 5432" || {
+              echo "⚠️ Cannot connect to database on localhost:5432"
+              echo "💡 Make sure PostgreSQL is running and listening on all interfaces"
               echo "💡 Check: sudo -u postgres psql -c \"ALTER SYSTEM SET listen_addresses = '*';\""
-              echo "💡 Check pg_hba.conf allows: host all all 172.17.0.0/16 md5"
             }
             
-            # Run migrations on host PostgreSQL
+            # Run migrations using host network (bypasses docker-compose network isolation)
             echo "🚀 Running database migrations..."
-            docker-compose -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy || {
+            docker run --rm --network host \
+              -e DATABASE_URL="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/muti_tenant?schema=public" \
+              ghcr.io/lyangend/sync/backend:latest \
+              npx prisma migrate deploy || {
               echo "❌ Migration failed!"
-              docker logs sync_mt_backend --tail=50 2>/dev/null || echo "Backend container not running yet"
               exit 1
             }
             
