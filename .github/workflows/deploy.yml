@@ -75,7 +75,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
 
       - name: Build and push Backend image
         uses: docker/build-push-action@v5
@@ -99,7 +99,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
 
       - name: Build and push Frontend image
         uses: docker/build-push-action@v5
@@ -119,7 +119,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/power' }}
 
       - name: Build and push Website image
         uses: docker/build-push-action@v5
