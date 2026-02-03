@@ -1,0 +1,16 @@
+# Docker Compose Override for Production Deployment
+# This file overrides docker-compose.prod.yml to fix port mappings
+# 
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up -d
+#
+# This approach keeps your original docker-compose.prod.yml unchanged
+
+version: '3.8'
+
+services:
+  # Override nginx to use standard HTTP/HTTPS ports
+  nginx:
+    ports:
+      - "80:80"      # Changed from 5080:80
+      - "443:443"    # Changed from 5443:443
