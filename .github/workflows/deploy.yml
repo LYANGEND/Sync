@@ -105,7 +105,9 @@ jobs:
             echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
             echo "cd ~/app-mt" >> $GITHUB_STEP_SUMMARY
-            echo "docker compose -f docker-compose.prod.yml pull" >> $GITHUB_STEP_SUMMARY
-            echo "docker compose -f docker-compose.prod.yml up -d" >> $GITHUB_STEP_SUMMARY
+            echo "chmod +x scripts/deploy-helper.sh" >> $GITHUB_STEP_SUMMARY
+            echo "./scripts/deploy-helper.sh" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **IMPORTANT:** ensure \`nginx/nginx.conf\` exists in \`~/app-mt\` before running." >> $GITHUB_STEP_SUMMARY
           fi
