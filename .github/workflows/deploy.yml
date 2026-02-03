@@ -173,8 +173,8 @@ jobs:
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=muti_tenant
-            POSTGRES_HOST=host.docker.internal
-            POSTGRES_PORT=5432
+            POSTGRES_HOST=${{ secrets.POSTGRES_HOST || 'host.docker.internal' }}
+            POSTGRES_PORT=${{ secrets.POSTGRES_PORT || '5432' }}
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
@@ -189,6 +189,9 @@ jobs:
             EOF
             chmod 600 .env
             
+            # Debug: show PostgreSQL connection info (without password)
+            echo "📌 PostgreSQL connection: ${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}"
+            
             # Login to GHCR
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
@@ -201,11 +204,21 @@ jobs:
             # Clean up any orphaned multi-tenant containers
             docker ps -a --filter "name=sync_mt" --format "{{.ID}}" | xargs -r docker rm -f || true
             
+            # Test database connectivity before running migrations
+            echo "🔍 Testing database connectivity..."
+            docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'npx prisma db execute --stdin <<< "SELECT 1"' || {
+              echo "⚠️ Cannot connect to database. Checking if PostgreSQL is reachable..."
+              docker-compose -f docker-compose.prod.yml run --rm backend sh -c 'nc -zv ${POSTGRES_HOST:-host.docker.internal} ${POSTGRES_PORT:-5432}' 2>&1 || true
+              echo "💡 Make sure PostgreSQL is running and accepts connections from Docker"
+              echo "💡 Check: sudo -u postgres psql -c \"ALTER SYSTEM SET listen_addresses = '*';\""
+              echo "💡 Check pg_hba.conf allows: host all all 172.0.0.0/8 md5"
+            }
+            
             # Run migrations on host PostgreSQL
             echo "🚀 Running database migrations..."
             docker-compose -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy || {
               echo "❌ Migration failed!"
-              docker logs sync_mt_backend --tail=50
+              docker logs sync_mt_backend --tail=50 2>/dev/null || echo "Backend container not running yet"
               exit 1
             }
             
