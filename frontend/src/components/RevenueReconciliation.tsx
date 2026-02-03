@@ -56,7 +56,7 @@ interface Reconciliation {
     completedAt: string;
 }
 
-const API_URL = 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const RevenueReconciliation = () => {
     const [dashboard, setDashboard] = useState<ReconciliationDashboard | null>(null);
