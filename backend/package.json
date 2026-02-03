@@ -11,7 +11,8 @@
     "lint": "eslint . --ext .ts",
     "test": "jest",
     "seed": "ts-node prisma/seed-all.ts",
-    "seed:all": "ts-node prisma/seed-all.ts"
+    "seed:all": "ts-node prisma/seed-all.ts",
+    "seed:ops": "ts-node prisma/seed-ops-only.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed-all.ts"

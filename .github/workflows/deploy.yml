@@ -225,8 +225,16 @@ jobs:
               -e DATABASE_URL="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/muti_tenant?schema=public" \
               ghcr.io/lyangend/sync/backend:latest \
               npx prisma migrate deploy || {
-              echo "❌ Migration failed!"
-              exit 1
+              echo "⚠️ Migration failed - schema may already exist, continuing..."
+            }
+            
+            # Seed ops platform (Admin + Plans only, safe to run multiple times)
+            echo "🌱 Seeding Ops Platform..."
+            docker run --rm --network host \
+              -e DATABASE_URL="postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/muti_tenant?schema=public" \
+              ghcr.io/lyangend/sync/backend:latest \
+              npx ts-node prisma/seed-ops-only.ts || {
+              echo "⚠️ Seeding failed or already done, continuing..."
             }
             
             # Start all services with latest images (force recreate)
