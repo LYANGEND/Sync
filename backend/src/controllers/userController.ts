@@ -10,7 +10,7 @@ const createUserSchema = z.object({
   password: z.string().min(6),
   fullName: z.string().min(2),
   role: z.nativeEnum(Role),
-  branchId: z.string().optional(),
+  branchId: z.string().optional().nullable(),
 });
 
 const updateUserSchema = z.object({
@@ -99,7 +99,7 @@ export const createUser = async (req: Request, res: Response) => {
         passwordHash,
         fullName,
         role,
-        branchId
+        branchId: branchId || null
       },
       select: {
         id: true,
@@ -117,6 +117,7 @@ export const createUser = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    console.error('Failed to create user:', error);
     res.status(500).json({ error: 'Failed to create user' });
   }
 };
@@ -131,7 +132,7 @@ export const updateUser = async (req: Request, res: Response) => {
       data.passwordHash = await hashPassword(password);
     }
     if (branchId !== undefined) {
-      data.branchId = branchId;
+      data.branchId = branchId || null;
     }
 
     const user = await prisma.user.update({
@@ -152,6 +153,7 @@ export const updateUser = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    console.error('Failed to update user:', error);
     res.status(500).json({ error: 'Failed to update user' });
   }
 };

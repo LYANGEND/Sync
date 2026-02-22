@@ -46,3 +46,7 @@ frontend/package-lock.json
 package-lock.json
 package-lock.json
 /node_modules
+backend/Finalised Syllabi
+.gitignore
+backend/Finalised Teaching Modules
+*.md

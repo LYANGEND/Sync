@@ -91,7 +91,16 @@ const Users = () => {
         }
         await api.put(`/users/${editingUser.id}`, payload);
       } else {
-        await api.post('/users', formData);
+        const payload: any = {
+          fullName: formData.fullName,
+          email: formData.email,
+          role: formData.role,
+          password: formData.password,
+        };
+        if (formData.branchId) {
+          payload.branchId = formData.branchId;
+        }
+        await api.post('/users', payload);
       }
       fetchUsers();
       setShowModal(false);
@@ -229,8 +238,8 @@ const Users = () => {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${user.isActive
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
-                          : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
+                        : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                         }`}>
                         {user.isActive ? 'Active' : 'Inactive'}
                       </span>
