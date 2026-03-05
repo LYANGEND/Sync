@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
 import { sendEmail } from './notificationService';
-
-const prisma = new PrismaClient();
 
 interface AttendancePattern {
   type: string; // CONSECUTIVE_ABSENCE, DAY_PATTERN, POST_EVENT, CHRONIC

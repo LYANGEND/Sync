@@ -1,10 +1,9 @@
 
 import { Request, Response } from 'express';
-import { PrismaClient, BranchStatus, TransferEntityType } from '@prisma/client';
+import { BranchStatus, TransferEntityType } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
-
-const prisma = new PrismaClient();
 
 // Schemas
 const createBranchSchema = z.object({

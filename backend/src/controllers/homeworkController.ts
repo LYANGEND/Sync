@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
 
 // Get homework submissions for an assessment
 export const getSubmissions = async (req: Request, res: Response) => {

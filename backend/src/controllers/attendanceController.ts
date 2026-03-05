@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
-
-const prisma = new PrismaClient();
 
 const recordAttendanceSchema = z.object({
   classId: z.string().uuid(),

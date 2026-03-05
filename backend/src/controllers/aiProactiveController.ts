@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
-
-const prisma = new PrismaClient();
 
 // ==========================================
 // PROACTIVE AI ALERTS

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
@@ -9,8 +9,6 @@ import {
   getCashFlowSummary,
   getAgedReceivables,
 } from '../services/accountingService';
-
-const prisma = new PrismaClient();
 
 // ========================================
 // AI FINANCIAL ADVISOR

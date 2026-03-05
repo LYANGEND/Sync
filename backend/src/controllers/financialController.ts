@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import {
   getTrialBalance,
@@ -8,8 +8,6 @@ import {
   getCashFlowSummary,
   getAgedReceivables,
 } from '../services/accountingService';
-
-const prisma = new PrismaClient();
 
 // ========================================
 // FINANCIAL STATEMENTS

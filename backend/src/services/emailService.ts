@@ -1,8 +1,5 @@
 import nodemailer from 'nodemailer';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from '../utils/prisma';
 export const sendEmail = async (to: string, subject: string, html: string) => {
   try {
     // 1. Fetch SMTP settings

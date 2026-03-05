@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { sendEmail } from '../services/emailService';
-
-const prisma = new PrismaClient();
 
 const baseStudentSchema = z.object({
   firstName: z.string().min(2),

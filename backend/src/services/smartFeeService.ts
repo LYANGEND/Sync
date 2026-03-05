@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
 import { sendEmail, generateFeeReminderEmail } from './notificationService';
 import aiService from './aiService';
-
-const prisma = new PrismaClient();
 
 interface PaymentPrediction {
   studentId: string;

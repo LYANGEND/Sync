@@ -1,7 +1,5 @@
-import { PrismaClient, Prisma } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 interface UsageEvent {
   userId: string;
   branchId?: string;

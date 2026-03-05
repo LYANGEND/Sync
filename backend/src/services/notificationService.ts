@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import nodemailer from 'nodemailer';
-
-const prisma = new PrismaClient();
 
 interface NotificationOptions {
   to: string;

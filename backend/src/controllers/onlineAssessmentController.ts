@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
-
-const prisma = new PrismaClient() as any;
 
 // Schema for creating/updating questions
 const questionSchema = z.object({

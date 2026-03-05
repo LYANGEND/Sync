@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import axios from 'axios';
-
-const prisma = new PrismaClient();
 
 interface AIConfig {
   provider: string;

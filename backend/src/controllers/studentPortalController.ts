@@ -1,8 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from '../utils/prisma';
 // Get comprehensive academic dashboard for a student
 export const getStudentAcademicDashboard = async (req: Request, res: Response) => {
   try {

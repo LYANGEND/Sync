@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { comparePassword, generateToken, hashPassword } from '../utils/auth';
-
-const prisma = new PrismaClient();
 
 const loginSchema = z.object({
   email: z.string().email(),

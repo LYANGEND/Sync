@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient, TopicStatus } from '@prisma/client';
+import { TopicStatus } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
 
 // --- Schemas ---
 

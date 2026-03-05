@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import aiService from './aiService';
-
-const prisma = new PrismaClient();
 
 interface RiskFactors {
   academic: { score: number; details: string };

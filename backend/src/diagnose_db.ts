@@ -1,8 +1,5 @@
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from './utils/prisma';
 async function main() {
     console.log('Testing DB Connection...');
     try {

@@ -4,10 +4,7 @@
  * API Documentation: https://lenco-api.readme.io/v2.0/reference
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from '../utils/prisma';
 // Lenco API Configuration
 interface LencoConfig {
     apiKey: string;

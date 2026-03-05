@@ -1,11 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateSequenceNumber, logFinancialAction } from '../services/accountingService';
 import { onInvoiceSent } from '../services/accountingBridge';
-
-const prisma = new PrismaClient();
 
 // ========================================
 // INVOICE MANAGEMENT

@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
-
-const prisma = new PrismaClient() as any;
 
 // ==========================================
 // Conversation Management
@@ -626,7 +625,7 @@ export const generateReportRemarks = async (req: AuthRequest, res: Response) => 
     const presentCount = attendance.filter((a: { status: string }) => a.status !== 'ABSENT').length;
     const attendanceRate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
-    const subjects = termResults.map((r: { subject: { name: string }; totalScore: number | string; grade?: string }) => ({
+    const subjects = termResults.map((r: any) => ({
       name: r.subject.name,
       score: Number(r.totalScore),
       grade: r.grade || 'N/A',

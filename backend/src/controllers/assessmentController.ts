@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 
 // Prisma Client should be generated. If you see errors here, try reloading the window.
-const prisma = new PrismaClient();
-
 const createAssessmentSchema = z.object({
   title: z.string().min(2),
   type: z.enum(['EXAM', 'TEST', 'QUIZ', 'HOMEWORK', 'PROJECT']),

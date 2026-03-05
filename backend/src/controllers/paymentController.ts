@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient, PaymentStatus } from '@prisma/client';
+import { PaymentStatus } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
@@ -10,8 +11,6 @@ import {
   MobileMoneyCollectionRequest
 } from '../services/lencoService';
 import { onPaymentCreated, onPaymentVoided } from '../services/accountingBridge';
-
-const prisma = new PrismaClient();
 
 const createPaymentSchema = z.object({
   studentId: z.string().uuid(),

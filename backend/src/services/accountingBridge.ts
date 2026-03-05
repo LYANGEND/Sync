@@ -11,10 +11,8 @@
  *   EXPENSES:  5000 Salaries, 5100 Utilities, 5200 Supplies, 5300 Maintenance, etc.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { createJournalEntry, logFinancialAction } from './accountingService';
-
-const prisma = new PrismaClient();
 
 // ========================================
 // ACCOUNT CODE MAPPINGS

@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
 
 const createPeriodSchema = z.object({
   classIds: z.array(z.string().uuid()).min(1), // Support multiple classes

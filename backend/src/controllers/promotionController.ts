@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
-
-const prisma = new PrismaClient();
 
 // --- Schemas ---
 

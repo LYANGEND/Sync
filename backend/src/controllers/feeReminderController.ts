@@ -1,12 +1,11 @@
 import { Request, Response } from 'express';
-import { PrismaClient, StudentFeeStructure, FeeTemplate, Student, Class } from '@prisma/client';
+import { StudentFeeStructure, FeeTemplate, Student, Class } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import {
     sendNotification,
     generatePaymentReceiptEmail,
     generateFeeReminderEmail
 } from '../services/notificationService';
-
-const prisma = new PrismaClient();
 
 type StudentWithFees = Student & {
     class: Class | null;

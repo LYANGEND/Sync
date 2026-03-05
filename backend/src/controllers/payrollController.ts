@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import {
@@ -10,8 +10,6 @@ import {
   calculateNHIMA,
 } from '../services/accountingService';
 import { onPayrollCompleted } from '../services/accountingBridge';
-
-const prisma = new PrismaClient();
 
 // ========================================
 // STAFF PAYROLL MANAGEMENT

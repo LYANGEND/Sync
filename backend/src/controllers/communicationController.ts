@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { sendEmail } from '../services/emailService';
 import { broadcastNotification, createNotification } from '../services/notificationService';
-
-const prisma = new PrismaClient();
 
 const sendAnnouncementSchema = z.object({
   subject: z.string().min(1),
