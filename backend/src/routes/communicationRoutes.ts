@@ -9,7 +9,10 @@ import {
   getMessages,
   sendMessage,
   searchUsers,
-  subscribeToPush
+  subscribeToPush,
+  getSentCommunications,
+  getCommunicationStatsHandler,
+  getAnnouncementHistory
 } from '../controllers/communicationController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -36,5 +39,11 @@ router.get('/users/search', authorizeRole(chatRoles), searchUsers);
 // Announcement routes
 const announcementRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER'];
 router.post('/announcements', authorizeRole(announcementRoles), sendAnnouncement);
+router.get('/announcements/history', authorizeRole(announcementRoles), getAnnouncementHistory);
+
+// Communication logs & stats (admin/bursar/secretary only)
+const logViewRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY'];
+router.get('/logs', authorizeRole(logViewRoles), getSentCommunications);
+router.get('/stats', authorizeRole(logViewRoles), getCommunicationStatsHandler);
 
 export default router;

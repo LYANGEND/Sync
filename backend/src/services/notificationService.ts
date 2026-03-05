@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import nodemailer from 'nodemailer';
+import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 
 interface NotificationOptions {
   to: string;
@@ -36,13 +37,24 @@ async function getNotificationSettings(): Promise<NotificationSettings | null> {
   return settings as NotificationSettings | null;
 }
 
-// Send Email Notification
+// Send Email Notification (with logging)
 export async function sendEmail(options: NotificationOptions): Promise<boolean> {
+  const logId = await logCommunication({
+    channel: 'EMAIL',
+    status: 'PENDING',
+    recipientEmail: options.to,
+    subject: options.subject,
+    message: options.text,
+    htmlBody: options.html,
+    source: 'notification_service',
+  });
+
   try {
     const settings = await getNotificationSettings();
 
     if (!settings) {
       console.log('No settings found');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
       return false;
     }
 
@@ -50,11 +62,13 @@ export async function sendEmail(options: NotificationOptions): Promise<boolean> 
     const emailEnabled = settings.emailNotificationsEnabled ?? true;
     if (!emailEnabled) {
       console.log('Email notifications are disabled');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'Email notifications disabled');
       return false;
     }
 
     if (!settings.smtpHost || !settings.smtpUser || !settings.smtpPassword) {
       console.log('SMTP settings not configured');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMTP not configured');
       return false;
     }
 
@@ -78,20 +92,31 @@ export async function sendEmail(options: NotificationOptions): Promise<boolean> 
 
     await transporter.sendMail(mailOptions);
     console.log(`Email sent to ${options.to}`);
+    if (logId) await updateCommunicationLogStatus(logId, 'SENT');
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Email sending failed:', error);
+    if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message || 'Unknown error');
     return false;
   }
 }
 
-// Send SMS Notification
+// Send SMS Notification (with logging)
 export async function sendSms(options: SmsOptions): Promise<boolean> {
+  const logId = await logCommunication({
+    channel: 'SMS',
+    status: 'PENDING',
+    recipientPhone: options.to,
+    message: options.message,
+    source: 'notification_service',
+  });
+
   try {
     const settings = await getNotificationSettings();
 
     if (!settings) {
       console.log('No settings found');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
       return false;
     }
 
@@ -99,29 +124,39 @@ export async function sendSms(options: SmsOptions): Promise<boolean> {
     const smsEnabled = settings.smsNotificationsEnabled ?? false;
     if (!smsEnabled) {
       console.log('SMS notifications are disabled');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS notifications disabled');
       return false;
     }
 
     if (!settings.smsProvider || !settings.smsApiKey) {
       console.log('SMS settings not configured');
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS not configured');
       return false;
     }
 
     // Format phone number (remove spaces, ensure proper format)
     const phone = options.to.replace(/\s+/g, '');
 
+    let sent = false;
     // Provider-specific SMS sending
     switch (settings.smsProvider.toUpperCase()) {
       case 'AFRICASTALKING':
-        return await sendAfricasTalkingSms(phone, options.message, settings);
+        sent = await sendAfricasTalkingSms(phone, options.message, settings);
+        break;
       case 'TWILIO':
-        return await sendTwilioSms(phone, options.message, settings);
+        sent = await sendTwilioSms(phone, options.message, settings);
+        break;
       default:
         console.log(`Unknown SMS provider: ${settings.smsProvider}`);
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', `Unknown provider: ${settings.smsProvider}`);
         return false;
     }
-  } catch (error) {
+
+    if (logId) await updateCommunicationLogStatus(logId, sent ? 'SENT' : 'FAILED', sent ? undefined : 'Provider returned failure');
+    return sent;
+  } catch (error: any) {
     console.error('SMS sending failed:', error);
+    if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message || 'Unknown error');
     return false;
   }
 }

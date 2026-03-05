@@ -1,14 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
-import { Send, Mail, Bell, Users, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { 
+  Send, Mail, Bell, Users, CheckCircle, AlertCircle, MessageSquare, 
+  Megaphone, Clock, BarChart3
+} from 'lucide-react';
 import ChatInterface from './ChatInterface';
+import SentItems from './SentItems';
+import AnnouncementHistory from './AnnouncementHistory';
 import { useAuth } from '../../context/AuthContext';
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
 
+type TabType = 'announcements' | 'messages' | 'sent' | 'history';
+
 const Communication = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'messages'>('announcements');
+  const [activeTab, setActiveTab] = useState<TabType>('announcements');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
@@ -17,8 +24,10 @@ const Communication = () => {
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
+  const isAdmin = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY'].includes(user?.role || '');
   const canSendAnnouncements = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER'].includes(user?.role || '');
   const canChat = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'PARENT'].includes(user?.role || '');
+  const canViewLogs = isAdmin;
 
   useEffect(() => {
     if (!canSendAnnouncements && canChat) {
@@ -48,7 +57,7 @@ const Communication = () => {
       const response = await api.post('/communication/announcements', {
         subject,
         message,
-        targetRoles: targetRoles.length > 0 ? targetRoles : undefined, // undefined means all
+        targetRoles: targetRoles.length > 0 ? targetRoles : undefined,
         sendEmail,
         sendNotification,
       });
@@ -68,49 +77,51 @@ const Communication = () => {
 
   if (!canSendAnnouncements && !canChat) {
     return (
-      <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-4xl mx-auto text-center text-gray-500 dark:text-gray-400">
+      <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-5xl mx-auto text-center text-gray-500 dark:text-gray-400">
         You do not have permission to access this page.
       </div>
     );
   }
 
+  const tabs: { key: TabType; label: string; icon: React.ReactNode; show: boolean }[] = [
+    { key: 'announcements', label: 'New Announcement', icon: <Megaphone size={18} />, show: canSendAnnouncements },
+    { key: 'history', label: 'History', icon: <Clock size={18} />, show: canSendAnnouncements },
+    { key: 'messages', label: 'Messages', icon: <MessageSquare size={18} />, show: canChat },
+    { key: 'sent', label: 'Sent Items', icon: <BarChart3 size={18} />, show: canViewLogs },
+  ];
+
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-4xl mx-auto">
-      <div className="mb-8">
+    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-5xl mx-auto">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Communication Hub</h1>
-        <p className="text-gray-500 dark:text-gray-400">Manage announcements and messages</p>
+        <p className="text-gray-500 dark:text-gray-400">Manage announcements, messages, and track all communications</p>
       </div>
 
-      <div className="flex gap-4 mb-6">
-        {canSendAnnouncements && (
+      {/* Tab Navigation */}
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+        {tabs.filter(t => t.show).map(tab => (
           <button
-            onClick={() => setActiveTab('announcements')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === 'announcements'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 whitespace-nowrap text-sm ${
+              activeTab === tab.key
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600'
             }`}
           >
-            Announcements
+            {tab.icon}
+            {tab.label}
           </button>
-        )}
-        {canChat && (
-          <button
-            onClick={() => setActiveTab('messages')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-              activeTab === 'messages'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
-            }`}
-          >
-            <MessageSquare size={18} />
-            Messages
-          </button>
-        )}
+        ))}
       </div>
 
+      {/* Tab Content */}
       {activeTab === 'messages' && canChat ? (
         <ChatInterface />
+      ) : activeTab === 'sent' && canViewLogs ? (
+        <SentItems />
+      ) : activeTab === 'history' && canSendAnnouncements ? (
+        <AnnouncementHistory />
       ) : canSendAnnouncements ? (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
           <div className="p-6 border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700">
@@ -118,6 +129,7 @@ const Communication = () => {
               <Send size={20} className="text-blue-600" />
               New Announcement
             </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Broadcast a message to users. Emails will be tracked in Sent Items.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-6">

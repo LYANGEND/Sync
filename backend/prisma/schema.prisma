@@ -107,6 +107,11 @@ model User {
   pushSubscriptions        PushSubscription[]
   subjectAssignments       TeacherSubject[]
 
+  // Communication tracking
+  sentCommunications CommunicationLog[] @relation("SentCommunications")
+  createdAnnouncements Announcement[]   @relation("CreatedAnnouncements")
+  createdCampaigns DebtCollectionCampaign[] @relation("CreatedCampaigns")
+
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
   
@@ -272,6 +277,19 @@ model SchoolSettings {
   feeReminderDaysBefore    Int     @default(7) // Days before due date to send reminder
   overdueReminderEnabled   Boolean @default(true)
   overdueReminderFrequency Int     @default(7) // Days between overdue reminders
+
+  // Debt Collection Escalation Settings
+  debtCollectionEnabled    Boolean @default(false)
+  escalationDay1Channel    String  @default("EMAIL")     // Day 7: gentle reminder
+  escalationDay2Channel    String  @default("SMS")        // Day 14: firm reminder
+  escalationDay3Channel    String  @default("WHATSAPP")   // Day 21: urgent + payment plan
+  escalationDay4Channel    String  @default("ALL")        // Day 30: formal final notice
+  escalationDay1Days       Int     @default(7)
+  escalationDay2Days       Int     @default(14)
+  escalationDay3Days       Int     @default(21)
+  escalationDay4Days       Int     @default(30)
+  debtCollectionMinAmount  Decimal @default(0) @db.Decimal(10, 2) // Minimum amount to trigger collection
+  aiPersonalizedMessages   Boolean @default(true) // Use AI to personalize messages
 
   // Communication Settings (SMTP)
   smtpHost      String?
@@ -1919,4 +1937,163 @@ model AttendanceAlert {
   @@index([studentId])
   @@index([isResolved])
   @@map("attendance_alerts")
+}
+
+// ========================================
+// COMMUNICATION LOG — Audit trail for ALL outbound comms
+// ========================================
+enum CommunicationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+}
+
+enum CommunicationStatus {
+  SENT
+  FAILED
+  PENDING
+}
+
+model CommunicationLog {
+  id        String               @id @default(uuid())
+  channel   CommunicationChannel
+  status    CommunicationStatus  @default(PENDING)
+
+  recipientEmail String?
+  recipientPhone String?
+  recipientName  String?
+
+  subject String?
+  message String  @db.Text
+  htmlBody String? @db.Text
+
+  // What triggered this? e.g. "announcement", "fee_reminder", "payment_receipt", "attendance_alert", "manual"
+  source  String  @default("manual")
+  // Optional link to the user who triggered it
+  sentById String?
+  sentBy   User?   @relation("SentCommunications", fields: [sentById], references: [id])
+
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([channel])
+  @@index([status])
+  @@index([source])
+  @@index([sentById])
+  @@index([createdAt])
+  @@map("communication_logs")
+}
+
+// ========================================
+// ANNOUNCEMENT — Persisted announcement history
+// ========================================
+model Announcement {
+  id          String   @id @default(uuid())
+  subject     String
+  message     String   @db.Text
+  targetRoles String[] // Which roles received this
+  sentViaEmail       Boolean @default(false)
+  sentViaNotification Boolean @default(true)
+  recipientCount     Int     @default(0)
+
+  createdById String
+  createdBy   User   @relation("CreatedAnnouncements", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("announcements")
+}
+
+// ========================================
+// DEBT COLLECTION CAMPAIGNS
+// ========================================
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum DebtorSegment {
+  WILL_PAY      // Consistent payer, just late
+  NEEDS_NUDGE   // Irregular, responds to reminders
+  AT_RISK       // Very low payment rate
+  HARDSHIP      // Zero payments, possibly struggling
+}
+
+model DebtCollectionCampaign {
+  id          String         @id @default(uuid())
+  name        String
+  description String?        @db.Text
+  status      CampaignStatus @default(DRAFT)
+
+  // Targeting criteria
+  minAmountOwed    Decimal? @db.Decimal(10, 2)
+  minDaysOverdue   Int?
+  targetSegments   String[] // DebtorSegment values
+  targetGradeLevels Int[]
+
+  // Results
+  totalTargeted   Int @default(0)
+  totalContacted  Int @default(0)
+  totalResponded  Int @default(0) // Paid after contact
+  amountCollected Decimal @default(0) @db.Decimal(10, 2)
+
+  createdById String
+  createdBy   User   @relation("CreatedCampaigns", fields: [createdById], references: [id])
+
+  messages CampaignMessage[]
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdById])
+  @@map("debt_collection_campaigns")
+}
+
+model CampaignMessage {
+  id         String @id @default(uuid())
+  campaignId String
+  campaign   DebtCollectionCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  studentId     String
+  studentName   String
+  parentName    String?
+  parentEmail   String?
+  parentPhone   String?
+
+  // What was sent
+  channel       String   // EMAIL, SMS, WHATSAPP
+  escalationLevel Int    @default(1) // 1=gentle, 2=firm, 3=urgent, 4=final
+  subject       String?
+  messageContent String  @db.Text
+  aiGenerated   Boolean  @default(false)
+
+  // Debtor info at time of send
+  amountOwed    Decimal  @db.Decimal(10, 2)
+  daysOverdue   Int
+  segment       String   // DebtorSegment value
+  paymentLikelihood String? // HIGH, MEDIUM, LOW
+
+  // Outcome
+  status        String   @default("SENT") // SENT, FAILED, PAID, NO_RESPONSE
+  paidAmount    Decimal? @db.Decimal(10, 2)
+  paidAt        DateTime?
+  errorMessage  String?
+
+  sentAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([studentId])
+  @@index([status])
+  @@index([sentAt])
+  @@map("campaign_messages")
 }

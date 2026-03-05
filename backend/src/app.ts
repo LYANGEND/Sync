@@ -43,6 +43,7 @@ import payrollRoutes from './routes/payrollRoutes';
 import budgetRoutes from './routes/budgetRoutes';
 import pettyCashRoutes from './routes/pettyCashRoutes';
 import financialRoutes from './routes/financialRoutes';
+import debtCollectionRoutes from './routes/debtCollectionRoutes';
 // Middleware
 import { generalLimiter } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -122,6 +123,7 @@ app.use('/api/v1/payroll', payrollRoutes);
 app.use('/api/v1/budgets', budgetRoutes);
 app.use('/api/v1/petty-cash', pettyCashRoutes);
 app.use('/api/v1/financial', financialRoutes);
+app.use('/api/v1/debt-collection', debtCollectionRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

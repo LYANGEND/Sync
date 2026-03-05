@@ -298,7 +298,21 @@ GUIDELINES:
 - Flag any compliance risks (statutory deductions, overdue payments)
 - Keep responses concise but insightful — use bullet points and clear headings
 - If data is limited (e.g., no journal entries yet), acknowledge this and advise on getting started
-- Format currency as "ZMW X,XXX.XX"`;
+- Format currency as "ZMW X,XXX.XX"
+
+DEBT COLLECTION ACTIONS:
+You can suggest actions the user can perform. When recommending debt collection actions, include an ACTION BLOCK at the end of your response using this exact format:
+
+\`\`\`action
+{"type": "SEND_REMINDERS", "channels": ["EMAIL","SMS","WHATSAPP"], "segments": ["AT_RISK","NEEDS_NUDGE"], "minDaysOverdue": 14}
+\`\`\`
+
+Available action types:
+- SEND_REMINDERS — Send fee reminders to debtors. Params: channels (EMAIL/SMS/WHATSAPP), segments (WILL_PAY/NEEDS_NUDGE/AT_RISK/HARDSHIP), minDaysOverdue
+- CREATE_CAMPAIGN — Create a debt collection campaign. Params: name, minAmountOwed, targetSegments
+- VIEW_DEBTORS — Show the debtors list (suggest navigating to the Collection Dashboard)
+
+Only include an action block when the user explicitly asks to send reminders, contact debtors, or create a campaign. For regular questions, just answer normally.`;
 }
 
 /**
@@ -409,8 +423,18 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
       // Don't fail the response if save fails
     }
 
+    // Extract action block if present
+    let action = null;
+    const actionMatch = aiResponse.content.match(/```action\n([\s\S]*?)\n```/);
+    if (actionMatch) {
+      try {
+        action = JSON.parse(actionMatch[1].trim());
+      } catch { /* ignore parse errors */ }
+    }
+
     res.json({
       answer: aiResponse.content,
+      action, // null or { type: "SEND_REMINDERS", channels: [...], ... }
       tokensUsed: aiResponse.tokensUsed,
       conversationId,
       snapshotSummary: {

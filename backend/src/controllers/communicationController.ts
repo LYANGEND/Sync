@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { sendEmail } from '../services/emailService';
 import { broadcastNotification, createNotification } from '../services/notificationService';
+import { getCommunicationLogs, getCommunicationStats } from '../services/communicationLogService';
 
 const sendAnnouncementSchema = z.object({
   subject: z.string().min(1),
@@ -15,6 +16,7 @@ const sendAnnouncementSchema = z.object({
 
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.userId;
     const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendNotification } = sendAnnouncementSchema.parse(req.body);
 
     // 1. Find target users
@@ -33,19 +35,33 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
     }
 
     const userIds = users.map(u => u.id);
-    const emails = users.map(u => u.email);
 
-    // 2. Send Notifications
+    // 2. Persist announcement to database
+    await (prisma as any).announcement.create({
+      data: {
+        subject,
+        message,
+        targetRoles: targetRoles?.map(r => r.toString()) || ['ALL'],
+        sentViaEmail: shouldSendEmail,
+        sentViaNotification: sendNotification,
+        recipientCount: users.length,
+        createdById: userId,
+      },
+    });
+
+    // 3. Send Notifications
     if (sendNotification) {
       await broadcastNotification(userIds, subject, message, 'INFO');
     }
 
-    // 3. Send Emails (Async to not block response)
+    // 4. Send Emails with audit logging
     if (shouldSendEmail) {
-      // Send individually or use BCC? For now, let's loop (simple but slow for large lists)
-      // In production, use a queue (BullMQ)
       Promise.all(users.map(user =>
-        sendEmail(user.email, subject, `<p>Dear ${user.fullName},</p><p>${message}</p>`)
+        sendEmail(user.email, subject, `<p>Dear ${user.fullName},</p><p>${message}</p>`, {
+          source: 'announcement',
+          sentById: userId,
+          recipientName: user.fullName,
+        })
       )).catch(err => console.error('Background email sending failed', err));
     }
 
@@ -372,5 +388,70 @@ export const subscribeToPush = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Push subscription error:', error);
     res.status(500).json({ message: 'Failed to save subscription' });
+  }
+};
+
+// ============ Communication Logs & History ============
+
+export const getSentCommunications = async (req: Request, res: Response) => {
+  try {
+    const { channel, status, source, search, page, limit } = req.query;
+
+    const result = await getCommunicationLogs({
+      channel: channel as any,
+      status: status as any,
+      source: source as string,
+      search: search as string,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 25,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Get sent communications error:', error);
+    res.status(500).json({ message: 'Failed to fetch communication logs' });
+  }
+};
+
+export const getCommunicationStatsHandler = async (_req: Request, res: Response) => {
+  try {
+    const stats = await getCommunicationStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Get communication stats error:', error);
+    res.status(500).json({ message: 'Failed to fetch communication stats' });
+  }
+};
+
+export const getAnnouncementHistory = async (req: Request, res: Response) => {
+  try {
+    const { page = '1', limit = '20' } = req.query;
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+
+    const [announcements, total] = await Promise.all([
+      (prisma as any).announcement.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+        include: {
+          createdBy: {
+            select: { id: true, fullName: true, role: true },
+          },
+        },
+      }),
+      (prisma as any).announcement.count(),
+    ]);
+
+    res.json({
+      announcements,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+    });
+  } catch (error) {
+    console.error('Get announcement history error:', error);
+    res.status(500).json({ message: 'Failed to fetch announcement history' });
   }
 };

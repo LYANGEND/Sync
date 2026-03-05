@@ -3,7 +3,7 @@ import {
   Coins, Send, Loader2, AlertTriangle, TrendingUp, TrendingDown,
   Minus, Sparkles, RefreshCw, ChevronDown, ChevronUp,
   Shield, Lightbulb, X, MessageSquare, History, Trash2,
-  Plus, Clock, Edit3, Check,
+  Plus, Clock, Edit3, Check, Target, Users, Zap,
 } from 'lucide-react';
 import api from '../../utils/api';
 
@@ -15,6 +15,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  action?: { type: string; params: Record<string, any> };
 }
 
 interface QuickInsights {
@@ -78,6 +79,10 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
     'How can we improve our revenue collection rate?',
     'Compare this month\'s financial performance to last month',
     'What budget areas need attention?',
+    'Send payment reminders to all overdue parents',
+    'Create a debt collection campaign for parents owing over 1000',
+    'Show me the debtor segmentation breakdown',
+    'Which debtors are at highest risk of non-payment?',
   ];
 
   // Scroll to bottom on new messages
@@ -209,6 +214,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
         role: 'assistant',
         content: res.data.answer,
         timestamp: new Date(),
+        action: res.data.action || undefined,
       };
       setMessages(prev => [...prev, assistantMessage]);
 
@@ -824,6 +830,12 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                           {formatResponse(msg.content)}
                         </div>
                       )}
+                      {/* AI Action Button */}
+                      {msg.action && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
+                          <ActionButton action={msg.action} />
+                        </div>
+                      )}
                       <p className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-emerald-200' : 'text-slate-400 dark:text-gray-500'}`}>
                         {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
@@ -902,6 +914,97 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+// Action Button for AI-suggested debt collection actions
+const ActionButton: React.FC<{ action: { type: string; params: Record<string, any> } }> = ({ action }) => {
+  const [executing, setExecuting] = React.useState(false);
+  const [result, setResult] = React.useState<string | null>(null);
+
+  const actionConfig: Record<string, { label: string; icon: React.ElementType; color: string; endpoint: string; method: string }> = {
+    SEND_REMINDERS: {
+      label: 'Send Reminders',
+      icon: Send,
+      color: 'blue',
+      endpoint: '/debt-collection/send',
+      method: 'POST',
+    },
+    CREATE_CAMPAIGN: {
+      label: 'Create Campaign',
+      icon: Target,
+      color: 'purple',
+      endpoint: '/debt-collection/campaigns',
+      method: 'POST',
+    },
+    VIEW_DEBTORS: {
+      label: 'View Debtors',
+      icon: Users,
+      color: 'orange',
+      endpoint: '/debt-collection/debtors',
+      method: 'GET',
+    },
+  };
+
+  const config = actionConfig[action.type];
+  if (!config) return null;
+
+  const handleExecute = async () => {
+    // For VIEW_DEBTORS, navigate to the debt collection tab
+    if (action.type === 'VIEW_DEBTORS') {
+      setResult('Switch to the Debt Collection tab to view all debtors');
+      return;
+    }
+
+    setExecuting(true);
+    try {
+      const res = config.method === 'POST'
+        ? await api.post(config.endpoint, action.params)
+        : await api.get(config.endpoint, { params: action.params });
+
+      if (action.type === 'SEND_REMINDERS') {
+        setResult(`✅ Sent ${res.data.result?.totalSent || 0} reminders successfully!`);
+      } else if (action.type === 'CREATE_CAMPAIGN') {
+        setResult(`✅ Campaign "${res.data.campaign?.name || ''}" created!`);
+      } else {
+        setResult('✅ Action completed successfully!');
+      }
+    } catch (err: any) {
+      setResult(`❌ ${err.response?.data?.error || 'Action failed'}`);
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const Icon = config.icon;
+
+  return (
+    <div className="space-y-2">
+      {!result ? (
+        <button
+          onClick={handleExecute}
+          disabled={executing}
+          className={`inline-flex items-center gap-2 px-3 py-2 bg-${config.color}-50 dark:bg-${config.color}-900/20 border border-${config.color}-200 dark:border-${config.color}-700 rounded-lg text-sm font-medium text-${config.color}-700 dark:text-${config.color}-300 hover:bg-${config.color}-100 dark:hover:bg-${config.color}-900/30 transition-colors disabled:opacity-50`}
+        >
+          {executing ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Icon size={14} />
+          )}
+          {executing ? 'Executing...' : config.label}
+          {action.params && Object.keys(action.params).length > 0 && (
+            <span className="text-xs opacity-70">
+              ({Object.entries(action.params).map(([k, v]) => `${k}: ${v}`).join(', ')})
+            </span>
+          )}
+        </button>
+      ) : (
+        <p className="text-xs text-slate-600 dark:text-gray-400 flex items-center gap-1">
+          <Zap size={12} className="text-yellow-500" />
+          {result}
+        </p>
+      )}
     </div>
   );
 };

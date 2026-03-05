@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import FinanceReports from './FinanceReports';
 
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target } from 'lucide-react';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
 import BulkImportModal from '../../components/BulkImportModal';
@@ -20,6 +20,7 @@ import Budgets from '../accounting/Budgets';
 import PettyCash from '../accounting/PettyCash';
 import FinancialStatements from '../accounting/FinancialStatements';
 import AIFinancialAdvisor from '../accounting/AIFinancialAdvisor';
+import DebtCollection from '../accounting/DebtCollection';
 
 interface Payment {
   id: string;
@@ -76,11 +77,11 @@ const getGradeLabel = (grade: number) => {
 };
 
 const Finance = () => {
-  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'expenses' | 'invoices' | 'payroll' | 'budgets' | 'petty-cash' | 'financial-reports' | 'ai-advisor'>('payments');
+  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'expenses' | 'invoices' | 'payroll' | 'budgets' | 'petty-cash' | 'financial-reports' | 'ai-advisor' | 'debt-collection'>('payments');
 
   // Determine which section is active for visual grouping
   const revenueTabKeys = ['payments', 'mobile-money', 'fees', 'scholarships', 'reports', 'reminders'];
-  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'financial-reports', 'ai-advisor'];
+  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'financial-reports', 'ai-advisor', 'debt-collection'];
   const [activeSection, setActiveSection] = useState<'revenue' | 'accounting'>('revenue');
 
   // Sync section with tab
@@ -821,6 +822,13 @@ const Finance = () => {
               <Sparkles size={16} />
               Finance AI
             </button>
+            <button onClick={() => setActiveTab('debt-collection')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'debt-collection'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Target size={16} />
+              Debt Collection
+            </button>
           </>
         )}
       </div>
@@ -995,6 +1003,8 @@ const Finance = () => {
         <FinancialStatements embedded />
       ) : activeTab === 'ai-advisor' ? (
         <AIFinancialAdvisor embedded />
+      ) : activeTab === 'debt-collection' ? (
+        <DebtCollection embedded />
       ) : activeTab === 'payments' ? (
         <>
           {/* Stats Cards */}
