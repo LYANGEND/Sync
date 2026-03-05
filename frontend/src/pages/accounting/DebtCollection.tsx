@@ -277,7 +277,6 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
     try {
       await api.put('/debt-collection/settings', settings);
       toast.success('Settings updated!');
-      setShowSettings(false);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update settings');
     } finally {

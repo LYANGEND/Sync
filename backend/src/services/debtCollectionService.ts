@@ -51,7 +51,7 @@ export async function segmentDebtors(options?: {
     },
   });
 
-  const settings = await prisma.schoolSettings.findFirst();
+  const settings = await prisma.schoolSettings.findFirst() as any;
   const day1 = settings?.escalationDay1Days || 7;
   const day2 = settings?.escalationDay2Days || 14;
   const day3 = settings?.escalationDay3Days || 21;
@@ -354,7 +354,7 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   });
   if (!campaign) throw new Error('Campaign not found');
 
-  const settings = await prisma.schoolSettings.findFirst();
+  const settings = await prisma.schoolSettings.findFirst() as any;
   const schoolName = settings?.schoolName || 'School';
   const useAI = settings?.aiPersonalizedMessages !== false;
 
@@ -495,7 +495,7 @@ export async function sendQuickReminders(options: {
   channels: ('EMAIL' | 'SMS' | 'WHATSAPP')[];
   sentById: string;
 }): Promise<{ sent: number; failed: number }> {
-  const settings = await prisma.schoolSettings.findFirst();
+  const settings = await prisma.schoolSettings.findFirst() as any;
   const schoolName = settings?.schoolName || 'School';
   const useAI = settings?.aiPersonalizedMessages !== false;
 
@@ -664,7 +664,7 @@ export async function reconcileCampaignPayments(): Promise<number> {
  * Run the daily debt collection check — called by scheduler
  */
 export async function runScheduledCollection(): Promise<void> {
-  const settings = await prisma.schoolSettings.findFirst();
+  const settings = await prisma.schoolSettings.findFirst() as any;
   if (!settings?.debtCollectionEnabled) {
     console.log('[Debt Collection] Disabled in settings, skipping...');
     return;

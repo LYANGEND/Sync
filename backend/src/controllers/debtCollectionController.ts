@@ -275,7 +275,7 @@ export const reconcilePayments = async (req: Request, res: Response) => {
  */
 export const getCollectionSettings = async (req: Request, res: Response) => {
   try {
-    const settings = await prisma.schoolSettings.findFirst({
+    const settings = await (prisma.schoolSettings as any).findFirst({
       select: {
         debtCollectionEnabled: true,
         escalationDay1Channel: true,
@@ -310,7 +310,7 @@ export const updateCollectionSettings = async (req: Request, res: Response) => {
     const settings = await prisma.schoolSettings.findFirst();
     if (!settings) return res.status(404).json({ error: 'No settings found' });
 
-    const updated = await prisma.schoolSettings.update({
+    const updated = await (prisma.schoolSettings as any).update({
       where: { id: settings.id },
       data: {
         debtCollectionEnabled: data.debtCollectionEnabled,
