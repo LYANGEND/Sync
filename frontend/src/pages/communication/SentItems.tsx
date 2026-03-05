@@ -62,6 +62,9 @@ const sourceLabels: Record<string, string> = {
   attendance_alert: 'Attendance Alert',
   notification_service: 'System Notification',
   manual: 'Manual',
+  debt_collection: 'Debt Collection',
+  quick_reminder: 'Quick Reminder',
+  scheduled_collection: 'Scheduled Collection',
 };
 
 const SentItems = () => {
@@ -225,6 +228,9 @@ const SentItems = () => {
               <option value="attendance_alert">Attendance Alert</option>
               <option value="notification_service">System</option>
               <option value="manual">Manual</option>
+              <option value="debt_collection">Debt Collection</option>
+              <option value="quick_reminder">Quick Reminder</option>
+              <option value="scheduled_collection">Scheduled Collection</option>
             </select>
           </div>
         </div>
