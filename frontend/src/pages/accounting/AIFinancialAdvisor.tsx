@@ -964,9 +964,13 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
         : await api.get(config.endpoint, { params: action.params });
 
       if (action.type === 'SEND_REMINDERS') {
-        setResult(`✅ Sent ${res.data.result?.totalSent || 0} reminders successfully!`);
+        const sent = res.data.sent ?? res.data.result?.totalSent ?? 0;
+        const failed = res.data.failed ?? 0;
+        setResult(sent > 0 
+          ? `✅ Sent ${sent} reminders successfully!${failed > 0 ? ` (${failed} failed)` : ''}`
+          : `⚠️ ${res.data.message || 'No reminders sent — check SMTP settings in Settings page'}`);
       } else if (action.type === 'CREATE_CAMPAIGN') {
-        setResult(`✅ Campaign "${res.data.campaign?.name || ''}" created!`);
+        setResult(`✅ Campaign "${res.data.campaign?.name || res.data.name || ''}" created!`);
       } else {
         setResult('✅ Action completed successfully!');
       }

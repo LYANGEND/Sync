@@ -423,18 +423,23 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
       // Don't fail the response if save fails
     }
 
-    // Extract action block if present
+    // Extract action block if present and strip it from the displayed answer
     let action = null;
+    let cleanAnswer = aiResponse.content;
     const actionMatch = aiResponse.content.match(/```action\n([\s\S]*?)\n```/);
     if (actionMatch) {
       try {
-        action = JSON.parse(actionMatch[1].trim());
+        const parsed = JSON.parse(actionMatch[1].trim());
+        const { type, ...params } = parsed;
+        action = { type, params };
+        // Remove the action block from the displayed text
+        cleanAnswer = cleanAnswer.replace(/```action\n[\s\S]*?\n```/, '').trim();
       } catch { /* ignore parse errors */ }
     }
 
     res.json({
-      answer: aiResponse.content,
-      action, // null or { type: "SEND_REMINDERS", channels: [...], ... }
+      answer: cleanAnswer,
+      action, // null or { type: "SEND_REMINDERS", params: { channels: [...], ... } }
       tokensUsed: aiResponse.tokensUsed,
       conversationId,
       snapshotSummary: {
