@@ -1,12 +1,14 @@
-name: CI/CD Pipeline
+name: Build and Deploy SYNC
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master  # Single-tenant system
+      - power   # Multi-tenant system (ops platform)
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: lyangend/sync
+  IMAGE_PREFIX: lyangend/sync
 
 jobs:
   build-and-push:
@@ -15,214 +17,93 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        service: [frontend, backend]
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the Container registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:master
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:buildcache,mode=max
+      - name: Determine deployment configuration
+        id: config
+        run: |
+          if [ "${{ github.ref_name }}" == "master" ]; then
+            # Single-tenant configuration
+            echo "tag=master" >> $GITHUB_OUTPUT
+            echo "vite_api_url=" >> $GITHUB_OUTPUT
+            echo "deployment=single-tenant" >> $GITHUB_OUTPUT
+          else
+            # Multi-tenant configuration
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "vite_api_url=/api" >> $GITHUB_OUTPUT
+            echo "deployment=multi-tenant" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
         with:
-          context: ./frontend
+          context: ./${{ matrix.service }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:master
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:buildcache,mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.config.outputs.tag }}
+          build-args: |
+            VITE_API_URL=${{ steps.config.outputs.vite_api_url }}
+          cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.service }}
+          platforms: linux/amd64
 
-  deploy:
+      - name: Image details
+        run: |
+          echo "✅ Built: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.config.outputs.tag }}"
+          echo "📦 Deployment: ${{ steps.config.outputs.deployment }}"
+          echo "🔧 VITE_API_URL: ${{ steps.config.outputs.vite_api_url || '(default)' }}"
+
+  summary:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Ensure nginx directory exists on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            mkdir -p ~/app/nginx
-
-      - name: Copy configuration files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.prod.yml,nginx-system.conf"
-          target: "~/app"
-          strip_components: 0
-
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd ~/app
-            
-            # Create .env file with secure permissions
-            cat > .env << 'EOF'
-            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            NODE_ENV=production
-            EOF
-            chmod 600 .env
-            
-            # Login to GHCR
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Pull latest images (force pull)
-            docker-compose -f docker-compose.prod.yml pull --ignore-pull-failures
-            
-            # Stop and remove containers
-            docker-compose -f docker-compose.prod.yml down --remove-orphans
-            
-            # Clean up any orphaned containers
-            docker ps -a --filter "name=sync" --format "{{.ID}}" | xargs -r docker rm -f || true
-            
-            # Run migrations on host PostgreSQL
-            echo "🚀 Running database migrations..."
-            docker-compose -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy || {
-              echo "❌ Migration failed!"
-              docker logs sync_backend --tail=50
-              exit 1
-            }
-            
-            # Start all services with latest images (force recreate)
-            docker-compose -f docker-compose.prod.yml up -d --force-recreate
-            
-            # Wait for services to be healthy
-            echo "⏳ Waiting for services to be ready..."
-            
-            # Wait for backend
-            for i in {1..30}; do
-              if curl -s -f http://localhost:3002/api/health > /dev/null 2>&1; then
-                echo "✅ Backend is ready!"
-                break
-              fi
-              if [ $i -eq 30 ]; then
-                echo "⚠️ Backend health check timeout (checking logs...)"
-                docker logs sync_backend --tail=50
-                exit 1
-              fi
-              sleep 3
-            done
-            
-            # Wait for frontend
-            for i in {1..20}; do
-              if curl -s -f http://localhost:3003 > /dev/null 2>&1; then
-                echo "✅ Frontend is ready!"
-                break
-              fi
-              if [ $i -eq 20 ]; then
-                echo "⚠️ Frontend health check timeout (checking logs...)"
-                docker logs sync_frontend --tail=50
-                exit 1
-              fi
-              sleep 2
-            done
-            
-            # Configure system nginx
-            echo "🔧 Configuring system nginx..."
-            
-            # Remove old/duplicate sync configs
-            sudo rm -f /etc/nginx/sites-enabled/sync-school || true
-            
-            # Only update nginx config if it has changed (preserves SSL config)
-            if ! sudo diff -q ~/app/nginx-system.conf /etc/nginx/sites-available/sync-base 2>/dev/null; then
-              echo "📝 Nginx config changed, updating..."
-              # Backup the base config (without SSL)
-              sudo cp ~/app/nginx-system.conf /etc/nginx/sites-available/sync-base
-              
-              # If SSL config exists, preserve it; otherwise use base
-              if [ -f /etc/nginx/sites-available/sync ] && grep -q "ssl_certificate" /etc/nginx/sites-available/sync; then
-                echo "✅ SSL config detected, preserving..."
-                # Keep the existing config with SSL
-              else
-                echo "📋 No SSL config, using base config..."
-                sudo cp ~/app/nginx-system.conf /etc/nginx/sites-available/sync
-              fi
-              
-              sudo ln -sf /etc/nginx/sites-available/sync /etc/nginx/sites-enabled/sync
-              
-              # Test nginx configuration
-              sudo nginx -t || {
-                echo "❌ nginx configuration error"
-                exit 1
-              }
-              
-              # Reload nginx
-              sudo systemctl reload nginx
-            else
-              echo "✅ Nginx config unchanged, skipping update"
-            fi
-            
-            # Show deployment status
-            echo "📊 Deployment Status:"
-            docker-compose -f docker-compose.prod.yml ps
-            
-            # Test the application
-            echo "🧪 Testing application..."
-            if curl -s -f http://localhost/health > /dev/null 2>&1; then
-              echo "✅ Application is accessible via nginx!"
-            else
-              echo "⚠️ Application might not be accessible via nginx"
-            fi
-            
-            # Clean up old Docker images to save space
-            echo "🧹 Cleaning up old Docker images..."
-            
-            # Remove dangling images
-            docker image prune -f
-            
-            # Remove old sync images (keep only latest 2)
-            echo "Removing old sync/backend images..."
-            docker images ghcr.io/lyangend/sync/backend --format "{{.ID}} {{.CreatedAt}}" | \
-              tail -n +3 | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
-            
-            echo "Removing old sync/frontend images..."
-            docker images ghcr.io/lyangend/sync/frontend --format "{{.ID}} {{.CreatedAt}}" | \
-              tail -n +3 | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
-            
-            # Show disk space saved
-            echo "✅ Cleanup complete"
-            df -h / | tail -1
-            
-            # Create database backup (optional)
-            echo "💾 Creating database backup..."
-            BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql"
-            PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} pg_dump -h localhost -U ${{ secrets.POSTGRES_USER }} ${{ secrets.POSTGRES_DB }} > "$BACKUP_FILE" 2>/dev/null && \
-            echo "✅ Backup created: $BACKUP_FILE" || \
-            echo "⚠️ Backup skipped or failed"
-            
-            echo "🎉 Deployment completed successfully!"
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.ref_name }}" == "master" ]; then
+            echo "**System:** Single-tenant" >> $GITHUB_STEP_SUMMARY
+            echo "**Tag:** \`:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/frontend:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/backend:master\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "cd ~/app" >> $GITHUB_STEP_SUMMARY
+            echo "TAG=master docker compose pull" >> $GITHUB_STEP_SUMMARY
+            echo "TAG=master docker compose up -d" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**System:** Multi-tenant (Ops Platform)" >> $GITHUB_STEP_SUMMARY
+            echo "**Tag:** \`:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/frontend:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ghcr.io/lyangend/sync/backend:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "cd ~/app-mt" >> $GITHUB_STEP_SUMMARY
+            echo "docker compose -f docker-compose.prod.yml pull" >> $GITHUB_STEP_SUMMARY
+            echo "docker compose -f docker-compose.prod.yml up -d" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
