@@ -1,7 +1,7 @@
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching'
 import { clientsClaim } from 'workbox-core'
 import { NavigationRoute, registerRoute } from 'workbox-routing'
-import { StaleWhileRevalidate, NetworkFirst, CacheFirst } from 'workbox-strategies'
+import { StaleWhileRevalidate, NetworkFirst, CacheFirst, NetworkOnly } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 import { BackgroundSyncPlugin } from 'workbox-background-sync'
@@ -74,9 +74,7 @@ registerRoute(
   ({ url, request }) =>
     url.pathname.startsWith('/api/') &&
     ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method),
-  new NetworkFirst({
-    cacheName: 'api-mutations',
-    networkTimeoutSeconds: 10,
+  new NetworkOnly({
     plugins: [bgSyncPlugin],
   }),
   'POST'
@@ -86,9 +84,7 @@ registerRoute(
   ({ url, request }) =>
     url.pathname.startsWith('/api/') &&
     ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method),
-  new NetworkFirst({
-    cacheName: 'api-mutations',
-    networkTimeoutSeconds: 10,
+  new NetworkOnly({
     plugins: [bgSyncPlugin],
   }),
   'PUT'
