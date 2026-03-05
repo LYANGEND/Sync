@@ -14,6 +14,7 @@ import {
   getConversation,
   updateConversation,
   deleteConversation,
+  executeAIAction,
 } from '../controllers/aiFinancialController';
 import { aiLimiter } from '../middleware/rateLimiter';
 
@@ -25,6 +26,7 @@ router.use(authenticateToken);
 router.post('/ai-advisor', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), aiLimiter, getAIFinancialAdvice);
 router.get('/ai-advisor/snapshot', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), getFinancialSnapshot);
 router.post('/ai-advisor/quick-insights', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), aiLimiter, getQuickInsights);
+router.post('/ai-advisor/execute-action', authorizeRole(['SUPER_ADMIN', 'BURSAR']), executeAIAction);
 
 // AI Conversation History
 router.get('/ai-advisor/conversations', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), listConversations);

@@ -918,95 +918,114 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
   );
 };
 
-// Action Button for AI-suggested debt collection actions
+// Action Button for AI-suggested actions (creates, sends, debt collection)
 const ActionButton: React.FC<{ action: { type: string; params: Record<string, any> } }> = ({ action }) => {
   const [executing, setExecuting] = React.useState(false);
   const [result, setResult] = React.useState<string | null>(null);
+  const [confirmed, setConfirmed] = React.useState(false);
 
-  const actionConfig: Record<string, { label: string; icon: React.ElementType; color: string; endpoint: string; method: string }> = {
-    SEND_REMINDERS: {
-      label: 'Send Reminders',
-      icon: Send,
-      color: 'blue',
-      endpoint: '/debt-collection/send',
-      method: 'POST',
-    },
-    CREATE_CAMPAIGN: {
-      label: 'Create Campaign',
-      icon: Target,
-      color: 'purple',
-      endpoint: '/debt-collection/campaigns',
-      method: 'POST',
-    },
-    VIEW_DEBTORS: {
-      label: 'View Debtors',
-      icon: Users,
-      color: 'orange',
-      endpoint: '/debt-collection/debtors',
-      method: 'GET',
-    },
+  // Actions that go through the unified execute-action endpoint
+  const createActions: Record<string, { label: string; icon: React.ElementType; color: string; confirmMsg: string }> = {
+    CREATE_VENDOR:      { label: 'Create Vendor',     icon: Plus,    color: 'emerald',  confirmMsg: `Create vendor "${action.params?.name || ''}"?` },
+    CREATE_EXPENSE:     { label: 'Create Expense',    icon: Minus,   color: 'red',      confirmMsg: `Record expense: ZMW ${Number(action.params?.amount || 0).toLocaleString()} — ${action.params?.description || ''}?` },
+    CREATE_INVOICE:     { label: 'Create Invoice',    icon: Coins,   color: 'blue',     confirmMsg: `Create invoice for ${action.params?.studentName || ''}?` },
+    RECORD_PAYMENT:     { label: 'Record Payment',    icon: Check,   color: 'green',    confirmMsg: `Record ZMW ${Number(action.params?.amount || 0).toLocaleString()} payment from ${action.params?.studentName || ''}?` },
+    CREATE_BUDGET:      { label: 'Create Budget',     icon: Target,  color: 'purple',   confirmMsg: `Create budget "${action.params?.name || ''}"?` },
+    CREATE_PETTY_CASH_TRANSACTION: { label: 'Record Petty Cash', icon: Coins, color: 'amber', confirmMsg: `Record petty cash ${action.params?.type?.toLowerCase() || 'transaction'}: ZMW ${Number(action.params?.amount || 0).toLocaleString()}?` },
+    CREATE_FEE_TEMPLATE: { label: 'Create Fee Template', icon: Plus, color: 'indigo', confirmMsg: `Create fee "${action.params?.name || ''}" — ZMW ${Number(action.params?.amount || 0).toLocaleString()}?` },
   };
 
-  const config = actionConfig[action.type];
+  // Legacy actions that call their own endpoints directly
+  const legacyActions: Record<string, { label: string; icon: React.ElementType; color: string; endpoint: string; method: string }> = {
+    SEND_REMINDERS: { label: 'Send Reminders', icon: Send, color: 'blue', endpoint: '/debt-collection/send', method: 'POST' },
+    CREATE_CAMPAIGN: { label: 'Create Campaign', icon: Target, color: 'purple', endpoint: '/debt-collection/campaigns', method: 'POST' },
+    VIEW_DEBTORS: { label: 'View Debtors', icon: Users, color: 'orange', endpoint: '/debt-collection/debtors', method: 'GET' },
+  };
+
+  const isCreateAction = !!createActions[action.type];
+  const config = createActions[action.type] || legacyActions[action.type];
   if (!config) return null;
 
   const handleExecute = async () => {
-    // For VIEW_DEBTORS, navigate to the debt collection tab
     if (action.type === 'VIEW_DEBTORS') {
-      setResult('Switch to the Debt Collection tab to view all debtors');
+      setResult('📋 Switch to the Debt Collection tab to view all debtors');
+      return;
+    }
+
+    // Require confirmation for create actions
+    if (isCreateAction && !confirmed) {
+      setConfirmed(true);
       return;
     }
 
     setExecuting(true);
     try {
-      const res = config.method === 'POST'
-        ? await api.post(config.endpoint, action.params)
-        : await api.get(config.endpoint, { params: action.params });
-
-      if (action.type === 'SEND_REMINDERS') {
-        const sent = res.data.sent ?? res.data.result?.totalSent ?? 0;
-        const failed = res.data.failed ?? 0;
-        setResult(sent > 0 
-          ? `✅ Sent ${sent} reminders successfully!${failed > 0 ? ` (${failed} failed)` : ''}`
-          : `⚠️ ${res.data.message || 'No reminders sent — check SMTP settings in Settings page'}`);
-      } else if (action.type === 'CREATE_CAMPAIGN') {
-        setResult(`✅ Campaign "${res.data.campaign?.name || res.data.name || ''}" created!`);
+      let res;
+      if (isCreateAction) {
+        // All create actions go through the unified executor
+        res = await api.post('/financial/ai-advisor/execute-action', { type: action.type, params: action.params });
+        setResult(res.data.success ? `✅ ${res.data.message}` : `⚠️ ${res.data.message || 'Action completed'}`);
       } else {
-        setResult('✅ Action completed successfully!');
+        // Legacy debt collection actions
+        const legacy = legacyActions[action.type];
+        res = legacy.method === 'POST'
+          ? await api.post(legacy.endpoint, action.params)
+          : await api.get(legacy.endpoint, { params: action.params });
+
+        if (action.type === 'SEND_REMINDERS') {
+          const sent = res.data.sent ?? res.data.result?.totalSent ?? 0;
+          const failed = res.data.failed ?? 0;
+          setResult(sent > 0
+            ? `✅ Sent ${sent} reminders!${failed > 0 ? ` (${failed} failed)` : ''}`
+            : `⚠️ ${res.data.message || 'No reminders sent — check SMTP settings'}`);
+        } else if (action.type === 'CREATE_CAMPAIGN') {
+          setResult(`✅ Campaign "${res.data.campaign?.name || ''}" created!`);
+        } else {
+          setResult('✅ Done!');
+        }
       }
     } catch (err: any) {
       setResult(`❌ ${err.response?.data?.error || 'Action failed'}`);
+      setConfirmed(false);
     } finally {
       setExecuting(false);
     }
   };
 
   const Icon = config.icon;
+  const colorClass = config.color;
+
+  // Summarize params nicely
+  const paramSummary = isCreateAction
+    ? createActions[action.type].confirmMsg
+    : Object.entries(action.params || {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ');
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 mt-2">
       {!result ? (
-        <button
-          onClick={handleExecute}
-          disabled={executing}
-          className={`inline-flex items-center gap-2 px-3 py-2 bg-${config.color}-50 dark:bg-${config.color}-900/20 border border-${config.color}-200 dark:border-${config.color}-700 rounded-lg text-sm font-medium text-${config.color}-700 dark:text-${config.color}-300 hover:bg-${config.color}-100 dark:hover:bg-${config.color}-900/30 transition-colors disabled:opacity-50`}
-        >
-          {executing ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Icon size={14} />
+        <div className="flex flex-col gap-1">
+          {confirmed && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+              ⚠️ {paramSummary} Click again to confirm.
+            </p>
           )}
-          {executing ? 'Executing...' : config.label}
-          {action.params && Object.keys(action.params).length > 0 && (
-            <span className="text-xs opacity-70">
-              ({Object.entries(action.params).map(([k, v]) => `${k}: ${v}`).join(', ')})
-            </span>
-          )}
-        </button>
+          <button
+            onClick={handleExecute}
+            disabled={executing}
+            className={`inline-flex items-center gap-2 px-3 py-2 bg-${colorClass}-50 dark:bg-${colorClass}-900/20 border border-${colorClass}-200 dark:border-${colorClass}-700 rounded-lg text-sm font-medium text-${colorClass}-700 dark:text-${colorClass}-300 hover:bg-${colorClass}-100 dark:hover:bg-${colorClass}-900/30 transition-colors disabled:opacity-50`}
+          >
+            {executing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Icon size={14} />
+            )}
+            {executing ? 'Executing...' : confirmed ? `Confirm ${config.label}` : config.label}
+          </button>
+        </div>
       ) : (
-        <p className="text-xs text-slate-600 dark:text-gray-400 flex items-center gap-1">
-          <Zap size={12} className="text-yellow-500" />
-          {result}
+        <p className="text-xs text-slate-600 dark:text-gray-400 flex items-start gap-1">
+          <Zap size={12} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+          <span>{result}</span>
         </p>
       )}
     </div>
