@@ -1,39 +1,44 @@
 # Stage 1: Build
-FROM node:20-alpine as builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install OpenSSL
 RUN apk add --no-cache openssl
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 # Generate Prisma Client before build
 RUN npx prisma generate
 RUN npm run build
 
-# Compile seed.ts separately
-RUN npx tsc prisma/seed.ts --outDir dist/prisma --esModuleInterop --skipLibCheck
-
-# Stage 2: Run
+# Stage 2: Production
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl curl && \
+    addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
 
 COPY package*.json ./
-RUN npm install --production
+RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
-# Generate Prisma Client
-RUN npx prisma generate
+RUN mkdir -p uploads/logos uploads/profiles && chown -R nodejs:nodejs /app
 
-EXPOSE 3000
+USER nodejs
 
-CMD ["npm", "start"]
+EXPOSE 4000
+
+ENV PORT=4000 NODE_ENV=production
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:4000/api/health || exit 1
+
+CMD ["node", "dist/server.js"]

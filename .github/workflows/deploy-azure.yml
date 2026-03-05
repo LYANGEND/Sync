@@ -1,0 +1,194 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options: [dev, staging, prod]
+      run_migrations:
+        description: 'Run database migrations'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: sync-rg
+  ACR_NAME: syncprodacr
+  BACKEND_IMAGE: sync-backend
+  FRONTEND_IMAGE: sync-frontend
+  BACKEND_APP_NAME: sync-prod-backend
+  FRONTEND_APP_NAME: sync-prod-frontend
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Build & Push Docker Images to ACR
+  # ──────────────────────────────────────────────────────────
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    outputs:
+      backend-tag: ${{ steps.meta.outputs.backend-tag }}
+      frontend-tag: ${{ steps.meta.outputs.frontend-tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          SHA=$(echo ${{ github.sha }} | head -c 7)
+          echo "backend-tag=${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:${SHA}" >> $GITHUB_OUTPUT
+          echo "frontend-tag=${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:${SHA}" >> $GITHUB_OUTPUT
+          echo "sha=${SHA}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.backend-tag }}
+            ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.frontend-tag }}
+            ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Run Database Migrations
+  # ──────────────────────────────────────────────────────────
+  migrate:
+    name: Database Migrations
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.run_migrations != 'false' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+  # ──────────────────────────────────────────────────────────
+  # Job 3: Deploy to Azure Container Apps
+  # ──────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs: [build, migrate]
+    if: always() && needs.build.result == 'success'
+    environment:
+      name: production
+      url: ${{ steps.urls.outputs.frontend-url }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy backend
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ env.BACKEND_APP_NAME }}
+          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
+          imageToDeploy: ${{ needs.build.outputs.backend-tag }}
+
+      - name: Deploy frontend
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ env.FRONTEND_APP_NAME }}
+          resourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
+          imageToDeploy: ${{ needs.build.outputs.frontend-tag }}
+
+      - name: Get deployment URLs
+        id: urls
+        run: |
+          FRONTEND_FQDN=$(az containerapp show \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          BACKEND_FQDN=$(az containerapp show \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "frontend-url=https://${FRONTEND_FQDN}" >> $GITHUB_OUTPUT
+          echo "backend-url=https://${BACKEND_FQDN}" >> $GITHUB_OUTPUT
+          echo "### 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend:** https://${FRONTEND_FQDN}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend:** https://${BACKEND_FQDN}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Health check - Backend
+        run: |
+          echo "Waiting for backend to be ready..."
+          for i in {1..30}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.backend-url }}/api/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Backend is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i: Status $STATUS, retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Backend health check failed"
+          exit 1
+
+      - name: Health check - Frontend
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.frontend-url }}" || true)
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Frontend is healthy!"
+          else
+            echo "⚠️ Frontend returned status: $STATUS"
+          fi

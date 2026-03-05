@@ -175,7 +175,6 @@ async function main() {
         data: {
           name: s.name,
           code: s.code,
-          teacherId: teacher.id, // Assign default teacher
         }
       });
       console.log(`✅ Created subject: ${s.name}`);
