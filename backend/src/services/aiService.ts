@@ -57,8 +57,28 @@ class AIService {
         model: (settings as any).aiModel || 'gpt-4o-mini',
         enabled: (settings as any).aiEnabled,
       };
-      this.configLoadedAt = now;
-      return this.config;
+
+      // For Azure provider, merge in Azure-specific env vars that aren't stored in DB
+      if (provider === 'azure') {
+        this.config.azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+        this.config.azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
+        this.config.azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || this.config.model;
+        // If the API key from DB doesn't look like an Azure key, prefer the env var
+        if (this.isValidEnvVar(process.env.AZURE_OPENAI_API_KEY)) {
+          this.config.apiKey = process.env.AZURE_OPENAI_API_KEY!;
+        }
+        // Azure requires an endpoint — if missing, fall through to env var fallbacks
+        if (!this.isValidEnvVar(this.config.azureEndpoint)) {
+          this.config = null;
+          // Don't return — let it fall through to env var-based config below
+        } else {
+          this.configLoadedAt = now;
+          return this.config;
+        }
+      } else {
+        this.configLoadedAt = now;
+        return this.config;
+      }
     }
 
     // Fallback: check for Azure OpenAI env vars
@@ -359,7 +379,12 @@ class AIService {
 
     // Clean potential markdown code blocks
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(cleaned);
+    try {
+      return JSON.parse(cleaned);
+    } catch (parseError) {
+      console.error('AI returned invalid JSON. Raw response:', result.substring(0, 500));
+      throw new Error('AI returned an invalid response. Please try again.');
+    }
   }
 }
 

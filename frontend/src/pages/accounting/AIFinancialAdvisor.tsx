@@ -85,10 +85,31 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load quick insights on mount
+  // Load quick insights on mount (with cleanup to prevent duplicate calls)
   useEffect(() => {
-    loadQuickInsights();
+    let cancelled = false;
+
+    const load = async () => {
+      setInsightsLoading(true);
+      setInsightsError('');
+      try {
+        const res = await api.post('/financial/ai-advisor/quick-insights');
+        if (!cancelled) setInsights(res.data);
+      } catch (error: any) {
+        if (!cancelled) {
+          const retryAfter = error.response?.data?.retryAfter;
+          const msg = error.response?.data?.error || 'Failed to load insights';
+          setInsightsError(retryAfter ? `${msg} Try again in ${retryAfter}s.` : msg);
+        }
+      } finally {
+        if (!cancelled) setInsightsLoading(false);
+      }
+    };
+
+    load();
     loadConversations();
+
+    return () => { cancelled = true; };
   }, []);
 
   const loadConversations = async () => {
