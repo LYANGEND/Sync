@@ -50,3 +50,9 @@ backend/Finalised Syllabi
 .gitignore
 backend/Finalised Teaching Modules
 *.md
+scripts/deploy-azure.sh
+scripts/deploy-azure.ps1
+scripts/backup.sh
+infra/main.bicepparam
+.azure-secrets
+nginx-system.conf

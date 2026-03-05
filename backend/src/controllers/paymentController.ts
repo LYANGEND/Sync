@@ -9,6 +9,7 @@ import {
   getCollectionById,
   MobileMoneyCollectionRequest
 } from '../services/lencoService';
+import { onPaymentCreated, onPaymentVoided } from '../services/accountingBridge';
 
 const prisma = new PrismaClient();
 
@@ -127,6 +128,11 @@ export const createPayment = async (req: Request, res: Response) => {
         },
       },
     });
+
+    // Create accounting journal entry (double-entry bookkeeping)
+    onPaymentCreated(payment.id, userId).catch(err =>
+      console.error('Background journal entry creation failed:', err)
+    );
 
     // Send Notification (Email & SMS) via Notification Service
     try {
@@ -597,6 +603,11 @@ export const voidPayment = async (req: Request, res: Response) => {
 
     console.log(`Payment ${paymentId} voided by user ${userId}. Reason: ${reason}`);
 
+    // Create reversal journal entry
+    onPaymentVoided(paymentId, userId).catch(err =>
+      console.error('Background void journal creation failed:', err)
+    );
+
     res.json({
       message: 'Payment voided successfully',
       payment: voidedPayment
@@ -1039,6 +1050,13 @@ async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETE
     });
 
     console.log(`Payment ${payment.transactionId} updated to ${newStatus} from collection ${collection.reference}`);
+
+    // Create accounting journal entry for completed mobile money payment
+    if (newStatus === 'COMPLETED') {
+      onPaymentCreated(payment.id).catch(err =>
+        console.error('Background journal entry for mobile money failed:', err)
+      );
+    }
 
     // Send notification to parent on successful payment
     if (newStatus === 'COMPLETED') {

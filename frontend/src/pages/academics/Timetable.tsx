@@ -42,11 +42,6 @@ interface Subject {
   id: string;
   name: string;
   code: string;
-  teacherId?: string;
-  teacher?: {
-    id: string;
-    fullName: string;
-  };
 }
 
 interface AcademicTerm {
@@ -124,13 +119,6 @@ const Timetable = () => {
         setClasses(childClasses);
         if (childClasses.length > 0) {
           setSelectedClassId(childClasses[0].id);
-        }
-      } else if (user?.role === 'STUDENT') {
-        // Should be single class (their own)
-        const profileRes = await api.get('/students/profile/me');
-        if (profileRes.data.class) {
-          setClasses([profileRes.data.class]);
-          setSelectedClassId(profileRes.data.class.id);
         }
       } else {
         // For Admin/Teachers: All classes
@@ -662,12 +650,6 @@ const Timetable = () => {
           )}
 
           {viewMode === 'CLASS' ? (
-            user?.role === 'STUDENT' && classes.length > 0 ? (
-              <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-300 font-medium flex items-center gap-2">
-                <span className="text-blue-500 dark:text-blue-400 text-xs uppercase font-bold">Your Class:</span>
-                {classes[0].name}
-              </div>
-            ) : (
               <select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
@@ -678,7 +660,6 @@ const Timetable = () => {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-            )
           ) : (
             <select
               value={selectedTeacherId}
@@ -849,30 +830,16 @@ const Timetable = () => {
               {viewMode === 'CLASS' ? (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teacher</label>
-                  {(() => {
-                    const selectedSubject = subjects.find(s => s.id === newPeriod.subjectId);
-                    if (!newPeriod.subjectId) {
-                      return (
-                        <div className="px-3 py-2 border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 rounded-lg text-gray-500 dark:text-gray-400 text-sm italic">
-                          Select a subject first
-                        </div>
-                      );
-                    }
-                    if (selectedSubject?.teacher) {
-                      return (
-                        <div className="px-3 py-2 border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 rounded-lg text-green-800 dark:text-green-300 font-medium flex items-center gap-2">
-                          <User size={16} />
-                          {selectedSubject.teacher.fullName}
-                          <span className="text-xs text-green-600 dark:text-green-400 ml-auto">(Auto-assigned)</span>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="px-3 py-2 border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg text-yellow-800 dark:text-yellow-300 text-sm">
-                        ⚠️ No teacher assigned to this subject. Please assign one in the Subjects page.
-                      </div>
-                    );
-                  })()}
+                  {!newPeriod.subjectId ? (
+                    <div className="px-3 py-2 border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 rounded-lg text-gray-500 dark:text-gray-400 text-sm italic">
+                      Select a subject first
+                    </div>
+                  ) : (
+                    <div className="px-3 py-2 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-800 dark:text-blue-300 text-sm flex items-center gap-2">
+                      <User size={16} />
+                      Teacher will be auto-assigned from Subject Allocation
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div>

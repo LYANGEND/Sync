@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, Users, AlertCircle, BookOpen, Clock, Calendar, CheckSquare, GraduationCap } from 'lucide-react';
+import { TrendingUp, Users, AlertCircle, BookOpen, Clock, Calendar, CheckSquare, GraduationCap, Brain, Shield, Bell } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
@@ -25,6 +25,11 @@ interface AdminStats {
       };
     };
   }[];
+  intelligence?: {
+    atRiskCount: number;
+    unresolvedAlerts: number;
+    attendanceRate: number;
+  };
 }
 
 // Teacher Stats Interface
@@ -244,6 +249,47 @@ const Dashboard = () => {
             </Link>
           ))}
         </div>
+
+        {/* Intelligence Summary */}
+        {stats?.intelligence && (stats.intelligence.atRiskCount > 0 || stats.intelligence.unresolvedAlerts > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            <Link
+              to="/intelligence"
+              className="flex items-center gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-2xl border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
+            >
+              <div className="p-2 bg-orange-100 dark:bg-orange-900/40 rounded-xl">
+                <Shield size={20} className="text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{stats.intelligence.atRiskCount}</p>
+                <p className="text-xs text-orange-600 dark:text-orange-400">At-Risk Students</p>
+              </div>
+            </Link>
+            <Link
+              to="/intelligence"
+              className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-2xl border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+            >
+              <div className="p-2 bg-red-100 dark:bg-red-900/40 rounded-xl">
+                <Bell size={20} className="text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-red-700 dark:text-red-400">{stats.intelligence.unresolvedAlerts}</p>
+                <p className="text-xs text-red-600 dark:text-red-400">Attendance Alerts</p>
+              </div>
+            </Link>
+            <div
+              className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-200 dark:border-blue-800"
+            >
+              <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-xl">
+                <Brain size={20} className="text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-blue-700 dark:text-blue-400">{stats.intelligence.attendanceRate}%</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">Weekly Attendance</p>
+              </div>
+            </div>
+          </div>
+        )}
 
 
         {/* Stats Grid - Desktop */}

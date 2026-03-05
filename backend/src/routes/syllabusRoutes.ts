@@ -3,10 +3,13 @@ import {
   getTopics, 
   createTopic, 
   deleteTopic,
+  updateTopic,
   getClassProgress,
   updateTopicProgress,
   getLessonPlans,
-  createLessonPlan
+  createLessonPlan,
+  updateLessonPlan,
+  deleteLessonPlan
 } from '../controllers/syllabusController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -17,6 +20,7 @@ router.use(authenticateToken);
 // Topics (Syllabus Definition)
 router.get('/topics', getTopics);
 router.post('/topics', authorizeRole(['SUPER_ADMIN', 'TEACHER']), createTopic);
+router.put('/topics/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), updateTopic);
 router.delete('/topics/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), deleteTopic);
 
 // Progress Tracking
@@ -26,5 +30,7 @@ router.put('/progress/:topicId/:classId', authorizeRole(['SUPER_ADMIN', 'TEACHER
 // Lesson Plans
 router.get('/lesson-plans', getLessonPlans);
 router.post('/lesson-plans', authorizeRole(['SUPER_ADMIN', 'TEACHER']), createLessonPlan);
+router.put('/lesson-plans/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), updateLessonPlan);
+router.delete('/lesson-plans/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), deleteLessonPlan);
 
 export default router;

@@ -127,6 +127,29 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       },
     });
 
+    // 5. Intelligence summary (if tables exist)
+    let intelligenceSummary = { atRiskCount: 0, unresolvedAlerts: 0, attendanceRate: 0 };
+    try {
+      const atRiskCount = await (prisma as any).studentRiskAssessment.count({
+        where: { riskLevel: { in: ['HIGH', 'CRITICAL'] } },
+      });
+      const unresolvedAlerts = await (prisma as any).attendanceAlert.count({
+        where: { isResolved: false },
+      });
+
+      // Recent attendance rate (last 7 days)
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const recentAttendance = await prisma.attendance.findMany({
+        where: { date: { gte: weekAgo } },
+      });
+      const attendanceRate = recentAttendance.length > 0
+        ? Math.round((recentAttendance.filter(r => r.status !== 'ABSENT').length / recentAttendance.length) * 100)
+        : 0;
+
+      intelligenceSummary = { atRiskCount, unresolvedAlerts, attendanceRate };
+    } catch { /* tables may not exist yet */ }
+
     res.json({
       role: 'ADMIN',
       dailyRevenue: Number(todayPayments._sum.amount) || 0,
@@ -136,6 +159,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         ...p,
         amount: Number(p.amount)
       })),
+      intelligence: intelligenceSummary,
     });
   } catch (error) {
     console.error('Dashboard stats error:', error);

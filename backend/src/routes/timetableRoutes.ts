@@ -4,6 +4,7 @@ import {
   getTimetableByTeacher,
   createTimetablePeriod,
   deleteTimetablePeriod,
+  updateTimetablePeriod,
   getAllPeriods
 } from '../controllers/timetableController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
@@ -16,6 +17,7 @@ router.get('/', authorizeRole(['SUPER_ADMIN', 'TEACHER']), getAllPeriods);
 router.get('/class/:classId', getTimetableByClass);
 router.get('/teacher/:teacherId', getTimetableByTeacher);
 router.post('/', authorizeRole(['SUPER_ADMIN', 'TEACHER']), createTimetablePeriod);
+router.put('/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), updateTimetablePeriod);
 router.delete('/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), deleteTimetablePeriod);
 
 export default router;

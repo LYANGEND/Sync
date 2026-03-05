@@ -98,6 +98,30 @@ export const getAssessmentById = async (req: Request, res: Response) => {
   }
 };
 
+export const updateAssessment = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = createAssessmentSchema.partial().parse(req.body);
+
+    const updateData: any = { ...data };
+    if (data.date) updateData.date = new Date(data.date);
+
+    const assessment = await prisma.assessment.update({
+      where: { id },
+      data: updateData,
+      include: { subject: true, class: true },
+    });
+
+    res.json(assessment);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Update assessment error:', error);
+    res.status(500).json({ error: 'Failed to update assessment' });
+  }
+};
+
 
 export const deleteAssessment = async (req: Request, res: Response) => {
   try {

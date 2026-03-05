@@ -84,6 +84,26 @@ export const deleteTopic = async (req: Request, res: Response) => {
   }
 };
 
+export const updateTopic = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = createTopicSchema.partial().parse(req.body);
+
+    const topic = await prisma.topic.update({
+      where: { id },
+      data,
+    });
+
+    res.json(topic);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Update topic error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 // --- Topic Progress ---
 
 export const getClassProgress = async (req: Request, res: Response) => {
@@ -219,6 +239,37 @@ export const createLessonPlan = async (req: Request, res: Response) => {
       return res.status(400).json({ errors: error.errors });
     }
     console.error('Create lesson plan error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const updateLessonPlan = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = createLessonPlanSchema.partial().parse(req.body);
+
+    const plan = await prisma.lessonPlan.update({
+      where: { id },
+      data,
+    });
+
+    res.json(plan);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Update lesson plan error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const deleteLessonPlan = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await prisma.lessonPlan.delete({ where: { id } });
+    res.status(204).send();
+  } catch (error) {
+    console.error('Delete lesson plan error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

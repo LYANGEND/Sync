@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -75,29 +75,58 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
     },
     {
+      icon: BarChart3,
+      label: 'Analytics',
+      path: '/analytics',
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
+    },
+    {
+      icon: GraduationCap,
+      label: 'Teaching AI',
+      path: '/ai-assistant',
+      roles: ['SUPER_ADMIN', 'TEACHER']
+    },
+    {
+      icon: Brain,
+      label: 'Intelligence',
+      path: '/intelligence',
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']
+    },
+    {
+      icon: Cpu,
+      label: 'AI Command Center',
+      path: '/ai-analytics',
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
+    },
+    {
       icon: Settings,
       label: 'Settings',
       path: '/settings',
       roles: ['SUPER_ADMIN']
     },
     {
+      icon: TrendingUp,
+      label: 'Academic Progress',
+      path: '/academics/progress',
+      roles: ['PARENT']
+    },
+    {
       icon: CalendarCheck,
       label: 'Timetable',
       path: '/academics/timetable',
-      roles: ['PARENT', 'STUDENT']
+      roles: ['PARENT']
     },
-    // Using BookOpen for Assignments for now, or ClipboardList if imported
     {
-      icon: BookOpen,
-      label: 'Assignments',
-      path: '/student/assessments', // Re-using student assessments view or creating new?
-      roles: ['PARENT', 'STUDENT']
+      icon: Calendar,
+      label: 'Academic Calendar',
+      path: '/academics/calendar',
+      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'PARENT']
     },
     {
       icon: Award,
       label: 'Academic Reports',
       path: '/academics/reports',
-      roles: ['PARENT', 'STUDENT']
+      roles: ['PARENT']
     },
   ];
 
@@ -132,7 +161,9 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {filteredMenuItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = item.path === '/' 
+              ? location.pathname === '/'
+              : location.pathname.startsWith(item.path);
             return (
               <Link
                 key={item.label}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -45,6 +45,18 @@ interface SettingsData {
   lencoApiKey?: string;
   lencoEnvironment?: string;
   lencoDefaultBearer?: string;
+
+  // AI Configuration
+  aiProvider: string;
+  aiApiKey: string;
+  aiModel: string;
+  aiEnabled: boolean;
+
+  // WhatsApp Configuration
+  whatsappProvider: string;
+  whatsappApiKey: string;
+  whatsappPhoneId: string;
+  whatsappEnabled: boolean;
 }
 
 interface Term {
@@ -91,11 +103,21 @@ const Settings = () => {
     lencoApiKey: '',
     lencoEnvironment: 'sandbox',
     lencoDefaultBearer: 'merchant',
+
+    aiProvider: '',
+    aiApiKey: '',
+    aiModel: '',
+    aiEnabled: false,
+
+    whatsappProvider: '',
+    whatsappApiKey: '',
+    whatsappPhoneId: '',
+    whatsappEnabled: false,
   });
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments' | 'ai'>('general');
 
   // Logo upload state
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -148,6 +170,16 @@ const Settings = () => {
         lencoApiKey: settingsRes.data.lencoApiKey || '',
         lencoEnvironment: settingsRes.data.lencoEnvironment || 'sandbox',
         lencoDefaultBearer: settingsRes.data.lencoDefaultBearer || 'merchant',
+
+        aiProvider: settingsRes.data.aiProvider || '',
+        aiApiKey: settingsRes.data.aiApiKey || '',
+        aiModel: settingsRes.data.aiModel || '',
+        aiEnabled: settingsRes.data.aiEnabled ?? false,
+
+        whatsappProvider: settingsRes.data.whatsappProvider || '',
+        whatsappApiKey: settingsRes.data.whatsappApiKey || '',
+        whatsappPhoneId: settingsRes.data.whatsappPhoneId || '',
+        whatsappEnabled: settingsRes.data.whatsappEnabled ?? false,
       });
       setLogoUrl(settingsRes.data.logoUrl || null);
       setTerms(termsRes.data);
@@ -253,6 +285,12 @@ const Settings = () => {
           className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
         >
           Payments
+        </button>
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'ai' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+        >
+          AI & Intelligence
         </button>
       </div>
 
@@ -799,6 +837,135 @@ const Settings = () => {
                       <option value="customer">Customer (Parent pays fees)</option>
                     </select>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI & Intelligence Settings */}
+        {activeTab === 'ai' && (
+          <div className="space-y-6">
+            {/* AI Provider */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b pb-2">
+                <Bot className="text-purple-600 dark:text-purple-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">AI Assistant Configuration</h2>
+              </div>
+
+              <div className="flex items-center justify-between mb-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-800 dark:text-white">Enable AI Assistant</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Enable AI-powered lesson plans, quizzes, grading assistance, and more</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.aiEnabled}
+                    onChange={(e) => setSettings({ ...settings, aiEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">AI Provider</label>
+                  <select
+                    value={settings.aiProvider}
+                    onChange={(e) => setSettings({ ...settings, aiProvider: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">Select provider...</option>
+                    <option value="openai">OpenAI (GPT-4o)</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={settings.aiModel}
+                    onChange={(e) => setSettings({ ...settings, aiModel: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder={settings.aiProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o-mini'}
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave blank for default model</p>
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key</label>
+                  <input
+                    type="password"
+                    value={settings.aiApiKey}
+                    onChange={(e) => setSettings({ ...settings, aiApiKey: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder="sk-..."
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Your AI provider API key. Stored securely in the database.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* WhatsApp Configuration */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b pb-2">
+                <MessageSquare className="text-green-600 dark:text-green-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">WhatsApp Integration</h2>
+              </div>
+
+              <div className="flex items-center justify-between mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-800 dark:text-white">Enable WhatsApp Notifications</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Send fee reminders, attendance alerts, and announcements via WhatsApp</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.whatsappEnabled}
+                    onChange={(e) => setSettings({ ...settings, whatsappEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">WhatsApp Provider</label>
+                  <select
+                    value={settings.whatsappProvider}
+                    onChange={(e) => setSettings({ ...settings, whatsappProvider: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">Select provider...</option>
+                    <option value="meta">Meta Cloud API (Official)</option>
+                    <option value="twilio">Twilio WhatsApp</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Number ID</label>
+                  <input
+                    type="text"
+                    value={settings.whatsappPhoneId}
+                    onChange={(e) => setSettings({ ...settings, whatsappPhoneId: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder="From Meta/Twilio dashboard"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key / Access Token</label>
+                  <input
+                    type="password"
+                    value={settings.whatsappApiKey}
+                    onChange={(e) => setSettings({ ...settings, whatsappApiKey: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder="Your WhatsApp API access token"
+                  />
                 </div>
               </div>
             </div>

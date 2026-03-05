@@ -46,6 +46,18 @@ const updateSettingsSchema = z.object({
   lencoApiKey: z.string().optional().or(z.literal('')),
   lencoEnvironment: z.string().optional().or(z.literal('')),
   lencoDefaultBearer: z.string().optional().or(z.literal('')),
+
+  // AI Configuration
+  aiProvider: z.string().optional().or(z.literal('')),
+  aiApiKey: z.string().optional().or(z.literal('')),
+  aiModel: z.string().optional().or(z.literal('')),
+  aiEnabled: z.boolean().optional(),
+
+  // WhatsApp Configuration
+  whatsappProvider: z.string().optional().or(z.literal('')),
+  whatsappApiKey: z.string().optional().or(z.literal('')),
+  whatsappPhoneId: z.string().optional().or(z.literal('')),
+  whatsappEnabled: z.boolean().optional(),
 });
 
 export const getSettings = async (req: Request, res: Response) => {

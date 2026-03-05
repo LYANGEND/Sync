@@ -30,10 +30,18 @@ import StudentQuiz from './pages/student/StudentQuiz';
 import StudentAssessments from './pages/student/StudentAssessments';
 import AttendanceRegister from './pages/academics/AttendanceRegister';
 import TeacherGradebook from './pages/academics/TeacherGradebook';
+import StudentAcademicPortal from './pages/academics/StudentAcademicPortal';
+import AcademicCalendar from './pages/academics/AcademicCalendar';
 import { Toaster } from 'react-hot-toast';
 import VerifyReport from './pages/public/VerifyReport';
 import PublicPayment from './pages/public/PublicPayment';
 import ShareTargetHandler from './pages/public/ShareTargetHandler';
+
+// New AI & Intelligence Pages
+import Analytics from './pages/analytics/Analytics';
+import AIAssistant from './pages/ai/AIAssistant';
+import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
+import StudentIntelligence from './pages/intelligence/StudentIntelligence';
 
 function App() {
   return (
@@ -61,7 +69,7 @@ function App() {
                     </RoleGuard>
                   } />
                   <Route path="/student/assessments" element={
-                    <RoleGuard allowedRoles={['STUDENT', 'SUPER_ADMIN', 'PARENT']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'PARENT']}>
                       <StudentAssessments />
                     </RoleGuard>
                   } />
@@ -119,7 +127,7 @@ function App() {
                   } />
 
                   <Route path="/academics/timetable" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'STUDENT', 'PARENT']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'PARENT']}>
                       <Timetable />
                     </RoleGuard>
                   } />
@@ -157,10 +165,39 @@ function App() {
                     </RoleGuard>
                   } />
 
+                  <Route path="/analytics" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
+                      <Analytics />
+                    </RoleGuard>
+                  } />
+                  <Route path="/ai-assistant" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                      <AIAssistant />
+                    </RoleGuard>
+                  } />
+                  <Route path="/intelligence" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']}>
+                      <StudentIntelligence />
+                    </RoleGuard>
+                  } />
+                  <Route path="/ai-analytics" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
+                      <AIAnalyticsDashboard />
+                    </RoleGuard>
+                  } />
+
                   <Route path="/academics/reports" element={
-                    <RoleGuard allowedRoles={['PARENT', 'STUDENT']}>
+                    <RoleGuard allowedRoles={['PARENT']}>
                       <AcademicReports />
                     </RoleGuard>
+                  } />
+                  <Route path="/academics/progress" element={
+                    <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN', 'TEACHER']}>
+                      <StudentAcademicPortal />
+                    </RoleGuard>
+                  } />
+                  <Route path="/academics/calendar" element={
+                    <AcademicCalendar />
                   } />
                   <Route path="/settings" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN']}>

@@ -9,7 +9,8 @@ import {
   Users,
   Wallet,
   GraduationCap,
-  Bell
+  Bell,
+  TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
@@ -62,7 +63,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
     if (role === 'PARENT') {
       return [
         { icon: LayoutDashboard, label: 'Home', path: '/my-children', roles: ['PARENT'] },
-        { icon: GraduationCap, label: 'Reports', path: '/my-children', roles: ['PARENT'] },
+        { icon: TrendingUp, label: 'Progress', path: '/academics/progress', roles: ['PARENT'] },
         { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['PARENT'], badgeKey: 'messages' },
         { icon: User, label: 'Profile', path: '/profile', roles: ['PARENT'] },
       ];

@@ -3,6 +3,7 @@ import {
   createAssessment,
   getAssessments,
   getAssessmentById,
+  updateAssessment,
   recordResults,
   getAssessmentResults,
   getStudentResults,
@@ -21,6 +22,7 @@ router.post('/', authorizeRole(['TEACHER', 'SUPER_ADMIN']), createAssessment);
 router.get('/', getAssessments);
 router.get('/gradebook', authorizeRole(['TEACHER', 'SUPER_ADMIN', 'BURSAR', 'SECRETARY']), getGradebook);
 router.get('/:id', getAssessmentById);
+router.put('/:id', authorizeRole(['TEACHER', 'SUPER_ADMIN']), updateAssessment);
 router.delete('/:id', authorizeRole(['TEACHER', 'SUPER_ADMIN']), deleteAssessment);
 router.post('/bulk-delete', authorizeRole(['TEACHER', 'SUPER_ADMIN']), bulkDeleteAssessments);
 

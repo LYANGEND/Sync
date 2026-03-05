@@ -15,7 +15,7 @@ export const PWAManager: React.FC = () => {
     // Fetch and set notification badge on mount
     const updateNotificationBadge = useCallback(async () => {
         try {
-            const response = await api.get('/notifications/unread-count');
+            const response = await api.get('/communication/notifications/unread-count');
             const count = response.data?.count || 0;
             await setBadge(count);
         } catch (error) {

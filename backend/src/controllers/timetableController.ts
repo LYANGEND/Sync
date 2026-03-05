@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 const createPeriodSchema = z.object({
   classIds: z.array(z.string().uuid()).min(1), // Support multiple classes
   subjectId: z.string().uuid(),
-  teacherId: z.string().uuid().optional(), // Optional - will use subject's teacher if not provided
+  teacherId: z.string().uuid().optional(), // Optional - will look up from TeacherSubject allocation
   dayOfWeek: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
   startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/), // HH:MM
   endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),   // HH:MM
@@ -125,20 +125,21 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
     const { classIds, subjectId, dayOfWeek, startTime, endTime, academicTermId } = data;
     let { teacherId } = data;
 
-    // If teacherId not provided, get it from the subject's assigned teacher
+    // If teacherId not provided, look up from TeacherSubject allocation for this class
     if (!teacherId) {
-      const subject = await prisma.subject.findUnique({
-        where: { id: subjectId },
-        select: { teacherId: true, name: true }
+      const allocation = await prisma.teacherSubject.findFirst({
+        where: { subjectId, classId: classIds[0] },
+        include: { subject: { select: { name: true } } }
       });
 
-      if (!subject?.teacherId) {
+      if (!allocation) {
+        const subject = await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true } });
         return res.status(400).json({
-          message: `Subject "${subject?.name || 'Unknown'}" has no assigned teacher. Please assign a teacher to this subject first.`
+          message: `No teacher allocated for "${subject?.name || 'Unknown'}" in this class. Please use Subject Allocation first.`
         });
       }
 
-      teacherId = subject.teacherId;
+      teacherId = allocation.teacherId;
     }
 
     // 1. Check for Teacher Conflict
@@ -289,6 +290,47 @@ export const deleteTimetablePeriod = async (req: Request, res: Response) => {
     res.status(204).send();
   } catch (error) {
     console.error('Delete timetable period error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const updateTimetablePeriod = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = z.object({
+      subjectId: z.string().uuid().optional(),
+      teacherId: z.string().uuid().optional(),
+      dayOfWeek: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).optional(),
+      startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).optional(),
+      endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).optional(),
+    }).parse(req.body);
+
+    const period = await prisma.timetablePeriod.update({
+      where: { id },
+      data,
+      include: {
+        subject: true,
+        teacher: { select: { id: true, fullName: true } },
+        classes: {
+          include: {
+            class: { select: { id: true, name: true, gradeLevel: true } }
+          }
+        }
+      },
+    });
+
+    const result = {
+      ...period,
+      classNames: period.classes.map(c => c.class.name),
+      isCombined: period.classes.length > 1,
+    };
+
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Update timetable period error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

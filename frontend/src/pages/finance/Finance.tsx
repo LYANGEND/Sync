@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import FinanceReports from './FinanceReports';
 
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles } from 'lucide-react';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
 import BulkImportModal from '../../components/BulkImportModal';
@@ -11,6 +11,15 @@ import MobileMoneyPayment from '../../components/MobileMoneyPayment';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
+
+// Accounting modules (rendered as embedded tabs)
+import Expenses from '../accounting/Expenses';
+import Invoices from '../accounting/Invoices';
+import Payroll from '../accounting/Payroll';
+import Budgets from '../accounting/Budgets';
+import PettyCash from '../accounting/PettyCash';
+import FinancialStatements from '../accounting/FinancialStatements';
+import AIFinancialAdvisor from '../accounting/AIFinancialAdvisor';
 
 interface Payment {
   id: string;
@@ -67,7 +76,18 @@ const getGradeLabel = (grade: number) => {
 };
 
 const Finance = () => {
-  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports'>('payments');
+  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'expenses' | 'invoices' | 'payroll' | 'budgets' | 'petty-cash' | 'financial-reports' | 'ai-advisor'>('payments');
+
+  // Determine which section is active for visual grouping
+  const revenueTabKeys = ['payments', 'mobile-money', 'fees', 'scholarships', 'reports', 'reminders'];
+  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'financial-reports', 'ai-advisor'];
+  const [activeSection, setActiveSection] = useState<'revenue' | 'accounting'>('revenue');
+
+  // Sync section with tab
+  useEffect(() => {
+    if (revenueTabKeys.includes(activeTab)) setActiveSection('revenue');
+    else setActiveSection('accounting');
+  }, [activeTab]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [feeTemplates, setFeeTemplates] = useState<FeeTemplate[]>([]);
   const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
@@ -680,68 +700,129 @@ const Finance = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Section Switcher */}
+      <div className="flex items-center gap-2 mb-4">
+        <button
+          onClick={() => { setActiveSection('revenue'); setActiveTab('payments'); }}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
+            activeSection === 'revenue'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+          }`}
+        >
+          <CreditCard size={16} />
+          Revenue & Collections
+        </button>
+        <button
+          onClick={() => { setActiveSection('accounting'); setActiveTab('expenses'); }}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
+            activeSection === 'accounting'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+          }`}
+        >
+          <BarChart3 size={16} />
+          Accounting & Reports
+        </button>
+      </div>
+
+      {/* Sub-tabs */}
       <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg w-full md:w-fit mb-6 overflow-x-auto scrollbar-hide">
-        <button
-          onClick={() => setActiveTab('payments')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'payments'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          Payments
-        </button>
-        <button
-          onClick={() => setActiveTab('mobile-money')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'mobile-money'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          <Smartphone size={16} />
-          Mobile Money
-        </button>
-        <button
-          onClick={() => setActiveTab('fees')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'fees'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          Fee Structures
-        </button>
-        <button
-          onClick={() => setActiveTab('scholarships')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'scholarships'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          Scholarships
-        </button>
-        <button
-          onClick={() => setActiveTab('reports')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reports'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          <TrendingUp size={16} />
-          Reports
-        </button>
-        <button
-          onClick={() => {
-            setActiveTab('reminders');
-            fetchDebtors();
-          }}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reminders'
-            ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-            : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-            }`}
-        >
-          <Bell size={16} />
-          Reminders
-        </button>
+        {activeSection === 'revenue' ? (
+          <>
+            <button onClick={() => setActiveTab('payments')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'payments'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              Payments
+            </button>
+            <button onClick={() => setActiveTab('mobile-money')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'mobile-money'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Smartphone size={16} />
+              Mobile Money
+            </button>
+            <button onClick={() => setActiveTab('fees')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'fees'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              Fee Structures
+            </button>
+            <button onClick={() => setActiveTab('scholarships')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'scholarships'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              Scholarships
+            </button>
+            <button onClick={() => setActiveTab('reports')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reports'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <TrendingUp size={16} />
+              Reports
+            </button>
+            <button onClick={() => { setActiveTab('reminders'); fetchDebtors(); }}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reminders'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Bell size={16} />
+              Reminders
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setActiveTab('expenses')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'expenses'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Receipt size={16} />
+              Expenses
+            </button>
+            <button onClick={() => setActiveTab('invoices')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'invoices'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <FileText size={16} />
+              Invoices
+            </button>
+            <button onClick={() => setActiveTab('payroll')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'payroll'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Calculator size={16} />
+              Payroll
+            </button>
+            <button onClick={() => setActiveTab('budgets')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'budgets'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <PiggyBank size={16} />
+              Budgets
+            </button>
+            <button onClick={() => setActiveTab('petty-cash')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'petty-cash'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Wallet size={16} />
+              Petty Cash
+            </button>
+            <button onClick={() => setActiveTab('financial-reports')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'financial-reports'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <ClipboardList size={16} />
+              Statements
+            </button>
+            <button onClick={() => setActiveTab('ai-advisor')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'ai-advisor'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <Sparkles size={16} />
+              Finance AI
+            </button>
+          </>
+        )}
       </div>
 
       {activeTab === 'reports' ? (
@@ -900,6 +981,20 @@ const Finance = () => {
             </div>
           )}
         </div>
+      ) : activeTab === 'expenses' ? (
+        <Expenses embedded />
+      ) : activeTab === 'invoices' ? (
+        <Invoices embedded />
+      ) : activeTab === 'payroll' ? (
+        <Payroll embedded />
+      ) : activeTab === 'budgets' ? (
+        <Budgets embedded />
+      ) : activeTab === 'petty-cash' ? (
+        <PettyCash embedded />
+      ) : activeTab === 'financial-reports' ? (
+        <FinancialStatements embedded />
+      ) : activeTab === 'ai-advisor' ? (
+        <AIFinancialAdvisor embedded />
       ) : activeTab === 'payments' ? (
         <>
           {/* Stats Cards */}
