@@ -6,6 +6,8 @@ services:
     container_name: sync_backend
     restart: always
     network_mode: "host"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
       - PORT=3002
