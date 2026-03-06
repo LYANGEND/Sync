@@ -398,7 +398,7 @@ const MyChildren = () => {
                               <span className="block text-[10px] text-blue-400 dark:text-blue-500">{period.endTime}</span>
                             </div>
                             <div className="flex-1">
-                              <span className="block text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{period.subject.name}</span>
+                              <span className="block text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{period.subject?.name}</span>
                             </div>
                           </div>
                         ))
@@ -437,7 +437,7 @@ const MyChildren = () => {
                             <h5 className="text-sm font-medium text-slate-800 dark:text-white line-clamp-1" title={assessment.title}>{assessment.title}</h5>
                             <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
                               <BookOpen size={10} />
-                              {assessment.subject.name}
+                              {assessment.subject?.name}
                             </div>
                           </div>
                         ))
@@ -512,8 +512,8 @@ const MyChildren = () => {
                         child.assessmentResults.slice(0, 5).map((result) => (
                           <div key={result.id} className="flex justify-between items-center p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-600">
                             <div>
-                              <span className="font-medium text-slate-700 dark:text-slate-200 block text-sm">{result.assessment.subject.name}</span>
-                              <span className="text-xs text-slate-500 dark:text-slate-400">{result.assessment.title}</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-200 block text-sm">{result.assessment?.subject?.name}</span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">{result.assessment?.title}</span>
                             </div>
                             <div className="flex items-center">
                               <div className="text-right mr-3">
@@ -550,7 +550,7 @@ const MyChildren = () => {
                               <div className="w-8 h-8 bg-white dark:bg-slate-600 rounded flex items-center justify-center text-blue-600 mr-3 shadow-sm">
                                 <FileText size={16} />
                               </div>
-                              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{report.term.name}</span>
+                              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{report.term?.name}</span>
                             </div>
                             <button className="text-blue-600 hover:text-blue-800 text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-600 border border-blue-100 dark:border-slate-500 rounded-md hover:bg-blue-50 dark:hover:bg-slate-500 transition-colors shadow-sm">
                               View
@@ -589,7 +589,7 @@ const MyChildren = () => {
                         <>
                           {child.feeStructures.map((fee) => (
                             <div key={fee.id} className="flex justify-between text-sm py-1 border-b border-slate-50 dark:border-slate-700 last:border-0">
-                              <span className="text-slate-600 dark:text-slate-400">{fee.feeTemplate.name}</span>
+                              <span className="text-slate-600 dark:text-slate-400">{fee.feeTemplate?.name}</span>
                               <span className="font-medium text-slate-900 dark:text-white">ZMW {Number(fee.amountDue).toLocaleString()}</span>
                             </div>
                           ))}
@@ -612,7 +612,7 @@ const MyChildren = () => {
                     <h3 className="font-semibold text-slate-800 dark:text-white">Recent Payments</h3>
                   </div>
                   <div className="space-y-3">
-                    {child.payments.length > 0 ? (
+                    {(child.payments?.length ?? 0) > 0 ? (
                       child.payments.slice(0, 3).map((payment, idx) => (
                         <div key={idx} className="flex justify-between items-center text-sm p-2 rounded hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                           <div>
@@ -632,7 +632,7 @@ const MyChildren = () => {
                       <p className="text-sm text-slate-500 dark:text-slate-400 italic text-center py-4">No payment records found</p>
                     )}
                   </div>
-                  {child.payments.length > 0 && (
+                  {(child.payments?.length ?? 0) > 0 && (
                     <button
                       onClick={() => handleViewAllPayments(child)}
                       className="w-full mt-2 text-xs text-blue-600 font-medium hover:underline py-2"
@@ -649,7 +649,7 @@ const MyChildren = () => {
                     <h3 className="font-semibold text-slate-800 dark:text-white">Recent Attendance</h3>
                   </div>
                   <div className="space-y-3">
-                    {child.attendance.length > 0 ? (
+                    {(child.attendance?.length ?? 0) > 0 ? (
                       child.attendance.slice(0, 5).map((record, idx) => (
                         <div key={idx} className="flex justify-between items-center text-sm">
                           <span className="text-slate-600 dark:text-slate-400">{new Date(record.date).toLocaleDateString()}</span>

@@ -203,7 +203,7 @@ const Dashboard = () => {
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <div className="text-xs font-bold text-gray-900 dark:text-white">{assessment._count.results}</div>
+                        <div className="text-xs font-bold text-gray-900 dark:text-white">{assessment._count?.results ?? 0}</div>
                         <Link to="/academics/gradebook" className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Grade</Link>
                       </div>
                     </div>

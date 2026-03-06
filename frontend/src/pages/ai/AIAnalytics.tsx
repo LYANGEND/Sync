@@ -341,8 +341,8 @@ const OverviewTab = ({
           {usage?.byFeature && usage.byFeature.length > 0 ? (
             <div className="space-y-3">
               {usage.byFeature.map((f, i) => {
-                const featureCount = f._count.id;
-                const featureTokens = f._sum.tokensUsed || 0;
+                const featureCount = f._count?.id ?? 0;
+                const featureTokens = f._sum?.tokensUsed || 0;
                 const pct = usage.totalInteractions > 0
                   ? (featureCount / usage.totalInteractions) * 100
                   : 0;
@@ -389,7 +389,7 @@ const OverviewTab = ({
                       <p className="text-xs text-gray-400">{u.user?.email || u.userId}</p>
                     </div>
                   </div>
-                  <span className="text-sm font-semibold text-indigo-600">{u._count.id} uses</span>
+                  <span className="text-sm font-semibold text-indigo-600">{u._count?.id ?? 0} uses</span>
                 </div>
               ))}
             </div>
