@@ -2097,3 +2097,163 @@ model CampaignMessage {
   @@index([sentAt])
   @@map("campaign_messages")
 }
+
+// ==========================================
+// VIRTUAL CLASSROOM & AI LIVE TUTOR
+// ==========================================
+
+model VirtualClassroom {
+  id          String   @id @default(uuid())
+  title       String
+  description String?  @db.Text
+
+  // Academic context (IDs stored without FK to avoid modifying existing models)
+  classId     String?
+  subjectId   String?
+  teacherId   String?  // The human teacher who owns this classroom
+
+  // Jitsi configuration
+  roomName    String   @unique  // Jitsi room identifier
+  roomPassword String?
+  jitsiDomain  String  @default("meet.jit.si") // Jitsi server domain
+
+  // Schedule
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  actualStart    DateTime?
+  actualEnd      DateTime?
+
+  // Status: SCHEDULED, LIVE, ENDED, CANCELLED
+  status      String   @default("SCHEDULED")
+
+  // AI Tutor settings
+  aiTutorEnabled     Boolean  @default(false)
+  aiTutorVoiceId     String?  // ElevenLabs voice ID
+  aiTutorName        String   @default("AI Teacher")
+  aiTutorPersona     String?  @db.Text  // Custom personality/instructions
+  lessonPlanContent  String?  @db.Text  // Lesson plan for AI to follow
+  aiTutorLanguage    String   @default("en") // Teaching language
+
+  maxParticipants    Int      @default(50)
+  isRecordingEnabled Boolean  @default(false)
+
+  createdById String
+
+  // Self-contained relations
+  tutorSessions AITutorSession[]
+  recordings    ClassRecording[]
+  participants  ClassroomParticipant[]
+  chatMessages  ClassroomChat[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([scheduledStart])
+  @@index([createdById])
+  @@index([classId])
+  @@index([subjectId])
+  @@map("virtual_classrooms")
+}
+
+model AITutorSession {
+  id           String   @id @default(uuid())
+  classroomId  String
+  classroom    VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  // Status: PENDING, ACTIVE, PAUSED, ENDED, ERROR
+  status       String   @default("PENDING")
+
+  // AI Configuration used
+  voiceId      String?
+  modelUsed    String?  // gpt-4o, etc.
+  personaUsed  String?  @db.Text
+
+  // Lesson tracking
+  lessonPhase  String   @default("GREETING") // GREETING, ATTENDANCE, RECAP, TEACHING, Q_AND_A, ACTIVITY, WRAP_UP
+  currentTopic String?
+  topicIndex   Int      @default(0)
+
+  // Metrics
+  totalTokensUsed    Int   @default(0)
+  totalTTSCharacters Int   @default(0)
+  totalSTTMinutes    Float @default(0)
+  questionsAsked     Int   @default(0)
+  questionsAnswered  Int   @default(0)
+
+  // Conversation log stored as JSON array
+  conversationLog Json?
+
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([classroomId])
+  @@index([status])
+  @@map("ai_tutor_sessions")
+}
+
+model ClassroomParticipant {
+  id          String   @id @default(uuid())
+  classroomId String
+  classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  userId      String?
+  studentId   String?
+  displayName String
+  role        String   @default("STUDENT") // STUDENT, TEACHER, OBSERVER
+
+  joinedAt    DateTime @default(now())
+  leftAt      DateTime?
+
+  // Engagement metrics
+  handRaiseCount   Int   @default(0)
+  chatMessageCount Int   @default(0)
+  speakingDuration Float @default(0) // in seconds
+  attentionScore   Float? // 0-100 AI-estimated engagement
+
+  @@index([classroomId])
+  @@index([userId])
+  @@map("classroom_participants")
+}
+
+model ClassroomChat {
+  id          String   @id @default(uuid())
+  classroomId String
+  classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  senderName  String
+  senderId    String?
+  isAI        Boolean  @default(false)
+  message     String   @db.Text
+
+  // If AI response, optional audio URL
+  audioUrl    String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([classroomId])
+  @@index([createdAt])
+  @@map("classroom_chats")
+}
+
+model ClassRecording {
+  id          String   @id @default(uuid())
+  classroomId String
+  classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  recordingUrl String?
+  duration     Float?   // in seconds
+  fileSize     BigInt?  // in bytes
+
+  // AI-generated summary
+  summary      String?  @db.Text
+  keyTopics    Json?    // Array of key topics covered
+  transcript   String?  @db.Text
+
+  createdAt    DateTime @default(now())
+
+  @@index([classroomId])
+  @@map("class_recordings")
+}

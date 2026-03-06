@@ -32,6 +32,8 @@ import AttendanceRegister from './pages/academics/AttendanceRegister';
 import TeacherGradebook from './pages/academics/TeacherGradebook';
 import StudentAcademicPortal from './pages/academics/StudentAcademicPortal';
 import AcademicCalendar from './pages/academics/AcademicCalendar';
+import VirtualClassrooms from './pages/academics/VirtualClassrooms';
+import VirtualClassroom from './pages/academics/VirtualClassroom';
 import { Toaster } from 'react-hot-toast';
 import VerifyReport from './pages/public/VerifyReport';
 import PublicPayment from './pages/public/PublicPayment';
@@ -195,6 +197,14 @@ function App() {
                     <RoleGuard allowedRoles={['PARENT', 'SUPER_ADMIN', 'TEACHER']}>
                       <StudentAcademicPortal />
                     </RoleGuard>
+                  } />
+                  <Route path="/virtual-classroom" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'STUDENT', 'PARENT']}>
+                      <VirtualClassrooms />
+                    </RoleGuard>
+                  } />
+                  <Route path="/virtual-classroom/:id" element={
+                    <VirtualClassroom />
                   } />
                   <Route path="/academics/calendar" element={
                     <AcademicCalendar />
