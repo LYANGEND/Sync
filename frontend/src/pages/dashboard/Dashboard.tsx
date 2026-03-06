@@ -105,7 +105,7 @@ const Dashboard = () => {
   // --- TEACHER VIEW ---
   if (data?.role === 'TEACHER') {
     const stats = (data as TeacherStats).stats;
-    const { todaySchedule, recentAssessments, myClasses } = data as TeacherStats;
+    const { todaySchedule = [], recentAssessments = [], myClasses = [] } = data as TeacherStats;
 
     return (
       <PullToRefresh onRefresh={handleRefresh} className="min-h-screen">
@@ -164,8 +164,8 @@ const Dashboard = () => {
                         <div className="text-[10px] text-gray-400">{period.endTime}</div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-blue-900 dark:text-blue-400 truncate">{period.subject.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{period.class.name}</div>
+                        <div className="text-sm font-bold text-blue-900 dark:text-blue-400 truncate">{period.subject?.name}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{period.class?.name}</div>
                       </div>
                       <Link
                         to="/academics/attendance"
@@ -199,7 +199,7 @@ const Dashboard = () => {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-bold text-gray-900 dark:text-white truncate">{assessment.title}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {assessment.class.name} • {assessment.subject.name}
+                          {assessment.class?.name} • {assessment.subject?.name}
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -387,17 +387,17 @@ const Dashboard = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
-                {stats?.recentPayments.length === 0 ? (
+                {(stats?.recentPayments?.length ?? 0) === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No recent payments</td>
                   </tr>
                 ) : (
-                  stats?.recentPayments.map((payment) => (
+                  stats?.recentPayments?.map((payment) => (
                     <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                       <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
-                        {payment.student.firstName} {payment.student.lastName}
+                        {payment.student?.firstName} {payment.student?.lastName}
                       </td>
-                      <td className="px-6 py-4">{payment.student.class?.name || 'N/A'}</td>
+                      <td className="px-6 py-4">{payment.student?.class?.name || 'N/A'}</td>
                       <td className={`px-6 py-4 font-semibold ${payment.status === 'VOIDED' ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white'}`}>
                         ZMW {Number(payment.amount).toLocaleString()}
                       </td>
@@ -428,15 +428,15 @@ const Dashboard = () => {
 
           {/* Mobile List */}
           <div className="md:hidden divide-y divide-gray-100 dark:divide-slate-700">
-            {stats?.recentPayments.length === 0 ? (
+            {(stats?.recentPayments?.length ?? 0) === 0 ? (
               <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">No recent payments</div>
             ) : (
-              stats?.recentPayments.map((payment) => (
+              stats?.recentPayments?.map((payment) => (
                 <div key={payment.id} className="p-4 active:bg-gray-50 dark:active:bg-slate-700 transition-colors">
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <p className="font-semibold text-gray-900 dark:text-white">{payment.student.firstName} {payment.student.lastName}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{payment.student.class?.name || 'N/A'}</p>
+                      <p className="font-semibold text-gray-900 dark:text-white">{payment.student?.firstName} {payment.student?.lastName}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{payment.student?.class?.name || 'N/A'}</p>
                     </div>
                     <span className={`text-lg font-bold ${payment.status === 'VOIDED' ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white'}`}>
                       ZMW {Number(payment.amount).toLocaleString()}
