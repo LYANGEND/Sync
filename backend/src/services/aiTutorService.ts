@@ -95,15 +95,17 @@ After checking all students, move to RECAP.`;
       phaseInstructions = `You are doing a RECAP of previous lessons. 
 Briefly summarize key points from the last class. Ask 1-2 quick recall questions.
 "Last time, we learned about [topic]. Who can remind us what [key concept] means?"
+If the lesson plan shows this is part of a syllabus sequence, reference what was covered before.
 Keep this to 2-3 minutes worth of content. Then transition to TEACHING.`;
       break;
     case 'TEACHING':
       phaseInstructions = `You are in the main TEACHING phase. This is the core of the lesson.
-Follow the lesson plan below. Explain concepts step by step.
-Use examples, analogies, and visual descriptions.
+Follow the lesson plan below carefully — cover each subtopic and its learning objectives.
+Explain concepts step by step using examples, analogies, and visual descriptions.
 Pause after each key point and ask "Does everyone understand?" or check comprehension.
 Break complex ideas into smaller pieces. Use numbered steps for processes.
-Teach one concept at a time before moving to the next.`;
+Teach one subtopic fully before moving to the next.
+Use local/Zambian examples wherever possible to make content relatable.`;
       break;
     case 'Q_AND_A':
       phaseInstructions = `You are in the Q&A phase. Invite questions from students.
@@ -226,6 +228,26 @@ class AITutorService {
       });
       if (subject) {
         subjectName = subject.name;
+      }
+    }
+
+    // Auto-load saved lesson plans for this class+subject if no manual content set
+    if (!classroom.lessonPlanContent && classroom.classId && classroom.subjectId) {
+      const savedPlans = await prisma.lessonPlan.findMany({
+        where: { classId: classroom.classId, subjectId: classroom.subjectId },
+        orderBy: { weekStartDate: 'desc' },
+        take: 3,
+        include: { subject: { select: { name: true } } },
+      });
+      if (savedPlans.length > 0) {
+        let planContext = `📋 SAVED LESSON PLANS FOR ${subjectName.toUpperCase()}:\n\n`;
+        savedPlans.forEach((plan: any, i: number) => {
+          planContext += `--- Plan ${i + 1}: ${plan.title} ---\n`;
+          planContext += `Date: ${new Date(plan.weekStartDate).toLocaleDateString()}\n`;
+          planContext += `${plan.content}\n\n`;
+        });
+        // Inject into classroom's lessonPlanContent for this session
+        (classroom as any).lessonPlanContent = planContext;
       }
     }
 
@@ -395,6 +417,25 @@ class AITutorService {
     if (classroom.subjectId) {
       const subject = await prisma.subject.findUnique({ where: { id: classroom.subjectId } });
       if (subject) subjectName = subject.name;
+    }
+
+    // Auto-load saved lesson plans if classroom doesn't have manual content
+    if (!classroom.lessonPlanContent && classroom.classId && classroom.subjectId) {
+      const savedPlans = await prisma.lessonPlan.findMany({
+        where: { classId: classroom.classId, subjectId: classroom.subjectId },
+        orderBy: { weekStartDate: 'desc' },
+        take: 3,
+        include: { subject: { select: { name: true } } },
+      });
+      if (savedPlans.length > 0) {
+        let planContext = `📋 SAVED LESSON PLANS FOR ${subjectName.toUpperCase()}:\n\n`;
+        savedPlans.forEach((plan: any, i: number) => {
+          planContext += `--- Plan ${i + 1}: ${plan.title} ---\n`;
+          planContext += `Date: ${new Date(plan.weekStartDate).toLocaleDateString()}\n`;
+          planContext += `${plan.content}\n\n`;
+        });
+        (classroom as any).lessonPlanContent = planContext;
+      }
     }
 
     // Build system prompt for current phase

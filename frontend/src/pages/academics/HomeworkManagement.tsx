@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import {
   FileText, CheckCircle, Clock, AlertTriangle,
-  ChevronRight, BookOpen, Star, MessageSquare
+  ChevronRight, BookOpen, Star, MessageSquare, Sparkles, X, Loader2, Plus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -31,10 +31,13 @@ interface Submission {
   };
 }
 
-const HomeworkManagement: React.FC = () => {
+interface HomeworkManagementProps {
+  subjectId?: string;
+}
+
+const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: propSubjectId }) => {
   const { user } = useAuth();
 
-  const [view, setView] = useState<'list' | 'submissions'>('list');
   const [loading, setLoading] = useState(false);
 
   // Teacher view
@@ -49,6 +52,16 @@ const HomeworkManagement: React.FC = () => {
   const [gradeScore, setGradeScore] = useState('');
   const [gradeFeedback, setGradeFeedback] = useState('');
 
+  // AI Homework Generation
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiGenerating, setAIGenerating] = useState(false);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [terms, setTerms] = useState<any[]>([]);
+  const [aiSubjectId, setAISubjectId] = useState('');
+  const [aiTopicName, setAITopicName] = useState('');
+  const [aiHomeworkType, setAIHomeworkType] = useState<'HOMEWORK' | 'PROJECT'>('HOMEWORK');
+  const [aiGeneratedContent, setAIGeneratedContent] = useState<{ title: string; content: string; totalMarks: number } | null>(null);
+
   useEffect(() => {
     fetchClasses();
   }, [user]);
@@ -61,18 +74,24 @@ const HomeworkManagement: React.FC = () => {
 
   const fetchClasses = async () => {
     try {
-      const res = await api.get('/classes');
-      setClasses(res.data);
+      const [classesRes, subjectsRes, termsRes] = await Promise.all([
+        api.get('/classes'),
+        api.get('/subjects'),
+        api.get('/academic-terms'),
+      ]);
+      setClasses(classesRes.data);
+      setSubjects(subjectsRes.data);
+      setTerms(termsRes.data);
     } catch (error) {
-      console.error('Failed to fetch classes:', error);
+      console.error('Failed to fetch data:', error);
     }
   };
 
   const fetchAssessments = async () => {
     try {
-      const res = await api.get('/assessments', {
-        params: { classId: selectedClass }
-      });
+      const params: any = { classId: selectedClass };
+      if (propSubjectId) params.subjectId = propSubjectId;
+      const res = await api.get('/assessments', { params });
       // Only HOMEWORK and PROJECT types
       setAssessments(res.data.filter((a: any) => ['HOMEWORK', 'PROJECT'].includes(a.type)));
     } catch (error) {
@@ -132,6 +151,70 @@ const HomeworkManagement: React.FC = () => {
     );
   };
 
+  const handleAIGenerate = async () => {
+    if (!aiSubjectId || !selectedClass) {
+      toast.error('Please select a class and subject');
+      return;
+    }
+    setAIGenerating(true);
+    try {
+      const selectedClassObj = classes.find((c: any) => c.id === selectedClass);
+      const response = await api.post('/syllabus/generate-homework', {
+        subjectId: aiSubjectId,
+        topicName: aiTopicName || undefined,
+        gradeLevel: selectedClassObj?.gradeLevel,
+        homeworkType: aiHomeworkType,
+      });
+      // Parse title from AI content
+      const content = response.data.content;
+      const titleMatch = content.match(/\*\*Title[:\s]*\*\*\s*(.+)/i) || content.match(/^#\s*(.+)/m) || content.match(/Title[:\s]+(.+)/i);
+      const title = titleMatch ? titleMatch[1].trim() : `${response.data.subjectName} ${aiHomeworkType === 'PROJECT' ? 'Project' : 'Homework'}`;
+      const marksMatch = content.match(/total[:\s]*(\d+)\s*marks/i);
+      const totalMarks = marksMatch ? Number(marksMatch[1]) : 50;
+
+      setAIGeneratedContent({
+        title,
+        content,
+        totalMarks,
+      });
+    } catch (error) {
+      console.error('AI homework generation failed:', error);
+      toast.error('Failed to generate homework. Please check your AI configuration.');
+    } finally {
+      setAIGenerating(false);
+    }
+  };
+
+  const handleSaveAIHomework = async () => {
+    if (!aiGeneratedContent || !selectedClass || !aiSubjectId) return;
+    const activeTerm = terms.find((t: any) => t.isActive) || terms[0];
+    if (!activeTerm) {
+      toast.error('No active term found');
+      return;
+    }
+    try {
+      await api.post('/assessments', {
+        title: aiGeneratedContent.title,
+        type: aiHomeworkType,
+        description: aiGeneratedContent.content,
+        classId: selectedClass,
+        subjectId: aiSubjectId,
+        termId: activeTerm.id,
+        totalMarks: aiGeneratedContent.totalMarks,
+        weight: 5,
+        date: new Date().toISOString(),
+      });
+      toast.success('Homework created successfully!');
+      setShowAIModal(false);
+      setAIGeneratedContent(null);
+      setAITopicName('');
+      fetchAssessments();
+    } catch (error) {
+      console.error('Failed to save homework:', error);
+      toast.error('Failed to save homework');
+    }
+  };
+
   // ======= Teacher/Admin View =======
   return (
     <div className="p-4 md:p-6">
@@ -148,6 +231,15 @@ const HomeworkManagement: React.FC = () => {
           <option value="">Select Class</option>
           {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+
+        <button
+          onClick={() => { setShowAIModal(true); setAIGeneratedContent(null); }}
+          disabled={!selectedClass}
+          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
+        >
+          <Sparkles size={16} />
+          Create with AI
+        </button>
       </div>
 
       {!selectedAssessment ? (
@@ -267,6 +359,195 @@ const HomeworkManagement: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* AI Homework Generation Modal */}
+      {showAIModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-lg flex items-center justify-center">
+                  <Sparkles size={20} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">AI Homework Generator</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {classes.find((c: any) => c.id === selectedClass)?.name || 'Select a class first'}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowAIModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <X size={20} />
+              </button>
+            </div>
+
+            {!aiGeneratedContent ? (
+              /* Config Step */
+              <div className="p-6 space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                  <select
+                    value={aiSubjectId}
+                    onChange={e => setAISubjectId(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">Choose subject...</option>
+                    {(() => {
+                      const cls = classes.find((c: any) => c.id === selectedClass);
+                      const classSubjectIds = new Set((cls?.subjects || []).map((s: any) => s.id));
+                      const filtered = classSubjectIds.size > 0
+                        ? subjects.filter((s: any) => classSubjectIds.has(s.id))
+                        : subjects;
+                      return filtered.map((s: any) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ));
+                    })()}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic (optional)</label>
+                  <input
+                    type="text"
+                    value={aiTopicName}
+                    onChange={e => setAITopicName(e.target.value)}
+                    placeholder="e.g., Fractions, Photosynthesis..."
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assignment Type</label>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setAIHomeworkType('HOMEWORK')}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        aiHomeworkType === 'HOMEWORK'
+                          ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
+                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                      }`}
+                    >
+                      📝 Homework
+                    </button>
+                    <button
+                      onClick={() => setAIHomeworkType('PROJECT')}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        aiHomeworkType === 'PROJECT'
+                          ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
+                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                      }`}
+                    >
+                      🎯 Project
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    onClick={() => setShowAIModal(false)}
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAIGenerate}
+                    disabled={!aiSubjectId || aiGenerating}
+                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {aiGenerating ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} />
+                        Generate Homework
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Preview Step */
+              <div className="p-6 space-y-4">
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 flex items-center gap-2">
+                  <CheckCircle size={18} className="text-green-600" />
+                  <span className="text-sm font-medium text-green-700 dark:text-green-300">Homework generated!</span>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                  <input
+                    type="text"
+                    value={aiGeneratedContent.title}
+                    onChange={e => setAIGeneratedContent({ ...aiGeneratedContent, title: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Total Marks</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={aiGeneratedContent.totalMarks}
+                      onChange={e => setAIGeneratedContent({ ...aiGeneratedContent, totalMarks: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                    <input
+                      type="text"
+                      value={aiHomeworkType}
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Content</label>
+                  <textarea
+                    value={aiGeneratedContent.content}
+                    onChange={e => setAIGeneratedContent({ ...aiGeneratedContent, content: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
+                    rows={12}
+                  />
+                </div>
+
+                <div className="flex justify-between gap-3 pt-2">
+                  <button
+                    onClick={() => setAIGeneratedContent(null)}
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg flex items-center gap-2"
+                  >
+                    <Sparkles size={16} />
+                    Regenerate
+                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowAIModal(false)}
+                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={handleSaveAIHomework}
+                      className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      <Plus size={16} />
+                      Create Homework
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

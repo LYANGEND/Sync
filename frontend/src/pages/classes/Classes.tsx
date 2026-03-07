@@ -34,9 +34,49 @@ interface Student {
 }
 
 const getGradeLabel = (grade: number) => {
-  if (grade === 0) return 'Nursery';
+  if (grade === -2) return 'Baby Class';
+  if (grade === -1) return 'Middle Class';
+  if (grade === 0) return 'Reception';
+  if (grade >= 1 && grade <= 7) return `Grade ${grade}`;
+  if (grade === 8) return 'Form 1';
+  if (grade === 9) return 'Form 2';
+  if (grade === 10) return 'Form 3';
+  if (grade === 11) return 'Form 4';
   return `Grade ${grade}`;
 };
+
+// Subject codes appropriate for each grade level (Zambian curriculum)
+const ECE_CODES = ['ECE-LIT','ECE-NUM','ECE-ENV','ECE-CA','ECE-PHY','ECE-LANG','ECE-LA','ECE-LL','ECE-MA','ECE-MATH','ECE-RE','ECE-REL','ECE-PCA','ECE-ART','ECE-EA'];
+const PRIMARY_LOWER_CODES = ['ENG','MATH','SCI','SST','CA','PE','RE','COMP','ZAM_LANG'];
+const PRIMARY_UPPER_CODES = ['ENG','MATH','SCI','SST','CA','PE','RE','COMP','ZAM_LANG','HOME_ECO','CTS','TECH_ST'];
+const FORM_1_2_CODES = ['ENG','MATH','INT_SCI','SOC_ST','COMP','PE','RE','CIVIC','ZAM_LANG','BIO','CHEM','PHYS','GEOG','HIST','HOME_ECO','AGRI_SCI','ART_DES','MUSIC','FRENCH','LIT_ENG','ICT','CTS','FASH_FAB','FOOD_NUT'];
+const FORM_3_4_CODES = ['ENG','MATH','COMP','PE','RE','CIVIC','BIO','CHEM','PHYS','ADD_MATH','GEOG','HIST','HOME_ECO','AGRI_SCI','ART_DES','MUSIC','FRENCH','LIT_ENG','ICT','INT_SCI','SOC_ST','COMM','DES_TECH','TRAV_TOUR','FASH_FAB','FOOD_NUT','HOSP_MGT','ZAM_LANG','EXP_ARTS'];
+
+function getSubjectCodesForGrade(gradeLevel: number): string[] {
+  if (gradeLevel <= 0) return ECE_CODES;
+  if (gradeLevel <= 4) return PRIMARY_LOWER_CODES;
+  if (gradeLevel <= 7) return PRIMARY_UPPER_CODES;
+  if (gradeLevel <= 9) return FORM_1_2_CODES;
+  return FORM_3_4_CODES;
+}
+
+// All available grade level options
+const GRADE_OPTIONS = [
+  { value: -2, label: 'Baby Class' },
+  { value: -1, label: 'Middle Class' },
+  { value: 0, label: 'Reception' },
+  { value: 1, label: 'Grade 1' },
+  { value: 2, label: 'Grade 2' },
+  { value: 3, label: 'Grade 3' },
+  { value: 4, label: 'Grade 4' },
+  { value: 5, label: 'Grade 5' },
+  { value: 6, label: 'Grade 6' },
+  { value: 7, label: 'Grade 7' },
+  { value: 8, label: 'Form 1' },
+  { value: 9, label: 'Form 2' },
+  { value: 10, label: 'Form 3' },
+  { value: 11, label: 'Form 4' },
+];
 
 const Classes = () => {
   const [classes, setClasses] = useState<Class[]>([]);
@@ -502,13 +542,18 @@ const Classes = () => {
                   <select
                     required
                     value={formData.gradeLevel}
-                    onChange={(e) => setFormData({ ...formData, gradeLevel: parseInt(e.target.value) })}
+                    onChange={(e) => {
+                      const gl = parseInt(e.target.value);
+                      // Auto-select recommended subjects for this grade level
+                      const codes = getSubjectCodesForGrade(gl);
+                      const recommended = subjects.filter(s => codes.includes(s.code)).map(s => s.id);
+                      setFormData({ ...formData, gradeLevel: gl, subjectIds: recommended });
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select Grade</option>
-                    <option value="0">Nursery</option>
-                    {[...Array(12)].map((_, i) => (
-                      <option key={i + 1} value={i + 1}>Grade {i + 1}</option>
+                    {GRADE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
                 </div>
@@ -553,20 +598,60 @@ const Classes = () => {
               </div>
 
               <div className="mt-6">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign Subjects</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-60 overflow-y-auto p-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700">
-                  {subjects.map(subject => (
-                    <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.subjectIds.includes(subject.id)}
-                        onChange={() => toggleSubject(subject.id)}
-                        className="rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-700 dark:text-gray-200">{subject.name}</span>
-                    </label>
-                  ))}
-                </div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Assign Subjects
+                  <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">
+                    ({formData.subjectIds.length} selected — showing subjects for {getGradeLabel(formData.gradeLevel)})
+                  </span>
+                </label>
+                {(() => {
+                  const codes = getSubjectCodesForGrade(formData.gradeLevel);
+                  const recommended = subjects.filter(s => codes.includes(s.code));
+                  const others = subjects.filter(s => !codes.includes(s.code));
+                  return (
+                    <>
+                      {/* Recommended subjects for this grade */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-48 overflow-y-auto p-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700">
+                        {recommended.length === 0 && (
+                          <p className="col-span-full text-sm text-gray-400 italic py-2">Select a grade level first</p>
+                        )}
+                        {recommended.map(subject => (
+                          <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formData.subjectIds.includes(subject.id)}
+                              onChange={() => toggleSubject(subject.id)}
+                              className="rounded text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-200">{subject.name}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      {/* Other subjects (collapsed by default) */}
+                      {others.length > 0 && (
+                        <details className="mt-2">
+                          <summary className="text-xs text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-300">
+                            Show other subjects ({others.length})
+                          </summary>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-40 overflow-y-auto p-2 mt-1 border border-dashed border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-800">
+                            {others.map(subject => (
+                              <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-white dark:hover:bg-slate-700 rounded cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={formData.subjectIds.includes(subject.id)}
+                                  onChange={() => toggleSubject(subject.id)}
+                                  className="rounded text-gray-400 focus:ring-gray-400"
+                                />
+                                <span className="text-sm text-gray-500 dark:text-gray-400">{subject.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="flex justify-end space-x-3 mt-6">

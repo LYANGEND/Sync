@@ -3,6 +3,7 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
+import * as convoService from '../services/conversationService';
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -965,36 +966,20 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
     try {
       if (conversationId) {
         // Append to existing conversation
-        await prisma.aIMessage.createMany({
-          data: [
-            { conversationId, role: 'user', content: question, tokenCount: null },
-            { conversationId, role: 'assistant', content: aiResponse.content, tokenCount: aiResponse.tokensUsed || null },
-          ],
-        });
+        await convoService.saveMessage(conversationId, 'user', question);
+        await convoService.saveMessage(conversationId, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
         // Update title if this is the first real exchange (title is still default)
-        const convo = await prisma.aIConversation.findUnique({ where: { id: conversationId } });
-        if (convo && convo.title === 'New Conversation') {
+        const convoData = await prisma.aIConversation.findUnique({ where: { id: conversationId } });
+        if (convoData && convoData.title === 'New Conversation') {
           const shortTitle = question.length > 60 ? question.slice(0, 57) + '...' : question;
-          await prisma.aIConversation.update({ where: { id: conversationId }, data: { title: shortTitle } });
+          await convoService.updateConversation(conversationId, user.userId, shortTitle);
         }
-        await prisma.aIConversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
       } else {
-        // Create a new conversation
+        // Create a new conversation with initial messages
         const shortTitle = question.length > 60 ? question.slice(0, 57) + '...' : question;
-        const convo = await prisma.aIConversation.create({
-          data: {
-            userId: user.userId,
-            title: shortTitle,
-            model: 'financial-advisor',
-            context: { type: 'financial-advisor' },
-            messages: {
-              create: [
-                { role: 'user', content: question },
-                { role: 'assistant', content: aiResponse.content, tokenCount: aiResponse.tokensUsed || null },
-              ],
-            },
-          },
-        });
+        const convo = await convoService.createConversation(user.userId, 'financial-advisor', shortTitle);
+        await convoService.saveMessage(convo.id, 'user', question);
+        await convoService.saveMessage(convo.id, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
         conversationId = convo.id;
       }
     } catch (saveErr: any) {
@@ -1136,23 +1121,7 @@ export const listConversations = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const conversations = await prisma.aIConversation.findMany({
-      where: {
-        userId: user.userId,
-        context: { path: ['type'], equals: 'financial-advisor' },
-      },
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: { select: { messages: true } },
-      },
-      take: 50,
-    });
-
+    const conversations = await convoService.listConversations(user.userId, 'financial-advisor');
     res.json(conversations);
   } catch (error: any) {
     console.error('List conversations error:', error);
@@ -1168,20 +1137,9 @@ export const getConversation = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const conversation = await prisma.aIConversation.findFirst({
-      where: { id: req.params.id, userId: user.userId },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-          select: { id: true, role: true, content: true, createdAt: true },
-        },
-      },
-    });
-
-    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-
-    res.json(conversation);
+    const result = await convoService.getConversation(req.params.id, user.userId);
+    if (!result) return res.status(404).json({ error: 'Conversation not found' });
+    res.json(result);
   } catch (error: any) {
     console.error('Get conversation error:', error);
     res.status(500).json({ error: 'Failed to load conversation' });
@@ -1196,20 +1154,10 @@ export const updateConversation = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-
     const { title } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
-
-    const conversation = await prisma.aIConversation.findFirst({
-      where: { id: req.params.id, userId: user.userId },
-    });
-    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-
-    const updated = await prisma.aIConversation.update({
-      where: { id: req.params.id },
-      data: { title: title.trim() },
-    });
-
+    const updated = await convoService.updateConversation(req.params.id, user.userId, title);
+    if (!updated) return res.status(404).json({ error: 'Conversation not found' });
     res.json(updated);
   } catch (error: any) {
     console.error('Update conversation error:', error);
@@ -1225,14 +1173,8 @@ export const deleteConversation = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const conversation = await prisma.aIConversation.findFirst({
-      where: { id: req.params.id, userId: user.userId },
-    });
-    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-
-    await prisma.aIConversation.delete({ where: { id: req.params.id } });
-
+    const deleted = await convoService.deleteConversation(req.params.id, user.userId);
+    if (!deleted) return res.status(404).json({ error: 'Conversation not found' });
     res.json({ message: 'Conversation deleted' });
   } catch (error: any) {
     console.error('Delete conversation error:', error);

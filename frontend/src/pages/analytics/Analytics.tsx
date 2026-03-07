@@ -3,52 +3,8 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, GraduationCap,
   AlertTriangle, CheckCircle, Activity, RefreshCw, BookOpen
 } from 'lucide-react';
-import api from '../../utils/api';
+import analyticsService, { AnalyticsDashboard, SchoolHealth } from '../../services/analyticsService';
 import toast from 'react-hot-toast';
-
-interface AnalyticsDashboard {
-  enrollment: {
-    byStatus: { status: string; count: number }[];
-    byGrade: { className: string; gradeLevel: number; students: number }[];
-    total: number;
-  };
-  revenue: {
-    weeklyTrend: { week: string; amount: number }[];
-    totalRevenue: number;
-    transactionCount: number;
-  };
-  attendance: {
-    rate: number;
-    present: number;
-    late: number;
-    absent: number;
-    total: number;
-  };
-  academic: {
-    averageScore: number;
-    passRate: number;
-    subjectPerformance: { subject: string; average: number; passRate: number; totalStudents: number }[];
-  };
-  risk: {
-    byLevel: { level: string; count: number }[];
-    total: number;
-  };
-  generatedAt: string;
-}
-
-interface SchoolHealth {
-  metrics: {
-    activeStudents: number;
-    activeTeachers: number;
-    totalClasses: number;
-    studentTeacherRatio: number;
-    feeCollectionRate: number;
-    weeklyAttendanceRate: number;
-    atRiskStudents: number;
-    currentTerm: string;
-  };
-  insights: string[];
-}
 
 const Analytics = () => {
   const [dashboard, setDashboard] = useState<AnalyticsDashboard | null>(null);
@@ -63,12 +19,12 @@ const Analytics = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [dashRes, healthRes] = await Promise.all([
-        api.get('/analytics/dashboard'),
-        api.get('/analytics/school-health'),
+      const [dashData, healthData] = await Promise.all([
+        analyticsService.getDashboard(),
+        analyticsService.getSchoolHealth(),
       ]);
-      setDashboard(dashRes.data);
-      setHealth(healthRes.data);
+      setDashboard(dashData);
+      setHealth(healthData);
     } catch (error) {
       console.error('Error fetching analytics:', error);
       toast.error('Failed to load analytics');

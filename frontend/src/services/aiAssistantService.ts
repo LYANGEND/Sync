@@ -100,6 +100,14 @@ const aiAssistantService = {
   // Report Remarks
   generateRemarks: (studentId: string, termId: string) =>
     api.post<{ remarks: string }>('/ai-assistant/report-remarks', { studentId, termId }).then(r => r.data),
+
+  // Teaching Context
+  getTeachingContext: () =>
+    api.get<{ classes: any[]; subjects: any[] }>('/ai-assistant/teaching-context').then(r => r.data),
+
+  // Student Insights
+  getStudentInsights: (params: { classId: string; subjectId?: string }) =>
+    api.get('/ai-assistant/student-insights', { params }).then(r => r.data),
 };
 
 export default aiAssistantService;

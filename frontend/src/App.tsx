@@ -7,7 +7,6 @@ import Dashboard from './pages/dashboard/Dashboard';
 import Students from './pages/students/Students';
 import StudentProfile from './pages/students/StudentProfile';
 import Finance from './pages/finance/Finance';
-import Attendance from './pages/attendance/Attendance';
 import Academics from './pages/academics/Academics';
 import GradingScales from './pages/academics/GradingScales';
 import ReportCards from './pages/academics/ReportCards';
@@ -43,6 +42,7 @@ import ShareTargetHandler from './pages/public/ShareTargetHandler';
 import Analytics from './pages/analytics/Analytics';
 import AIAssistant from './pages/ai/AIAssistant';
 import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
+import MasterAI from './pages/ai/MasterAI';
 import StudentIntelligence from './pages/intelligence/StudentIntelligence';
 
 function App() {
@@ -95,7 +95,7 @@ function App() {
 
                   <Route path="/attendance" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY']}>
-                      <Attendance />
+                      <AttendanceRegister />
                     </RoleGuard>
                   } />
 
@@ -185,6 +185,11 @@ function App() {
                   <Route path="/ai-analytics" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
                       <AIAnalyticsDashboard />
+                    </RoleGuard>
+                  } />
+                  <Route path="/master-ai" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                      <MasterAI />
                     </RoleGuard>
                   } />
 

@@ -6,6 +6,64 @@ import { elevenLabsService, TEACHING_VOICES } from '../services/elevenLabsServic
 import crypto from 'crypto';
 
 // ==========================================
+// HELPERS
+// ==========================================
+
+/**
+ * Build a structured lesson plan string from topic + subtopics in the DB.
+ * This is used both by createClassroom and the AI tutor system prompt.
+ */
+async function buildLessonPlanFromSyllabus(topicId: string, selectedSubTopicIds?: string[]): Promise<string> {
+  const topic: any = await (prisma.topic as any).findUnique({
+    where: { id: topicId },
+    include: {
+      subtopics: {
+        where: selectedSubTopicIds?.length ? { id: { in: selectedSubTopicIds } } : undefined,
+        orderBy: { orderIndex: 'asc' },
+      },
+      subject: { select: { name: true } },
+    },
+  });
+
+  if (!topic) return '';
+
+  let plan = `📚 SUBJECT: ${topic.subject.name}\n`;
+  plan += `📖 TOPIC: ${topic.title}\n`;
+  if (topic.description) plan += `📝 Description: ${topic.description}\n`;
+  plan += `📊 Grade Level: ${topic.gradeLevel}\n\n`;
+
+  if (topic.subtopics.length > 0) {
+    plan += `--- SUBTOPICS TO COVER ---\n\n`;
+    topic.subtopics.forEach((st: any, i: number) => {
+      plan += `${i + 1}. ${st.title}\n`;
+      if (st.description) plan += `   ${st.description}\n`;
+      if (st.learningObjectives) {
+        try {
+          const objectives = JSON.parse(st.learningObjectives);
+          if (Array.isArray(objectives) && objectives.length) {
+            plan += `   Learning Objectives:\n`;
+            objectives.forEach((obj: string) => {
+              plan += `   • ${obj}\n`;
+            });
+          }
+        } catch {}
+      }
+      if (st.duration) plan += `   ⏱ Duration: ~${st.duration} minutes\n`;
+      plan += '\n';
+    });
+  }
+
+  plan += `--- LESSON FLOW ---\n`;
+  plan += `1. INTRODUCTION: Review previous knowledge, introduce today's topic\n`;
+  plan += `2. TEACHING: Cover the subtopics above with examples and explanations\n`;
+  plan += `3. ACTIVITY: Interactive exercise related to the subtopics\n`;
+  plan += `4. ASSESSMENT: Check understanding with questions\n`;
+  plan += `5. WRAP-UP: Summarize key points, preview next topic\n`;
+
+  return plan;
+}
+
+// ==========================================
 // VIRTUAL CLASSROOM CONTROLLER
 // ==========================================
 
@@ -34,10 +92,18 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
       isRecordingEnabled,
       jitsiDomain,
       roomPassword,
+      topicId,
+      selectedSubTopicIds,
     } = req.body;
 
     if (!title || !scheduledStart || !scheduledEnd) {
       return res.status(400).json({ error: 'Title, scheduledStart, and scheduledEnd are required' });
+    }
+
+    // If topic is selected, build structured lesson plan from syllabus
+    let finalLessonPlan = lessonPlanContent || null;
+    if (topicId && !lessonPlanContent) {
+      finalLessonPlan = await buildLessonPlanFromSyllabus(topicId, selectedSubTopicIds);
     }
 
     // Generate a unique Jitsi room name
@@ -55,16 +121,18 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
         jitsiDomain: jitsiDomain || 'meet.jit.si',
         scheduledStart: new Date(scheduledStart),
         scheduledEnd: new Date(scheduledEnd),
+        topicId: topicId || null,
+        selectedSubTopicIds: selectedSubTopicIds || null,
         aiTutorEnabled: aiTutorEnabled || false,
         aiTutorVoiceId: aiTutorVoiceId || null,
         aiTutorName: aiTutorName || 'AI Teacher',
         aiTutorPersona: aiTutorPersona || null,
-        lessonPlanContent: lessonPlanContent || null,
+        lessonPlanContent: finalLessonPlan,
         aiTutorLanguage: aiTutorLanguage || 'en',
         maxParticipants: maxParticipants || 50,
         isRecordingEnabled: isRecordingEnabled || false,
         createdById: userId,
-      },
+      } as any,
     });
 
     res.status(201).json(classroom);

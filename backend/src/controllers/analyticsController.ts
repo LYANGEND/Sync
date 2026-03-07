@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
+import * as metrics from '../services/metricsService';
 
 /**
  * Enhanced Analytics Controller
@@ -199,68 +200,29 @@ export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Res
 
 export const getSchoolHealthDashboard = async (req: AuthRequest, res: Response) => {
   try {
-    const [
-      studentCount,
-      teacherCount,
-      classCount,
-      activeTerm,
-    ] = await Promise.all([
-      prisma.student.count({ where: { status: 'ACTIVE' } }),
-      prisma.user.count({ where: { role: 'TEACHER', isActive: true } }),
-      prisma.class.count(),
-      prisma.academicTerm.findFirst({ where: { isActive: true } }),
-    ]);
+    const health = await metrics.getSchoolHealthSnapshot();
 
-    // Student-teacher ratio
-    const studentTeacherRatio = teacherCount > 0 ? Math.round(studentCount / teacherCount) : 0;
+    const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
 
-    // Fee collection rate
-    const totalFees = await prisma.studentFeeStructure.aggregate({ _sum: { amountDue: true } });
-    const totalPaid = await prisma.payment.aggregate({
-      where: { status: 'COMPLETED' },
-      _sum: { amount: true },
-    });
-    const collectionRate = Number(totalFees._sum.amountDue) > 0
-      ? Math.round((Number(totalPaid._sum.amount) / Number(totalFees._sum.amountDue)) * 100)
-      : 0;
-
-    // Recent attendance rate (last 7 days)
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    const recentAttendance = await prisma.attendance.findMany({
-      where: { date: { gte: weekAgo } },
-    });
-    const weeklyAttendanceRate = recentAttendance.length > 0
-      ? Math.round((recentAttendance.filter(r => r.status !== 'ABSENT').length / recentAttendance.length) * 100)
-      : 0;
-
-    // Risk students count
-    let atRiskCount = 0;
-    try {
-      atRiskCount = await (prisma as any).studentRiskAssessment.count({
-        where: { riskLevel: { in: ['HIGH', 'CRITICAL'] } },
-      });
-    } catch { /* table may not exist yet */ }
-
-    // Generate AI insights
+    // Generate text insights from canonical numbers
     const insights = generateHealthInsights({
-      studentCount,
-      teacherCount,
-      studentTeacherRatio,
-      collectionRate,
-      weeklyAttendanceRate,
-      atRiskCount,
+      studentCount: health.enrollment.activeStudents,
+      teacherCount: health.enrollment.activeTeachers,
+      studentTeacherRatio: health.enrollment.studentTeacherRatio,
+      collectionRate: health.fees.collectionRatePercent,
+      weeklyAttendanceRate: health.attendance.ratePercent,
+      atRiskCount: health.risk.critical + health.risk.high,
     });
 
     res.json({
       metrics: {
-        activeStudents: studentCount,
-        activeTeachers: teacherCount,
-        totalClasses: classCount,
-        studentTeacherRatio,
-        feeCollectionRate: collectionRate,
-        weeklyAttendanceRate,
-        atRiskStudents: atRiskCount,
+        activeStudents: health.enrollment.activeStudents,
+        activeTeachers: health.enrollment.activeTeachers,
+        totalClasses: health.enrollment.totalClasses,
+        studentTeacherRatio: health.enrollment.studentTeacherRatio,
+        feeCollectionRate: health.fees.collectionRatePercent,
+        weeklyAttendanceRate: health.attendance.ratePercent,
+        atRiskStudents: health.risk.critical + health.risk.high,
         currentTerm: activeTerm?.name || 'N/A',
       },
       insights,

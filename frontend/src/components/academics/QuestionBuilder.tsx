@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Trash2, Save, CheckCircle, XCircle, Sparkles, X, Loader2 } from 'lucide-react';
 import api from '../../utils/api';
 
 interface QuestionOption {
@@ -18,13 +18,24 @@ interface Question {
 
 interface QuestionBuilderProps {
   assessmentId: string;
+  subjectId?: string;
+  subjectName?: string;
   onClose: () => void;
 }
 
-const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose }) => {
+const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subjectId, subjectName, onClose }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // AI Generation State
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiGenerating, setAIGenerating] = useState(false);
+  const [aiQuestionCount, setAIQuestionCount] = useState(5);
+  const [aiDifficulty, setAIDifficulty] = useState('medium');
+  const [aiQuestionTypes, setAIQuestionTypes] = useState<string[]>(['MULTIPLE_CHOICE']);
+  const [aiTopicName, setAITopicName] = useState('');
+  const [aiGeneratedQuestions, setAIGeneratedQuestions] = useState<Question[]>([]);
 
   // New Question State
   const [newQuestion, setNewQuestion] = useState<Question>({
@@ -94,6 +105,36 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
     });
   };
 
+  const handleAIGenerate = async () => {
+    if (!subjectId) {
+      alert('Subject information not available for AI generation.');
+      return;
+    }
+    setAIGenerating(true);
+    try {
+      const response = await api.post('/syllabus/generate-questions', {
+        subjectId,
+        topicName: aiTopicName || undefined,
+        questionCount: aiQuestionCount,
+        questionTypes: aiQuestionTypes,
+        difficulty: aiDifficulty,
+      });
+      setAIGeneratedQuestions(response.data.questions || []);
+    } catch (error) {
+      console.error('AI question generation failed:', error);
+      alert('Failed to generate questions. Please check your AI configuration in settings.');
+    } finally {
+      setAIGenerating(false);
+    }
+  };
+
+  const handleAddAIQuestions = () => {
+    setQuestions([...questions, ...aiGeneratedQuestions]);
+    setAIGeneratedQuestions([]);
+    setShowAIModal(false);
+    setAITopicName('');
+  };
+
   const handleSaveAll = async () => {
     try {
       setSaving(true);
@@ -132,6 +173,15 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-gray-800">Question Builder</h2>
         <div className="flex gap-2">
+          {subjectId && (
+            <button
+              onClick={() => { setShowAIModal(true); setAIGeneratedQuestions([]); }}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all"
+            >
+              <Sparkles size={18} />
+              AI Generate
+            </button>
+          )}
           <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
             Close
           </button>
@@ -322,6 +372,187 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, onClose
           ))}
         </div>
       </div>
+
+      {/* AI Question Generation Modal */}
+      {showAIModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-lg flex items-center justify-center">
+                  <Sparkles size={20} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">AI Question Generator</h2>
+                  {subjectName && <p className="text-sm text-gray-500 dark:text-gray-400">{subjectName}</p>}
+                </div>
+              </div>
+              <button onClick={() => setShowAIModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            {aiGeneratedQuestions.length === 0 ? (
+              /* Config Step */
+              <div className="p-6 space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic (optional)</label>
+                  <input
+                    type="text"
+                    value={aiTopicName}
+                    onChange={e => setAITopicName(e.target.value)}
+                    placeholder="e.g., Photosynthesis, Quadratic Equations..."
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Number of Questions</label>
+                    <select
+                      value={aiQuestionCount}
+                      onChange={e => setAIQuestionCount(Number(e.target.value))}
+                      className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                    >
+                      {[3, 5, 7, 10, 15].map(n => (
+                        <option key={n} value={n}>{n} questions</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Difficulty</label>
+                    <select
+                      value={aiDifficulty}
+                      onChange={e => setAIDifficulty(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Question Types</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: 'MULTIPLE_CHOICE', label: 'Multiple Choice' },
+                      { value: 'TRUE_FALSE', label: 'True/False' },
+                      { value: 'SHORT_ANSWER', label: 'Short Answer' },
+                    ].map(type => (
+                      <button
+                        key={type.value}
+                        onClick={() => {
+                          setAIQuestionTypes(prev =>
+                            prev.includes(type.value)
+                              ? prev.filter(t => t !== type.value).length > 0 ? prev.filter(t => t !== type.value) : prev
+                              : [...prev, type.value]
+                          );
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                          aiQuestionTypes.includes(type.value)
+                            ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
+                            : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                        }`}
+                      >
+                        {type.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    onClick={() => setShowAIModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAIGenerate}
+                    disabled={aiGenerating}
+                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all"
+                  >
+                    {aiGenerating ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} />
+                        Generate Questions
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Preview Step */
+              <div className="p-6 space-y-4">
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 flex items-center gap-2">
+                  <CheckCircle size={18} className="text-green-600" />
+                  <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                    {aiGeneratedQuestions.length} questions generated!
+                  </span>
+                </div>
+
+                <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                  {aiGeneratedQuestions.map((q, i) => (
+                    <div key={i} className="p-4 bg-gray-50 dark:bg-slate-700 rounded-lg border border-gray-200 dark:border-slate-600">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-medium text-gray-900 dark:text-white">Q{i + 1}. {q.text}</span>
+                        <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded ml-2 flex-shrink-0">{q.type}</span>
+                      </div>
+                      {q.options && (
+                        <ul className="space-y-1 ml-4 mt-2">
+                          {q.options.map((opt, j) => (
+                            <li key={j} className={`text-sm flex items-center gap-2 ${opt.isCorrect ? 'text-green-700 font-medium' : 'text-gray-600 dark:text-gray-400'}`}>
+                              {opt.isCorrect ? <CheckCircle size={14} /> : <span className="w-3.5" />}
+                              {opt.text}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {q.correctAnswer && (
+                        <p className="text-sm text-green-700 mt-2 ml-4">✓ Answer: {q.correctAnswer}</p>
+                      )}
+                      <div className="mt-2 text-xs text-gray-500 text-right">{q.points} points</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-between gap-3 pt-2">
+                  <button
+                    onClick={() => setAIGeneratedQuestions([])}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg flex items-center gap-2"
+                  >
+                    <Sparkles size={16} />
+                    Regenerate
+                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowAIModal(false)}
+                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={handleAddAIQuestions}
+                      className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      <Plus size={16} />
+                      Add All to Assessment
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

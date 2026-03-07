@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Video, Plus, Calendar, Users, Bot, Play, Trash2, Edit,
   Search, Loader2, GraduationCap, Brain, Sparkles,
-  Monitor, BookOpen, X, Volume2
+  Monitor, BookOpen, X, Volume2, CheckSquare,
+  Square, Wand2, ListTree
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import syllabusService, { Topic, parseLearningObjectives } from '../../services/syllabusService';
 
 interface Classroom {
   id: string;
@@ -38,6 +40,8 @@ interface Voice {
 interface ClassOption {
   id: string;
   name: string;
+  gradeLevel?: number;
+  subjects?: { id: string; name: string; code: string }[];
 }
 
 interface SubjectOption {
@@ -60,6 +64,14 @@ export default function VirtualClassrooms() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+
+  // Syllabus-driven scheduling state
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [loadingTopics, setLoadingTopics] = useState(false);
+  const [selectedTopicId, setSelectedTopicId] = useState('');
+  const [selectedSubTopicIds, setSelectedSubTopicIds] = useState<string[]>([]);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [savedLessonPlans, setSavedLessonPlans] = useState<{ id: string; title: string; content: string; weekStartDate: string }[]>([]);
 
   const [form, setForm] = useState({
     title: '',
@@ -133,6 +145,90 @@ export default function VirtualClassrooms() {
     }
   };
 
+  // Fetch topics when both subject and class are selected
+  const fetchTopics = useCallback(async (subjectId: string, classId: string) => {
+    if (!subjectId || !classId) {
+      setTopics([]);
+      setSelectedTopicId('');
+      setSelectedSubTopicIds([]);
+      return;
+    }
+
+    const selectedClass = classes.find(c => c.id === classId);
+    const gradeLevel = selectedClass?.gradeLevel;
+    if (gradeLevel === undefined) return;
+
+    setLoadingTopics(true);
+    try {
+      const res = await syllabusService.getTopics(subjectId, gradeLevel);
+      setTopics(res.data);
+    } catch (err) {
+      console.error('Fetch topics error:', err);
+      setTopics([]);
+    } finally {
+      setLoadingTopics(false);
+    }
+  }, [classes]);
+
+  // Auto-fetch topics when subject or class changes
+  useEffect(() => {
+    if (form.subjectId && form.classId && classes.length > 0) {
+      fetchTopics(form.subjectId, form.classId);
+      // Also fetch saved lesson plans for this class+subject
+      api.get(`/syllabus/lesson-plans?classId=${form.classId}&subjectId=${form.subjectId}`)
+        .then(res => setSavedLessonPlans(res.data))
+        .catch(() => setSavedLessonPlans([]));
+    } else {
+      setTopics([]);
+      setSelectedTopicId('');
+      setSelectedSubTopicIds([]);
+      setSavedLessonPlans([]);
+    }
+  }, [form.subjectId, form.classId, classes, fetchTopics]);
+
+  // Toggle subtopic selection
+  const toggleSubTopic = (subTopicId: string) => {
+    setSelectedSubTopicIds(prev =>
+      prev.includes(subTopicId)
+        ? prev.filter(id => id !== subTopicId)
+        : [...prev, subTopicId]
+    );
+  };
+
+  // Select all subtopics for current topic
+  const selectAllSubTopics = () => {
+    const topic = topics.find(t => t.id === selectedTopicId);
+    if (topic?.subtopics) {
+      setSelectedSubTopicIds(topic.subtopics.map(st => st.id));
+    }
+  };
+
+  // AI-generate lesson plan from selected topic + subtopics
+  const handleGenerateLessonPlan = async () => {
+    if (!selectedTopicId) return;
+
+    setGeneratingPlan(true);
+    try {
+      const selectedClass = classes.find(c => c.id === form.classId);
+      const res = await syllabusService.generateLessonPlan({
+        topicId: selectedTopicId,
+        subTopicIds: selectedSubTopicIds.length > 0 ? selectedSubTopicIds : undefined,
+        subjectId: form.subjectId || undefined,
+        gradeLevel: selectedClass?.gradeLevel,
+        durationMinutes: form.scheduledStart && form.scheduledEnd
+          ? Math.round((new Date(form.scheduledEnd).getTime() - new Date(form.scheduledStart).getTime()) / 60000)
+          : 45,
+      });
+
+      setForm(prev => ({ ...prev, lessonPlanContent: res.data.lessonPlan }));
+    } catch (err: any) {
+      console.error('Generate lesson plan error:', err);
+      alert('Failed to generate lesson plan. Please try again or write it manually.');
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
+
   // ==========================================
   // CREATE CLASSROOM
   // ==========================================
@@ -149,6 +245,8 @@ export default function VirtualClassrooms() {
         aiTutorVoiceId: form.aiTutorVoiceId || undefined,
         aiTutorPersona: form.aiTutorPersona || undefined,
         lessonPlanContent: form.lessonPlanContent || undefined,
+        topicId: selectedTopicId || undefined,
+        selectedSubTopicIds: selectedSubTopicIds.length > 0 ? selectedSubTopicIds : undefined,
       });
 
       setShowCreate(false);
@@ -176,6 +274,9 @@ export default function VirtualClassrooms() {
       lessonPlanContent: '',
       maxParticipants: 50,
     });
+    setSelectedTopicId('');
+    setSelectedSubTopicIds([]);
+    setTopics([]);
   };
 
   const deleteClassroom = async (classroomId: string) => {
@@ -487,9 +588,16 @@ export default function VirtualClassrooms() {
                       className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
                     >
                       <option value="">Select subject...</option>
-                      {subjects.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
+                      {(() => {
+                        const cls = classes.find(c => c.id === form.classId);
+                        const classSubjectIds = new Set((cls?.subjects || []).map(s => s.id));
+                        const filtered = classSubjectIds.size > 0
+                          ? subjects.filter(s => classSubjectIds.has(s.id))
+                          : subjects;
+                        return filtered.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ));
+                      })()}
                     </select>
                   </div>
                 </div>
@@ -517,6 +625,136 @@ export default function VirtualClassrooms() {
                   </div>
                 </div>
               </div>
+
+              {/* Syllabus Topic Picker — shown when subject + class selected */}
+              {form.subjectId && form.classId && (
+                <div className="space-y-3 pt-3 border-t dark:border-gray-700">
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <ListTree size={16} className="text-indigo-500" />
+                    Syllabus Topic
+                    <span className="text-xs font-normal text-gray-400">(from curriculum)</span>
+                  </h3>
+
+                  {loadingTopics ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+                      <Loader2 size={14} className="animate-spin" /> Loading topics...
+                    </div>
+                  ) : topics.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-2">
+                      No syllabus topics found for this subject + grade. You can still write a lesson plan manually below.
+                    </p>
+                  ) : (
+                    <>
+                      {/* Topic dropdown */}
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Select Topic</label>
+                        <select
+                          value={selectedTopicId}
+                          onChange={(e) => {
+                            setSelectedTopicId(e.target.value);
+                            setSelectedSubTopicIds([]);
+                          }}
+                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                        >
+                          <option value="">Choose a topic from the syllabus...</option>
+                          {topics.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.orderIndex > 0 ? `${t.orderIndex}. ` : ''}{t.title}
+                              {t._count?.subtopics ? ` (${t._count.subtopics} subtopics)` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Subtopic checkboxes */}
+                      {selectedTopicId && (() => {
+                        const topic = topics.find(t => t.id === selectedTopicId);
+                        const subtopics = topic?.subtopics || [];
+
+                        if (subtopics.length === 0) {
+                          return (
+                            <p className="text-xs text-gray-400 pl-1">
+                              No subtopics defined for this topic yet.
+                            </p>
+                          );
+                        }
+
+                        return (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs text-gray-500 dark:text-gray-400">
+                                Select subtopics to cover ({selectedSubTopicIds.length}/{subtopics.length})
+                              </label>
+                              <button
+                                type="button"
+                                onClick={selectAllSubTopics}
+                                className="text-xs text-indigo-500 hover:text-indigo-600 font-medium"
+                              >
+                                Select all
+                              </button>
+                            </div>
+
+                            <div className="max-h-40 overflow-y-auto space-y-1 rounded-xl border dark:border-gray-600 p-2 bg-gray-50 dark:bg-gray-750">
+                              {subtopics.map(st => {
+                                const isSelected = selectedSubTopicIds.includes(st.id);
+                                const objectives = parseLearningObjectives(st.learningObjectives);
+
+                                return (
+                                  <button
+                                    key={st.id}
+                                    type="button"
+                                    onClick={() => toggleSubTopic(st.id)}
+                                    className={`w-full text-left flex items-start gap-2 p-2 rounded-lg transition text-sm ${
+                                      isSelected
+                                        ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700'
+                                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
+                                    }`}
+                                  >
+                                    {isSelected ? (
+                                      <CheckSquare size={16} className="text-indigo-500 mt-0.5 flex-shrink-0" />
+                                    ) : (
+                                      <Square size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                                    )}
+                                    <div className="min-w-0">
+                                      <span className="font-medium text-gray-800 dark:text-gray-200 text-xs">
+                                        {st.title}
+                                      </span>
+                                      {st.duration && (
+                                        <span className="text-[10px] text-gray-400 ml-1">~{st.duration}min</span>
+                                      )}
+                                      {objectives.length > 0 && (
+                                        <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                                          {objectives[0]}{objectives.length > 1 ? ` +${objectives.length - 1} more` : ''}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* AI Generate Lesson Plan button */}
+                      {selectedTopicId && (
+                        <button
+                          type="button"
+                          onClick={handleGenerateLessonPlan}
+                          disabled={generatingPlan}
+                          className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-xl hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 text-xs font-medium transition w-full justify-center"
+                        >
+                          {generatingPlan ? (
+                            <><Loader2 size={14} className="animate-spin" /> Generating lesson plan with AI...</>
+                          ) : (
+                            <><Wand2 size={14} /> Generate Lesson Plan from Syllabus</>
+                          )}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* AI Tutor Settings */}
               <div className="space-y-3 pt-3 border-t dark:border-gray-700">
@@ -581,12 +819,35 @@ export default function VirtualClassrooms() {
 
                     <div>
                       <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        Lesson Plan (optional)
+                        Lesson Plan {selectedTopicId ? '(auto-generated from syllabus — edit if needed)' : '(optional)'}
                       </label>
+                      {savedLessonPlans.length > 0 && (
+                        <div className="mb-2">
+                          <select
+                            onChange={(e) => {
+                              const plan = savedLessonPlans.find(p => p.id === e.target.value);
+                              if (plan) {
+                                setForm(prev => ({ ...prev, lessonPlanContent: `📋 ${plan.title}\n\n${plan.content}` }));
+                              }
+                            }}
+                            className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                            defaultValue=""
+                          >
+                            <option value="" disabled>📂 Load from saved lesson plan ({savedLessonPlans.length} available)...</option>
+                            {savedLessonPlans.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.title} — {new Date(p.weekStartDate).toLocaleDateString()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <textarea
                         value={form.lessonPlanContent}
                         onChange={(e) => setForm({ ...form, lessonPlanContent: e.target.value })}
-                        placeholder="Paste or type the lesson plan here. The AI tutor will follow this plan during the class..."
+                        placeholder={selectedTopicId
+                          ? 'Click "Generate Lesson Plan from Syllabus" above, or write your own...'
+                          : 'Paste or type the lesson plan here. The AI tutor will follow this plan during the class...'}
                         rows={5}
                         className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white resize-none"
                       />

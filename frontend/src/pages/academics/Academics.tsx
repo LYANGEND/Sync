@@ -3,29 +3,23 @@ import { useAuth } from '../../context/AuthContext';
 import Subjects from '../subjects/Subjects';
 import Classes from '../classes/Classes';
 import Terms from '../terms/Terms';
-import Assessments from './Assessments';
 import GradingScales from './GradingScales';
 import ReportCards from './ReportCards';
 import Timetable from './Timetable';
 import Promotions from './Promotions';
-import LessonPlanner from './LessonPlanner';
 import AcademicCalendar from './AcademicCalendar';
 import AttendanceRegister from './AttendanceRegister';
 import TeacherGradebook from './TeacherGradebook';
 import SubjectAllocation from './SubjectAllocation';
-import HomeworkManagement from './HomeworkManagement';
 
 const Academics = () => {
   const { user } = useAuth();
   const [view, setView] = useState('');
 
   const allTabs = [
-    { id: 'assessments', label: 'Assessments', roles: ['SUPER_ADMIN', 'TEACHER'] },
     { id: 'gradebook', label: 'Gradebook', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'] },
     { id: 'reports', label: 'Report Cards', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
-    { id: 'homework', label: 'Homework', roles: ['SUPER_ADMIN', 'TEACHER'] },
     { id: 'attendance', label: 'Attendance', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
-    { id: 'lesson-planner', label: 'Lesson Planner', roles: ['SUPER_ADMIN', 'TEACHER'] },
     { id: 'timetable', label: 'Timetable', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY', 'PARENT'] },
     { id: 'calendar', label: 'Calendar', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY', 'PARENT'] },
     { id: 'classes', label: 'Classes', roles: ['SUPER_ADMIN', 'SECRETARY'] },
@@ -76,18 +70,15 @@ const Academics = () => {
         {/* Render only if role allows to prevent unauthorized access via state manipulation */}
         {view === 'classes' && allowedTabs.find(t => t.id === 'classes') && <Classes />}
         {view === 'subjects' && allowedTabs.find(t => t.id === 'subjects') && <Subjects />}
-        {view === 'assessments' && allowedTabs.find(t => t.id === 'assessments') && <Assessments />}
         {view === 'grading' && allowedTabs.find(t => t.id === 'grading') && <GradingScales />}
         {view === 'reports' && allowedTabs.find(t => t.id === 'reports') && <ReportCards />}
         {view === 'timetable' && allowedTabs.find(t => t.id === 'timetable') && <Timetable />}
-        {view === 'lesson-planner' && allowedTabs.find(t => t.id === 'lesson-planner') && <LessonPlanner />}
         {view === 'terms' && allowedTabs.find(t => t.id === 'terms') && <Terms />}
         {view === 'promotions' && allowedTabs.find(t => t.id === 'promotions') && <Promotions />}
         {view === 'calendar' && allowedTabs.find(t => t.id === 'calendar') && <AcademicCalendar />}
         {view === 'attendance' && allowedTabs.find(t => t.id === 'attendance') && <AttendanceRegister />}
         {view === 'gradebook' && allowedTabs.find(t => t.id === 'gradebook') && <TeacherGradebook />}
         {view === 'allocation' && allowedTabs.find(t => t.id === 'allocation') && <SubjectAllocation />}
-        {view === 'homework' && allowedTabs.find(t => t.id === 'homework') && <HomeworkManagement />}
       </div>
     </div>
   );

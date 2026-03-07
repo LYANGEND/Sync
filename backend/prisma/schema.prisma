@@ -758,12 +758,29 @@ model Topic {
   gradeLevel  Int // 1-12
   orderIndex  Int     @default(0)
 
-  progress TopicProgress[]
+  subtopics SubTopic[]
+  progress  TopicProgress[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("topics")
+}
+
+model SubTopic {
+  id               String  @id @default(uuid())
+  title            String
+  description      String?
+  learningObjectives String? @db.Text // JSON array of objectives
+  topicId          String
+  topic            Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  orderIndex       Int     @default(0)
+  duration         Int?    // Suggested duration in minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sub_topics")
 }
 
 model TopicProgress {
@@ -2126,12 +2143,16 @@ model VirtualClassroom {
   // Status: SCHEDULED, LIVE, ENDED, CANCELLED
   status      String   @default("SCHEDULED")
 
+  // Syllabus linking — which topic/subtopics to teach in this session
+  topicId              String?  // Topic to cover in this class
+  selectedSubTopicIds  Json?    // Array of SubTopic IDs to cover
+
   // AI Tutor settings
   aiTutorEnabled     Boolean  @default(false)
   aiTutorVoiceId     String?  // ElevenLabs voice ID
   aiTutorName        String   @default("AI Teacher")
   aiTutorPersona     String?  @db.Text  // Custom personality/instructions
-  lessonPlanContent  String?  @db.Text  // Lesson plan for AI to follow
+  lessonPlanContent  String?  @db.Text  // Lesson plan for AI to follow (auto-generated from syllabus or manual)
   aiTutorLanguage    String   @default("en") // Teaching language
 
   maxParticipants    Int      @default(50)

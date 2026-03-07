@@ -31,6 +31,7 @@ export interface AttendanceAlert {
   message: string;
   resolved: boolean;
   createdAt: string;
+  student?: { firstName: string; lastName: string; class?: { name: string } };
 }
 
 export interface ClassInsights {

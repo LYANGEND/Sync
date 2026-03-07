@@ -5,38 +5,8 @@ import {
   TrendingDown, DollarSign, Calendar, Brain, Loader2
 } from 'lucide-react';
 import api from '../../utils/api';
+import intelligenceService, { RiskAssessment, AttendanceAlert } from '../../services/intelligenceService';
 import toast from 'react-hot-toast';
-
-interface RiskAssessment {
-  studentId: string;
-  studentName: string;
-  className: string;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  riskScore: number;
-  factors: {
-    academic: number;
-    attendance: number;
-    financial: number;
-    trend: number;
-  };
-  details: {
-    averageScore?: number;
-    attendanceRate?: number;
-    failingSubjects?: string[];
-    feeBalance?: number;
-    consecutiveAbsences?: number;
-  };
-}
-
-interface AttendanceAlert {
-  id: string;
-  studentId: string;
-  student?: { firstName: string; lastName: string; class?: { name: string } };
-  alertType: string;
-  message: string;
-  resolved: boolean;
-  createdAt: string;
-}
 
 const StudentIntelligence = () => {
   const [activeTab, setActiveTab] = useState<'risk' | 'alerts' | 'fees'>('risk');
@@ -62,12 +32,12 @@ const StudentIntelligence = () => {
         termId = termRes.data?.id;
       } catch { /* no active term */ }
 
-      const [riskRes, alertsRes] = await Promise.all([
-        api.get('/intelligence/risk/at-risk', { params: { termId, minLevel: 'MEDIUM' } }).catch(() => ({ data: [] })),
-        api.get('/intelligence/attendance/alerts', { params: { resolved: false } }).catch(() => ({ data: [] })),
+      const [riskData, alertsData] = await Promise.all([
+        intelligenceService.getAtRiskStudents({ termId, minLevel: 'MEDIUM' }).catch(() => []),
+        intelligenceService.getAttendanceAlerts({ resolved: false }).catch(() => []),
       ]);
-      setAtRiskStudents(riskRes.data);
-      setAlerts(alertsRes.data);
+      setAtRiskStudents(riskData);
+      setAlerts(alertsData);
     } catch (error) {
       console.error('Error fetching intelligence data:', error);
     } finally {
@@ -78,8 +48,8 @@ const StudentIntelligence = () => {
   const fetchRecommendations = async (studentId: string) => {
     setLoadingRecs(true);
     try {
-      const res = await api.get(`/intelligence/risk/student/${studentId}/recommendations`);
-      setRecommendations(res.data.recommendations || []);
+      const data = await intelligenceService.getAIRecommendations(studentId, '');
+      setRecommendations(data.recommendations || []);
     } catch {
       toast.error('Could not load recommendations');
       setRecommendations([]);
@@ -90,7 +60,7 @@ const StudentIntelligence = () => {
 
   const resolveAlert = async (alertId: string) => {
     try {
-      await api.put(`/intelligence/attendance/alerts/${alertId}/resolve`, { notes: 'Resolved from dashboard' });
+      await intelligenceService.resolveAlert(alertId, 'Resolved from dashboard');
       setAlerts(prev => prev.filter(a => a.id !== alertId));
       toast.success('Alert resolved');
     } catch {

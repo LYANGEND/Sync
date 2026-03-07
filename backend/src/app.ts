@@ -46,6 +46,8 @@ import financialRoutes from './routes/financialRoutes';
 import debtCollectionRoutes from './routes/debtCollectionRoutes';
 // Virtual Classroom & AI Tutor
 import virtualClassroomRoutes from './routes/virtualClassroomRoutes';
+// Master AI Ops
+import masterAIRoutes from './routes/masterAIRoutes';
 // Middleware
 import { generalLimiter } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -129,6 +131,9 @@ app.use('/api/v1/debt-collection', debtCollectionRoutes);
 
 // Virtual Classroom & AI Tutor
 app.use('/api/v1/virtual-classroom', virtualClassroomRoutes);
+
+// Master AI Ops
+app.use('/api/v1/master-ai', masterAIRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

@@ -1,0 +1,1035 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Sparkles, Send, Loader2, CheckCircle2, XCircle, ChevronRight,
+  Calendar, BookOpen, GraduationCap,
+  CreditCard, Bell, BarChart3, ArrowRight, Zap, Terminal,
+  Copy, Trash2, ChevronDown, Plus, MessageSquare, MoreHorizontal,
+  Pencil, Check, X, Search, PanelLeftClose, PanelLeft
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
+import ReactMarkdown from 'react-markdown';
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  actions?: MasterAIAction[];
+  suggestions?: string[];
+  timestamp: Date;
+  isLoading?: boolean;
+}
+
+const quickCommands = [
+  {
+    icon: Calendar,
+    label: 'Add Zambian Holidays',
+    command: 'Add all public holidays for Zambia for 2025 to the academic calendar',
+    color: 'blue',
+  },
+  {
+    icon: Calendar,
+    label: 'Add Zimbabwe Holidays',
+    command: 'Add all public holidays for Zimbabwe for 2025 to the academic calendar',
+    color: 'emerald',
+  },
+  {
+    icon: Calendar,
+    label: 'Add SA Holidays',
+    command: 'Add all public holidays for South Africa for 2025 to the academic calendar',
+    color: 'amber',
+  },
+  {
+    icon: BookOpen,
+    label: 'Create Subjects',
+    command: 'Create standard primary school subjects: Mathematics, English, Science, Social Studies, Physical Education, Art, Music, Computer Studies',
+    color: 'purple',
+  },
+  {
+    icon: GraduationCap,
+    label: 'Setup Classes',
+    command: 'Create classes for a primary school from Grade 1 to Grade 7 with capacity 40 each',
+    color: 'pink',
+  },
+  {
+    icon: CreditCard,
+    label: 'Setup Fee Structure',
+    command: 'Create fee templates: Tuition Fee (500 per term), Transport Fee (100 per month), Computer Lab Fee (50 per term), Uniform Fee (150 once off)',
+    color: 'cyan',
+  },
+  {
+    icon: BarChart3,
+    label: 'School Statistics',
+    command: 'Show me the current school statistics - how many students, teachers, classes, etc.',
+    color: 'orange',
+  },
+  {
+    icon: Bell,
+    label: 'Create Announcement',
+    command: 'Create a high priority announcement for all teachers and parents: "School will be closed next Friday for staff development day"',
+    color: 'red',
+  },
+];
+
+// ==========================================
+// HELPER: Group conversations by date
+// ==========================================
+function groupConversationsByDate(conversations: MasterAIConversation[]) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const last7 = new Date(today.getTime() - 7 * 86400000);
+  const last30 = new Date(today.getTime() - 30 * 86400000);
+
+  const groups: { label: string; items: MasterAIConversation[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'Previous 7 Days', items: [] },
+    { label: 'Previous 30 Days', items: [] },
+    { label: 'Older', items: [] },
+  ];
+
+  for (const c of conversations) {
+    const d = new Date(c.updatedAt);
+    if (d >= today) groups[0].items.push(c);
+    else if (d >= yesterday) groups[1].items.push(c);
+    else if (d >= last7) groups[2].items.push(c);
+    else if (d >= last30) groups[3].items.push(c);
+    else groups[4].items.push(c);
+  }
+
+  return groups.filter(g => g.items.length > 0);
+}
+
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
+const MasterAI = () => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Load conversations on mount
+  const loadConversations = useCallback(async () => {
+    try {
+      const data = await masterAIService.getConversations();
+      setConversations(data);
+    } catch {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConversations();
+  }, [loadConversations]);
+
+  // Load a specific conversation's messages
+  const loadConversation = async (convoId: string) => {
+    if (convoId === activeConversationId) return;
+    setLoadingConversation(true);
+    try {
+      const { messages: dbMessages } = await masterAIService.getConversation(convoId);
+      const chatMsgs: ChatMessage[] = dbMessages.map(m => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: new Date(m.createdAt),
+      }));
+      setMessages(chatMsgs);
+      setActiveConversationId(convoId);
+    } catch {
+      toast.error('Failed to load conversation');
+    } finally {
+      setLoadingConversation(false);
+    }
+  };
+
+  // Start a new chat
+  const startNewChat = () => {
+    setMessages([]);
+    setActiveConversationId(null);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
+  // Delete a conversation
+  const handleDeleteConversation = async (convoId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await masterAIService.deleteConversation(convoId);
+      setConversations(prev => prev.filter(c => c.id !== convoId));
+      if (activeConversationId === convoId) {
+        startNewChat();
+      }
+      toast.success('Conversation deleted');
+    } catch {
+      toast.error('Failed to delete');
+    }
+  };
+
+  // Send command
+  const sendCommand = async (command?: string) => {
+    const text = command || input.trim();
+    if (!text || isProcessing) return;
+
+    const userMsg: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: new Date(),
+    };
+
+    const loadingMsg: ChatMessage = {
+      id: `loading-${Date.now()}`,
+      role: 'assistant',
+      content: 'Processing your command...',
+      timestamp: new Date(),
+      isLoading: true,
+    };
+
+    setMessages(prev => [...prev, userMsg, loadingMsg]);
+    setInput('');
+    setIsProcessing(true);
+
+    try {
+      const result = await masterAIService.executeCommand(text, activeConversationId || undefined);
+
+      // If a new conversation was created, update state
+      if (result.isNewConversation || !activeConversationId) {
+        setActiveConversationId(result.conversationId);
+        loadConversations(); // Refresh sidebar
+      }
+
+      const assistantMsg: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: result.message,
+        actions: result.actions,
+        suggestions: result.suggestions,
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev.filter(m => !m.isLoading), assistantMsg]);
+
+      // Update the conversation's updatedAt in the sidebar
+      setConversations(prev => {
+        const existing = prev.find(c => c.id === result.conversationId);
+        if (existing) {
+          return [
+            { ...existing, updatedAt: new Date().toISOString() },
+            ...prev.filter(c => c.id !== result.conversationId),
+          ];
+        }
+        return prev;
+      });
+      loadConversations();
+
+      const successCount = result.actions?.filter(a => a.success).length || 0;
+      const failCount = result.actions?.filter(a => !a.success).length || 0;
+      if (successCount > 0) toast.success(`${successCount} action(s) completed successfully`);
+      if (failCount > 0) toast.error(`${failCount} action(s) failed`);
+    } catch (error: any) {
+      const errorMsg: ChatMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: error.response?.data?.error || 'Failed to process command. Please try again.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev.filter(m => !m.isLoading), errorMsg]);
+      toast.error('Command failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendCommand();
+    }
+  };
+
+  // Filter conversations by search
+  const filteredConversations = searchQuery
+    ? conversations.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : conversations;
+
+  const groupedConversations = groupConversationsByDate(filteredConversations);
+
+  return (
+    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900">
+      {/* ============ SIDEBAR ============ */}
+      <div
+        className={`${
+          sidebarOpen ? 'w-72' : 'w-0'
+        } transition-all duration-300 flex-shrink-0 overflow-hidden border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col`}
+      >
+        {/* Sidebar Header */}
+        <div className="p-3 flex-shrink-0">
+          <button
+            onClick={startNewChat}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200"
+          >
+            <Plus size={18} />
+            New Chat
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-3 pb-2 flex-shrink-0">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search conversations..."
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 placeholder-gray-400 outline-none focus:border-purple-300 dark:focus:border-purple-600 transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* Conversation List */}
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
+          {conversations.length === 0 ? (
+            <div className="text-center py-8 px-4">
+              <MessageSquare size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+              <p className="text-xs text-gray-400 dark:text-gray-500">No conversations yet</p>
+              <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-1">Start a new chat to begin</p>
+            </div>
+          ) : (
+            groupedConversations.map(group => (
+              <div key={group.label} className="mb-3">
+                <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                  {group.label}
+                </p>
+                {group.items.map(convo => (
+                  <ConversationItem
+                    key={convo.id}
+                    conversation={convo}
+                    isActive={convo.id === activeConversationId}
+                    onClick={() => loadConversation(convo.id)}
+                    onDelete={(e) => handleDeleteConversation(convo.id, e)}
+                    onRename={async (newTitle) => {
+                      try {
+                        await masterAIService.updateConversation(convo.id, newTitle);
+                        setConversations(prev =>
+                          prev.map(c => c.id === convo.id ? { ...c, title: newTitle } : c)
+                        );
+                      } catch {
+                        toast.error('Failed to rename');
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ============ MAIN CHAT AREA ============ */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            >
+              {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+            </button>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2 text-sm">
+                Master AI Ops
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium">BETA</span>
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Natural language control across all modules
+              </p>
+            </div>
+            {activeConversationId && (
+              <button
+                onClick={startNewChat}
+                className="p-2 rounded-lg text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                title="New Chat"
+              >
+                <Plus size={18} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+          {loadingConversation ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
+            </div>
+          ) : messages.length === 0 ? (
+            <WelcomeScreen onCommand={sendCommand} />
+          ) : (
+            messages.map(msg => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onSuggestionClick={sendCommand}
+              />
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Quick Commands Strip */}
+        {messages.length > 0 && (
+          <div className="px-4 pb-2 flex-shrink-0">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+              {quickCommands.slice(0, 4).map((cmd, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendCommand(cmd.command)}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+                >
+                  <cmd.icon size={12} />
+                  {cmd.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Input Area */}
+        <div className="px-4 pb-4 flex-shrink-0">
+          <div className="flex items-end gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
+            <Terminal size={16} className="text-gray-400 ml-2 mb-3 flex-shrink-0" />
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder='Tell me what to do... e.g. "Add all Zambian holidays for 2025"'
+              className="flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-2 py-2 max-h-32"
+              rows={1}
+              style={{ minHeight: '40px' }}
+              disabled={isProcessing}
+            />
+            <button
+              onClick={() => sendCommand()}
+              disabled={!input.trim() || isProcessing}
+              className="p-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
+              {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400 text-center mt-2">
+            Master AI can create, read, and manage data across all modules. Actions are executed immediately.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// CONVERSATION SIDEBAR ITEM
+// ==========================================
+const ConversationItem = ({
+  conversation,
+  isActive,
+  onClick,
+  onDelete,
+  onRename,
+}: {
+  conversation: MasterAIConversation;
+  isActive: boolean;
+  onClick: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+  onRename: (title: string) => void;
+}) => {
+  const [showMenu, setShowMenu] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(conversation.title);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isRenaming) renameRef.current?.focus();
+  }, [isRenaming]);
+
+  const handleRenameSubmit = () => {
+    if (renameValue.trim() && renameValue !== conversation.title) {
+      onRename(renameValue.trim());
+    }
+    setIsRenaming(false);
+    setShowMenu(false);
+  };
+
+  return (
+    <div
+      onClick={isRenaming ? undefined : onClick}
+      className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+        isActive
+          ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700/50'
+      }`}
+    >
+      <MessageSquare size={14} className="flex-shrink-0 opacity-50" />
+
+      {isRenaming ? (
+        <div className="flex-1 flex items-center gap-1 min-w-0">
+          <input
+            ref={renameRef}
+            value={renameValue}
+            onChange={e => setRenameValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') { setIsRenaming(false); setShowMenu(false); } }}
+            className="flex-1 text-xs bg-white dark:bg-slate-600 border border-purple-300 dark:border-purple-600 rounded px-2 py-1 outline-none text-gray-900 dark:text-white min-w-0"
+            onClick={e => e.stopPropagation()}
+          />
+          <button onClick={(e) => { e.stopPropagation(); handleRenameSubmit(); }} className="p-0.5 text-green-600 hover:text-green-700"><Check size={14} /></button>
+          <button onClick={(e) => { e.stopPropagation(); setIsRenaming(false); setShowMenu(false); }} className="p-0.5 text-gray-400 hover:text-gray-600"><X size={14} /></button>
+        </div>
+      ) : (
+        <>
+          <span className="flex-1 text-xs truncate">{conversation.title}</span>
+          <div className={`flex items-center gap-0.5 ${isActive || showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Dropdown menu */}
+      {showMenu && !isRenaming && (
+        <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-700 rounded-lg shadow-lg border border-gray-200 dark:border-slate-600 py-1 min-w-[120px]">
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsRenaming(true); setRenameValue(conversation.title); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-600"
+          >
+            <Pencil size={12} /> Rename
+          </button>
+          <button
+            onClick={(e) => { setShowMenu(false); onDelete(e); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+          >
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==========================================
+// WELCOME SCREEN
+// ==========================================
+const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
+  <div className="flex flex-col items-center justify-center min-h-full py-8 px-4">
+    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-6">
+      <Sparkles className="w-10 h-10 text-purple-600 dark:text-purple-400" />
+    </div>
+    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+      What would you like me to do?
+    </h3>
+    <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 text-center max-w-md">
+      Tell me in plain English and I'll execute it across any module — calendar, students, classes, fees, and more.
+    </p>
+
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
+      {quickCommands.map((cmd, i) => (
+        <button
+          key={i}
+          onClick={() => onCommand(cmd.command)}
+          className="flex items-center gap-3 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-all text-left group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
+            <cmd.icon size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">{cmd.label}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
+          </div>
+          <ArrowRight size={14} className="text-gray-300 dark:text-gray-600 flex-shrink-0 group-hover:text-purple-500 transition-colors" />
+        </button>
+      ))}
+    </div>
+
+    <div className="mt-8 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-xl p-5 border border-purple-100 dark:border-purple-800/30 max-w-lg w-full">
+      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+        <Zap size={14} className="text-purple-600 dark:text-purple-400" />
+        What can I do?
+      </h4>
+      <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1.5">
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Add public holidays by country to the academic calendar</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Create classes, subjects, and fee structures</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Search for students, teachers, and users</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Create announcements and send notifications</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Set up academic terms and assessment schedules</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Record expenses and manage scholarships</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> View school statistics and analytics</li>
+      </ul>
+    </div>
+  </div>
+);
+
+// ==========================================
+// MESSAGE BUBBLE
+// ==========================================
+const MessageBubble = ({
+  message,
+  onSuggestionClick,
+}: {
+  message: ChatMessage;
+  onSuggestionClick: (cmd: string) => void;
+}) => {
+  const isUser = message.role === 'user';
+
+  if (message.isLoading) {
+    return (
+      <div className="flex gap-3">
+        <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
+          <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+        </div>
+        <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-200 dark:border-slate-700">
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <Loader2 size={14} className="animate-spin text-purple-500" />
+            Processing your command...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isUser) {
+    return (
+      <div className="flex gap-3 justify-end">
+        <div className="max-w-[85%] bg-purple-600 text-white rounded-2xl rounded-br-md px-4 py-3">
+          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          <p className="text-[10px] text-purple-200 mt-1">
+            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3">
+      <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-1">
+        <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+      </div>
+      <div className="flex-1 min-w-0 space-y-3">
+        {/* Message Text */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-200 dark:border-slate-700 inline-block max-w-[85%]">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-gray-900 dark:text-white leading-relaxed">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700">
+            <button
+              onClick={() => { navigator.clipboard.writeText(message.content); toast.success('Copied!'); }}
+              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+            >
+              <Copy size={10} /> Copy
+            </button>
+            <span className="text-[10px] text-gray-300 dark:text-gray-600">•</span>
+            <span className="text-[10px] text-gray-400">
+              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+
+        {/* Action Results */}
+        {message.actions && message.actions.length > 0 && (
+          <div className="space-y-2 max-w-[85%]">
+            {message.actions.map((action, i) => (
+              <ActionResult key={i} action={action} />
+            ))}
+          </div>
+        )}
+
+        {/* Suggestions */}
+        {message.suggestions && message.suggestions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {message.suggestions.map((suggestion, i) => (
+              <button
+                key={i}
+                onClick={() => onSuggestionClick(suggestion)}
+                className="text-xs px-3 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-600 transition-colors flex items-center gap-1"
+              >
+                <ChevronRight size={10} />
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// SMART DATA FORMATTER — Human-readable rendering
+// ==========================================
+
+/** Format a date string nicely */
+const formatDate = (d: string) => {
+  try {
+    return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return d; }
+};
+
+/** Format currency */
+const formatCurrency = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
+
+/** Render a key-value stat row */
+const StatRow = ({ label, value, icon }: { label: string; value: string | number; icon?: string }) => (
+  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/60 dark:bg-slate-800/60">
+    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+      {icon && <span>{icon}</span>}
+      {label}
+    </span>
+    <span className="text-sm font-semibold text-gray-900 dark:text-white">{value}</span>
+  </div>
+);
+
+/** Human-friendly label from camelCase / snake_case keys */
+const humanizeKey = (key: string): string => {
+  const map: Record<string, string> = {
+    activeStudents: 'Active Students',
+    activeTeachers: 'Active Teachers',
+    totalClasses: 'Total Classes',
+    totalSubjects: 'Total Subjects',
+    totalTerms: 'Academic Terms',
+    totalCalendarEvents: 'Calendar Events',
+    totalRevenue: 'Total Revenue',
+    attendanceRate: 'Attendance Rate',
+    firstName: 'First Name',
+    lastName: 'Last Name',
+    admissionNumber: 'Admission No.',
+    dateOfBirth: 'Date of Birth',
+    enrollmentDate: 'Enrollment Date',
+    feeAmount: 'Fee Amount',
+    startDate: 'Start Date',
+    endDate: 'End Date',
+    eventType: 'Type',
+    createdAt: 'Created',
+    updatedAt: 'Updated',
+    expenseNumber: 'Expense No.',
+    isActive: 'Active',
+    gradeLevel: 'Grade Level',
+  };
+  if (map[key]) return map[key];
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim();
+};
+
+/** Stat icon by key */
+const statIcon = (key: string): string => {
+  const map: Record<string, string> = {
+    activeStudents: '👨‍🎓',
+    activeTeachers: '👩‍🏫',
+    totalClasses: '🏫',
+    totalSubjects: '📚',
+    totalTerms: '📅',
+    totalCalendarEvents: '🗓️',
+    totalRevenue: '💰',
+    attendanceRate: '📊',
+  };
+  return map[key] || '📌';
+};
+
+/** Render statistics object as a nice grid */
+const StatsDisplay = ({ data }: { data: Record<string, any> }) => (
+  <div className="grid grid-cols-2 gap-2">
+    {Object.entries(data)
+      .filter(([k]) => !['id', 'schoolId', 'createdAt', 'updatedAt'].includes(k))
+      .map(([key, value]) => (
+        <StatRow key={key} label={humanizeKey(key)} value={value} icon={statIcon(key)} />
+      ))}
+  </div>
+);
+
+/** Render an array of items as a clean list */
+const ItemListDisplay = ({ items, toolName }: { items: any[]; toolName: string }) => {
+  // Determine which fields to show based on tool type
+  const getDisplayFields = (): { key: string; label: string }[] => {
+    if (toolName.includes('calendar') || toolName.includes('event')) {
+      return [
+        { key: 'title', label: 'Event' },
+        { key: 'startDate', label: 'Date' },
+        { key: 'eventType', label: 'Type' },
+      ];
+    }
+    if (toolName.includes('student')) {
+      return [
+        { key: 'firstName', label: 'Name' },
+        { key: 'admissionNumber', label: 'Admission No.' },
+        { key: 'status', label: 'Status' },
+      ];
+    }
+    if (toolName.includes('class')) {
+      return [
+        { key: 'name', label: 'Class Name' },
+        { key: 'gradeLevel', label: 'Grade' },
+        { key: 'capacity', label: 'Capacity' },
+      ];
+    }
+    if (toolName.includes('subject')) {
+      return [
+        { key: 'name', label: 'Subject' },
+        { key: 'code', label: 'Code' },
+      ];
+    }
+    if (toolName.includes('fee')) {
+      return [
+        { key: 'name', label: 'Fee Name' },
+        { key: 'amount', label: 'Amount' },
+        { key: 'frequency', label: 'Frequency' },
+      ];
+    }
+    if (toolName.includes('scholarship')) {
+      return [
+        { key: 'name', label: 'Scholarship' },
+        { key: 'percentage', label: 'Discount' },
+      ];
+    }
+    if (toolName.includes('expense')) {
+      return [
+        { key: 'description', label: 'Description' },
+        { key: 'amount', label: 'Amount' },
+        { key: 'category', label: 'Category' },
+      ];
+    }
+    if (toolName.includes('term')) {
+      return [
+        { key: 'name', label: 'Term' },
+        { key: 'startDate', label: 'Start' },
+        { key: 'endDate', label: 'End' },
+      ];
+    }
+    if (toolName.includes('announcement')) {
+      return [
+        { key: 'title', label: 'Title' },
+        { key: 'priority', label: 'Priority' },
+      ];
+    }
+    if (toolName.includes('user')) {
+      return [
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'role', label: 'Role' },
+      ];
+    }
+    if (toolName.includes('timetable') || toolName.includes('period')) {
+      return [
+        { key: 'dayOfWeek', label: 'Day' },
+        { key: 'startTime', label: 'Start' },
+        { key: 'endTime', label: 'End' },
+      ];
+    }
+    // Generic fallback
+    return Object.keys(items[0] || {})
+      .filter(k => !['id', 'schoolId', 'createdAt', 'updatedAt', 'userId', 'classId', 'subjectId', 'teacherId', 'termId'].includes(k))
+      .slice(0, 3)
+      .map(k => ({ key: k, label: humanizeKey(k) }));
+  };
+
+  const fields = getDisplayFields();
+  const displayItems = items.slice(0, 20); // Cap at 20 for readability
+  const hasMore = items.length > 20;
+
+  const formatValue = (item: any, key: string): string => {
+    const val = item[key];
+    if (val === null || val === undefined) return '—';
+    if (key === 'firstName') return `${item.firstName || ''} ${item.lastName || ''}`.trim();
+    if (key === 'amount' || key === 'feeAmount') return formatCurrency(Number(val));
+    if (key === 'percentage') return `${val}%`;
+    if (key === 'startDate' || key === 'endDate' || key === 'date') return formatDate(String(val));
+    if (key === 'eventType' || key === 'status' || key === 'category' || key === 'frequency' || key === 'priority' || key === 'role') {
+      return String(val).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    }
+    if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+    return String(val);
+  };
+
+  return (
+    <div className="space-y-1">
+      {/* Header row */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        {fields.map(f => (
+          <span key={f.key} className="flex-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+            {f.label}
+          </span>
+        ))}
+      </div>
+      {/* Data rows */}
+      {displayItems.map((item, idx) => (
+        <div key={item.id || idx} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 transition-colors">
+          {fields.map(f => (
+            <span key={f.key} className="flex-1 text-xs text-gray-700 dark:text-gray-300 truncate">
+              {formatValue(item, f.key)}
+            </span>
+          ))}
+        </div>
+      ))}
+      {hasMore && (
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center pt-1">
+          ... and {items.length - 20} more items
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** Smart data renderer — picks the best visualization for the data type */
+const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) => {
+  if (!data) return null;
+
+  // Stats tool — plain object with numeric values
+  if (toolName === 'get_school_statistics' || (typeof data === 'object' && !Array.isArray(data) && !data.created && !data.deleted && !data.summary)) {
+    return <StatsDisplay data={data} />;
+  }
+
+  // Resilient format: { created: [], updated?: [], existing?: [], errors: [], summary: string }
+  if (data.created || data.updated || data.existing) {
+    const sections: { label: string; emoji: string; items: any[] }[] = [];
+    if (data.created?.length) sections.push({ label: 'Newly Created', emoji: '✨', items: data.created });
+    if (data.updated?.length) sections.push({ label: 'Updated', emoji: '🔄', items: data.updated });
+    if (data.existing?.length) sections.push({ label: 'Already Existed', emoji: 'ℹ️', items: data.existing });
+
+    return (
+      <div className="space-y-3">
+        {sections.map(sec => (
+          <div key={sec.label}>
+            <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1.5">
+              <span>{sec.emoji}</span> {sec.label} ({sec.items.length})
+            </p>
+            <ItemListDisplay items={sec.items} toolName={toolName} />
+          </div>
+        ))}
+        {data.errors?.length > 0 && (
+          <div>
+            <p className="text-[10px] font-semibold text-red-500 uppercase tracking-wider px-2 mb-1 flex items-center gap-1.5">
+              <span>⚠️</span> Issues ({data.errors.length})
+            </p>
+            <div className="space-y-1">
+              {data.errors.map((err: string, i: number) => (
+                <p key={i} className="text-xs text-red-500 dark:text-red-400 px-3 py-1.5 rounded-lg bg-red-50/50 dark:bg-red-900/10">
+                  {err}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Array of items (list tools)
+  if (Array.isArray(data) && data.length > 0) {
+    return <ItemListDisplay items={data} toolName={toolName} />;
+  }
+
+  // Delete result
+  if (typeof data?.deleted === 'number') {
+    return (
+      <div className="px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
+        <p className="text-xs text-gray-700 dark:text-gray-300">
+          🗑️ {data.deleted} item{data.deleted !== 1 ? 's' : ''} removed successfully
+        </p>
+      </div>
+    );
+  }
+
+  // Fallback — simple key-value for plain objects
+  if (typeof data === 'object' && !Array.isArray(data)) {
+    const entries = Object.entries(data).filter(([k]) => !['id', 'schoolId'].includes(k));
+    if (entries.length > 0 && entries.length <= 12) {
+      return <StatsDisplay data={data} />;
+    }
+  }
+
+  // Last resort — formatted text (not raw JSON)
+  return (
+    <div className="px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
+      <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+        {typeof data === 'string' ? data : JSON.stringify(data, null, 2)}
+      </p>
+    </div>
+  );
+};
+
+// ==========================================
+// ACTION RESULT CARD
+// ==========================================
+const ActionResult = ({ action }: { action: MasterAIAction }) => {
+  const [expanded, setExpanded] = useState(false); // Collapsed by default — message is the hero
+
+  return (
+    <div
+      className={`rounded-xl border overflow-hidden ${
+        action.success
+          ? 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800/30'
+          : 'bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800/30'
+      }`}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-white/30 dark:hover:bg-slate-800/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-2">
+          {action.success ? (
+            <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+          ) : (
+            <XCircle size={16} className="text-red-600 dark:text-red-400 flex-shrink-0" />
+          )}
+          <span className="text-sm font-medium text-gray-900 dark:text-white">{action.summary}</span>
+        </div>
+        {action.data && (
+          <ChevronDown size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+        )}
+      </div>
+
+      {/* Error */}
+      {action.error && !action.success && (
+        <p className="text-xs text-red-600 dark:text-red-400 px-3 pb-2 ml-6">
+          {action.error}
+        </p>
+      )}
+
+      {/* Smart Data Display */}
+      {expanded && action.data && (
+        <div className="px-3 pb-3">
+          <SmartDataDisplay data={action.data} toolName={action.tool} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default MasterAI;

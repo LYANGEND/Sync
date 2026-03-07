@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -103,6 +103,12 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       label: 'AI Command Center',
       path: '/ai-analytics',
       roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
+    },
+    {
+      icon: Sparkles,
+      label: 'Master AI Ops',
+      path: '/master-ai',
+      roles: ['SUPER_ADMIN']
     },
     {
       icon: Settings,

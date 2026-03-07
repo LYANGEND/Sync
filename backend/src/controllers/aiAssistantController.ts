@@ -5,6 +5,7 @@ import { z } from 'zod';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
+import * as convoService from '../services/conversationService';
 
 // ==========================================
 // Conversation Management
@@ -14,17 +15,10 @@ export const createConversation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
     const { title, context } = req.body;
-
-    const conversation = await prisma.aIConversation.create({
-      data: {
-        userId,
-        title: title || 'New Conversation',
-        context: { ...(context || {}), type: 'teaching-assistant' },
-      },
-    });
-
+    const conversation = await convoService.createConversation(
+      userId, 'teaching-assistant', title || 'New Conversation', context || {},
+    );
     res.status(201).json(conversation);
   } catch (error) {
     console.error('Create conversation error:', error);
@@ -36,20 +30,7 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
-    const conversations = await prisma.aIConversation.findMany({
-      where: {
-        userId,
-        NOT: {
-          context: { path: ['type'], equals: 'financial-advisor' },
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        _count: { select: { messages: true, artifacts: true } },
-      },
-    });
-
+    const conversations = await convoService.listConversationsExcluding(userId, 'financial-advisor');
     res.json(conversations);
   } catch (error) {
     console.error('Get conversations error:', error);
@@ -59,13 +40,9 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
 
 export const deleteConversation = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
     const userId = req.user?.userId;
-
-    await prisma.aIConversation.deleteMany({
-      where: { id, userId },
-    });
-
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    await convoService.deleteConversation(req.params.id, userId);
     res.json({ message: 'Conversation deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete conversation' });
@@ -74,27 +51,11 @@ export const deleteConversation = async (req: AuthRequest, res: Response) => {
 
 export const getConversation = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
-    const conversation = await prisma.aIConversation.findFirst({
-      where: { id, userId },
-      include: {
-        _count: { select: { messages: true, artifacts: true } },
-      },
-    });
-
-    if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
-
-    const messages = await prisma.aIMessage.findMany({
-      where: { conversationId: id },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    res.json({ conversation, messages });
+    const result = await convoService.getConversation(req.params.id, userId);
+    if (!result) return res.status(404).json({ error: 'Conversation not found' });
+    res.json(result);
   } catch (error) {
     console.error('Get conversation error:', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
@@ -746,6 +707,17 @@ async function getTeacherContext(userId: string): Promise<{
       className: ts.class.name,
     }));
 
+    // Fetch recent lesson plans for this teacher
+    const recentPlans = await prisma.lessonPlan.findMany({
+      where: { teacherId: userId },
+      orderBy: { weekStartDate: 'desc' },
+      take: 10,
+      include: {
+        subject: { select: { name: true, code: true } },
+        class: { select: { name: true, gradeLevel: true } },
+      },
+    });
+
     // Build summary string for system prompt
     let summary = '';
     if (classes.length > 0) {
@@ -753,6 +725,15 @@ async function getTeacherContext(userId: string): Promise<{
       for (const c of classes) {
         summary += `- ${c.name} (Grade ${c.gradeLevel}, ${c.studentCount} students${c.isClassTeacher ? ', you are class teacher' : ''}): ${c.subjects.join(', ') || 'No subjects assigned'}\n`;
       }
+    }
+
+    if (recentPlans.length > 0) {
+      summary += `\n\nYour recent lesson plans:\n`;
+      for (const plan of recentPlans) {
+        const date = new Date(plan.weekStartDate).toLocaleDateString();
+        summary += `- [${date}] ${(plan as any).subject.name} / ${(plan as any).class.name}: ${plan.title}\n`;
+      }
+      summary += `(You have ${recentPlans.length} recent plans available. When asked about lesson plans, you can reference these.)\n`;
     }
 
     return { classes, subjects: allSubjects, summary };
@@ -846,6 +827,24 @@ async function getClassInsights(classId: string): Promise<string> {
       }
     }
 
+    // Include recent lesson plans for this class
+    const classLessonPlans = await prisma.lessonPlan.findMany({
+      where: { classId },
+      orderBy: { weekStartDate: 'desc' },
+      take: 5,
+      include: {
+        subject: { select: { name: true, code: true } },
+        teacher: { select: { fullName: true } },
+      },
+    });
+    if (classLessonPlans.length > 0) {
+      insights += `\nRecent lesson plans for this class:\n`;
+      for (const plan of classLessonPlans) {
+        const date = new Date(plan.weekStartDate).toLocaleDateString();
+        insights += `  - [${date}] ${(plan as any).subject.name}: ${plan.title} (by ${(plan as any).teacher.fullName})\n`;
+      }
+    }
+
     return insights;
   } catch (error) {
     console.error('Error getting class insights:', error);
@@ -862,10 +861,12 @@ function buildSystemPrompt(context?: any, teacherSummary?: string, classInsights
 - Creating rubrics and grading criteria
 - Differentiating instruction for diverse learners
 - Analyzing student performance and recommending interventions
+- Referencing and building upon previously saved lesson plans
 
 Be practical, culturally relevant to Zambia, and consider resource-limited classroom environments.
 Format responses with clear headings, bullet points, numbered lists, and tables where appropriate.
-Use markdown formatting (bold, headings, tables) to make responses easy to read.`;
+Use markdown formatting (bold, headings, tables) to make responses easy to read.
+When a teacher asks about lesson plans, reference their existing saved plans from the context below and offer to build upon them.`;
 
   if (context?.systemOverride) {
     prompt = context.systemOverride + '\n\n' + prompt;

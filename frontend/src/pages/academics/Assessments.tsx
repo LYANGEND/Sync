@@ -32,7 +32,11 @@ interface AssessmentResult {
   remarks: string;
 }
 
-const Assessments = () => {
+interface AssessmentsProps {
+  subjectId?: string;
+}
+
+const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) => {
   const [view, setView] = useState<'list' | 'create' | 'grade' | 'questions' | 'gradebook'>('list');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,6 +76,13 @@ const Assessments = () => {
   useEffect(() => {
     fetchAssessments();
   }, [selectedClass, selectedSubject]);
+
+  useEffect(() => {
+    if (propSubjectId) {
+      setSelectedSubject(propSubjectId);
+      setNewAssessment(prev => ({ ...prev, subjectId: propSubjectId }));
+    }
+  }, [propSubjectId]);
 
   const fetchInitialData = async () => {
     try {
@@ -267,6 +278,8 @@ const Assessments = () => {
 
         <QuestionBuilder
           assessmentId={currentAssessment.id}
+          subjectId={currentAssessment.subject?.id}
+          subjectName={currentAssessment.subject?.name}
           onClose={() => setView('list')}
 
         />
@@ -621,6 +634,7 @@ const Assessments = () => {
             </select>
             <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
           </div>
+          {!propSubjectId && (
           <div className="relative flex-1 sm:flex-none sm:w-64">
             <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <select
@@ -635,6 +649,7 @@ const Assessments = () => {
             </select>
             <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
           </div>
+          )}
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto">

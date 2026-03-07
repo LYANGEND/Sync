@@ -6,30 +6,8 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import api from '../../utils/api';
+import aiAssistantService, { Conversation, Message, FavoritePrompt, Artifact } from '../../services/aiAssistantService';
 import toast from 'react-hot-toast';
-
-interface Conversation {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  _count?: { messages: number; artifacts: number };
-}
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  createdAt: string;
-}
-
-interface FavoritePrompt {
-  id: string;
-  title: string;
-  prompt: string;
-  category: string;
-}
 
 interface TeachingClass {
   id: string;
@@ -46,15 +24,6 @@ interface TeachingSubject {
   code: string;
   classId: string;
   className: string;
-}
-
-interface Artifact {
-  id: string;
-  type: string;
-  title: string;
-  content: string;
-  isPublished: boolean;
-  createdAt: string;
 }
 
 interface StudentInsight {
@@ -108,17 +77,17 @@ const AIAssistant = () => {
 
   const loadInitialData = async () => {
     try {
-      const [statusRes, convsRes, favsRes, ctxRes] = await Promise.all([
-        api.get('/ai-assistant/status'),
-        api.get('/ai-assistant/conversations'),
-        api.get('/ai-assistant/prompts').catch(() => ({ data: [] })),
-        api.get('/ai-assistant/teaching-context').catch(() => ({ data: { classes: [], subjects: [] } })),
+      const [statusData, convsData, favsData, ctxData] = await Promise.all([
+        aiAssistantService.getStatus(),
+        aiAssistantService.getConversations(),
+        aiAssistantService.getFavorites().catch(() => []),
+        aiAssistantService.getTeachingContext().catch(() => ({ classes: [], subjects: [] })),
       ]);
-      setAiAvailable(statusRes.data.available);
-      setConversations(convsRes.data);
-      setFavorites(favsRes.data);
-      setTeachingClasses(ctxRes.data.classes || []);
-      setTeachingSubjects(ctxRes.data.subjects || []);
+      setAiAvailable(statusData.available);
+      setConversations(convsData);
+      setFavorites(favsData as FavoritePrompt[]);
+      setTeachingClasses(ctxData.classes || []);
+      setTeachingSubjects(ctxData.subjects || []);
     } catch (error) {
       console.error('Error loading AI assistant:', error);
     } finally {
@@ -132,11 +101,9 @@ const AIAssistant = () => {
 
   const createConversation = async () => {
     try {
-      const res = await api.post('/ai-assistant/conversations', {
-        title: 'New Conversation',
-      });
-      setConversations(prev => [res.data, ...prev]);
-      selectConversation(res.data.id);
+      const data = await aiAssistantService.createConversation('New Conversation');
+      setConversations(prev => [data, ...prev]);
+      selectConversation(data.id);
     } catch {
       toast.error('Failed to create conversation');
     }
@@ -147,8 +114,8 @@ const AIAssistant = () => {
     setShowSidebar(false);
     setActivePanel('chat');
     try {
-      const res = await api.get(`/ai-assistant/conversations/${id}`);
-      setMessages(res.data.messages || []);
+      const data = await aiAssistantService.getConversation(id);
+      setMessages(data.messages || []);
     } catch {
       toast.error('Failed to load conversation');
     }
@@ -158,7 +125,7 @@ const AIAssistant = () => {
     e.stopPropagation();
     if (!confirm('Delete this conversation?')) return;
     try {
-      await api.delete(`/ai-assistant/conversations/${id}`);
+      await aiAssistantService.deleteConversation(id);
       setConversations(prev => prev.filter(c => c.id !== id));
       if (activeConversation === id) {
         setActiveConversation(null);
@@ -194,12 +161,10 @@ const AIAssistant = () => {
     let convId = activeConversation;
     if (!convId) {
       try {
-        const res = await api.post('/ai-assistant/conversations', {
-          title: userMessage.slice(0, 50),
-        });
-        convId = res.data.id;
+        const data = await aiAssistantService.createConversation(userMessage.slice(0, 50));
+        convId = data.id;
         setActiveConversation(convId);
-        setConversations(prev => [res.data, ...prev]);
+        setConversations(prev => [data, ...prev]);
       } catch {
         toast.error('Failed to create conversation');
         setSending(false);
@@ -225,25 +190,15 @@ const AIAssistant = () => {
         const parts = userMessage.split(' ');
         const command = parts[0];
         const topic = parts.slice(1).join(' ');
-        res = await api.post('/ai-assistant/command', {
-          command,
-          params: {
-            topic,
-            text: topic,
-            gradeLevel: selectedClass ? `Grade ${selectedClass.gradeLevel}` : undefined,
-            subject: selectedSubject?.name,
-            className: selectedClass?.name,
-          },
-          conversationId: convId,
-        });
+        res = await aiAssistantService.executeCommand(convId!, command, topic);
       } else {
-        res = await api.post('/ai-assistant/chat', { message: userMessage, conversationId: convId, context });
+        res = await aiAssistantService.sendMessage(convId!, userMessage);
       }
 
       const assistantMsg: Message = {
-        id: res.data.message?.id || `ai-${Date.now()}`,
+        id: res.message?.id || `ai-${Date.now()}`,
         role: 'assistant',
-        content: res.data.message?.content || res.data.reply || 'No response',
+        content: res.message?.content || (res as any).reply || 'No response',
         createdAt: new Date().toISOString(),
       };
       setMessages(prev => [...prev, assistantMsg]);
@@ -291,8 +246,8 @@ const AIAssistant = () => {
   const loadArtifacts = async () => {
     setLoadingArtifacts(true);
     try {
-      const res = await api.get('/ai-assistant/artifacts');
-      setArtifacts(res.data);
+      const data = await aiAssistantService.getArtifacts();
+      setArtifacts(data as Artifact[]);
     } catch { toast.error('Failed to load artifacts'); }
     finally { setLoadingArtifacts(false); }
   };
@@ -301,10 +256,10 @@ const AIAssistant = () => {
     const title = window.prompt('Give this artifact a name:', 'AI Generated Content');
     if (!title) return;
     try {
-      const res = await api.post('/ai-assistant/artifacts', {
-        conversationId: activeConversation, type: 'OTHER', title, content,
+      const data = await aiAssistantService.saveArtifact({
+        conversationId: activeConversation || undefined, type: 'OTHER', title, content,
       });
-      setArtifacts(prev => [res.data, ...prev]);
+      setArtifacts(prev => [data as Artifact, ...prev]);
       toast.success('Saved to artifacts!');
     } catch { toast.error('Failed to save artifact'); }
   };
@@ -312,7 +267,7 @@ const AIAssistant = () => {
   const deleteArtifactItem = async (id: string) => {
     if (!confirm('Delete this artifact?')) return;
     try {
-      await api.delete(`/ai-assistant/artifacts/${id}`);
+      await aiAssistantService.deleteArtifact(id);
       setArtifacts(prev => prev.filter(a => a.id !== id));
       toast.success('Artifact deleted');
     } catch { toast.error('Failed to delete'); }
@@ -323,10 +278,11 @@ const AIAssistant = () => {
     if (!selectedClassId) { toast.error('Select a class first'); return; }
     setLoadingInsights(true);
     try {
-      const params = new URLSearchParams({ classId: selectedClassId });
-      if (selectedSubjectId) params.append('subjectId', selectedSubjectId);
-      const res = await api.get(`/ai-assistant/student-insights?${params}`);
-      setStudentInsights(res.data);
+      const data = await aiAssistantService.getStudentInsights({
+        classId: selectedClassId,
+        subjectId: selectedSubjectId || undefined,
+      });
+      setStudentInsights(data);
     } catch { toast.error('Failed to load insights'); }
     finally { setLoadingInsights(false); }
   };
@@ -813,7 +769,7 @@ const ArtifactCard = ({ artifact, onDelete }: { artifact: Artifact; onDelete: (i
             {artifact.type.replace('_', ' ')}
           </span>
           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{artifact.title}</p>
-          {artifact.isPublished && <span className="px-1.5 py-0.5 bg-green-100 text-green-600 rounded text-[10px]">Published</span>}
+          {artifact.published && <span className="px-1.5 py-0.5 bg-green-100 text-green-600 rounded text-[10px]">Published</span>}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button onClick={() => setExpanded(!expanded)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700">
