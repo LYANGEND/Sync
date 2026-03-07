@@ -2,8 +2,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const uploadDir = path.join(__dirname, '../../uploads/profiles');
-const logoDir = path.join(__dirname, '../../uploads/logos');
+// Use process.cwd() for uploads so paths work in both dev and production (Docker)
+const uploadDir = path.join(process.cwd(), 'uploads/profiles');
+const logoDir = path.join(process.cwd(), 'uploads/logos');
 
 // Ensure upload directories exist
 if (!fs.existsSync(uploadDir)) {

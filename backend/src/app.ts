@@ -79,8 +79,8 @@ app.use(morgan('dev'));
 // Apply rate limiting to all routes
 app.use('/api/', generalLimiter);
 
-// Serve static files (uploaded images)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Serve static files (uploaded images) — use process.cwd() so it works in both dev and production
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Routes
 app.use('/api/v1/auth', authRoutes);

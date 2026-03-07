@@ -63,7 +63,7 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/dist ./dist
 
 # Create uploads directory with proper permissions
-RUN mkdir -p uploads && chown -R appuser:nodejs uploads
+RUN mkdir -p uploads/profiles uploads/logos && chown -R appuser:nodejs uploads
 
 # Switch to non-root user
 USER appuser

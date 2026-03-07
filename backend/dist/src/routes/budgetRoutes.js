@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const budgetController_1 = require("../controllers/budgetController");
+const router = (0, express_1.Router)();
+router.use(authMiddleware_1.authenticateToken);
+router.get('/vs-actual', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), budgetController_1.getBudgetVsActual);
+router.get('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), budgetController_1.getBudgets);
+router.get('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN', 'BURSAR']), budgetController_1.getBudgetById);
+router.post('/', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), budgetController_1.createBudget);
+router.put('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), budgetController_1.updateBudget);
+router.post('/:id/activate', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), budgetController_1.activateBudget);
+router.post('/:id/close', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), budgetController_1.closeBudget);
+router.delete('/:id', (0, authMiddleware_1.authorizeRole)(['SUPER_ADMIN']), budgetController_1.deleteBudget);
+exports.default = router;
