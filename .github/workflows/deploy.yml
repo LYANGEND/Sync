@@ -129,11 +129,17 @@ jobs:
             echo "📥 Pulling new images (tag: ${{ steps.config.outputs.tag }})..."
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} pull
 
-            # Restart containers with new images (zero-downtime: backend first, then frontend)
+            # Restart containers with new images
+            # Stop+rm first to avoid docker-compose v1.29.2 bug: KeyError 'ContainerConfig'
+            # (v1.29.2 can't recreate containers from modern BuildKit images — must create fresh)
             echo "🔄 Restarting backend..."
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} stop backend || true
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} rm -f backend || true
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} up -d --no-deps backend
 
             echo "🔄 Restarting frontend..."
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} stop frontend || true
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} rm -f frontend || true
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} up -d --no-deps frontend
 
             # Clean up old images to save disk space
