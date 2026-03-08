@@ -78,8 +78,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check SSH secrets are configured
+        id: check
+        run: |
+          if [ -n "${{ secrets.SSH_HOST }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️ SSH_HOST secret not set — skipping server deployment."
+            echo "Add SSH_HOST, SSH_USER, SSH_KEY secrets to enable auto-deploy."
+          fi
+
       - name: Determine deploy config
         id: config
+        if: steps.check.outputs.configured == 'true'
         run: |
           if [ "${{ github.ref_name }}" == "master" ]; then
             echo "tag=master" >> $GITHUB_OUTPUT
@@ -92,6 +104,7 @@ jobs:
           fi
 
       - name: Deploy to server via SSH
+        if: steps.check.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
