@@ -8,14 +8,11 @@ services:
     env_file:
       - .env
     environment:
-      - PORT=3002
       - NODE_ENV=production
-      # JWT_SECRET intentionally NOT here — env_file: .env provides it.
-      # Writing JWT_SECRET=${JWT_SECRET} here would override .env with an empty
-      # string (because docker-compose expands from the HOST shell, not .env),
-      # causing jwt.verify to use the fallback 'supersecretkey' and return 403.
+      # PORT is NOT set here — the image default (3000) is used.
+      # JWT_SECRET is NOT set here — env_file: .env provides it cleanly.
     ports:
-      - "3002:3002"   # expose to host so system nginx (localhost:3002) can reach it
+      - "3002:3000"   # host:3002 → container:3000 (app default port)
     networks:
       - sync_network
 
