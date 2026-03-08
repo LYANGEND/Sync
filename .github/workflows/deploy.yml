@@ -81,12 +81,11 @@ jobs:
       - name: Check SSH secrets are configured
         id: check
         run: |
-          if [ -n "${{ secrets.SSH_HOST }}" ]; then
+          if [ -n "${{ secrets.HOST }}" ]; then
             echo "configured=true" >> $GITHUB_OUTPUT
           else
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "⚠️ SSH_HOST secret not set — skipping server deployment."
-            echo "Add SSH_HOST, SSH_USER, SSH_KEY secrets to enable auto-deploy."
+            echo "⚠️ HOST secret not set — skipping server deployment."
           fi
 
       - name: Determine deploy config
@@ -107,10 +106,9 @@ jobs:
         if: steps.check.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -e
             echo "🚀 Deploying ${{ github.ref_name }} to server..."
@@ -118,8 +116,8 @@ jobs:
             # Go to app directory
             cd ${{ steps.config.outputs.app_dir }}
 
-            # Login to GHCR (needed to pull private packages)
-            echo "${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Login to GHCR
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Pull new images
             echo "📥 Pulling new images (tag: ${{ steps.config.outputs.tag }})..."
