@@ -76,8 +76,6 @@ jobs:
   deploy-to-server:
     needs: build-and-push
     runs-on: ubuntu-latest
-    # Only deploy if SSH secrets are configured
-    if: ${{ secrets.SSH_HOST != '' }}
 
     steps:
       - name: Determine deploy config
