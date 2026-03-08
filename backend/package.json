@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "nodemon src/server.ts",
-    "migrate": "prisma migrate dev",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
     "test": "jest"
