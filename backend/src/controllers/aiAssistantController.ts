@@ -30,7 +30,7 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const conversations = await convoService.listConversationsExcluding(userId, 'financial-advisor');
+    const conversations = await convoService.listConversations(userId, 'teaching-assistant');
     res.json(conversations);
   } catch (error) {
     console.error('Get conversations error:', error);
@@ -42,7 +42,7 @@ export const deleteConversation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    await convoService.deleteConversation(req.params.id, userId);
+    await convoService.deleteConversation(req.params.id, userId, 'teaching-assistant');
     res.json({ message: 'Conversation deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete conversation' });
@@ -53,7 +53,7 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const result = await convoService.getConversation(req.params.id, userId);
+    const result = await convoService.getConversation(req.params.id, userId, 'teaching-assistant');
     if (!result) return res.status(404).json({ error: 'Conversation not found' });
     res.json(result);
   } catch (error) {
@@ -77,11 +77,15 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Get or create conversation
+    // Get or create conversation — scoped to 'teaching-assistant' only
     let conversation: any;
     if (conversationId) {
       conversation = await prisma.aIConversation.findFirst({
-        where: { id: conversationId, userId },
+        where: {
+          id: conversationId,
+          userId,
+          context: { path: ['type'], equals: 'teaching-assistant' },
+        },
         include: { messages: { orderBy: { createdAt: 'asc' } } },
       });
     }
@@ -91,7 +95,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
         data: {
           userId,
           title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
-          context: { ...(context || {}), type: 'teaching-assistant' },
+          context: { type: 'teaching-assistant' },
         },
         include: { messages: true },
       });
@@ -112,7 +116,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (context?.classId) {
       classInsights = await getClassInsights(context.classId);
     }
-    const systemPrompt = buildSystemPrompt(context, teacherCtx.summary, classInsights);
+    let subjectTopics = '';
+    if (context?.subjectId) {
+      subjectTopics = await getSubjectTopics(
+        context.subjectId,
+        context.gradeLevel ? Number(context.gradeLevel) : undefined,
+      );
+    }
+    const systemPrompt = buildSystemPrompt(context, teacherCtx.summary, classInsights, subjectTopics);
     const previousMessages = conversation.messages.slice(-20).map((m: any) => ({
       role: m.role as 'user' | 'assistant' | 'system',
       content: m.content,
@@ -243,6 +254,133 @@ Create 3 versions:
 
 Also add ELL (English Language Learner) modifications.`;
         break;
+
+      case '/gap': {
+        // Curriculum Gap Detector: analyse topic progress for a class/subject and surface gaps
+        if (!params.classId) {
+          return res.status(400).json({ error: '/gap requires classId in params' });
+        }
+
+        // Fetch all topics for the subject (or all subjects for the class)
+        const gapSubjectWhere = params.subjectId
+          ? { id: params.subjectId }
+          : undefined;
+
+        const classForGap = await prisma.class.findUnique({
+          where: { id: params.classId },
+          select: { name: true, gradeLevel: true, academicTermId: true },
+        });
+
+        const topicsForGap = await (prisma.topic as any).findMany({
+          where: {
+            ...(gapSubjectWhere ? { subject: gapSubjectWhere } : {}),
+            gradeLevel: classForGap?.gradeLevel ?? undefined,
+          },
+          include: {
+            subject: { select: { name: true } },
+            progress: {
+              where: { classId: params.classId },
+              select: { status: true },
+            },
+          },
+          orderBy: [{ subject: { name: 'asc' } }, { orderIndex: 'asc' }],
+        });
+
+        if (topicsForGap.length === 0) {
+          return res.json({
+            conversationId: null,
+            message: {
+              role: 'assistant',
+              content: `No curriculum topics found for ${classForGap?.name || 'this class'}. Please set up topics in the Syllabus section first.`,
+            },
+          });
+        }
+
+        // Categorise topics
+        const completed = topicsForGap.filter((t: any) => t.progress?.[0]?.status === 'COMPLETED');
+        const inProgress = topicsForGap.filter((t: any) => t.progress?.[0]?.status === 'IN_PROGRESS');
+        const pending = topicsForGap.filter((t: any) => !t.progress?.[0] || t.progress?.[0]?.status === 'PENDING');
+
+        const gapSummary = `
+CLASS: ${classForGap?.name} (Grade ${classForGap?.gradeLevel})
+Total Topics: ${topicsForGap.length}
+Completed: ${completed.length} (${Math.round((completed.length / topicsForGap.length) * 100)}%)
+In Progress: ${inProgress.length}
+Pending/Not Started: ${pending.length}
+
+COMPLETED TOPICS:
+${completed.map((t: any) => `✅ [${t.subject.name}] ${t.title}`).join('\n') || 'None yet'}
+
+IN PROGRESS:
+${inProgress.map((t: any) => `🔄 [${t.subject.name}] ${t.title}`).join('\n') || 'None'}
+
+PENDING / NOT STARTED (potential gaps):
+${pending.map((t: any) => `❌ [${t.subject.name}] ${t.title}`).join('\n') || 'All topics covered!'}
+`;
+
+        systemOverride = 'You are a Zambian curriculum expert and academic coach. Analyse curriculum coverage data and provide actionable gap-closing strategies.';
+        prompt = `Analyse the following curriculum progress data for a Zambian school class and:
+1. Identify the most critical curriculum gaps (topics not yet taught)
+2. Suggest a priority order for addressing the gaps before term end
+3. Recommend specific teaching strategies for the 3 most critical gaps
+4. Estimate time needed to close the gaps
+5. Flag any topics that need re-teaching based on typical student performance patterns
+
+${gapSummary}
+
+Provide a clear, structured report with actionable steps the teacher can take this week.`;
+        break;
+      }
+
+      case '/career': {
+        // Career & Subject Path Advisor
+        if (!params.studentId) {
+          return res.status(400).json({ error: '/career requires studentId in params' });
+        }
+
+        const careerStudent = await prisma.student.findUnique({
+          where: { id: params.studentId },
+          include: { class: { select: { name: true, gradeLevel: true } } },
+        });
+        if (!careerStudent) return res.status(404).json({ error: 'Student not found' });
+
+        const careerTermResults = await prisma.termResult.findMany({
+          where: { studentId: params.studentId },
+          include: { subject: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        });
+
+        // Aggregate average by subject
+        const subjectAvgs: Record<string, { total: number; count: number }> = {};
+        for (const r of careerTermResults) {
+          const sName = (r as any).subject.name;
+          if (!subjectAvgs[sName]) subjectAvgs[sName] = { total: 0, count: 0 };
+          subjectAvgs[sName].total += Number((r as any).totalScore);
+          subjectAvgs[sName].count++;
+        }
+        const subjectSummary = Object.entries(subjectAvgs)
+          .map(([name, d]) => `${name}: ${(d.total / d.count).toFixed(1)}%`)
+          .join(', ');
+
+        systemOverride = 'You are a career guidance counsellor specialising in the Zambian education system and career pathways.';
+        prompt = `Provide personalised career and subject path advice for this student:
+
+Student: ${careerStudent.firstName} ${careerStudent.lastName}
+Current Class: ${(careerStudent as any).class?.name} (Grade ${(careerStudent as any).class?.gradeLevel})
+Gender: ${careerStudent.gender}
+Subject Performance: ${subjectSummary || 'No results recorded yet'}
+
+Based on this profile:
+1. Identify the student's academic strengths (top-performing subjects)
+2. Recommend 3 suitable subject combinations for Form 5/6 (Zambian A-Level equivalent)
+3. Suggest 5 career pathways that align with their strengths and the Zambian job market
+4. Recommend specific actions to take now (Grade ${(careerStudent as any).class?.gradeLevel}) to prepare for those pathways
+5. Highlight any areas that need improvement to keep options open
+
+Be encouraging, realistic, and specific to the Zambian context.`;
+        break;
+      }
 
       default:
         return res.status(400).json({ error: `Unknown command: ${command}` });
@@ -423,10 +561,81 @@ export const getTeachingContext = async (req: AuthRequest, res: Response) => {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const ctx = await getTeacherContext(userId);
+
+    // For admins / non-teachers with no assignments, return all classes
+    if (ctx.classes.length === 0) {
+      const allClasses = await prisma.class.findMany({
+        include: {
+          subjects: { select: { id: true, name: true, code: true } },
+          _count: { select: { students: true } },
+          academicTerm: { select: { name: true } },
+        },
+        orderBy: [{ gradeLevel: 'asc' }, { name: 'asc' }],
+      });
+      const classes = allClasses.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        gradeLevel: c.gradeLevel,
+        studentCount: c._count.students,
+        isClassTeacher: false,
+        subjects: c.subjects.map((s: any) => s.name),
+        term: c.academicTerm?.name || null,
+      }));
+      return res.json({ classes, subjects: ctx.subjects });
+    }
+
     res.json({ classes: ctx.classes, subjects: ctx.subjects });
   } catch (error) {
     console.error('Get teaching context error:', error);
     res.status(500).json({ error: 'Failed to load teaching context' });
+  }
+};
+
+// All subjects with grade-level grouping and topics — for AI subject awareness
+export const getSubjectsContext = async (req: AuthRequest, res: Response) => {
+  try {
+    const subjects = await prisma.subject.findMany({
+      include: {
+        topics: {
+          select: { id: true, title: true, description: true, gradeLevel: true, orderIndex: true },
+          orderBy: [{ gradeLevel: 'asc' }, { orderIndex: 'asc' }],
+        },
+        classes: {
+          select: { id: true, name: true, gradeLevel: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    // Group subjects by grade level
+    const byGrade: Record<number, any[]> = {};
+    for (const subj of subjects) {
+      const gradeLevels = [...new Set(subj.classes.map((c: any) => c.gradeLevel as number))]
+        .sort((a: number, b: number) => a - b);
+
+      const subjData = {
+        id: subj.id,
+        name: subj.name,
+        code: subj.code,
+        classes: subj.classes,
+        topics: subj.topics,
+      };
+
+      if (gradeLevels.length === 0) {
+        if (!byGrade[0]) byGrade[0] = [];
+        if (!byGrade[0].find((s: any) => s.id === subj.id)) byGrade[0].push(subjData);
+      } else {
+        for (const grade of gradeLevels) {
+          if (!byGrade[grade]) byGrade[grade] = [];
+          if (!byGrade[grade].find((s: any) => s.id === subj.id)) byGrade[grade].push(subjData);
+        }
+      }
+    }
+
+    res.json({ subjects, byGrade });
+  } catch (error) {
+    console.error('Get subjects context error:', error);
+    res.status(500).json({ error: 'Failed to load subjects' });
   }
 };
 
@@ -640,6 +849,51 @@ Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`;
 // Helpers
 // ==========================================
 
+// Fetch curriculum topics for a specific subject (optionally filtered by grade level)
+async function getSubjectTopics(subjectId: string, gradeLevel?: number): Promise<string> {
+  try {
+    const subject = await prisma.subject.findUnique({
+      where: { id: subjectId },
+      include: {
+        topics: {
+          select: { title: true, description: true, gradeLevel: true, orderIndex: true },
+          orderBy: [{ gradeLevel: 'asc' }, { orderIndex: 'asc' }],
+          take: 30,
+        },
+      },
+    });
+
+    if (!subject) return '';
+
+    let topicsText = `\n\nSELECTED SUBJECT: ${subject.name} (${subject.code})\n`;
+
+    if (subject.topics.length === 0) {
+      topicsText += '  (No curriculum topics have been defined for this subject yet)\n';
+    } else {
+      topicsText += 'Curriculum Topics:\n';
+      // Group topics by grade level
+      const byGrade: Record<number, string[]> = {};
+      for (const topic of subject.topics) {
+        const g = topic.gradeLevel;
+        if (!byGrade[g]) byGrade[g] = [];
+        byGrade[g].push(topic.title);
+      }
+      const grades = Object.keys(byGrade).map(Number).sort((a, b) => a - b);
+      for (const g of grades) {
+        // If a specific grade is requested, highlight it; still show others as context
+        const marker = gradeLevel && g === gradeLevel ? ' ← current grade' : '';
+        topicsText += `  Grade ${g}${marker}: ${byGrade[g].join(' | ')}\n`;
+      }
+    }
+
+    topicsText += 'Use this curriculum knowledge to give highly relevant, topic-specific help.\n';
+    return topicsText;
+  } catch (error) {
+    console.error('Error fetching subject topics:', error);
+    return '';
+  }
+}
+
 async function getTeacherContext(userId: string): Promise<{
   classes: any[];
   subjects: any[];
@@ -852,7 +1106,7 @@ async function getClassInsights(classId: string): Promise<string> {
   }
 }
 
-function buildSystemPrompt(context?: any, teacherSummary?: string, classInsights?: string): string {
+function buildSystemPrompt(context?: any, teacherSummary?: string, classInsights?: string, subjectTopics?: string): string {
   let prompt = `You are an AI Teaching Assistant for a Zambian school management system called Sync. You help teachers with:
 - Creating lesson plans aligned to the Zambian curriculum
 - Generating quizzes and assessments
@@ -880,6 +1134,11 @@ When a teacher asks about lesson plans, reference their existing saved plans fro
   // Inject class-specific data when context specifies a class
   if (classInsights) {
     prompt += classInsights;
+  }
+
+  // Inject selected subject's curriculum topics
+  if (subjectTopics) {
+    prompt += subjectTopics;
   }
 
   if (context?.subject) prompt += `\nCurrent Subject: ${context.subject}`;

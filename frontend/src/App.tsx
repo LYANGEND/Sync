@@ -43,6 +43,7 @@ import Analytics from './pages/analytics/Analytics';
 import AIAssistant from './pages/ai/AIAssistant';
 import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
 import MasterAI from './pages/ai/MasterAI';
+import AIIntelligenceHub from './pages/ai/AIIntelligenceHub';
 import StudentIntelligence from './pages/intelligence/StudentIntelligence';
 
 function App() {
@@ -190,6 +191,11 @@ function App() {
                   <Route path="/master-ai" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                       <MasterAI />
+                    </RoleGuard>
+                  } />
+                  <Route path="/ai-intelligence" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER']}>
+                      <AIIntelligenceHub />
                     </RoleGuard>
                   } />
 

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { createNotification } from '../services/notificationService';
 
 const recordAttendanceSchema = z.object({
   classId: z.string().uuid(),
@@ -55,6 +56,44 @@ export const recordAttendance = async (req: Request, res: Response) => {
     });
 
     res.status(201).json({ message: 'Attendance recorded successfully', count: result.length });
+
+    // Auto-notify parents of absent/late students (fire and forget)
+    (async () => {
+      try {
+        const absentOrLate = records.filter(r => r.status === 'ABSENT' || r.status === 'LATE');
+        if (absentOrLate.length === 0) return;
+
+        // Get student details with parent link
+        const students = await prisma.student.findMany({
+          where: { id: { in: absentOrLate.map(r => r.studentId) } },
+          include: {
+            parent: { select: { id: true } },
+          },
+        });
+
+        // Get class name
+        const classInfo = await prisma.class.findUnique({ where: { id: classId }, select: { name: true } });
+        const className = classInfo?.name || 'their class';
+        const dateStr = attendanceDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        for (const student of students) {
+          const record = absentOrLate.find(r => r.studentId === student.id);
+          if (!record || !student.parentId) continue;
+
+          const statusLabel = record.status === 'ABSENT' ? 'absent from' : 'late to';
+          const studentName = `${student.firstName} ${student.lastName}`;
+
+          await createNotification(
+            student.parentId,
+            `Attendance Alert: ${studentName}`,
+            `${studentName} was ${statusLabel} ${className} on ${dateStr}.`,
+            'WARNING'
+          );
+        }
+      } catch (err) {
+        console.error('Auto attendance notification error:', err);
+      }
+    })();
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });

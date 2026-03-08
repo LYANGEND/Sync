@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../../utils/api';
+import { useAuth } from '../../context/AuthContext';
 import { 
   Megaphone, Mail, Bell, Users, ChevronLeft, ChevronRight, 
-  Calendar, User
+  Calendar, User, CheckCircle, MessageSquare, Phone, AlertTriangle,
+  Clock
 } from 'lucide-react';
 
 interface Announcement {
@@ -12,6 +14,11 @@ interface Announcement {
   targetRoles: string[];
   sentViaEmail: boolean;
   sentViaNotification: boolean;
+  sentViaSms?: boolean;
+  sentViaWhatsApp?: boolean;
+  priority?: string;
+  scheduledAt?: string | null;
+  sentAt?: string | null;
   recipientCount: number;
   createdAt: string;
   createdBy: {
@@ -19,6 +26,10 @@ interface Announcement {
     fullName: string;
     role: string;
   };
+  _count?: {
+    acknowledgments: number;
+  };
+  acknowledged?: boolean;
 }
 
 const roleColors: Record<string, string> = {
@@ -32,6 +43,7 @@ const roleColors: Record<string, string> = {
 };
 
 const AnnouncementHistory = () => {
+  useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -56,6 +68,19 @@ const AnnouncementHistory = () => {
   useEffect(() => {
     fetchAnnouncements();
   }, [fetchAnnouncements]);
+
+  const handleAcknowledge = async (announcementId: string) => {
+    try {
+      await api.post(`/communication/announcements/${announcementId}/acknowledge`);
+      setAnnouncements(prev => prev.map(a =>
+        a.id === announcementId
+          ? { ...a, acknowledged: true, _count: { acknowledgments: (a._count?.acknowledgments || 0) + 1 } }
+          : a
+      ));
+    } catch (error) {
+      console.error('Failed to acknowledge', error);
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
@@ -138,6 +163,14 @@ const AnnouncementHistory = () => {
 
               {/* Delivery channels & roles */}
               <div className="flex items-center gap-2 mt-3 flex-wrap">
+                {announcement.priority && announcement.priority !== 'NORMAL' && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                    announcement.priority === 'EMERGENCY' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                    'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                  }`}>
+                    <AlertTriangle size={12} /> {announcement.priority}
+                  </span>
+                )}
                 {announcement.sentViaNotification && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">
                     <Bell size={12} /> In-App
@@ -146,6 +179,16 @@ const AnnouncementHistory = () => {
                 {announcement.sentViaEmail && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400">
                     <Mail size={12} /> Email
+                  </span>
+                )}
+                {announcement.sentViaSms && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400">
+                    <MessageSquare size={12} /> SMS
+                  </span>
+                )}
+                {announcement.sentViaWhatsApp && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400">
+                    <Phone size={12} /> WhatsApp
                   </span>
                 )}
                 <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -157,6 +200,16 @@ const AnnouncementHistory = () => {
                     {role.replace('_', ' ')}
                   </span>
                 ))}
+                {/* Acknowledgment count */}
+                {announcement._count && (
+                  <>
+                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <CheckCircle size={12} className="text-green-500" />
+                      {announcement._count.acknowledgments} ack'd
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -178,6 +231,30 @@ const AnnouncementHistory = () => {
                   <span className="flex items-center gap-1">
                     <Users size={12} />
                     {announcement.recipientCount} recipients
+                  </span>
+                  {announcement.scheduledAt && (
+                    <span className="flex items-center gap-1 text-orange-500">
+                      <Clock size={12} />
+                      Scheduled: {formatDate(announcement.scheduledAt)}
+                    </span>
+                  )}
+                </div>
+                {/* Acknowledge Button */}
+                <div className="flex items-center gap-3 pt-2">
+                  {announcement.acknowledged ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm font-medium">
+                      <CheckCircle size={16} /> Acknowledged
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAcknowledge(announcement.id); }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      <CheckCircle size={16} /> Acknowledge
+                    </button>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {announcement._count?.acknowledgments || 0} of {announcement.recipientCount} acknowledged
                   </span>
                 </div>
               </div>

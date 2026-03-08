@@ -117,6 +117,7 @@ model User {
   
   // Multi-branch assignments (for staff working at multiple locations)
   branchAssignments UserBranch[]
+  financialReports  FinancialReport[]
 
   @@map("users")
 }
@@ -244,6 +245,7 @@ model AcademicTerm {
   studentReports   StudentTermReport[]
   timetablePeriods TimetablePeriod[]
   lessonPlans      LessonPlan[]
+  financialReports FinancialReport[]
 
   activeInSettings SchoolSettings?
 
@@ -820,17 +822,6 @@ model LessonPlan {
   @@map("lesson_plans")
 }
 
-model Conversation {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  participants ConversationParticipant[]
-  messages     Message[]
-
-  @@map("conversations")
-}
-
 model ConversationParticipant {
   id             String       @id @default(uuid())
   conversationId String
@@ -851,9 +842,23 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   content        String
   isRead         Boolean      @default(false)
+  readAt         DateTime?    // When the message was read
   createdAt      DateTime     @default(now())
 
   @@map("messages")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  isGroup   Boolean  @default(false)
+  name      String?  // Group chat name
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
 }
 
 model Scholarship {
@@ -914,6 +919,7 @@ model Branch {
   budgets            Budget[]
   pettyCashAccounts  PettyCashAccount[]
   receiptSequences   ReceiptSequence[]
+  financialReports   FinancialReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2012,17 +2018,81 @@ model Announcement {
   message     String   @db.Text
   targetRoles String[] // Which roles received this
   sentViaEmail       Boolean @default(false)
+  sentViaSms         Boolean @default(false)
+  sentViaWhatsApp    Boolean @default(false)
   sentViaNotification Boolean @default(true)
   recipientCount     Int     @default(0)
+  priority           String  @default("NORMAL") // NORMAL, URGENT, EMERGENCY
+
+  // Scheduling
+  scheduledAt DateTime? // If set, announcement is scheduled for the future
+  sentAt      DateTime? // When actually sent (null if still scheduled)
 
   createdById String
   createdBy   User   @relation("CreatedAnnouncements", fields: [createdById], references: [id])
+
+  acknowledgments AnnouncementAcknowledgment[]
 
   createdAt DateTime @default(now())
 
   @@index([createdById])
   @@index([createdAt])
+  @@index([scheduledAt])
   @@map("announcements")
+}
+
+// ========================================
+// ANNOUNCEMENT ACKNOWLEDGMENTS
+// ========================================
+model AnnouncementAcknowledgment {
+  id             String   @id @default(uuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  acknowledgedAt DateTime @default(now())
+
+  @@unique([announcementId, userId])
+  @@map("announcement_acknowledgments")
+}
+
+// ========================================
+// MESSAGE TEMPLATES
+// ========================================
+model MessageTemplate {
+  id       String @id @default(uuid())
+  name     String
+  subject  String?
+  body     String @db.Text
+  channel  String @default("ALL") // EMAIL, SMS, WHATSAPP, ALL
+  category String @default("general") // general, fee_reminder, attendance, report, custom
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("message_templates")
+}
+
+// ========================================
+// PARENT COMMUNICATION PREFERENCES
+// ========================================
+model CommunicationPreference {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  emailEnabled    Boolean @default(true)
+  smsEnabled      Boolean @default(true)
+  whatsappEnabled Boolean @default(true)
+  pushEnabled     Boolean @default(true)
+
+  // Quiet hours
+  quietHoursStart String? // "22:00"
+  quietHoursEnd   String? // "06:00"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("communication_preferences")
 }
 
 // ========================================
@@ -2277,4 +2347,37 @@ model ClassRecording {
 
   @@index([classroomId])
   @@map("class_recordings")
+}
+
+// ─────────────────────────────────────────
+// FINANCIAL REPORTS (saved snapshots)
+// ─────────────────────────────────────────
+enum FinancialReportType {
+  AUDIT_REPORT
+  INCOME_STATEMENT
+  FEE_STATEMENT
+  AGED_RECEIVABLES
+  CASH_FLOW
+  COMPLIANCE
+  CUSTOM
+}
+
+model FinancialReport {
+  id          String              @id @default(uuid())
+  title       String
+  reportType  FinancialReportType @default(CUSTOM)
+  termId      String?
+  term        AcademicTerm?       @relation(fields: [termId], references: [id])
+  reportDate  DateTime            @default(now())
+  data        Json                // Full snapshot JSON
+  summary     String?             @db.Text
+  generatedBy String
+  user        User                @relation(fields: [generatedBy], references: [id])
+  branchId    String?
+  branch      Branch?             @relation(fields: [branchId], references: [id])
+  createdAt   DateTime            @default(now())
+
+  @@index([branchId, reportDate])
+  @@index([termId])
+  @@map("financial_reports")
 }

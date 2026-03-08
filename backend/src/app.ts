@@ -48,6 +48,8 @@ import debtCollectionRoutes from './routes/debtCollectionRoutes';
 import virtualClassroomRoutes from './routes/virtualClassroomRoutes';
 // Master AI Ops
 import masterAIRoutes from './routes/masterAIRoutes';
+// New AI Intelligence Features
+import aiIntelligenceRoutes from './routes/aiIntelligenceRoutes';
 // Middleware
 import { generalLimiter } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -134,6 +136,9 @@ app.use('/api/v1/virtual-classroom', virtualClassroomRoutes);
 
 // Master AI Ops
 app.use('/api/v1/master-ai', masterAIRoutes);
+
+// New AI Intelligence Features (grade forecast, fee defaulters, timetable, exam scheduling, parent letters)
+app.use('/api/v1/ai', aiIntelligenceRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

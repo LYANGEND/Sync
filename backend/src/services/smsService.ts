@@ -1,4 +1,6 @@
 import { prisma } from '../utils/prisma';
+import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
+
 interface SmsResult {
   success: boolean;
   messageId?: string;
@@ -8,36 +10,60 @@ interface SmsResult {
 /**
  * SMS Service - Dedicated service for sending SMS messages
  * Supports Africa's Talking and Twilio providers
+ * All messages are logged to the CommunicationLog audit trail.
  */
 class SmsService {
   /**
-   * Send a single SMS message
+   * Send a single SMS message (with audit logging)
    */
-  async send(phone: string, message: string): Promise<SmsResult> {
+  async send(phone: string, message: string, options?: { source?: string; sentById?: string; recipientName?: string }): Promise<SmsResult> {
+    const logId = await logCommunication({
+      channel: 'SMS',
+      status: 'PENDING',
+      recipientPhone: phone,
+      recipientName: options?.recipientName,
+      message: message.substring(0, 500),
+      source: options?.source || 'sms_direct',
+      sentById: options?.sentById,
+    });
+
     try {
       const settings = await prisma.schoolSettings.findFirst();
-      if (!settings) return { success: false, error: 'No school settings found' };
+      if (!settings) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
+        return { success: false, error: 'No school settings found' };
+      }
 
       if (!settings.smsNotificationsEnabled) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS notifications are disabled');
         return { success: false, error: 'SMS notifications are disabled' };
       }
 
       if (!settings.smsProvider || !settings.smsApiKey) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS provider not configured');
         return { success: false, error: 'SMS provider not configured' };
       }
 
       const formattedPhone = this.formatPhone(phone);
 
+      let result: SmsResult;
       switch (settings.smsProvider.toUpperCase()) {
         case 'AFRICASTALKING':
-          return await this.sendViaAfricasTalking(formattedPhone, message, settings);
+          result = await this.sendViaAfricasTalking(formattedPhone, message, settings);
+          break;
         case 'TWILIO':
-          return await this.sendViaTwilio(formattedPhone, message, settings);
+          result = await this.sendViaTwilio(formattedPhone, message, settings);
+          break;
         default:
+          if (logId) await updateCommunicationLogStatus(logId, 'FAILED', `Unknown SMS provider: ${settings.smsProvider}`);
           return { success: false, error: `Unknown SMS provider: ${settings.smsProvider}` };
       }
+
+      if (logId) await updateCommunicationLogStatus(logId, result.success ? 'SENT' : 'FAILED', result.error);
+      return result;
     } catch (error: any) {
       console.error('SMS send error:', error);
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message);
       return { success: false, error: error.message };
     }
   }

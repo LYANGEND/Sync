@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import axios from 'axios';
+import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 
 interface WhatsAppResult {
   success: boolean;
@@ -10,39 +11,65 @@ interface WhatsAppResult {
 /**
  * WhatsApp Service - Send messages via WhatsApp Business API
  * Supports Meta (Cloud API) and Twilio WhatsApp providers
+ * All messages are logged to the CommunicationLog audit trail.
  */
 class WhatsAppService {
   /**
-   * Send a WhatsApp text message
+   * Send a WhatsApp text message (with audit logging)
    */
-  async sendMessage(phone: string, message: string): Promise<WhatsAppResult> {
+  async sendMessage(phone: string, message: string, options?: { source?: string; sentById?: string; recipientName?: string }): Promise<WhatsAppResult> {
+    const logId = await logCommunication({
+      channel: 'WHATSAPP',
+      status: 'PENDING',
+      recipientPhone: phone,
+      recipientName: options?.recipientName,
+      message: message.substring(0, 500),
+      source: options?.source || 'whatsapp_direct',
+      sentById: options?.sentById,
+    });
+
     try {
       const settings = await prisma.schoolSettings.findFirst();
-      if (!settings) return { success: false, error: 'No school settings found' };
+      if (!settings) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
+        return { success: false, error: 'No school settings found' };
+      }
 
       const whatsappEnabled = (settings as any).whatsappEnabled;
-      if (!whatsappEnabled) return { success: false, error: 'WhatsApp is disabled' };
+      if (!whatsappEnabled) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'WhatsApp is disabled');
+        return { success: false, error: 'WhatsApp is disabled' };
+      }
 
       const provider = (settings as any).whatsappProvider;
       const apiKey = (settings as any).whatsappApiKey;
       const phoneId = (settings as any).whatsappPhoneId;
 
       if (!provider || !apiKey) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'WhatsApp not configured');
         return { success: false, error: 'WhatsApp not configured' };
       }
 
       const formattedPhone = this.formatPhone(phone);
 
+      let result: WhatsAppResult;
       switch (provider.toUpperCase()) {
         case 'META':
-          return await this.sendViaMeta(formattedPhone, message, apiKey, phoneId);
+          result = await this.sendViaMeta(formattedPhone, message, apiKey, phoneId);
+          break;
         case 'TWILIO_WHATSAPP':
-          return await this.sendViaTwilio(formattedPhone, message, settings);
+          result = await this.sendViaTwilio(formattedPhone, message, settings);
+          break;
         default:
+          if (logId) await updateCommunicationLogStatus(logId, 'FAILED', `Unknown WhatsApp provider: ${provider}`);
           return { success: false, error: `Unknown WhatsApp provider: ${provider}` };
       }
+
+      if (logId) await updateCommunicationLogStatus(logId, result.success ? 'SENT' : 'FAILED', result.error);
+      return result;
     } catch (error: any) {
       console.error('WhatsApp send error:', error);
+      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message);
       return { success: false, error: error.message };
     }
   }

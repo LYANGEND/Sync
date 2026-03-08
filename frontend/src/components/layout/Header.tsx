@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Check, X, BellRing } from 'lucide-react';
+import { Bell, Search, Check, X, BellRing, Trash2 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToPushNotifications } from '../../utils/push';
@@ -75,6 +75,28 @@ const Header = () => {
       setUnreadCount(0);
     } catch (error) {
       console.error('Failed to mark all as read', error);
+    }
+  };
+
+  const deleteNotification = async (id: string) => {
+    try {
+      await api.delete(`/communication/notifications/${id}`);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      setUnreadCount(prev => {
+        const wasUnread = notifications.find(n => n.id === id && !n.isRead);
+        return wasUnread ? Math.max(0, prev - 1) : prev;
+      });
+    } catch (error) {
+      console.error('Failed to delete notification', error);
+    }
+  };
+
+  const clearReadNotifications = async () => {
+    try {
+      await api.delete('/communication/notifications/clear-read');
+      setNotifications(prev => prev.filter(n => !n.isRead));
+    } catch (error) {
+      console.error('Failed to clear read notifications', error);
     }
   };
 
@@ -214,6 +236,14 @@ const Header = () => {
                   <div className="px-5 pb-3 flex justify-between items-center border-b border-gray-100">
                     <h3 className="text-lg font-bold text-gray-900">Notifications</h3>
                     <div className="flex items-center gap-2">
+                      {notifications.some(n => n.isRead) && (
+                        <button
+                          onClick={clearReadNotifications}
+                          className="text-sm text-red-500 font-medium"
+                        >
+                          Clear read
+                        </button>
+                      )}
                       {unreadCount > 0 && (
                         <button
                           onClick={markAllAsRead}
@@ -262,6 +292,12 @@ const Header = () => {
                                 <Check size={16} />
                               </button>
                             )}
+                            <button
+                              onClick={() => deleteNotification(notification.id)}
+                              className="p-2 text-gray-300 hover:text-red-500 flex-shrink-0"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
                         </div>
                       ))
@@ -279,17 +315,27 @@ const Header = () => {
                 />
 
                 {/* Desktop: Traditional dropdown */}
-                <div className="hidden md:block absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-scale-in">
-                  <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <h3 className="font-semibold text-gray-700">Notifications</h3>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={markAllAsRead}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        Mark all read
-                      </button>
-                    )}
+                <div className="hidden md:block absolute right-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden z-50 animate-scale-in">
+                  <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-700/50">
+                    <h3 className="font-semibold text-gray-700 dark:text-white">Notifications</h3>
+                    <div className="flex items-center gap-2">
+                      {notifications.some(n => n.isRead) && (
+                        <button
+                          onClick={clearReadNotifications}
+                          className="text-xs text-red-500 hover:text-red-700 font-medium"
+                        >
+                          Clear read
+                        </button>
+                      )}
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllAsRead}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="max-h-96 overflow-y-auto">
                     {notifications.length === 0 ? (
@@ -306,15 +352,24 @@ const Header = () => {
                             <h4 className={`text-sm font-medium ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
                               {notification.title}
                             </h4>
-                            {!notification.isRead && (
+                            <div className="flex items-center gap-1">
+                              {!notification.isRead && (
+                                <button
+                                  onClick={() => markAsRead(notification.id)}
+                                  className="text-gray-400 hover:text-blue-600"
+                                  title="Mark as read"
+                                >
+                                  <Check size={14} />
+                                </button>
+                              )}
                               <button
-                                onClick={() => markAsRead(notification.id)}
-                                className="text-gray-400 hover:text-blue-600"
-                                title="Mark as read"
+                                onClick={() => deleteNotification(notification.id)}
+                                className="text-gray-300 hover:text-red-500"
+                                title="Delete"
                               >
-                                <Check size={14} />
+                                <Trash2 size={13} />
                               </button>
-                            )}
+                            </div>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">{notification.message}</p>
                           <span className="text-[10px] text-gray-400 mt-2 block">

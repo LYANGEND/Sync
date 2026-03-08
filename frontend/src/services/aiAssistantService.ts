@@ -47,6 +47,27 @@ export interface AIStatus {
   enabled?: boolean;
 }
 
+export interface SubjectTopic {
+  id: string;
+  title: string;
+  description?: string;
+  gradeLevel: number;
+  orderIndex: number;
+}
+
+export interface SystemSubject {
+  id: string;
+  name: string;
+  code: string;
+  classes: { id: string; name: string; gradeLevel: number }[];
+  topics: SubjectTopic[];
+}
+
+export interface SubjectsContextResponse {
+  subjects: SystemSubject[];
+  byGrade: Record<number, SystemSubject[]>;
+}
+
 const aiAssistantService = {
   // Status
   getStatus: () =>
@@ -104,6 +125,10 @@ const aiAssistantService = {
   // Teaching Context
   getTeachingContext: () =>
     api.get<{ classes: any[]; subjects: any[] }>('/ai-assistant/teaching-context').then(r => r.data),
+
+  // All subjects with grade grouping and topics
+  getAllSubjects: () =>
+    api.get<SubjectsContextResponse>('/ai-assistant/subjects').then(r => r.data),
 
   // Student Insights
   getStudentInsights: (params: { classId: string; subjectId?: string }) =>

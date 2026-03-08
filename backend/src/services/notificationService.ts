@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma';
 import nodemailer from 'nodemailer';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
+import { sendPushToUser, broadcastPush } from './pushService';
 
 interface NotificationOptions {
   to: string;
@@ -582,7 +583,7 @@ ${schoolName}
   return { subject, text, html };
 }
 
-// Create a single notification in the database
+// Create a single notification in the database + auto-fire push
 export async function createNotification(
   userId: string,
   title: string,
@@ -599,6 +600,11 @@ export async function createNotification(
         isRead: false,
       },
     });
+
+    // Auto-fire web push notification in background
+    sendPushToUser(userId, title, message, { source: 'notification_auto_push' })
+      .catch(err => console.error('Auto-push failed:', err));
+
     return true;
   } catch (error) {
     console.error('Failed to create notification:', error);
@@ -606,7 +612,7 @@ export async function createNotification(
   }
 }
 
-// Broadcast notification to multiple users
+// Broadcast notification to multiple users + auto-fire push
 export async function broadcastNotification(
   userIds: string[],
   title: string,
@@ -623,6 +629,11 @@ export async function broadcastNotification(
         isRead: false,
       })),
     });
+
+    // Auto-fire web push notifications in background
+    broadcastPush(userIds, title, message, { source: 'broadcast_auto_push' })
+      .catch(err => console.error('Broadcast push failed:', err));
+
     return result.count;
   } catch (error) {
     console.error('Failed to broadcast notifications:', error);

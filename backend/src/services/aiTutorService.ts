@@ -762,9 +762,9 @@ After stating each question, pause and say you'll wait for answers.`;
   }
 
   /**
-   * End the tutoring session and generate a summary
+   * End the tutoring session and generate a rich AI-powered summary
    */
-  async endSession(sessionId: string): Promise<{ summary: string; metrics: any }> {
+  async endSession(sessionId: string): Promise<{ summary: string; structuredSummary: any; metrics: any }> {
     const session = await prisma.aITutorSession.findUnique({
       where: { id: sessionId },
       include: { classroom: true },
@@ -779,21 +779,54 @@ After stating each question, pause and say you'll wait for answers.`;
     const conversationLog = memState?.conversationHistory ||
       (session.conversationLog as unknown as ConversationEntry[]) || [];
 
-    // Generate class summary
-    const summaryPrompt = `Based on the following class conversation, generate a brief summary:
-- What topics were covered
-- Key points discussed
-- Questions asked by students
-- Areas where students seemed to struggle
-- Suggested follow-up topics
+    const conversationText = conversationLog
+      .map(e => `${e.speaker}: ${e.message}`)
+      .join('\n');
 
-CONVERSATION:
-${conversationLog.map(e => `${e.speaker}: ${e.message}`).join('\n')}`;
+    const durationMinutes = session.startedAt
+      ? Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000 / 60)
+      : 0;
 
-    const aiResponse = await aiService.chat([
-      { role: 'system', content: 'You are an educational assistant summarizing a class session. Be concise and actionable.' },
-      { role: 'user', content: summaryPrompt },
-    ]);
+    // Generate a rich structured AI session summary
+    const summaryPrompt = `You are an expert educational coach. Analyse this virtual classroom session and produce a comprehensive structured report.
+
+SESSION DURATION: ${durationMinutes} minutes
+CONVERSATION TRANSCRIPT:
+${conversationText || '(No conversation recorded)'}
+
+Return a JSON object with these exact keys:
+{
+  "briefSummary": "2-3 sentence overview of what happened",
+  "topicsCovered": ["list", "of", "main topics"],
+  "keyLearningPoints": ["key", "takeaways", "from the lesson"],
+  "studentQuestionsAsked": ["each question students asked verbatim or paraphrased"],
+  "areasOfConfusion": ["topics where students seemed confused or struggled"],
+  "teacherHighlights": ["moments where the teacher explained things particularly well"],
+  "homeworkOrFollowUp": "Any homework, follow-up tasks or next-class preview mentioned",
+  "recommendedNextTopics": ["suggested topics for next lesson based on coverage gaps"],
+  "engagementScore": "1-10 score with one-line justification",
+  "classroomNarrativeSummary": "A 4-6 sentence teacher-facing narrative of how the class went — suitable to include in a lesson plan record"
+}`;
+
+    let structuredSummary: any = {};
+    let plainSummary = '';
+
+    try {
+      structuredSummary = await aiService.generateJSON<any>(summaryPrompt, {
+        systemPrompt: 'You are an educational coach. Always respond with valid JSON only.',
+        temperature: 0.5,
+      });
+      plainSummary = structuredSummary.classroomNarrativeSummary || structuredSummary.briefSummary || '';
+    } catch (err) {
+      console.warn('[AITutor] Structured summary failed, falling back to plain summary:', err);
+      // Fall back to plain text summary
+      const fallbackResponse = await aiService.chat([
+        { role: 'system', content: 'You are an educational assistant summarizing a class session. Be concise and actionable.' },
+        { role: 'user', content: `Summarise this class session:\n${conversationText}` },
+      ]);
+      plainSummary = fallbackResponse.content;
+      structuredSummary = { briefSummary: plainSummary };
+    }
 
     // Update session in DB
     await prisma.aITutorSession.update({
@@ -810,21 +843,72 @@ ${conversationLog.map(e => `${e.speaker}: ${e.message}`).join('\n')}`;
     await prisma.classRecording.create({
       data: {
         classroomId: classroom.id,
-        summary: aiResponse.content,
+        summary: plainSummary,
         transcript: conversationLog.map(e => `[${e.timestamp}] ${e.speaker}: ${e.message}`).join('\n'),
-        keyTopics: [], // Could extract from summary
+        keyTopics: (structuredSummary.topicsCovered || []) as string[],
       },
     });
+
+    // Auto-create a LessonPlan record from the session so the teacher has a record
+    if (classroom.classId && classroom.subjectId && classroom.teacherId) {
+      try {
+        const lessonContent = [
+          `## Virtual Classroom Session — Auto-generated Summary`,
+          `**Duration:** ${durationMinutes} minutes`,
+          `**Session date:** ${new Date().toLocaleDateString()}`,
+          '',
+          `### Topics Covered`,
+          (structuredSummary.topicsCovered || []).map((t: string) => `- ${t}`).join('\n'),
+          '',
+          `### Key Learning Points`,
+          (structuredSummary.keyLearningPoints || []).map((p: string) => `- ${p}`).join('\n'),
+          '',
+          `### Student Questions`,
+          (structuredSummary.studentQuestionsAsked || []).map((q: string) => `- ${q}`).join('\n'),
+          '',
+          `### Areas of Confusion / Follow-up Needed`,
+          (structuredSummary.areasOfConfusion || []).map((a: string) => `- ${a}`).join('\n'),
+          '',
+          `### Homework / Next Class`,
+          structuredSummary.homeworkOrFollowUp || 'None specified',
+          '',
+          `### Recommended Next Topics`,
+          (structuredSummary.recommendedNextTopics || []).map((t: string) => `- ${t}`).join('\n'),
+          '',
+          `---`,
+          `*Auto-generated from AI Tutor session ${sessionId}*`,
+        ].join('\n');
+
+        // Find active term
+        const activeTerm = await prisma.academicTerm.findFirst({
+          where: { isActive: true },
+        });
+
+        await prisma.lessonPlan.create({
+          data: {
+            teacherId: classroom.teacherId,
+            classId: classroom.classId,
+            subjectId: classroom.subjectId,
+            termId: activeTerm?.id || '',
+            title: `[Virtual Class] ${classroom.title} — ${new Date().toLocaleDateString()}`,
+            weekStartDate: new Date(),
+            content: lessonContent,
+            status: 'COMPLETED',
+          } as any,
+        });
+      } catch (planErr) {
+        console.warn('[AITutor] Could not auto-create lesson plan:', planErr);
+      }
+    }
 
     // Clean up in-memory state
     this.activeSessions.delete(sessionId);
 
     return {
-      summary: aiResponse.content,
+      summary: plainSummary,
+      structuredSummary,
       metrics: {
-        duration: session.startedAt
-          ? Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000 / 60)
-          : 0,
+        duration: durationMinutes,
         totalTokensUsed: session.totalTokensUsed,
         totalTTSCharacters: session.totalTTSCharacters,
         questionsAsked: session.questionsAsked,

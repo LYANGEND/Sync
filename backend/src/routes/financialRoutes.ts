@@ -15,6 +15,12 @@ import {
   updateConversation,
   deleteConversation,
   executeAIAction,
+  getCashFlowForecast,
+  getComplianceStatus,
+  autoAllocatePayments,
+  saveReport,
+  listReports,
+  getReport,
 } from '../controllers/aiFinancialController';
 import { aiLimiter } from '../middleware/rateLimiter';
 
@@ -27,6 +33,12 @@ router.post('/ai-advisor', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAG
 router.get('/ai-advisor/snapshot', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), getFinancialSnapshot);
 router.post('/ai-advisor/quick-insights', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), aiLimiter, getQuickInsights);
 router.post('/ai-advisor/execute-action', authorizeRole(['SUPER_ADMIN', 'BURSAR']), executeAIAction);
+router.get('/ai-advisor/cash-flow-forecast', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), aiLimiter, getCashFlowForecast);
+router.get('/ai-advisor/compliance', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), getComplianceStatus);
+router.post('/ai-advisor/allocate-payments', authorizeRole(['SUPER_ADMIN', 'BURSAR']), autoAllocatePayments);
+router.post('/ai-advisor/reports', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), saveReport);
+router.get('/ai-advisor/reports', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), listReports);
+router.get('/ai-advisor/reports/:id', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), getReport);
 
 // AI Conversation History
 router.get('/ai-advisor/conversations', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER']), listConversations);

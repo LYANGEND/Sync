@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   GraduationCap, Send, Plus, Trash2, MessageSquare, Sparkles, BookOpen,
   FileText, Star, ChevronLeft, Loader2, AlertCircle, Command, Package,
-  Users, BarChart3, Download, Eye, X, Save, ArrowRight
+  Users, BarChart3, Download, Eye, X, Save, ArrowRight, BookMarked
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import aiAssistantService, { Conversation, Message, FavoritePrompt, Artifact } from '../../services/aiAssistantService';
+import aiAssistantService, { Conversation, Message, FavoritePrompt, Artifact, SystemSubject, SubjectTopic } from '../../services/aiAssistantService';
 import toast from 'react-hot-toast';
 
 interface TeachingClass {
@@ -16,14 +16,6 @@ interface TeachingClass {
   studentCount: number;
   isClassTeacher: boolean;
   subjects: string[];
-}
-
-interface TeachingSubject {
-  id: string;
-  name: string;
-  code: string;
-  classId: string;
-  className: string;
 }
 
 interface StudentInsight {
@@ -41,6 +33,8 @@ const SLASH_COMMANDS = [
   { command: '/email', description: 'Draft a parent email', icon: MessageSquare },
   { command: '/tips', description: 'Get teaching tips', icon: Sparkles },
   { command: '/differentiate', description: 'Differentiate for learners', icon: Command },
+  { command: '/gap', description: 'Detect curriculum gaps for a class', icon: AlertCircle },
+  { command: '/career', description: 'Career & subject path advice for a student', icon: GraduationCap },
 ];
 
 const AIAssistant = () => {
@@ -58,9 +52,12 @@ const AIAssistant = () => {
 
   // Teaching context state
   const [teachingClasses, setTeachingClasses] = useState<TeachingClass[]>([]);
-  const [teachingSubjects, setTeachingSubjects] = useState<TeachingSubject[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
+  // All system subjects (for the subject picker and AI curriculum awareness)
+  const [allSubjects, setAllSubjects] = useState<SystemSubject[]>([]);
+  const [subjectsByGrade, setSubjectsByGrade] = useState<Record<number, SystemSubject[]>>({});
+  const [selectedSubjectTopics, setSelectedSubjectTopics] = useState<SubjectTopic[]>([]);
 
   // Panel state
   const [activePanel, setActivePanel] = useState<'chat' | 'artifacts' | 'insights'>('chat');
@@ -77,17 +74,19 @@ const AIAssistant = () => {
 
   const loadInitialData = async () => {
     try {
-      const [statusData, convsData, favsData, ctxData] = await Promise.all([
+      const [statusData, convsData, favsData, ctxData, subjectsData] = await Promise.all([
         aiAssistantService.getStatus(),
         aiAssistantService.getConversations(),
         aiAssistantService.getFavorites().catch(() => []),
         aiAssistantService.getTeachingContext().catch(() => ({ classes: [], subjects: [] })),
+        aiAssistantService.getAllSubjects().catch(() => ({ subjects: [], byGrade: {} })),
       ]);
       setAiAvailable(statusData.available);
       setConversations(convsData);
       setFavorites(favsData as FavoritePrompt[]);
       setTeachingClasses(ctxData.classes || []);
-      setTeachingSubjects(ctxData.subjects || []);
+      setAllSubjects(subjectsData.subjects || []);
+      setSubjectsByGrade(subjectsData.byGrade || {});
     } catch (error) {
       console.error('Error loading AI assistant:', error);
     } finally {
@@ -146,7 +145,7 @@ const AIAssistant = () => {
 
     // Build context from selected class/subject
     const selectedClass = teachingClasses.find(c => c.id === selectedClassId);
-    const selectedSubject = teachingSubjects.find(s => s.id === selectedSubjectId);
+    const selectedSubject = allSubjects.find(s => s.id === selectedSubjectId);
     const context: any = {};
     if (selectedClassId) {
       context.classId = selectedClassId;
@@ -154,7 +153,9 @@ const AIAssistant = () => {
       context.gradeLevel = selectedClass?.gradeLevel;
     }
     if (selectedSubjectId && selectedSubject) {
+      context.subjectId = selectedSubjectId;
       context.subject = selectedSubject.name;
+      context.subjectCode = selectedSubject.code;
     }
 
     // Create conversation if needed
@@ -239,7 +240,11 @@ const AIAssistant = () => {
 
   // Derived state
   const selectedClass = teachingClasses.find(c => c.id === selectedClassId);
-  const filteredSubjects = teachingSubjects.filter(s => !selectedClassId || s.classId === selectedClassId);
+  // Subjects for the picker: filter by selected class grade if a class is chosen
+  const subjectsForPicker: SystemSubject[] = selectedClass
+    ? (subjectsByGrade[selectedClass.gradeLevel] || [])
+    : allSubjects;
+  const selectedSubject = allSubjects.find(s => s.id === selectedSubjectId);
 
 
   // Artifact methods
@@ -410,31 +415,73 @@ const AIAssistant = () => {
           </div>
 
           {/* Class / Subject Context Picker */}
-          {teachingClasses.length > 0 && (
-            <div className="flex items-center gap-3 px-4 pb-3">
-              <select value={selectedClassId}
-                onChange={(e) => { setSelectedClassId(e.target.value); setSelectedSubjectId(''); }}
-                className="text-xs bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-purple-500 outline-none"
-              >
-                <option value="">All Classes</option>
-                {teachingClasses.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} (Grade {c.gradeLevel}) — {c.studentCount} students{c.isClassTeacher ? ' ★' : ''}</option>
-                ))}
-              </select>
-              <select value={selectedSubjectId}
-                onChange={(e) => setSelectedSubjectId(e.target.value)}
-                className="text-xs bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-purple-500 outline-none"
-              >
-                <option value="">All Subjects</option>
-                {filteredSubjects.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}{selectedClassId ? '' : ` (${s.className})`}</option>
-                ))}
-              </select>
-              {selectedClassId && (
-                <button onClick={() => { setSelectedClassId(''); setSelectedSubjectId(''); }}
-                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                  <X className="w-4 h-4" />
-                </button>
+          {(teachingClasses.length > 0 || allSubjects.length > 0) && (
+            <div className="flex flex-col gap-2 px-4 pb-3">
+              <div className="flex items-center gap-3">
+                {teachingClasses.length > 0 && (
+                  <select value={selectedClassId}
+                    onChange={(e) => { setSelectedClassId(e.target.value); setSelectedSubjectId(''); setSelectedSubjectTopics([]); }}
+                    className="text-xs bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-purple-500 outline-none"
+                  >
+                    <option value="">All Classes</option>
+                    {teachingClasses.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} (Grade {c.gradeLevel}) — {c.studentCount} students{c.isClassTeacher ? ' ★' : ''}</option>
+                    ))}
+                  </select>
+                )}
+                <select value={selectedSubjectId}
+                  onChange={(e) => {
+                    setSelectedSubjectId(e.target.value);
+                    const subj = allSubjects.find(s => s.id === e.target.value);
+                    setSelectedSubjectTopics(subj?.topics || []);
+                  }}
+                  className="text-xs bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-purple-500 outline-none"
+                >
+                  <option value="">All Subjects</option>
+                  {selectedClass ? (
+                    // Show subjects for selected class grade
+                    subjectsForPicker.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                    ))
+                  ) : (
+                    // Show all subjects grouped by grade
+                    Object.entries(subjectsByGrade)
+                      .sort(([a], [b]) => Number(a) - Number(b))
+                      .map(([grade, subjects]) => (
+                        <optgroup key={grade} label={Number(grade) > 0 ? `Grade ${grade}` : 'General'}>
+                          {subjects.map(s => (
+                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                          ))}
+                        </optgroup>
+                      ))
+                  )}
+                </select>
+                {(selectedClassId || selectedSubjectId) && (
+                  <button onClick={() => { setSelectedClassId(''); setSelectedSubjectId(''); setSelectedSubjectTopics([]); }}
+                    className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {/* Topics pills for selected subject */}
+              {selectedSubjectTopics.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <BookMarked className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+                  {selectedSubjectTopics
+                    .filter(t => !selectedClass || t.gradeLevel === selectedClass.gradeLevel || t.gradeLevel === 0)
+                    .slice(0, 7)
+                    .map(topic => (
+                      <span key={topic.id}
+                        className="text-[10px] bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+                        {topic.title}
+                      </span>
+                    ))}
+                  {selectedSubjectTopics.filter(t => !selectedClass || t.gradeLevel === selectedClass.gradeLevel || t.gradeLevel === 0).length > 7 && (
+                    <span className="text-[10px] text-gray-400">
+                      +{selectedSubjectTopics.filter(t => !selectedClass || t.gradeLevel === selectedClass.gradeLevel || t.gradeLevel === 0).length - 7} more
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -457,12 +504,17 @@ const AIAssistant = () => {
               </p>
               {selectedClass && (
                 <p className="text-sm text-purple-600 dark:text-purple-400 mb-6">
-                  📚 Context: <strong>{selectedClass.name}</strong> — I know your class data!
+                  📚 Context: <strong>{selectedClass.name}</strong>{selectedSubject ? ` · ${selectedSubject.name}` : ''} — I know your class data!
                 </p>
               )}
-              {!selectedClass && teachingClasses.length > 0 && (
+              {!selectedClass && selectedSubject && (
+                <p className="text-sm text-purple-600 dark:text-purple-400 mb-6">
+                  📖 Subject: <strong>{selectedSubject.name}</strong>{selectedSubjectTopics.length > 0 ? ` · ${selectedSubjectTopics.length} curriculum topics loaded` : ''}
+                </p>
+              )}
+              {!selectedClass && !selectedSubject && (teachingClasses.length > 0 || allSubjects.length > 0) && (
                 <p className="text-xs text-gray-400 mb-6">
-                  💡 Select a class above for data-aware responses
+                  💡 Select a class or subject above for curriculum-aware responses
                 </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
@@ -585,7 +637,9 @@ const AIAssistant = () => {
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder={aiAvailable
-                ? selectedClass ? `Ask about ${selectedClass.name} or type / for commands...` : 'Ask anything or type / for commands...'
+                ? selectedSubject
+                  ? `Ask about ${selectedSubject.name}${selectedClass ? ` in ${selectedClass.name}` : ''} or type / for commands...`
+                  : selectedClass ? `Ask about ${selectedClass.name} or type / for commands...` : 'Ask anything or type / for commands...'
                 : 'AI is not configured. Contact admin to enable.'}
               disabled={!aiAvailable || sending}
               rows={1}

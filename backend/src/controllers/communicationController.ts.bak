@@ -1,0 +1,457 @@
+import { Request, Response } from 'express';
+import { Role } from '@prisma/client';
+import { prisma } from '../utils/prisma';
+import { z } from 'zod';
+import { sendEmail } from '../services/emailService';
+import { broadcastNotification, createNotification } from '../services/notificationService';
+import { getCommunicationLogs, getCommunicationStats } from '../services/communicationLogService';
+
+const sendAnnouncementSchema = z.object({
+  subject: z.string().min(1),
+  message: z.string().min(1),
+  targetRoles: z.array(z.nativeEnum(Role)).optional(), // If empty, send to all? Or require specific roles
+  sendEmail: z.boolean().default(false),
+  sendNotification: z.boolean().default(true),
+});
+
+export const sendAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendNotification } = sendAnnouncementSchema.parse(req.body);
+
+    // 1. Find target users
+    const whereClause: any = { isActive: true };
+    if (targetRoles && targetRoles.length > 0) {
+      whereClause.role = { in: targetRoles };
+    }
+
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      select: { id: true, email: true, fullName: true },
+    });
+
+    if (users.length === 0) {
+      return res.status(404).json({ message: 'No users found for the selected roles' });
+    }
+
+    const userIds = users.map(u => u.id);
+
+    // 2. Persist announcement to database
+    await (prisma as any).announcement.create({
+      data: {
+        subject,
+        message,
+        targetRoles: targetRoles?.map(r => r.toString()) || ['ALL'],
+        sentViaEmail: shouldSendEmail,
+        sentViaNotification: sendNotification,
+        recipientCount: users.length,
+        createdById: userId,
+      },
+    });
+
+    // 3. Send Notifications
+    if (sendNotification) {
+      await broadcastNotification(userIds, subject, message, 'INFO');
+    }
+
+    // 4. Send Emails with audit logging
+    if (shouldSendEmail) {
+      Promise.all(users.map(user =>
+        sendEmail(user.email, subject, `<p>Dear ${user.fullName},</p><p>${message}</p>`, {
+          source: 'announcement',
+          sentById: userId,
+          recipientName: user.fullName,
+        })
+      )).catch(err => console.error('Background email sending failed', err));
+    }
+
+    res.json({ message: `Announcement sent to ${users.length} users` });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Send announcement error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getMyNotifications = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const notifications = await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    res.json(notifications);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch notifications' });
+  }
+};
+
+export const markAsRead = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.userId;
+
+    await prisma.notification.updateMany({
+      where: { id, userId }, // Ensure ownership
+      data: { isRead: true },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update notification' });
+  }
+};
+
+export const markAllAsRead = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    await prisma.notification.updateMany({
+      where: { userId, isRead: false },
+      data: { isRead: true },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update notifications' });
+  }
+};
+
+export const getUnreadNotificationCount = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    const count = await prisma.notification.count({
+      where: { userId, isRead: false },
+    });
+
+    res.json({ count });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to get notification count' });
+  }
+};
+
+const sendMessageSchema = z.object({
+  conversationId: z.string().uuid().optional(),
+  recipientId: z.string().uuid().optional(),
+  content: z.string().min(1),
+});
+
+export const getConversations = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        participants: {
+          some: {
+            userId: userId
+          }
+        }
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                role: true,
+                email: true
+              }
+            }
+          }
+        },
+        messages: {
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    });
+
+    const formatted = conversations.map(c => {
+      const otherParticipants = c.participants
+        .filter(p => p.userId !== userId)
+        .map(p => p.user);
+
+      const lastMessage = c.messages[0];
+
+      return {
+        id: c.id,
+        participants: otherParticipants,
+        lastMessage: lastMessage ? {
+          content: lastMessage.content,
+          createdAt: lastMessage.createdAt,
+          isRead: lastMessage.isRead,
+          senderId: lastMessage.senderId
+        } : null,
+        updatedAt: c.updatedAt
+      };
+    });
+
+    res.json(formatted);
+  } catch (error) {
+    console.error('Get conversations error:', error);
+    res.status(500).json({ message: 'Failed to fetch conversations' });
+  }
+};
+
+export const getMessages = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { conversationId } = req.params;
+
+    const participant = await prisma.conversationParticipant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId: userId!
+        }
+      }
+    });
+
+    if (!participant) {
+      return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
+    const messages = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true
+          }
+        }
+      }
+    });
+
+    res.json(messages);
+  } catch (error) {
+    console.error('Get messages error:', error);
+    res.status(500).json({ message: 'Failed to fetch messages' });
+  }
+};
+
+export const sendMessage = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { conversationId, recipientId, content } = sendMessageSchema.parse(req.body);
+
+    let targetConversationId = conversationId;
+
+    if (!targetConversationId) {
+      if (!recipientId) {
+        return res.status(400).json({ message: 'Recipient ID is required for new conversation' });
+      }
+
+      const existing = await prisma.conversation.findFirst({
+        where: {
+          AND: [
+            { participants: { some: { userId: userId } } },
+            { participants: { some: { userId: recipientId } } }
+          ]
+        }
+      });
+
+      if (existing) {
+        targetConversationId = existing.id;
+      } else {
+        const newConv = await prisma.conversation.create({
+          data: {
+            participants: {
+              create: [
+                { userId: userId! },
+                { userId: recipientId }
+              ]
+            }
+          }
+        });
+        targetConversationId = newConv.id;
+      }
+    }
+
+    const message = await prisma.message.create({
+      data: {
+        conversationId: targetConversationId!,
+        senderId: userId!,
+        content
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true
+          }
+        }
+      }
+    });
+
+    await prisma.conversation.update({
+      where: { id: targetConversationId },
+      data: { updatedAt: new Date() }
+    });
+
+    res.json(message);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ errors: error.errors });
+    }
+    console.error('Send message error:', error);
+    res.status(500).json({ message: 'Failed to send message' });
+  }
+};
+
+export const searchUsers = async (req: Request, res: Response) => {
+  try {
+    const { query } = req.query;
+    const currentUser = (req as any).user;
+    const currentUserId = currentUser?.userId;
+    const userRole = currentUser?.role;
+
+    if (!query || typeof query !== 'string' || query.length < 2) {
+      return res.json([]);
+    }
+
+    const whereClause: any = {
+      AND: [
+        {
+          OR: [
+            { fullName: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } }
+          ]
+        },
+        { id: { not: currentUserId } },
+        { isActive: true }
+      ]
+    };
+
+    // RESTRICTION: Parents and Students can ONLY see Staff
+    if (userRole === 'PARENT' || userRole === 'STUDENT') {
+      whereClause.AND.push({
+        role: { in: ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY'] }
+      });
+    }
+
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        fullName: true,
+        role: true,
+        email: true
+      },
+      take: 10
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('Search users error:', error);
+    res.status(500).json({ message: 'Failed to search users' });
+  }
+};
+
+export const subscribeToPush = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const subscription = req.body;
+
+    if (!userId || !subscription || !subscription.endpoint) {
+      return res.status(400).json({ message: 'Invalid subscription data' });
+    }
+
+    // Upsert subscription
+    await prisma.pushSubscription.upsert({
+      where: { endpoint: subscription.endpoint },
+      update: {
+        userId,
+        keys: subscription.keys,
+      },
+      create: {
+        userId,
+        endpoint: subscription.endpoint,
+        keys: subscription.keys,
+      },
+    });
+
+    res.status(201).json({ message: 'Push subscription saved' });
+  } catch (error) {
+    console.error('Push subscription error:', error);
+    res.status(500).json({ message: 'Failed to save subscription' });
+  }
+};
+
+// ============ Communication Logs & History ============
+
+export const getSentCommunications = async (req: Request, res: Response) => {
+  try {
+    const { channel, status, source, search, page, limit } = req.query;
+
+    const result = await getCommunicationLogs({
+      channel: channel as any,
+      status: status as any,
+      source: source as string,
+      search: search as string,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 25,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Get sent communications error:', error);
+    res.status(500).json({ message: 'Failed to fetch communication logs' });
+  }
+};
+
+export const getCommunicationStatsHandler = async (_req: Request, res: Response) => {
+  try {
+    const stats = await getCommunicationStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Get communication stats error:', error);
+    res.status(500).json({ message: 'Failed to fetch communication stats' });
+  }
+};
+
+export const getAnnouncementHistory = async (req: Request, res: Response) => {
+  try {
+    const { page = '1', limit = '20' } = req.query;
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+
+    const [announcements, total] = await Promise.all([
+      (prisma as any).announcement.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+        include: {
+          createdBy: {
+            select: { id: true, fullName: true, role: true },
+          },
+        },
+      }),
+      (prisma as any).announcement.count(),
+    ]);
+
+    res.json({
+      announcements,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+    });
+  } catch (error) {
+    console.error('Get announcement history error:', error);
+    res.status(500).json({ message: 'Failed to fetch announcement history' });
+  }
+};

@@ -17,6 +17,7 @@ import {
   generateReportRemarks,
   getTeachingContext,
   getStudentInsights,
+  getSubjectsContext,
 } from '../controllers/aiAssistantController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { aiLimiter } from '../middleware/rateLimiter';
@@ -31,6 +32,7 @@ router.get('/status', getAIStatus);
 // Teacher context (classes, subjects, students)
 router.get('/teaching-context', getTeachingContext);
 router.get('/student-insights', getStudentInsights);
+router.get('/subjects', getSubjectsContext);
 
 // Conversations
 router.get('/conversations', getConversations);

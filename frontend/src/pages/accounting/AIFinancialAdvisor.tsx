@@ -4,8 +4,14 @@ import {
   Minus, Sparkles, RefreshCw, ChevronDown, ChevronUp,
   Shield, Lightbulb, X, MessageSquare, History, Trash2,
   Plus, Clock, Edit3, Check, Target, Users, Zap,
+  ShieldCheck, Wallet, FileDown, BarChart3, Save, BookOpen,
+  Download,
 } from 'lucide-react';
 import api from '../../utils/api';
+import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ========================================
 // TYPES
@@ -35,6 +41,36 @@ interface QuickInsights {
 
 interface Props {
   embedded?: boolean;
+}
+
+type PowerTab = 'forecast' | 'compliance' | 'allocator' | 'budget' | 'audit' | 'reports';
+
+interface CashFlowForecast {
+  forecast30: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+  forecast60: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+  forecast90: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+  keyAssumptions: string[];
+  riskFactors: string[];
+  recommendations: string[];
+  narrative: string;
+}
+
+interface ComplianceItem {
+  status: 'compliant' | 'warning' | 'overdue' | 'unknown';
+  description: string;
+  lastAmount?: number;
+  nextDeadline: string;
+}
+
+interface ComplianceStatus {
+  paye: ComplianceItem;
+  napsa: ComplianceItem;
+  nhima: ComplianceItem;
+  zra: ComplianceItem;
+  overallScore: number;
+  overallLabel: string;
+  alerts: string[];
+  recommendations: string[];
 }
 
 interface ConversationSummary {
@@ -69,6 +105,26 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  // Finance Intelligence Suite state
+  const [showPowerFeatures, setShowPowerFeatures] = useState(false);
+  const [activePowerTab, setActivePowerTab] = useState<PowerTab>('forecast');
+  const [cashFlowForecast, setCashFlowForecast] = useState<CashFlowForecast | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [complianceStatus, setComplianceStatus] = useState<ComplianceStatus | null>(null);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [allocating, setAllocating] = useState(false);
+  const [allocationResult, setAllocationResult] = useState<{ allocated: number; totalAmount: number; message: string; results: any[] } | null>(null);
+  const [rawSnapshot, setRawSnapshot] = useState<any>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  // Saved reports state
+  const [savedReports, setSavedReports] = useState<any[]>([]);
+  const [savingReport, setSavingReport] = useState(false);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportTitle, setReportTitle] = useState('');
+  const [selectedTermId, setSelectedTermId] = useState('');
+  const [selectedReportType, setSelectedReportType] = useState('CUSTOM');
+  const [academicTerms, setAcademicTerms] = useState<{ id: string; name: string }[]>([]);
+
   // Suggested questions
   const suggestedQuestions = [
     'How is our fee collection performance this month?',
@@ -83,6 +139,10 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
     'Create a debt collection campaign for parents owing over 1000',
     'Show me the debtor segmentation breakdown',
     'Which debtors are at highest risk of non-payment?',
+    'Export our current financial report to CSV',
+    'Auto-allocate all unallocated payments to student fee balances',
+    'Give me a PAYE, NAPSA and NHIMA compliance summary',
+    'What is our 90-day cash flow risk?',
   ];
 
   // Scroll to bottom on new messages
@@ -191,6 +251,312 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
     } finally {
       setInsightsLoading(false);
     }
+  };
+
+  const loadCashFlowForecast = async () => {
+    setForecastLoading(true);
+    try {
+      const res = await api.get('/financial/ai-advisor/cash-flow-forecast');
+      setCashFlowForecast(res.data);
+    } catch (e: any) {
+      const msg = e.response?.data?.error || 'Failed to generate forecast';
+      const retry = e.response?.data?.retryAfter;
+      toast.error(retry ? `${msg} Try again in ${retry}s.` : msg);
+    } finally {
+      setForecastLoading(false);
+    }
+  };
+
+  const loadComplianceStatus = async () => {
+    setComplianceLoading(true);
+    try {
+      const res = await api.get('/financial/ai-advisor/compliance');
+      setComplianceStatus(res.data);
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to check compliance');
+    } finally {
+      setComplianceLoading(false);
+    }
+  };
+
+  const runPaymentAllocation = async () => {
+    setAllocating(true);
+    try {
+      const res = await api.post('/financial/ai-advisor/allocate-payments');
+      setAllocationResult(res.data);
+      if (res.data.allocated > 0) toast.success(res.data.message);
+      else toast.success('All payments already fully allocated');
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to allocate payments');
+    } finally {
+      setAllocating(false);
+    }
+  };
+
+  const loadRawSnapshot = async () => {
+    if (snapshotLoading) return;
+    setSnapshotLoading(true);
+    try {
+      const res = await api.get('/financial/ai-advisor/snapshot');
+      setRawSnapshot(res.data);
+    } catch {
+      toast.error('Failed to load financial data');
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
+
+  // ── Load academic terms for report tagging ──
+  const loadAcademicTerms = async () => {
+    try {
+      const res = await api.get('/academic-terms');
+      setAcademicTerms((res.data || []).map((t: any) => ({ id: t.id, name: t.name || t.termName || t.id })));
+    } catch {
+      // silently ignore — terms are optional
+    }
+  };
+
+  // ── Load saved reports ──
+  const loadSavedReports = async () => {
+    setReportsLoading(true);
+    try {
+      const res = await api.get('/financial/ai-advisor/reports');
+      setSavedReports(res.data || []);
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to load saved reports');
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  // ── Save report to system ──
+  const saveReportToSystem = async () => {
+    if (!reportTitle.trim()) { toast.error('Please enter a report title'); return; }
+    setSavingReport(true);
+    try {
+      await api.post('/financial/ai-advisor/reports', {
+        title: reportTitle.trim(),
+        reportType: selectedReportType,
+        termId: selectedTermId || undefined,
+        summary: insights
+          ? `Health Score: ${insights.healthScore}/100 (${insights.healthLabel}). Revenue: ZMW ${insights.snapshot.revenueThisMonth.toLocaleString()}. Outstanding: ZMW ${insights.snapshot.outstandingFees.toLocaleString()}.`
+          : undefined,
+      });
+      toast.success('Report saved to system!');
+      setReportTitle('');
+      setSelectedTermId('');
+      loadSavedReports();
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to save report');
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
+  // ── Export as CSV ──
+  const exportCSV = () => {
+    if (!insights) { toast.error('Load Financial Health Dashboard first'); return; }
+    const rows: (string | number)[][] = [
+      ['Sync School — Financial Report', new Date().toLocaleDateString('en-GB')],
+      [],
+      ['FINANCIAL HEALTH SCORE', insights.healthScore, insights.healthLabel],
+      [],
+      ['KEY METRICS', '', ''],
+      ['Metric', 'Value', 'Trend'],
+      ...insights.keyMetrics.map(m => [m.label, m.value, m.trend]),
+      [],
+      ['SNAPSHOT', '', ''],
+      ['Revenue (Month)', `ZMW ${insights.snapshot.revenueThisMonth.toLocaleString()}`, ''],
+      ['Expenses (Month)', `ZMW ${insights.snapshot.expensesThisMonth.toLocaleString()}`, ''],
+      ['Net Income', `ZMW ${insights.snapshot.netIncome.toLocaleString()}`, ''],
+      ['Collection Rate', `${insights.snapshot.collectionRate}%`, ''],
+      ['Outstanding Fees', `ZMW ${insights.snapshot.outstandingFees.toLocaleString()}`, ''],
+      [],
+      ['CRITICAL ALERTS', '', ''],
+      ['Title', 'Description', 'Severity'],
+      ...insights.criticalAlerts.map(a => [a.title, a.description, a.severity]),
+      [],
+      ['RECOMMENDATIONS', '', ''],
+      ['Title', 'Description', 'Impact'],
+      ...insights.recommendations.map(r => [r.title, r.description, r.impact]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sync-finance-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Exported as CSV');
+  };
+
+  // ── Export as Excel (.xlsx) ──
+  const exportExcel = () => {
+    if (!insights) { toast.error('Load Financial Health Dashboard first'); return; }
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1 — Summary
+    const summaryData = [
+      ['Sync School — Financial Health Report', ''],
+      ['Generated', new Date().toLocaleDateString('en-GB')],
+      ['', ''],
+      ['HEALTH SCORE', `${insights.healthScore}/100`],
+      ['HEALTH LABEL', insights.healthLabel],
+      ['', ''],
+      ['SNAPSHOT', ''],
+      ['Revenue (Month)', insights.snapshot.revenueThisMonth],
+      ['Expenses (Month)', insights.snapshot.expensesThisMonth],
+      ['Net Income', insights.snapshot.netIncome],
+      ['Collection Rate', `${insights.snapshot.collectionRate}%`],
+      ['Outstanding Fees', insights.snapshot.outstandingFees],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+
+    // Sheet 2 — Key Metrics
+    const metricsData = [
+      ['Metric', 'Value', 'Trend', 'Good?'],
+      ...insights.keyMetrics.map(m => [m.label, m.value, m.trend, m.isGood ? 'Yes' : 'No']),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metricsData), 'Key Metrics');
+
+    // Sheet 3 — Alerts
+    const alertsData = [
+      ['Alert Title', 'Description', 'Severity'],
+      ...insights.criticalAlerts.map(a => [a.title, a.description, a.severity]),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(alertsData), 'Alerts');
+
+    // Sheet 4 — Recommendations
+    const recData = [
+      ['Recommendation', 'Description', 'Impact'],
+      ...insights.recommendations.map(r => [r.title, r.description, r.impact]),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(recData), 'Recommendations');
+
+    XLSX.writeFile(wb, `sync-finance-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success('Exported as Excel (.xlsx)');
+  };
+
+  // ── Export as PDF ──
+  const exportPDF = () => {
+    if (!insights) { toast.error('Load Financial Health Dashboard first'); return; }
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const dateStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // Header
+    doc.setFillColor(16, 185, 129); // emerald-500
+    doc.rect(0, 0, 210, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Sync School — Financial Report', 14, 12);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated: ${dateStr}`, 14, 21);
+    doc.setTextColor(0, 0, 0);
+
+    // Health Score box
+    const scoreColor: [number, number, number] = insights.healthScore >= 70 ? [16, 185, 129] : insights.healthScore >= 45 ? [245, 158, 11] : [239, 68, 68];
+    doc.setFillColor(...scoreColor);
+    doc.roundedRect(14, 34, 55, 22, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${insights.healthScore}`, 25, 46);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('/100', 36, 46);
+    doc.setFontSize(8);
+    doc.text(insights.healthLabel, 16, 52);
+    doc.setTextColor(0, 0, 0);
+
+    // Snapshot grid
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('FINANCIAL SNAPSHOT', 80, 38);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    const snapshotItems = [
+      ['Revenue (Month)', `ZMW ${insights.snapshot.revenueThisMonth.toLocaleString()}`],
+      ['Expenses (Month)', `ZMW ${insights.snapshot.expensesThisMonth.toLocaleString()}`],
+      ['Net Income', `ZMW ${insights.snapshot.netIncome.toLocaleString()}`],
+      ['Collection Rate', `${insights.snapshot.collectionRate}%`],
+      ['Outstanding Fees', `ZMW ${insights.snapshot.outstandingFees.toLocaleString()}`],
+    ];
+    snapshotItems.forEach(([label, value], i) => {
+      doc.setTextColor(100, 100, 100);
+      doc.text(label, 80, 44 + i * 6);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text(value, 140, 44 + i * 6);
+      doc.setFont('helvetica', 'normal');
+    });
+    doc.setTextColor(0, 0, 0);
+
+    let y = 65;
+
+    // Key Metrics table
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Key Metrics', 14, y);
+    y += 3;
+    autoTable(doc, {
+      startY: y,
+      head: [['Metric', 'Value', 'Trend']],
+      body: insights.keyMetrics.map(m => [m.label, m.value, m.trend === 'up' ? '↑' : m.trend === 'down' ? '↓' : '→']),
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 252, 249] },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+
+    // Alerts table
+    if (insights.criticalAlerts.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Critical Alerts', 14, y);
+      y += 3;
+      autoTable(doc, {
+        startY: y,
+        head: [['Alert', 'Description', 'Severity']],
+        body: insights.criticalAlerts.map(a => [a.title, a.description, a.severity.toUpperCase()]),
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [239, 68, 68], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [254, 249, 249] },
+        margin: { left: 14, right: 14 },
+        columnStyles: { 2: { cellWidth: 22 } },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    // Recommendations table
+    if (insights.recommendations.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Recommendations', 14, y);
+      y += 3;
+      autoTable(doc, {
+        startY: y,
+        head: [['Title', 'Description', 'Impact']],
+        body: insights.recommendations.map(r => [r.title, r.description, r.impact]),
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [249, 249, 255] },
+        margin: { left: 14, right: 14 },
+      });
+    }
+
+    // Footer
+    const pageCount = doc.getNumberOfPages();
+    for (let p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      doc.setFontSize(7);
+      doc.setTextColor(160, 160, 160);
+      doc.text(`Sync School Management System · Page ${p} of ${pageCount} · ${dateStr}`, 14, 290);
+    }
+
+    doc.save(`sync-finance-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    toast.success('Exported as PDF');
   };
 
   const sendMessage = async (question?: string) => {
@@ -659,6 +1025,554 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
         )}
       </div>
 
+      {/* ======== FINANCE INTELLIGENCE SUITE ======== */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowPowerFeatures(!showPowerFeatures)}
+          className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+        >
+          <Zap size={18} className="text-purple-500" />
+          Finance Intelligence Suite
+          <span className="text-[10px] px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full font-medium">10 AI Powers</span>
+          {showPowerFeatures ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+
+        {showPowerFeatures && (
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {/* Quick Action Buttons */}
+            <div className="flex flex-wrap gap-2 p-4 bg-gradient-to-r from-slate-50 to-purple-50/30 dark:from-slate-900/50 dark:to-purple-900/10 border-b border-slate-200 dark:border-slate-700">
+              {[
+                { label: '📊 Cash Flow Forecast', tab: 'forecast' as PowerTab, action: () => { setActivePowerTab('forecast'); if (!cashFlowForecast) loadCashFlowForecast(); } },
+                { label: '🔐 Compliance Check', tab: 'compliance' as PowerTab, action: () => { setActivePowerTab('compliance'); if (!complianceStatus) loadComplianceStatus(); } },
+                { label: '💳 Allocate Payments', tab: 'allocator' as PowerTab, action: () => setActivePowerTab('allocator') },
+                { label: '📈 Budget vs Actual', tab: 'budget' as PowerTab, action: () => { setActivePowerTab('budget'); if (!rawSnapshot) loadRawSnapshot(); } },
+                { label: '📋 Audit Trail', tab: 'audit' as PowerTab, action: () => { setActivePowerTab('audit'); if (!rawSnapshot) loadRawSnapshot(); } },
+                { label: '� Reports & Export', tab: 'reports' as PowerTab, action: () => { setActivePowerTab('reports'); loadSavedReports(); loadAcademicTerms(); } },
+              ].map((btn, i) => (
+                <button
+                  key={i}
+                  onClick={btn.action}
+                  className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all border ${
+                    btn.tab && activePowerTab === btn.tab
+                      ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-slate-600 hover:border-purple-400 hover:text-purple-600 dark:hover:text-purple-400'
+                  }`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab Content */}
+            <div className="p-5">
+
+              {/* ──── CASH FLOW FORECAST ──── */}
+              {activePowerTab === 'forecast' && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2">
+                      <TrendingUp size={16} className="text-blue-500" /> 30 / 60 / 90-Day Cash Flow Forecast
+                    </h4>
+                    <button onClick={loadCashFlowForecast} disabled={forecastLoading} className="text-xs text-slate-400 hover:text-blue-500 flex items-center gap-1 transition-colors">
+                      <RefreshCw size={11} className={forecastLoading ? 'animate-spin' : ''} /> Regenerate
+                    </button>
+                  </div>
+                  {forecastLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 className="animate-spin text-blue-500 mr-2" size={20} />
+                      <span className="text-sm text-slate-500 dark:text-gray-400">AI is forecasting cash flows…</span>
+                    </div>
+                  ) : !cashFlowForecast ? (
+                    <div className="text-center py-8">
+                      <TrendingUp size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                      <p className="text-sm text-slate-500 dark:text-gray-400 mb-3">Generate an AI-powered 30/60/90-day cash flow projection based on historical data</p>
+                      <button onClick={loadCashFlowForecast} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+                        Generate Forecast
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        {([
+                          { label: '30 Days', data: cashFlowForecast.forecast30 },
+                          { label: '60 Days', data: cashFlowForecast.forecast60 },
+                          { label: '90 Days', data: cashFlowForecast.forecast90 },
+                        ] as const).map(({ label, data }) => (
+                          <div key={label} className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+                            <p className="text-xs font-semibold text-slate-500 dark:text-gray-400 uppercase tracking-wide mb-3">{label}</p>
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-green-600 dark:text-green-400">↑ Inflow</span>
+                                <span className="text-xs font-medium text-green-700 dark:text-green-400">ZMW {Number(data.expectedInflow).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-red-500">↓ Outflow</span>
+                                <span className="text-xs font-medium text-red-600 dark:text-red-400">ZMW {Number(data.expectedOutflow).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between items-center pt-2 border-t border-slate-200 dark:border-slate-600">
+                                <span className="text-[10px] font-semibold text-slate-600 dark:text-gray-300">Net</span>
+                                <span className={`text-sm font-bold ${Number(data.netCashFlow) >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'}`}>
+                                  ZMW {Number(data.netCashFlow).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {cashFlowForecast.narrative && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-100 dark:border-blue-800">
+                          <p className="text-sm text-blue-800 dark:text-blue-200 leading-relaxed">{cashFlowForecast.narrative}</p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {cashFlowForecast.riskFactors?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2 flex items-center gap-1.5"><AlertTriangle size={12} /> Risk Factors</p>
+                            <ul className="space-y-1">
+                              {cashFlowForecast.riskFactors.map((r, i) => (
+                                <li key={i} className="text-xs text-slate-600 dark:text-gray-400 flex items-start gap-1.5">
+                                  <span className="text-red-400 mt-0.5 flex-shrink-0">•</span>{r}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {cashFlowForecast.recommendations?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1.5"><Lightbulb size={12} /> Recommendations</p>
+                            <ul className="space-y-1">
+                              {cashFlowForecast.recommendations.map((r, i) => (
+                                <li key={i} className="text-xs text-slate-600 dark:text-gray-400 flex items-start gap-1.5">
+                                  <span className="text-emerald-400 mt-0.5 flex-shrink-0">•</span>{r}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ──── COMPLIANCE TRACKER ──── */}
+              {activePowerTab === 'compliance' && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-green-500" /> Zambian Statutory Compliance Tracker
+                    </h4>
+                    <button onClick={loadComplianceStatus} disabled={complianceLoading} className="text-xs text-slate-400 hover:text-green-500 flex items-center gap-1 transition-colors">
+                      <RefreshCw size={11} className={complianceLoading ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                  </div>
+                  {complianceLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 className="animate-spin text-green-500 mr-2" size={20} />
+                      <span className="text-sm text-slate-500 dark:text-gray-400">Checking compliance status…</span>
+                    </div>
+                  ) : !complianceStatus ? (
+                    <div className="text-center py-8">
+                      <ShieldCheck size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                      <p className="text-sm text-slate-500 dark:text-gray-400 mb-3">Check PAYE, NAPSA, NHIMA and ZRA compliance in one click</p>
+                      <button onClick={loadComplianceStatus} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition-colors">
+                        Run Compliance Check
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold flex-shrink-0 ${
+                          complianceStatus.overallScore >= 85 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                          complianceStatus.overallScore >= 60 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                        }`}>
+                          {complianceStatus.overallScore}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-white">{complianceStatus.overallLabel}</p>
+                          <p className="text-xs text-slate-500 dark:text-gray-400">Overall Compliance Score</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {([
+                          { key: 'paye', label: 'PAYE', subtitle: 'Income Tax', data: complianceStatus.paye },
+                          { key: 'napsa', label: 'NAPSA', subtitle: 'Pension (5%+5%)', data: complianceStatus.napsa },
+                          { key: 'nhima', label: 'NHIMA', subtitle: 'Health (1%+1%)', data: complianceStatus.nhima },
+                          { key: 'zra', label: 'ZRA', subtitle: 'Tax Authority', data: complianceStatus.zra },
+                        ] as const).map(({ key, label, subtitle, data }) => (
+                          <div key={key} className={`p-3 rounded-xl border ${
+                            data.status === 'compliant' ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20' :
+                            data.status === 'warning'   ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20' :
+                            data.status === 'overdue'   ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20' :
+                            'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50'
+                          }`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-bold text-slate-800 dark:text-white">{label}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                data.status === 'compliant' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
+                                data.status === 'warning'   ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' :
+                                data.status === 'overdue'   ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300' :
+                                'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-gray-300'
+                              }`}>
+                                {data.status === 'compliant' ? '✓ OK' : data.status === 'warning' ? '⚠ Review' : data.status === 'overdue' ? '✗ Overdue' : '? Unknown'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-500 dark:text-gray-400">{subtitle}</p>
+                            <p className="text-[10px] text-slate-600 dark:text-gray-300 mt-1 leading-tight">{data.description}</p>
+                            <p className="text-[10px] text-slate-400 dark:text-gray-500 mt-1">Next deadline: <span className="font-medium">{data.nextDeadline}</span></p>
+                          </div>
+                        ))}
+                      </div>
+                      {complianceStatus.alerts?.length > 0 && (
+                        <div className="space-y-2">
+                          {complianceStatus.alerts.map((alert, i) => (
+                            <div key={i} className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                              <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                              <p className="text-xs text-amber-700 dark:text-amber-300">{alert}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs font-semibold text-slate-600 dark:text-gray-300 mb-2 flex items-center gap-1.5"><Lightbulb size={12} className="text-emerald-500" /> Recommendations</p>
+                        <ul className="space-y-1.5">
+                          {complianceStatus.recommendations.map((r, i) => (
+                            <li key={i} className="text-xs text-slate-500 dark:text-gray-400 flex items-start gap-1.5">
+                              <span className="text-emerald-400 mt-0.5 flex-shrink-0">→</span>{r}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ──── PAYMENT ALLOCATOR ──── */}
+              {activePowerTab === 'allocator' && (
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2 mb-4">
+                    <Wallet size={16} className="text-purple-500" /> Payment Allocation Engine
+                  </h4>
+                  <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 border border-purple-200 dark:border-purple-800 mb-4">
+                    <p className="text-sm text-purple-800 dark:text-purple-200 font-medium mb-1">What this does</p>
+                    <p className="text-xs text-purple-700 dark:text-purple-300">
+                      Matches unallocated payments to outstanding student fee balances, starting with the oldest due date.
+                      Fixes incorrect balances, eliminates parent disputes and strengthens your audit trail.
+                    </p>
+                  </div>
+                  {!allocationResult ? (
+                    <button
+                      onClick={runPaymentAllocation}
+                      disabled={allocating}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-60 transition-colors font-medium text-sm"
+                    >
+                      {allocating ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
+                      {allocating ? 'Allocating payments…' : '▶ Run Auto-Allocation Now'}
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className={`p-4 rounded-xl border ${allocationResult.allocated > 0 ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20' : 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20'}`}>
+                        <p className="text-sm font-semibold text-slate-800 dark:text-white">{allocationResult.message}</p>
+                        {allocationResult.allocated > 0 && (
+                          <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">
+                            Processed {allocationResult.allocated} payment(s) — ZMW {Number(allocationResult.totalAmount).toLocaleString()} allocated
+                          </p>
+                        )}
+                      </div>
+                      {allocationResult.results?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-600 dark:text-gray-300 mb-2">Allocation Details</p>
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {allocationResult.results.map((r: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 text-xs">
+                                <span className="text-slate-700 dark:text-gray-300">{r.student}</span>
+                                <span className="text-slate-500 dark:text-gray-400">{r.allocations} fee(s)</span>
+                                <span className="font-medium text-emerald-600 dark:text-emerald-400">ZMW {Number(r.amount).toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setAllocationResult(null)}
+                        className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 flex items-center gap-1 transition-colors"
+                      >
+                        <RefreshCw size={10} /> Run again
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ──── BUDGET VS ACTUAL ──── */}
+              {activePowerTab === 'budget' && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2">
+                      <BarChart3 size={16} className="text-amber-500" /> Budget vs Actual (Real-Time)
+                    </h4>
+                    <button onClick={loadRawSnapshot} disabled={snapshotLoading} className="text-xs text-slate-400 hover:text-amber-500 flex items-center gap-1 transition-colors">
+                      <RefreshCw size={11} className={snapshotLoading ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                  </div>
+                  {snapshotLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 className="animate-spin text-amber-500 mr-2" size={20} />
+                      <span className="text-sm text-slate-500 dark:text-gray-400">Loading budget data…</span>
+                    </div>
+                  ) : !rawSnapshot?.budgets?.length ? (
+                    <div className="text-center py-8">
+                      <BarChart3 size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                      <p className="text-sm text-slate-500 dark:text-gray-400 mb-1">No budgets found</p>
+                      <p className="text-xs text-slate-400 dark:text-gray-500">Ask the AI: "Create a Term 1 2026 budget with SALARIES 50000 and UTILITIES 8000"</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                      {rawSnapshot.budgets.map((budget: any, bi: number) => (
+                        <div key={bi} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900/50">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800 dark:text-white">{budget.name}</p>
+                              <p className="text-[10px] text-slate-400 dark:text-gray-500">{budget.period} · {budget.year} · {budget.status}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-slate-800 dark:text-white">{budget.utilizationPercent}</p>
+                              <p className="text-[10px] text-slate-400 dark:text-gray-500">utilized</p>
+                            </div>
+                          </div>
+                          <div className="p-3 space-y-2.5">
+                            {budget.items.map((item: any, ii: number) => {
+                              const pct = item.allocated > 0 ? Math.round((item.spent / item.allocated) * 100) : 0;
+                              return (
+                                <div key={ii}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs text-slate-600 dark:text-gray-300">{item.category}</span>
+                                    <span className={`text-[10px] font-medium ${pct > 100 ? 'text-red-600' : pct > 80 ? 'text-amber-600' : 'text-slate-500 dark:text-gray-400'}`}>
+                                      {Number(item.spent).toLocaleString()} / {Number(item.allocated).toLocaleString()} ({pct}%)
+                                    </span>
+                                  </div>
+                                  <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                      style={{ width: `${Math.min(pct, 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ──── AUDIT TRAIL ──── */}
+              {activePowerTab === 'audit' && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2">
+                      <Clock size={16} className="text-slate-500" /> Financial Audit Trail
+                    </h4>
+                    <button onClick={loadRawSnapshot} disabled={snapshotLoading} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 flex items-center gap-1 transition-colors">
+                      <RefreshCw size={11} className={snapshotLoading ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                  </div>
+                  {snapshotLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 className="animate-spin text-slate-400 mr-2" size={20} />
+                      <span className="text-sm text-slate-500 dark:text-gray-400">Loading audit log…</span>
+                    </div>
+                  ) : !rawSnapshot?.recentFinancialActivity?.length ? (
+                    <div className="text-center py-8">
+                      <Clock size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                      <p className="text-sm text-slate-500 dark:text-gray-400">No audit log entries found</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                      {rawSnapshot.recentFinancialActivity.map((log: any, i: number) => (
+                        <div key={i} className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                          <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <Shield size={11} className="text-slate-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-slate-700 dark:text-gray-200 truncate">{log.description || log.action}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-slate-400 dark:text-gray-500">{log.entity}</span>
+                              {log.amount && <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">ZMW {Number(log.amount).toLocaleString()}</span>}
+                              <span className="text-[10px] text-slate-300 dark:text-gray-600">{new Date(log.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' } as any)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ──── REPORTS & EXPORT ──── */}
+              {activePowerTab === 'reports' && (
+                <div className="space-y-6">
+                  {/* Export section */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2 mb-4">
+                      <Download size={16} className="text-emerald-500" /> Export Financial Report
+                    </h4>
+                    <p className="text-xs text-slate-400 dark:text-gray-500 mb-3">
+                      {insights ? 'Financial Health Dashboard is loaded. Choose your export format:' : 'Load the Financial Health Dashboard (top of page) first to enable exports.'}
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <button
+                        onClick={exportPDF}
+                        disabled={!insights}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center">
+                          <FileDown size={20} className="text-white" />
+                        </div>
+                        <span className="text-xs font-semibold text-red-700 dark:text-red-400">Export PDF</span>
+                        <span className="text-[10px] text-slate-400 dark:text-gray-500 text-center">Full formatted report with tables &amp; charts</span>
+                      </button>
+                      <button
+                        onClick={exportExcel}
+                        disabled={!insights}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <div className="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center">
+                          <BarChart3 size={20} className="text-white" />
+                        </div>
+                        <span className="text-xs font-semibold text-green-700 dark:text-green-400">Export Excel</span>
+                        <span className="text-[10px] text-slate-400 dark:text-gray-500 text-center">Multi-sheet .xlsx with metrics &amp; alerts</span>
+                      </button>
+                      <button
+                        onClick={exportCSV}
+                        disabled={!insights}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <div className="w-10 h-10 bg-slate-500 rounded-lg flex items-center justify-center">
+                          <FileDown size={20} className="text-white" />
+                        </div>
+                        <span className="text-xs font-semibold text-slate-600 dark:text-gray-300">Export CSV</span>
+                        <span className="text-[10px] text-slate-400 dark:text-gray-500 text-center">Raw data for spreadsheets &amp; auditors</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Save to System section */}
+                  <div className="border-t border-slate-200 dark:border-slate-700 pt-5">
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2 mb-4">
+                      <Save size={16} className="text-purple-500" /> Save Report to System
+                    </h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 dark:text-gray-400 mb-1">Report Title *</label>
+                        <input
+                          type="text"
+                          value={reportTitle}
+                          onChange={e => setReportTitle(e.target.value)}
+                          placeholder="e.g. Term 1 2026 Financial Health Report"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-gray-400 mb-1">Report Type</label>
+                          <select
+                            value={selectedReportType}
+                            onChange={e => setSelectedReportType(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                          >
+                            {[
+                              ['CUSTOM', 'Custom Report'],
+                              ['INCOME_STATEMENT', 'Income Statement'],
+                              ['FEE_STATEMENT', 'Fee Statement'],
+                              ['CASH_FLOW', 'Cash Flow'],
+                              ['AGED_RECEIVABLES', 'Aged Receivables'],
+                              ['COMPLIANCE', 'Compliance Report'],
+                              ['AUDIT_REPORT', 'Audit Report'],
+                            ].map(([val, label]) => (
+                              <option key={val} value={val}>{label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-gray-400 mb-1">Link to Term (optional)</label>
+                          <select
+                            value={selectedTermId}
+                            onChange={e => setSelectedTermId(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                          >
+                            <option value="">— No term —</option>
+                            {academicTerms.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <button
+                        onClick={saveReportToSystem}
+                        disabled={savingReport || !reportTitle.trim()}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 dark:disabled:bg-purple-900 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {savingReport ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                        {savingReport ? 'Saving…' : 'Save Report to System'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Saved reports list */}
+                  <div className="border-t border-slate-200 dark:border-slate-700 pt-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-semibold text-slate-700 dark:text-gray-200 flex items-center gap-2">
+                        <BookOpen size={16} className="text-blue-500" /> Saved Reports
+                      </h4>
+                      <button onClick={loadSavedReports} disabled={reportsLoading} className="text-xs text-slate-400 hover:text-blue-500 flex items-center gap-1 transition-colors">
+                        <RefreshCw size={11} className={reportsLoading ? 'animate-spin' : ''} /> Refresh
+                      </button>
+                    </div>
+                    {reportsLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="animate-spin text-blue-500 mr-2" size={18} />
+                        <span className="text-sm text-slate-500 dark:text-gray-400">Loading saved reports…</span>
+                      </div>
+                    ) : savedReports.length === 0 ? (
+                      <div className="text-center py-6">
+                        <BookOpen size={32} className="mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                        <p className="text-sm text-slate-500 dark:text-gray-400">No saved reports yet</p>
+                        <p className="text-xs text-slate-400 dark:text-gray-500 mt-1">Save a report above to archive it in the system</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {savedReports.map((r: any) => (
+                          <div key={r.id} className="flex items-center justify-between px-4 py-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-700 transition-colors">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{r.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full font-medium">{r.reportType?.replace(/_/g, ' ')}</span>
+                                {r.term?.name && <span className="text-[10px] text-slate-400 dark:text-gray-500">📅 {r.term.name}</span>}
+                                <span className="text-[10px] text-slate-400 dark:text-gray-500">{new Date(r.reportDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                              </div>
+                              {r.summary && <p className="text-[10px] text-slate-400 dark:text-gray-500 mt-1 line-clamp-1">{r.summary}</p>}
+                            </div>
+                            <div className="flex items-center gap-1 ml-3 flex-shrink-0">
+                              <span className="text-[10px] text-slate-400 dark:text-gray-500">{r.user?.fullName || 'System'}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Chat Interface */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
         {/* Chat Header */}
@@ -940,6 +1854,9 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
     SEND_REMINDERS: { label: 'Send Reminders', icon: Send, color: 'blue', endpoint: '/debt-collection/send', method: 'POST' },
     CREATE_CAMPAIGN: { label: 'Create Campaign', icon: Target, color: 'purple', endpoint: '/debt-collection/campaigns', method: 'POST' },
     VIEW_DEBTORS: { label: 'View Debtors', icon: Users, color: 'orange', endpoint: '/debt-collection/debtors', method: 'GET' },
+    AUTO_ALLOCATE_PAYMENTS: { label: 'Allocate Payments', icon: Wallet, color: 'purple', endpoint: '/financial/ai-advisor/allocate-payments', method: 'POST' },
+    EXPORT_REPORT: { label: 'Export Financial Report', icon: FileDown, color: 'emerald', endpoint: '/financial/ai-advisor/snapshot', method: 'GET' },
+    SAVE_REPORT: { label: 'Save Report to System', icon: Save, color: 'purple', endpoint: '/financial/ai-advisor/reports', method: 'POST' },
   };
 
   const isCreateAction = !!createActions[action.type];
@@ -980,6 +1897,76 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
             : `⚠️ ${res.data.message || 'No reminders sent — check SMTP settings'}`);
         } else if (action.type === 'CREATE_CAMPAIGN') {
           setResult(`✅ Campaign "${res.data.campaign?.name || ''}" created!`);
+        } else if (action.type === 'AUTO_ALLOCATE_PAYMENTS') {
+          const allocated = res.data.allocated ?? 0;
+          setResult(allocated > 0
+            ? `✅ Allocated ZMW ${Number(res.data.totalAmount || 0).toFixed(2)} across ${allocated} payment(s)`
+            : `ℹ️ ${res.data.message || 'All payments already allocated'}`);
+        } else if (action.type === 'EXPORT_REPORT') {
+          const snap = res.data;
+          // Build common rows for all formats
+          const rows = [
+            ['Sync School — Financial Report', new Date().toLocaleDateString('en-GB')],
+            [],
+            ['Revenue (Month)', snap.revenue?.thisMonth || 0],
+            ['Expenses (Month)', snap.expenses?.thisMonth || 0],
+            ['Net Income', snap.profitability?.netIncomeThisMonth || 0],
+            ['Collection Rate %', snap.feeCollection?.collectionRatePercent || 'N/A'],
+            ['Outstanding Fees', snap.feeCollection?.outstanding || 0],
+          ];
+          const filename = `sync-report-${new Date().toISOString().slice(0, 10)}`;
+
+          // Offer download options
+          const doCSV = () => {
+            const csv = rows.map(r => r.join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `${filename}.csv`;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+          };
+          const doExcel = () => {
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Summary');
+            XLSX.writeFile(wb, `${filename}.xlsx`);
+          };
+          const doPDF = () => {
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            doc.setFillColor(16, 185, 129);
+            doc.rect(0, 0, 210, 22, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(13);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Sync School — Financial Snapshot', 14, 14);
+            doc.setTextColor(0, 0, 0);
+            autoTable(doc, {
+              startY: 30,
+              head: [['Metric', 'Value']],
+              body: rows.filter(r => r.length === 2 && r[0]).map(r => [String(r[0]), String(r[1])]),
+              styles: { fontSize: 9 },
+              headStyles: { fillColor: [16, 185, 129], textColor: 255 },
+              margin: { left: 14, right: 14 },
+            });
+            doc.save(`${filename}.pdf`);
+          };
+          // Store handlers on window so JSX can use them (same component)
+          (window as any).__syncExport = { doCSV, doExcel, doPDF };
+          // If AI specified a format, trigger it immediately
+          const fmt = (action.params?.format || '').toUpperCase();
+          if (fmt === 'PDF') { doPDF(); setResult('✅ PDF report downloaded'); }
+          else if (fmt === 'EXCEL' || fmt === 'XLSX') { doExcel(); setResult('✅ Excel report downloaded'); }
+          else if (fmt === 'CSV') { doCSV(); setResult('✅ CSV report downloaded'); }
+          else setResult('EXPORT_FORMAT_PICKER');
+        } else if (action.type === 'SAVE_REPORT') {
+          const title = action.params?.title || `Financial Report ${new Date().toLocaleDateString('en-GB')}`;
+          const saveRes = await api.post('/financial/ai-advisor/reports', {
+            title,
+            reportType: action.params?.reportType || 'CUSTOM',
+            termId: action.params?.termId || undefined,
+            summary: action.params?.summary || undefined,
+          });
+          setResult(`✅ Report "${saveRes.data.report?.title || title}" saved to system successfully!`);
         } else {
           setResult('✅ Done!');
         }
@@ -1021,6 +2008,21 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
             )}
             {executing ? 'Executing...' : confirmed ? `Confirm ${config.label}` : config.label}
           </button>
+        </div>
+      ) : result === 'EXPORT_FORMAT_PICKER' ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-slate-600 dark:text-gray-300 flex items-center gap-1">
+            <FileDown size={12} className="text-emerald-500" /> Choose export format:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: '📄 PDF', fn: () => (window as any).__syncExport?.doPDF(), color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50' },
+              { label: '📊 Excel', fn: () => (window as any).__syncExport?.doExcel(), color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50' },
+              { label: '📋 CSV', fn: () => (window as any).__syncExport?.doCSV(), color: 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600' },
+            ].map(({ label, fn, color }) => (
+              <button key={label} onClick={fn} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${color}`}>{label}</button>
+            ))}
+          </div>
         </div>
       ) : (
         <p className="text-xs text-slate-600 dark:text-gray-400 flex items-start gap-1">

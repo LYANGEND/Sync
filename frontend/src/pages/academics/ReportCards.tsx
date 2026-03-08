@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, AlertCircle, CheckCircle, Printer, Download, FileSpreadsheet } from 'lucide-react';
+import { FileText, AlertCircle, CheckCircle, Printer, Download, FileSpreadsheet, Mail, Brain, Loader2, X } from 'lucide-react';
 import { exportToCSV, exportToExcel } from '../../utils/exportUtils';
 import { reportCardService, StudentReport } from '../../services/reportCardService';
 import api from '../../utils/api';
 import StudentReportCard from '../../components/academics/StudentReportCard';
 import ClassBroadsheet from '../../components/academics/ClassBroadsheet';
+import aiIntelligenceService, { ParentLetterResponse } from '../../services/aiIntelligenceService';
+import toast from 'react-hot-toast';
 
 
 interface Class {
@@ -44,6 +46,9 @@ const ReportCards: React.FC = () => {
   const [teacherRemark, setTeacherRemark] = useState('');
   const [principalRemark, setPrincipalRemark] = useState('');
   const [savingRemarks, setSavingRemarks] = useState(false);
+  const [parentLetter, setParentLetter] = useState<ParentLetterResponse | null>(null);
+  const [generatingLetter, setGeneratingLetter] = useState(false);
+  const [showLetterModal, setShowLetterModal] = useState(false);
   const reportRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -174,8 +179,21 @@ const ReportCards: React.FC = () => {
 
 
 
-  const handleViewBroadsheet = async () => {
-    if (!selectedClass || !selectedTerm) return;
+  const handleGenerateParentLetter = async () => {
+    if (!selectedStudent || !selectedTerm) return;
+    setGeneratingLetter(true);
+    try {
+      const letter = await aiIntelligenceService.generateParentLetter(selectedStudent, selectedTerm);
+      setParentLetter(letter);
+      setShowLetterModal(true);
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || 'Failed to generate parent letter');
+    } finally {
+      setGeneratingLetter(false);
+    }
+  };
+
+  const handleViewBroadsheet = async () => {    if (!selectedClass || !selectedTerm) return;
     try {
       setGenerating(true);
       // Auto-generate reports
@@ -317,6 +335,15 @@ const ReportCards: React.FC = () => {
             <FileSpreadsheet size={20} />
             Broadsheet
           </button>
+          <button
+            onClick={handleGenerateParentLetter}
+            disabled={!selectedStudent || !selectedTerm || generatingLetter}
+            title="Generate an AI-written personalised letter to the student's guardian"
+            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:bg-violet-300 disabled:cursor-not-allowed"
+          >
+            {generatingLetter ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}
+            {generatingLetter ? 'Writing…' : 'AI Parent Letter'}
+          </button>
         </div>
 
         {error && (
@@ -357,6 +384,57 @@ const ReportCards: React.FC = () => {
               <StudentReportCard report={r} editable={false} />
             </div>
           ))}
+        </div>
+      )}
+
+      {/* AI Parent Letter Modal */}
+      {showLetterModal && parentLetter && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
+                  <Brain className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-white">AI Parent Letter</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {parentLetter.studentName} · {parentLetter.termName}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const win = window.open('', '_blank');
+                    if (win) {
+                      win.document.write(`<html><head><title>Parent Letter — ${parentLetter.studentName}</title><style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;line-height:1.7;font-size:16px;}</style></head><body>${parentLetter.letterHtml}</body></html>`);
+                      win.document.close();
+                      win.print();
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  <Printer size={15} /> Print
+                </button>
+                <button
+                  onClick={() => setShowLetterModal(false)}
+                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 p-8">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none"
+                dangerouslySetInnerHTML={{ __html: parentLetter.letterHtml || `<p style="white-space:pre-wrap">${parentLetter.letterPlainText}</p>` }}
+              />
+            </div>
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500 text-center">
+              Generated by AI · Review before sending · Generated {new Date(parentLetter.generatedAt).toLocaleString()}
+            </div>
+          </div>
         </div>
       )}
     </div>

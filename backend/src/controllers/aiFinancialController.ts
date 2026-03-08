@@ -886,6 +886,16 @@ IMPORTANT: Only ONE action block per response. Always confirm what you're about 
 - CREATE_CAMPAIGN — Create a debt collection campaign. Params: name, minAmountOwed, targetSegments
 - VIEW_DEBTORS — Navigate to the Debt Collection dashboard
 
+**PAYMENT OPERATIONS:**
+- AUTO_ALLOCATE_PAYMENTS — Automatically allocate all unallocated payments to outstanding student fee balances (oldest due date first). No params required. Use when user asks to allocate payments, fix balances, or reconcile ledger.
+  Example: {"type":"AUTO_ALLOCATE_PAYMENTS"}
+
+**REPORTS & EXPORTS:**
+- EXPORT_REPORT — Export the current financial health report. Optional params: format (PDF/EXCEL/CSV, default PDF). Use when user asks to export, download, print, or generate a report PDF/Excel/CSV.
+  Example: {"type":"EXPORT_REPORT","format":"PDF"}
+- SAVE_REPORT — Save the current financial snapshot as a named report in the system, optionally linked to an academic term. Required: title (string). Optional: reportType (AUDIT_REPORT/INCOME_STATEMENT/FEE_STATEMENT/CASH_FLOW/AGED_RECEIVABLES/COMPLIANCE/CUSTOM), termName (string — will look up term by name), summary (string).
+  Example: {"type":"SAVE_REPORT","title":"Term 1 2026 Financial Audit","reportType":"AUDIT_REPORT","termName":"Term 1 2026"}
+
 === ACTION RULES ===
 1. ONLY include an action block when the user EXPLICITLY asks you to create/record/send something
 2. For regular analysis questions, just answer normally — NO action block
@@ -1472,5 +1482,383 @@ export const executeAIAction = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('AI Action execution error:', error);
     res.status(500).json({ error: error.message || 'Failed to execute action' });
+  }
+};
+
+// ========================================
+// CASH FLOW FORECAST
+// ========================================
+export const getCashFlowForecast = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const isAvailable = await aiService.isAvailable();
+    if (!isAvailable) return res.status(503).json({ error: 'AI is not configured. Set up AI in School Settings.' });
+
+    const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
+    const branchFilter: any = branchId ? { branchId } : {};
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+    const ninetyDaysLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+    const [recentPayments, recentExpenses, upcomingFees, activeTerm] = await Promise.all([
+      prisma.payment.findMany({
+        where: { status: 'COMPLETED', paymentDate: { gte: sixMonthsAgo }, ...branchFilter },
+        select: { amount: true, paymentDate: true },
+      }),
+      prisma.expense.findMany({
+        where: { status: 'PAID', date: { gte: sixMonthsAgo }, ...branchFilter },
+        select: { totalAmount: true, date: true },
+      }),
+      prisma.studentFeeStructure.findMany({
+        where: { dueDate: { gte: now, lte: ninetyDaysLater } },
+        select: { amountDue: true, amountPaid: true, dueDate: true },
+      }),
+      prisma.academicTerm.findFirst({ where: { isActive: true } }),
+    ]);
+
+    // Aggregate by month
+    const monthlyRevenue: Record<string, number> = {};
+    for (const p of recentPayments) {
+      const key = p.paymentDate.toISOString().slice(0, 7);
+      monthlyRevenue[key] = (monthlyRevenue[key] || 0) + Number(p.amount);
+    }
+    const monthlyExpenses: Record<string, number> = {};
+    for (const e of recentExpenses) {
+      const key = e.date.toISOString().slice(0, 7);
+      monthlyExpenses[key] = (monthlyExpenses[key] || 0) + Number(e.totalAmount);
+    }
+
+    const t30 = new Date(now.getTime() + 30 * 86400000);
+    const t60 = new Date(now.getTime() + 60 * 86400000);
+    const t90 = new Date(now.getTime() + 90 * 86400000);
+    const outstanding = (cutoff: Date) =>
+      upcomingFees
+        .filter(f => f.dueDate && new Date(f.dueDate) <= cutoff)
+        .reduce((s, f) => s + Math.max(0, Number(f.amountDue) - Number(f.amountPaid)), 0);
+
+    const startTime = Date.now();
+    const result = await aiService.generateJSON<{
+      forecast30: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+      forecast60: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+      forecast90: { expectedInflow: number; expectedOutflow: number; netCashFlow: number };
+      keyAssumptions: string[];
+      riskFactors: string[];
+      recommendations: string[];
+      narrative: string;
+    }>(
+      `You are a financial forecaster for a Zambian school. Analyze historical monthly data and forecast cash flows.
+Historical Monthly Revenue (ZMW): ${JSON.stringify(monthlyRevenue)}
+Historical Monthly Expenses (ZMW): ${JSON.stringify(monthlyExpenses)}
+Upcoming outstanding fee due amounts: 30-day: ZMW ${outstanding(t30).toFixed(2)}, 60-day: ZMW ${outstanding(t60).toFixed(2)}, 90-day: ZMW ${outstanding(t90).toFixed(2)}
+Active term: ${activeTerm?.name || 'Unknown'}
+Current Date: ${now.toISOString().slice(0, 10)}
+
+Respond with JSON only:
+{
+  "forecast30": {"expectedInflow": <ZMW number>, "expectedOutflow": <ZMW number>, "netCashFlow": <ZMW number>},
+  "forecast60": {"expectedInflow": <ZMW number>, "expectedOutflow": <ZMW number>, "netCashFlow": <ZMW number>},
+  "forecast90": {"expectedInflow": <ZMW number>, "expectedOutflow": <ZMW number>, "netCashFlow": <ZMW number>},
+  "keyAssumptions": ["..."],
+  "riskFactors": ["..."],
+  "recommendations": ["..."],
+  "narrative": "2-3 sentence executive summary"
+}`,
+      { temperature: 0.3 }
+    );
+
+    aiUsageTracker.track({ userId: user.userId, branchId: user.branchId, feature: 'financial-advisor', action: 'cash-flow-forecast', responseTimeMs: Date.now() - startTime });
+    res.json(result);
+  } catch (error: any) {
+    console.error('Cash flow forecast error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate forecast' });
+  }
+};
+
+// ========================================
+// ZAMBIAN COMPLIANCE TRACKER
+// ========================================
+export const getComplianceStatus = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-based
+
+    const [latestPayroll, ytdPayroll, taxExpenses] = await Promise.all([
+      prisma.payrollRun.findFirst({
+        where: branchId ? { branchId } : {},
+        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+      }),
+      prisma.payslip.aggregate({
+        where: {
+          isPaid: true,
+          paidAt: { gte: new Date(currentYear, 0, 1) },
+          payrollRun: branchId ? { branchId } : {},
+        },
+        _sum: { payeTax: true, napsaContribution: true, nhimaContribution: true },
+      }),
+      prisma.expense.aggregate({
+        where: {
+          category: 'TAXES' as any,
+          status: 'PAID',
+          date: { gte: new Date(currentYear, 0, 1) },
+          ...(branchId ? { branchId } : {}),
+        },
+        _sum: { totalAmount: true },
+      }),
+    ]);
+
+    const paye = Number(ytdPayroll._sum?.payeTax || 0);
+    const napsa = Number(ytdPayroll._sum?.napsaContribution || 0);
+    const nhima = Number(ytdPayroll._sum?.nhimaContribution || 0);
+    const taxPaid = Number(taxExpenses._sum?.totalAmount || 0);
+    const hasPayroll = !!latestPayroll;
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const lastRunLabel = latestPayroll ? `${months[latestPayroll.month - 1]} ${latestPayroll.year}` : null;
+    const payrollCurrent = latestPayroll && latestPayroll.year === currentYear && latestPayroll.month >= currentMonth - 1;
+
+    const nextMonth = new Date(currentYear, now.getMonth() + 1, 1);
+    const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    const compliance = {
+      paye: {
+        status: !hasPayroll ? 'unknown' : paye > 0 ? (payrollCurrent ? 'compliant' : 'warning') : 'overdue',
+        description: paye > 0 ? `ZMW ${paye.toFixed(2)} PAYE deducted YTD (last run: ${lastRunLabel})` : 'No PAYE deducted this year — verify payroll setup',
+        lastAmount: paye,
+        nextDeadline: fmt(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 14)),
+      },
+      napsa: {
+        status: !hasPayroll ? 'unknown' : napsa > 0 ? (payrollCurrent ? 'compliant' : 'warning') : 'overdue',
+        description: napsa > 0 ? `ZMW ${(napsa * 2).toFixed(2)} total NAPSA (5%+5%) YTD (last run: ${lastRunLabel})` : 'No NAPSA deducted — 5% employee + 5% employer required',
+        lastAmount: napsa * 2,
+        nextDeadline: fmt(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 10)),
+      },
+      nhima: {
+        status: !hasPayroll ? 'unknown' : nhima > 0 ? (payrollCurrent ? 'compliant' : 'warning') : 'overdue',
+        description: nhima > 0 ? `ZMW ${(nhima * 2).toFixed(2)} total NHIMA (1%+1%) YTD (last run: ${lastRunLabel})` : 'No NHIMA deducted — 1% employee + 1% employer required',
+        lastAmount: nhima * 2,
+        nextDeadline: fmt(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 14)),
+      },
+      zra: {
+        status: taxPaid > 0 ? 'compliant' : 'warning',
+        description: taxPaid > 0 ? `ZMW ${taxPaid.toFixed(2)} in tax payments recorded this year` : 'No ZRA tax payments recorded — verify if school is VAT-registered',
+        nextDeadline: fmt(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 21)),
+      },
+      overallScore: !hasPayroll ? 50 : (paye > 0 && napsa > 0 && nhima > 0) ? (payrollCurrent ? 95 : 72) : 35,
+      overallLabel: !hasPayroll ? 'Unknown' : (paye > 0 && napsa > 0 && nhima > 0) ? (payrollCurrent ? 'Compliant' : 'Review Required') : 'Non-Compliant',
+      alerts: [
+        ...(!hasPayroll ? ['No payroll run found — set up payroll to track statutory compliance'] : []),
+        ...(paye === 0 && hasPayroll ? ['⚠️ PAYE not deducted — all staff earning above ZMW 57,600/year must pay PAYE'] : []),
+        ...(napsa === 0 && hasPayroll ? ['⚠️ NAPSA contributions missing — 5% employee + 5% employer monthly'] : []),
+        ...(nhima === 0 && hasPayroll ? ['⚠️ NHIMA contributions missing — 1% employee + 1% employer monthly'] : []),
+        ...(!payrollCurrent && hasPayroll ? [`⚠️ Latest payroll was ${lastRunLabel} — ensure current month is processed`] : []),
+      ],
+      recommendations: [
+        'Process payroll before the 10th of each month to meet NAPSA deadline',
+        'File PAYE returns via ZRA iTax portal by 14th of the following month',
+        'Keep all NAPSA and NHIMA payment receipts for your audit trail',
+        'Register on ZRA iTax at zra.org.zm if not already done',
+      ],
+    };
+
+    res.json(compliance);
+  } catch (error: any) {
+    console.error('Compliance status error:', error);
+    res.status(500).json({ error: error.message || 'Failed to check compliance status' });
+  }
+};
+
+// ========================================
+// AUTO PAYMENT ALLOCATOR
+// ========================================
+export const autoAllocatePayments = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
+    const branchFilter: any = branchId ? { branchId } : {};
+
+    // Load all completed payments with their existing allocations
+    const payments = await prisma.payment.findMany({
+      where: { status: 'COMPLETED', ...branchFilter },
+      select: {
+        id: true, studentId: true, amount: true, transactionId: true,
+        allocations: { select: { amount: true, studentFeeId: true } },
+        student: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    let paymentsProcessed = 0;
+    let totalAllocated = 0;
+    const results: any[] = [];
+
+    for (const payment of payments) {
+      const alreadyAllocated = payment.allocations.reduce((s, a) => s + Number(a.amount), 0);
+      let unallocated = Number(payment.amount) - alreadyAllocated;
+      if (unallocated < 0.01) continue;
+
+      // Get outstanding fees for this student, oldest due date first
+      const allFees = await prisma.studentFeeStructure.findMany({
+        where: { studentId: payment.studentId },
+        orderBy: { dueDate: 'asc' },
+      });
+      const outstandingFees = allFees.filter(f => Number(f.amountDue) > Number(f.amountPaid));
+      if (!outstandingFees.length) continue;
+
+      const newAllocations: { paymentId: string; studentFeeId: string; amount: number }[] = [];
+      for (const fee of outstandingFees) {
+        if (unallocated < 0.01) break;
+        // Skip if already allocated for this payment+fee pair
+        if (payment.allocations.some(a => a.studentFeeId === fee.id)) continue;
+        const outstanding = Number(fee.amountDue) - Number(fee.amountPaid);
+        const toAllocate = Math.min(unallocated, outstanding);
+        newAllocations.push({ paymentId: payment.id, studentFeeId: fee.id, amount: toAllocate });
+        unallocated -= toAllocate;
+      }
+
+      if (newAllocations.length > 0) {
+        const ops: any[] = [
+          ...newAllocations.map(a => prisma.paymentAllocation.create({ data: a })),
+          ...newAllocations.map(a =>
+            prisma.studentFeeStructure.update({
+              where: { id: a.studentFeeId },
+              data: { amountPaid: { increment: a.amount } },
+            })
+          ),
+        ];
+        await prisma.$transaction(ops);
+        paymentsProcessed++;
+        const amt = newAllocations.reduce((s, a) => s + a.amount, 0);
+        totalAllocated += amt;
+        results.push({
+          student: `${payment.student.firstName} ${payment.student.lastName}`,
+          transactionId: payment.transactionId || payment.id.slice(0, 8),
+          allocations: newAllocations.length,
+          amount: amt,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      allocated: paymentsProcessed,
+      totalAmount: totalAllocated,
+      results,
+      message: paymentsProcessed > 0
+        ? `Auto-allocated ZMW ${totalAllocated.toFixed(2)} across ${paymentsProcessed} payment(s)`
+        : 'All payments are already fully allocated — ledger is clean',
+    });
+  } catch (error: any) {
+    console.error('Payment allocation error:', error);
+    res.status(500).json({ error: error.message || 'Failed to allocate payments' });
+  }
+};
+
+// ========================================
+// FINANCIAL REPORT: SAVE TO SYSTEM
+// ========================================
+export const saveReport = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { title, reportType, termId, summary } = req.body;
+    if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
+
+    const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
+
+    // Gather a fresh snapshot of the financial data to embed in the report
+    const snapshot = await gatherFinancialSnapshot(branchId);
+
+    const report = await prisma.financialReport.create({
+      data: {
+        title: title.trim(),
+        reportType: reportType || 'CUSTOM',
+        termId: termId || null,
+        summary: summary || null,
+        data: snapshot as any,
+        generatedBy: user.userId,
+        branchId: branchId || null,
+      },
+      include: {
+        term: { select: { name: true } },
+        user: { select: { fullName: true } },
+      },
+    });
+
+    res.json({ success: true, report });
+  } catch (error: any) {
+    console.error('Save report error:', error);
+    res.status(500).json({ error: error.message || 'Failed to save report' });
+  }
+};
+
+// ========================================
+// FINANCIAL REPORT: LIST SAVED REPORTS
+// ========================================
+export const listReports = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
+
+    const reports = await prisma.financialReport.findMany({
+      where: branchId ? { branchId } : {},
+      orderBy: { reportDate: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        reportType: true,
+        reportDate: true,
+        summary: true,
+        termId: true,
+        term: { select: { name: true } },
+        user: { select: { fullName: true } },
+      },
+      take: 100,
+    });
+
+    res.json(reports);
+  } catch (error: any) {
+    console.error('List reports error:', error);
+    res.status(500).json({ error: error.message || 'Failed to list reports' });
+  }
+};
+
+// ========================================
+// FINANCIAL REPORT: GET SINGLE REPORT
+// ========================================
+export const getReport = async (req: Request, res: Response) => {
+  try {
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const report = await prisma.financialReport.findUnique({
+      where: { id: req.params.id },
+      include: {
+        term: { select: { name: true } },
+        user: { select: { fullName: true } },
+      },
+    });
+
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    // Branch-level users can only see their own branch reports
+    if (user.role !== 'SUPER_ADMIN' && report.branchId && report.branchId !== user.branchId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    res.json(report);
+  } catch (error: any) {
+    console.error('Get report error:', error);
+    res.status(500).json({ error: error.message || 'Failed to get report' });
   }
 };

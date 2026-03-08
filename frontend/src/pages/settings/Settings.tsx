@@ -123,6 +123,21 @@ const Settings = () => {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [testSending, setTestSending] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ channel: string; success: boolean; message: string } | null>(null);
+
+  const handleSendTest = async (channel: 'email' | 'sms' | 'whatsapp') => {
+    setTestSending(channel);
+    setTestResult(null);
+    try {
+      const res = await api.post('/communication/test-message', { channel });
+      setTestResult({ channel, success: true, message: res.data.message || 'Test sent successfully!' });
+    } catch (error: any) {
+      setTestResult({ channel, success: false, message: error.response?.data?.error || 'Test failed' });
+    } finally {
+      setTestSending(null);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -780,6 +795,110 @@ const Settings = () => {
                 </div>
               </div>
             </div>
+
+            {/* WhatsApp Settings */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b pb-2">
+                <Phone className="text-green-600 dark:text-green-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">WhatsApp Integration</h2>
+              </div>
+
+              <div className="flex items-center justify-between mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-800 dark:text-white">Enable WhatsApp Notifications</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Send announcements, fee reminders and alerts via WhatsApp</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.whatsappEnabled}
+                    onChange={(e) => setSettings({ ...settings, whatsappEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Provider</label>
+                  <select
+                    value={settings.whatsappProvider}
+                    onChange={(e) => setSettings({ ...settings, whatsappProvider: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">Select provider...</option>
+                    <option value="meta">Meta Cloud API (Official)</option>
+                    <option value="twilio">Twilio WhatsApp</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Number ID</label>
+                  <input
+                    type="text"
+                    value={settings.whatsappPhoneId}
+                    onChange={(e) => setSettings({ ...settings, whatsappPhoneId: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder="From Meta/Twilio dashboard"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key / Access Token</label>
+                  <input
+                    type="password"
+                    value={settings.whatsappApiKey}
+                    onChange={(e) => setSettings({ ...settings, whatsappApiKey: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder="Your WhatsApp API access token"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Send Test Messages */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b pb-2">
+                <Send className="text-orange-600 dark:text-orange-400" size={20} />
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Test Communications</h2>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Send a test message to yourself to verify your channel configuration works.</p>
+
+              {testResult && (
+                <div className={`mb-4 p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>
+                  {testResult.message}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleSendTest('email')}
+                  disabled={testSending === 'email'}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50 text-sm font-medium"
+                >
+                  <Mail size={16} />
+                  {testSending === 'email' ? 'Sending...' : 'Test Email'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendTest('sms')}
+                  disabled={testSending === 'sms'}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors disabled:opacity-50 text-sm font-medium"
+                >
+                  <MessageSquare size={16} />
+                  {testSending === 'sms' ? 'Sending...' : 'Test SMS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendTest('whatsapp')}
+                  disabled={testSending === 'whatsapp'}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50 text-sm font-medium"
+                >
+                  <Phone size={16} />
+                  {testSending === 'whatsapp' ? 'Sending...' : 'Test WhatsApp'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -905,67 +1024,6 @@ const Settings = () => {
                     placeholder="sk-..."
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Your AI provider API key. Stored securely in the database.</p>
-                </div>
-              </div>
-            </div>
-
-            {/* WhatsApp Configuration */}
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
-              <div className="flex items-center gap-2 mb-4 border-b pb-2">
-                <MessageSquare className="text-green-600 dark:text-green-400" size={20} />
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">WhatsApp Integration</h2>
-              </div>
-
-              <div className="flex items-center justify-between mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-800 dark:text-white">Enable WhatsApp Notifications</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Send fee reminders, attendance alerts, and announcements via WhatsApp</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.whatsappEnabled}
-                    onChange={(e) => setSettings({ ...settings, whatsappEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                </label>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">WhatsApp Provider</label>
-                  <select
-                    value={settings.whatsappProvider}
-                    onChange={(e) => setSettings({ ...settings, whatsappProvider: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-                  >
-                    <option value="">Select provider...</option>
-                    <option value="meta">Meta Cloud API (Official)</option>
-                    <option value="twilio">Twilio WhatsApp</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Number ID</label>
-                  <input
-                    type="text"
-                    value={settings.whatsappPhoneId}
-                    onChange={(e) => setSettings({ ...settings, whatsappPhoneId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-                    placeholder="From Meta/Twilio dashboard"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key / Access Token</label>
-                  <input
-                    type="password"
-                    value={settings.whatsappApiKey}
-                    onChange={(e) => setSettings({ ...settings, whatsappApiKey: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-                    placeholder="Your WhatsApp API access token"
-                  />
                 </div>
               </div>
             </div>
