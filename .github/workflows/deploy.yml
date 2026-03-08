@@ -88,6 +88,10 @@ jobs:
             echo "⚠️ HOST secret not set — skipping server deployment."
           fi
 
+      - name: Checkout code (needed to copy compose file to server)
+        if: steps.check.outputs.configured == 'true'
+        uses: actions/checkout@v4
+
       - name: Determine deploy config
         id: config
         if: steps.check.outputs.configured == 'true'
@@ -101,6 +105,16 @@ jobs:
             echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
             echo "app_dir=~/app-mt" >> $GITHUB_OUTPUT
           fi
+
+      - name: Copy docker-compose.prod.yml to server
+        if: steps.check.outputs.configured == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "docker-compose.prod.yml"
+          target: ${{ steps.config.outputs.app_dir }}
 
       - name: Deploy to server via SSH
         if: steps.check.outputs.configured == 'true'
