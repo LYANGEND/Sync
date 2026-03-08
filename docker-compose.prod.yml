@@ -5,14 +5,14 @@ services:
     image: ghcr.io/lyangend/sync/backend:master
     container_name: sync_backend
     restart: always
-    network_mode: "host"
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
       - PORT=3002
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
+    networks:
+      - sync_network
 
   frontend:
     image: ghcr.io/lyangend/sync/frontend:master

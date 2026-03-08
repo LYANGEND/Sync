@@ -39,15 +39,19 @@ jobs:
         id: config
         run: |
           if [ "${{ github.ref_name }}" == "master" ]; then
-            # Single-tenant configuration
+            # Single-tenant: frontend proxies API via nginx /api → backend
             echo "tag=master" >> $GITHUB_OUTPUT
-            echo "vite_api_url=" >> $GITHUB_OUTPUT
+            echo "vite_api_url=/api" >> $GITHUB_OUTPUT
             echo "deployment=single-tenant" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
+            echo "app_dir=~/app" >> $GITHUB_OUTPUT
           else
             # Multi-tenant configuration
             echo "tag=latest" >> $GITHUB_OUTPUT
             echo "vite_api_url=/api" >> $GITHUB_OUTPUT
             echo "deployment=multi-tenant" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
+            echo "app_dir=~/app-mt" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push ${{ matrix.service }}
@@ -66,18 +70,77 @@ jobs:
         run: |
           echo "✅ Built: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ steps.config.outputs.tag }}"
           echo "📦 Deployment: ${{ steps.config.outputs.deployment }}"
-          echo "🔧 VITE_API_URL: ${{ steps.config.outputs.vite_api_url || '(default)' }}"
+          echo "🔧 VITE_API_URL: ${{ steps.config.outputs.vite_api_url }}"
 
-  summary:
+  # Auto-deploy to server via SSH after both images are built
+  deploy-to-server:
     needs: build-and-push
     runs-on: ubuntu-latest
+    # Only deploy if SSH secrets are configured
+    if: ${{ secrets.SSH_HOST != '' }}
+
+    steps:
+      - name: Determine deploy config
+        id: config
+        run: |
+          if [ "${{ github.ref_name }}" == "master" ]; then
+            echo "tag=master" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
+            echo "app_dir=~/app" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
+            echo "app_dir=~/app-mt" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            echo "🚀 Deploying ${{ github.ref_name }} to server..."
+
+            # Go to app directory
+            cd ${{ steps.config.outputs.app_dir }}
+
+            # Login to GHCR (needed to pull private packages)
+            echo "${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Pull new images
+            echo "📥 Pulling new images (tag: ${{ steps.config.outputs.tag }})..."
+            docker compose -f ${{ steps.config.outputs.compose_file }} pull
+
+            # Restart containers with new images (zero-downtime: backend first, then frontend)
+            echo "🔄 Restarting backend..."
+            docker compose -f ${{ steps.config.outputs.compose_file }} up -d --no-deps backend
+
+            echo "🔄 Restarting frontend..."
+            docker compose -f ${{ steps.config.outputs.compose_file }} up -d --no-deps frontend
+
+            # Clean up old images to save disk space
+            docker image prune -f
+
+            echo "✅ Deployment complete!"
+            docker compose -f ${{ steps.config.outputs.compose_file }} ps
+
+  summary:
+    needs: [build-and-push, deploy-to-server]
+    runs-on: ubuntu-latest
+    if: always()
     steps:
       - name: Deployment Summary
         run: |
-          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Build & Deploy Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          
+          echo "**Build:** ${{ needs.build-and-push.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Server Deploy:** ${{ needs.deploy-to-server.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           if [ "${{ github.ref_name }}" == "master" ]; then
             echo "**System:** Single-tenant" >> $GITHUB_STEP_SUMMARY
             echo "**Tag:** \`:master\`" >> $GITHUB_STEP_SUMMARY
@@ -85,13 +148,6 @@ jobs:
             echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/lyangend/sync/frontend:master\`" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/lyangend/sync/backend:master\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "cd ~/app" >> $GITHUB_STEP_SUMMARY
-            echo "TAG=master docker compose pull" >> $GITHUB_STEP_SUMMARY
-            echo "TAG=master docker compose up -d" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           else
             echo "**System:** Multi-tenant (Ops Platform)" >> $GITHUB_STEP_SUMMARY
             echo "**Tag:** \`:latest\`" >> $GITHUB_STEP_SUMMARY
@@ -99,11 +155,9 @@ jobs:
             echo "### 📦 Images Built:" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/lyangend/sync/frontend:latest\`" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/lyangend/sync/backend:latest\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.deploy-to-server.result }}" == "skipped" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔄 To Deploy on Server:" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "cd ~/app-mt" >> $GITHUB_STEP_SUMMARY
-            echo "docker compose -f docker-compose.prod.yml pull" >> $GITHUB_STEP_SUMMARY
-            echo "docker compose -f docker-compose.prod.yml up -d" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Auto-deploy skipped** — add SSH_HOST, SSH_USER, SSH_KEY secrets to enable automatic server deployment." >> $GITHUB_STEP_SUMMARY
           fi
