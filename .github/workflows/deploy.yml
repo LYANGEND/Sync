@@ -119,22 +119,28 @@ jobs:
             # Login to GHCR
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+            # Use docker-compose v1 (installed as separate binary on this server)
+            COMPOSE="docker-compose"
+            if ! command -v docker-compose &> /dev/null; then
+              COMPOSE="docker compose"
+            fi
+
             # Pull new images
             echo "📥 Pulling new images (tag: ${{ steps.config.outputs.tag }})..."
-            docker compose -f ${{ steps.config.outputs.compose_file }} pull
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} pull
 
             # Restart containers with new images (zero-downtime: backend first, then frontend)
             echo "🔄 Restarting backend..."
-            docker compose -f ${{ steps.config.outputs.compose_file }} up -d --no-deps backend
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} up -d --no-deps backend
 
             echo "🔄 Restarting frontend..."
-            docker compose -f ${{ steps.config.outputs.compose_file }} up -d --no-deps frontend
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} up -d --no-deps frontend
 
             # Clean up old images to save disk space
             docker image prune -f
 
             echo "✅ Deployment complete!"
-            docker compose -f ${{ steps.config.outputs.compose_file }} ps
+            $COMPOSE -f ${{ steps.config.outputs.compose_file }} ps
 
   summary:
     needs: [build-and-push, deploy-to-server]
