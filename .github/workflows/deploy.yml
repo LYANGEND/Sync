@@ -151,6 +151,13 @@ jobs:
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} rm -f backend || true
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} up -d --no-deps backend
 
+            # Wait for backend to be ready, then run any pending migrations
+            echo "⏳ Waiting for backend to start..."
+            sleep 8
+            echo "🗄️ Running Prisma migrations..."
+            docker exec sync_backend npx prisma migrate deploy
+            echo "✅ Migrations applied"
+
             echo "🔄 Restarting frontend..."
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} stop frontend || true
             $COMPOSE -f ${{ steps.config.outputs.compose_file }} rm -f frontend || true

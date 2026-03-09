@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { masterAIService } from '../services/masterAIService';
 import * as convoService from '../services/conversationService';
+import aiService from '../services/aiService';
 
 // ==========================================
 // MASTER AI OPS CONTROLLER
@@ -94,6 +95,14 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }
     if (message.length > 2000) {
       return res.status(400).json({ error: 'Message too long (max 2000 characters)' });
+    }
+
+    // Check AI availability before doing anything
+    const isAvailable = await aiService.isAvailable();
+    if (!isAvailable) {
+      return res.status(503).json({
+        error: 'AI is not configured. Please set up AI in School Settings (Settings → AI Configuration).',
+      });
     }
 
     // Get or create conversation (via shared service)
