@@ -143,7 +143,19 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error('Master AI execute error:', error);
-    res.status(500).json({ error: 'Failed to process command', details: error.message });
+    // Detect invalid/expired API key — return 503 with actionable message
+    const msg: string = error.message || '';
+    if (
+      msg.includes('invalid_api_key') ||
+      msg.includes('Incorrect API key') ||
+      msg.includes('authentication') ||
+      msg.includes('401')
+    ) {
+      return res.status(503).json({
+        error: 'Your AI API key is invalid or has expired. Please update it in School Settings → AI Configuration.',
+      });
+    }
+    res.status(500).json({ error: 'Failed to process command', details: msg });
   }
 };
 

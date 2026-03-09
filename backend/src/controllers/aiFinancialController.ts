@@ -1026,7 +1026,13 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('AI Financial Advisor error:', error);
-    res.status(500).json({ error: error.message || 'Failed to get AI financial advice' });
+    const msg: string = error.message || '';
+    if (msg.includes('invalid_api_key') || msg.includes('Incorrect API key') || msg.includes('authentication')) {
+      return res.status(503).json({
+        error: 'Your AI API key is invalid or has expired. Please update it in School Settings → AI Configuration.',
+      });
+    }
+    res.status(500).json({ error: msg || 'Failed to get AI financial advice' });
   }
 };
 
