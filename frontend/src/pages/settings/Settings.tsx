@@ -76,9 +76,9 @@ const Settings = () => {
     schoolWebsite: '',
     currentTermId: '',
 
-    primaryColor: '#2563eb',
+    primaryColor: '#1A3A9C',
     secondaryColor: '#475569',
-    accentColor: '#f59e0b',
+    accentColor: '#F5820A',
 
     emailNotificationsEnabled: true,
     smsNotificationsEnabled: false,

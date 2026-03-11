@@ -57,7 +57,7 @@ export const shareReceipt = async (receipt: {
     date: string;
 }): Promise<boolean> => {
     const text = `
-Payment Receipt - Sync School Management
+Payment Receipt — Sync
 
 Transaction ID: ${receipt.transactionId}
 Student: ${receipt.studentName}
@@ -99,8 +99,8 @@ export const sharePDF = async (file: File, title: string): Promise<boolean> => {
  */
 export const shareAppLink = async (): Promise<boolean> => {
     return share({
-        title: 'Sync School Management',
-        text: 'Check out Sync - Modern School Management System for managing students, fees, and academics.',
+        title: 'Sync — Run your school. In sync.',
+        text: 'Check out Sync — the AI-powered school management platform for students, fees, payroll, and academics.',
         url: window.location.origin,
     });
 };

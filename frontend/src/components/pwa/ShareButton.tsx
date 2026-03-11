@@ -86,7 +86,7 @@ Student: ${studentName}
 Amount: ZMW ${amount.toLocaleString()}
 Date: ${date}
 
-Paid via Sync School Management
+Paid via Sync — Run your school. In sync.
     `.trim();
 
         const success = await share({

@@ -178,7 +178,7 @@ export const createStudent = async (req: Request, res: Response) => {
           const emailSubject = 'Welcome to Sync - Your Parent Account';
           const emailBody = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #2563eb;">Welcome to Sync School Management</h2>
+              <h2 style="color: #1A3A9C;">Welcome to Sync — Run your school. In sync.</h2>
               <p>Dear ${data.guardianName || 'Parent'},</p>
               <p>A parent account has been automatically created for you to track your child's progress.</p>
               <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">

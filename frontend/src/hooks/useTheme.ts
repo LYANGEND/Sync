@@ -44,7 +44,7 @@ export const useTheme = (): ThemeConfig => {
         // Update meta theme-color
         const metaTheme = document.querySelector('meta[name="theme-color"]');
         if (metaTheme) {
-            metaTheme.setAttribute('content', shouldBeDark ? '#1e293b' : '#2563eb');
+            metaTheme.setAttribute('content', shouldBeDark ? '#0F2471' : '#1A3A9C');
         }
     }, [getSystemPreference]);
 

@@ -27,10 +27,10 @@ export default defineConfig({
         'offline.html'
       ],
       manifest: {
-        name: 'Sync School Management',
+        name: 'Sync',
         short_name: 'Sync',
-        description: 'Modern School Management System - Manage students, fees, attendance, and academics in one place.',
-        theme_color: '#2563eb',
+        description: 'Run your school. In sync. The AI-powered school management platform for fees, students, payroll, and academics.',
+        theme_color: '#1A3A9C',
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait-primary',

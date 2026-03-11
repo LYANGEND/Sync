@@ -552,7 +552,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
       doc.setPage(p);
       doc.setFontSize(7);
       doc.setTextColor(160, 160, 160);
-      doc.text(`Sync School Management System · Page ${p} of ${pageCount} · ${dateStr}`, 14, 290);
+      doc.text(`Sync · Run your school. In sync. · Page ${p} of ${pageCount} · ${dateStr}`, 14, 290);
     }
 
     doc.save(`sync-finance-report-${new Date().toISOString().slice(0, 10)}.pdf`);
