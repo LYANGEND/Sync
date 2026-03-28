@@ -954,12 +954,31 @@ export const updateCommunicationPreferences = async (req: Request, res: Response
 
 export const sendTestMessage = async (req: Request, res: Response) => {
   try {
-    const { channel, to } = z.object({
+    const { channel, to: providedTo } = z.object({
       channel: z.enum(['email', 'sms', 'whatsapp']),
-      to: z.string().min(1),
+      to: z.string().optional(),
     }).parse(req.body);
 
     const userId = (req as any).user?.userId;
+
+    // Fallback: use the school's own phone / email if no recipient provided
+    let to = providedTo?.trim() || '';
+    if (!to) {
+      const schoolSettings = await prisma.schoolSettings.findFirst();
+      if (channel === 'email') {
+        to = schoolSettings?.schoolEmail || '';
+      } else {
+        to = schoolSettings?.schoolPhone || '';
+      }
+    }
+
+    if (!to) {
+      return res.status(400).json({
+        success: false,
+        message: `No recipient provided and no school ${channel === 'email' ? 'email' : 'phone'} configured in settings.`,
+      });
+    }
+
     let success = false;
     let error = '';
 

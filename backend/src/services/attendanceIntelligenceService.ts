@@ -1,7 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
-import { sendEmail } from './notificationService';
+import { sendEmail } from './emailService';
 
 interface AttendancePattern {
   type: string; // CONSECUTIVE_ABSENCE, DAY_PATTERN, POST_EVENT, CHRONIC
@@ -285,12 +285,12 @@ class AttendanceIntelligenceService {
     // Email
     const parentEmail = student.parent?.email || student.guardianEmail;
     if (parentEmail) {
-      emailSent = await sendEmail({
-        to: parentEmail,
-        subject: `Attendance Alert - ${studentName} - ${schoolName}`,
-        text: alert.message,
-        html: `<h2>Attendance Alert</h2><p>${alert.message}</p><p>Please contact the school for more information.</p>`,
-      });
+      emailSent = await sendEmail(
+        parentEmail,
+        `Attendance Alert - ${studentName} - ${schoolName}`,
+        `<h2>Attendance Alert</h2><p>${alert.message}</p><p>Please contact the school for more information.</p>`,
+        { source: 'attendance_intelligence' }
+      );
     }
 
     // SMS

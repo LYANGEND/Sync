@@ -32,11 +32,34 @@ export interface Topic {
 
 export interface GeneratedLessonPlan {
   lessonPlan: string;
+  structuredLessonPlan?: StructuredLessonPlan | null;
   topic: { id: string; title: string };
   subtopics: { id: string; title: string }[];
   subjectName: string;
   gradeLevel: number;
   duration: number;
+}
+
+export interface StructuredLessonSegment {
+  index: number;
+  phase: 'GREETING' | 'ATTENDANCE' | 'RECAP' | 'TEACHING' | 'Q_AND_A' | 'ACTIVITY' | 'WRAP_UP';
+  title: string;
+  durationMinutes: number;
+  startMinute: number;
+  endMinute: number;
+  objectives: string[];
+  talkingPoints: string[];
+  instructions: string;
+  subTopicId?: string;
+}
+
+export interface StructuredLessonPlan {
+  title: string;
+  source: 'SYLLABUS' | 'TEXT' | 'FALLBACK';
+  totalDurationMinutes: number;
+  subjectName?: string | null;
+  topicTitle?: string | null;
+  segments: StructuredLessonSegment[];
 }
 
 export interface NextTopicSuggestion {

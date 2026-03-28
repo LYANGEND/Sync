@@ -2,6 +2,8 @@ import { prisma } from '../utils/prisma';
 import aiService from './aiService';
 import { elevenLabsService } from './elevenLabsService';
 import { Prisma } from '@prisma/client';
+import { buildRuntimeLessonPlan } from './lessonPlanRuntimeService';
+import { emitClassroomAIMessage } from './classroomRealtimeService';
 
 // ==========================================
 // AI TUTOR SERVICE — The Teaching Brain
@@ -45,8 +47,31 @@ interface LessonSection {
   activities?: string[];
 }
 
+interface SessionStartOptions {
+  generateAudio?: boolean;
+}
+
+interface PhaseTransitionOptions {
+  generateAudio?: boolean;
+  prompt?: string;
+  currentTopic?: string;
+  topicIndex?: number;
+  segmentObjectives?: string[];
+  segmentTalkingPoints?: string[];
+  segmentIndex?: number;
+  totalSegments?: number;
+}
+
+interface PromptSegmentContext {
+  title: string | null;
+  objectives: string[];
+  talkingPoints: string[];
+  segmentIndex?: number;
+  totalSegments?: number;
+}
+
 // Lesson phases the AI tutor progresses through
-const LESSON_PHASES = [
+export const LESSON_PHASES = [
   'GREETING',
   'ATTENDANCE', 
   'RECAP',
@@ -67,7 +92,8 @@ function buildTeacherSystemPrompt(
   lessonPlan: string | null,
   phase: LessonPhase,
   classInfo: { className?: string; subjectName?: string; studentNames?: string[] },
-  conversationHistory: ConversationEntry[]
+  conversationHistory: ConversationEntry[],
+  segmentContext?: PromptSegmentContext | null
 ): string {
   const defaultPersona = `You are ${tutorName}, a warm, patient, and engaging teacher. 
 You speak clearly, use simple language appropriate for the students' level, and make learning fun.
@@ -140,6 +166,26 @@ Use their names when calling on them or responding to them.`;
     lessonContext = `\n\nLESSON PLAN:\n${lessonPlan}`;
   }
 
+  let activeSegmentContext = '';
+  if (segmentContext?.title) {
+    const parts = [
+      `CURRENT SEGMENT: ${segmentContext.title}`,
+      segmentContext.segmentIndex && segmentContext.totalSegments
+        ? `Segment ${segmentContext.segmentIndex} of ${segmentContext.totalSegments}`
+        : null,
+      segmentContext.objectives.length > 0
+        ? `Objectives: ${segmentContext.objectives.join('; ')}`
+        : null,
+      segmentContext.talkingPoints.length > 0
+        ? `Talking points: ${segmentContext.talkingPoints.join('; ')}`
+        : null,
+    ].filter(Boolean);
+
+    if (parts.length > 0) {
+      activeSegmentContext = `\n\n${parts.join('\n')}`;
+    }
+  }
+
   // Recent conversation for context
   const recentConvo = conversationHistory.slice(-20).map(entry => {
     const role = entry.role === 'teacher' ? 'Teacher' : entry.speaker;
@@ -156,6 +202,7 @@ CURRENT LESSON PHASE: ${phase}
 ${phaseInstructions}
 ${studentContext}
 ${lessonContext}
+${activeSegmentContext}
 
 TEACHING RULES:
 1. Keep responses conversational and natural — like a real teacher speaking to a class.
@@ -175,19 +222,123 @@ ${recentConvo || '(Class is just starting)'}
 Respond ONLY as ${tutorName}. Do not include any meta-text, role labels, or formatting markers.`;
 }
 
+async function resolveSegmentContext(
+  classroom: {
+    title: string;
+    scheduledStart: Date;
+    scheduledEnd: Date;
+    topicId: string | null;
+    selectedSubTopicIds: unknown;
+    lessonPlanContent: string | null;
+  },
+  options: {
+    topicIndex?: number | null;
+    currentTopic?: string | null;
+    segmentObjectives?: string[];
+    segmentTalkingPoints?: string[];
+    segmentIndex?: number;
+    totalSegments?: number;
+  } = {}
+): Promise<PromptSegmentContext | null> {
+  if (
+    options.currentTopic
+    && (
+      (options.segmentObjectives && options.segmentObjectives.length > 0)
+      || (options.segmentTalkingPoints && options.segmentTalkingPoints.length > 0)
+      || options.segmentIndex !== undefined
+      || options.totalSegments !== undefined
+    )
+  ) {
+    return {
+      title: options.currentTopic,
+      objectives: options.segmentObjectives || [],
+      talkingPoints: options.segmentTalkingPoints || [],
+      segmentIndex: options.segmentIndex,
+      totalSegments: options.totalSegments,
+    };
+  }
+
+  const runtimePlan = await buildRuntimeLessonPlan({
+    title: classroom.title,
+    scheduledStart: classroom.scheduledStart,
+    scheduledEnd: classroom.scheduledEnd,
+    topicId: classroom.topicId,
+    selectedSubTopicIds: classroom.selectedSubTopicIds,
+    lessonPlanContent: classroom.lessonPlanContent,
+  });
+
+  const byIndex = typeof options.topicIndex === 'number'
+    ? runtimePlan.segments[options.topicIndex]
+    : undefined;
+  const segment = byIndex
+    || runtimePlan.segments.find(item => item.title === options.currentTopic)
+    || runtimePlan.segments[0];
+
+  if (!segment) {
+    return null;
+  }
+
+  return {
+    title: segment.title,
+    objectives: segment.objectives,
+    talkingPoints: segment.talkingPoints,
+    segmentIndex: segment.index + 1,
+    totalSegments: runtimePlan.segments.length,
+  };
+}
+
 class AITutorService {
   // In-memory session states (for active sessions)
   private activeSessions: Map<string, {
     conversationHistory: ConversationEntry[];
     phase: LessonPhase;
     topicIndex: number;
+    currentTopic: string | null;
+    segmentContext: PromptSegmentContext | null;
     startedAt: Date;
   }> = new Map();
+
+  private encodeAudioBuffer(audioBuffer?: Buffer | null) {
+    return audioBuffer ? audioBuffer.toString('base64') : null;
+  }
+
+  private emitTeacherMessage(
+    classroomId: string,
+    chatMessage: {
+      id: string;
+      senderName: string;
+      message: string;
+      createdAt: Date;
+    },
+    options: {
+      audioBuffer?: Buffer | null;
+      audioContentType?: string;
+      phase?: string | null;
+      currentTopic?: string | null;
+      messageType: 'greeting' | 'reply' | 'transition' | 'speak' | 'quiz';
+    }
+  ) {
+    emitClassroomAIMessage(classroomId, {
+      id: chatMessage.id,
+      senderName: chatMessage.senderName,
+      isAI: true,
+      message: chatMessage.message,
+      createdAt: chatMessage.createdAt.toISOString(),
+      audio: this.encodeAudioBuffer(options.audioBuffer),
+      audioContentType: options.audioContentType || null,
+      phase: options.phase || null,
+      currentTopic: options.currentTopic || null,
+      messageType: options.messageType,
+    });
+  }
 
   /**
    * Initialize or resume a tutor session for a classroom
    */
-  async startSession(classroomId: string): Promise<{ sessionId: string; greeting: TutorResponse }> {
+  async startSession(
+    classroomId: string,
+    options: SessionStartOptions = {}
+  ): Promise<{ sessionId: string; greeting: TutorResponse }> {
     const classroom = await prisma.virtualClassroom.findUnique({
       where: { id: classroomId },
     });
@@ -251,6 +402,10 @@ class AITutorService {
       }
     }
 
+    const initialSegmentContext = await resolveSegmentContext(classroom, {
+      topicIndex: 0,
+    });
+
     // Create DB session
     const session = await prisma.aITutorSession.create({
       data: {
@@ -258,6 +413,8 @@ class AITutorService {
         status: 'ACTIVE',
         voiceId: classroom.aiTutorVoiceId,
         lessonPhase: 'GREETING',
+        currentTopic: initialSegmentContext?.title || null,
+        topicIndex: initialSegmentContext?.segmentIndex ? initialSegmentContext.segmentIndex - 1 : 0,
         startedAt: new Date(),
       },
     });
@@ -266,7 +423,9 @@ class AITutorService {
     this.activeSessions.set(session.id, {
       conversationHistory: [],
       phase: 'GREETING',
-      topicIndex: 0,
+      topicIndex: initialSegmentContext?.segmentIndex ? initialSegmentContext.segmentIndex - 1 : 0,
+      currentTopic: initialSegmentContext?.title || null,
+      segmentContext: initialSegmentContext,
       startedAt: new Date(),
     });
 
@@ -277,7 +436,8 @@ class AITutorService {
       classroom.lessonPlanContent,
       'GREETING',
       { className, subjectName, studentNames },
-      []
+      [],
+      initialSegmentContext
     );
 
     const greetingPrompt = `The class is about to start. Students are joining the virtual classroom. Greet them and introduce today's lesson on ${subjectName}. Be warm and enthusiastic.`;
@@ -288,21 +448,24 @@ class AITutorService {
     ]);
 
     const greetingText = aiResponse.content;
+    const shouldGenerateAudio = options.generateAudio !== false;
 
     // Generate voice for the greeting
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
-    try {
-      const ttsResult = await elevenLabsService.teacherSpeak(
-        greetingText,
-        { voiceId: classroom.aiTutorVoiceId || undefined }
-      );
-      if (ttsResult) {
-        audioBuffer = ttsResult.audioBuffer;
-        audioContentType = ttsResult.contentType;
+    if (shouldGenerateAudio) {
+      try {
+        const ttsResult = await elevenLabsService.teacherSpeak(
+          greetingText,
+          { voiceId: classroom.aiTutorVoiceId || undefined }
+        );
+        if (ttsResult) {
+          audioBuffer = ttsResult.audioBuffer;
+          audioContentType = ttsResult.contentType;
+        }
+      } catch (err) {
+        console.warn('[AITutor] TTS failed for greeting, continuing with text only:', err);
       }
-    } catch (err) {
-      console.warn('[AITutor] TTS failed for greeting, continuing with text only:', err);
     }
 
     // Save to conversation history
@@ -318,7 +481,7 @@ class AITutorService {
     memState.conversationHistory.push(entry);
 
     // Save chat message to DB
-    await prisma.classroomChat.create({
+    const greetingChat = await prisma.classroomChat.create({
       data: {
         classroomId,
         senderName: classroom.aiTutorName,
@@ -335,6 +498,14 @@ class AITutorService {
         totalTTSCharacters: { increment: greetingText.length },
         conversationLog: [entry] as unknown as Prisma.InputJsonValue,
       },
+    });
+
+    this.emitTeacherMessage(classroomId, greetingChat, {
+      audioBuffer,
+      audioContentType,
+      phase: 'GREETING',
+      currentTopic: initialSegmentContext?.title || null,
+      messageType: 'greeting',
     });
 
     return {
@@ -378,6 +549,8 @@ class AITutorService {
         conversationHistory: (session.conversationLog as unknown as ConversationEntry[]) || [],
         phase: (session.lessonPhase as LessonPhase) || 'TEACHING',
         topicIndex: session.topicIndex || 0,
+        currentTopic: session.currentTopic || null,
+        segmentContext: null,
         startedAt: session.startedAt || new Date(),
       };
       this.activeSessions.set(sessionId, memState);
@@ -438,6 +611,14 @@ class AITutorService {
       }
     }
 
+    memState.segmentContext = await resolveSegmentContext(classroom, {
+      topicIndex: memState.topicIndex,
+      currentTopic: memState.currentTopic,
+    });
+    if (memState.segmentContext?.title) {
+      memState.currentTopic = memState.segmentContext.title;
+    }
+
     // Build system prompt for current phase
     const systemPrompt = buildTeacherSystemPrompt(
       classroom.aiTutorName,
@@ -445,7 +626,8 @@ class AITutorService {
       classroom.lessonPlanContent,
       memState.phase,
       { className, subjectName, studentNames },
-      memState.conversationHistory
+      memState.conversationHistory,
+      memState.segmentContext
     );
 
     // Build message array for AI
@@ -484,21 +666,21 @@ class AITutorService {
     memState.conversationHistory.push(teacherEntry);
 
     // Save to DB
-    await prisma.classroomChat.createMany({
-      data: [
-        {
-          classroomId: classroom.id,
-          senderName: studentName,
-          isAI: false,
-          message,
-        },
-        {
-          classroomId: classroom.id,
-          senderName: classroom.aiTutorName,
-          isAI: true,
-          message: responseText,
-        },
-      ],
+    await prisma.classroomChat.create({
+      data: {
+        classroomId: classroom.id,
+        senderName: studentName,
+        isAI: false,
+        message,
+      },
+    });
+    const teacherChat = await prisma.classroomChat.create({
+      data: {
+        classroomId: classroom.id,
+        senderName: classroom.aiTutorName,
+        isAI: true,
+        message: responseText,
+      },
     });
 
     // Update session
@@ -511,7 +693,17 @@ class AITutorService {
         questionsAnswered: { increment: 1 },
         conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
         lessonPhase: memState.phase,
+        currentTopic: memState.currentTopic,
+        topicIndex: memState.topicIndex,
       },
+    });
+
+    this.emitTeacherMessage(classroom.id, teacherChat, {
+      audioBuffer,
+      audioContentType,
+      phase: memState.phase,
+      currentTopic: memState.currentTopic,
+      messageType: 'reply',
     });
 
     return {
@@ -531,6 +723,31 @@ class AITutorService {
   async advancePhase(sessionId: string): Promise<TutorResponse> {
     const session = await prisma.aITutorSession.findUnique({
       where: { id: sessionId },
+    });
+
+    if (!session || session.status !== 'ACTIVE') {
+      throw new Error('No active tutoring session');
+    }
+
+    const currentPhase = ((session.lessonPhase as LessonPhase) || 'GREETING');
+    const currentIdx = LESSON_PHASES.indexOf(currentPhase);
+    const nextIdx = Math.min(currentIdx + 1, LESSON_PHASES.length - 1);
+    const nextPhase = LESSON_PHASES[nextIdx] as LessonPhase;
+
+    return this.transitionToPhase(sessionId, nextPhase);
+  }
+
+  /**
+   * Transition the lesson to a specific phase.
+   * Used both for manual controls and automation.
+   */
+  async transitionToPhase(
+    sessionId: string,
+    targetPhase: LessonPhase,
+    options: PhaseTransitionOptions = {}
+  ): Promise<TutorResponse> {
+    const session = await prisma.aITutorSession.findUnique({
+      where: { id: sessionId },
       include: { classroom: true },
     });
 
@@ -544,17 +761,33 @@ class AITutorService {
         conversationHistory: (session.conversationLog as unknown as ConversationEntry[]) || [],
         phase: (session.lessonPhase as LessonPhase) || 'GREETING',
         topicIndex: session.topicIndex || 0,
+        currentTopic: session.currentTopic || null,
+        segmentContext: null,
         startedAt: session.startedAt || new Date(),
       };
       this.activeSessions.set(sessionId, memState);
     }
 
-    // Find next phase
-    const currentIdx = LESSON_PHASES.indexOf(memState.phase);
-    const nextIdx = Math.min(currentIdx + 1, LESSON_PHASES.length - 1);
-    memState.phase = LESSON_PHASES[nextIdx] as LessonPhase;
+    memState.phase = targetPhase;
+    if (typeof options.topicIndex === 'number') {
+      memState.topicIndex = options.topicIndex;
+    }
+    if (options.currentTopic !== undefined) {
+      memState.currentTopic = options.currentTopic;
+    }
 
     const classroom = session.classroom;
+    memState.segmentContext = await resolveSegmentContext(classroom, {
+      topicIndex: memState.topicIndex,
+      currentTopic: memState.currentTopic,
+      segmentObjectives: options.segmentObjectives,
+      segmentTalkingPoints: options.segmentTalkingPoints,
+      segmentIndex: options.segmentIndex,
+      totalSegments: options.totalSegments,
+    });
+    if (memState.segmentContext?.title) {
+      memState.currentTopic = memState.segmentContext.title;
+    }
 
     // Generate transition message
     const systemPrompt = buildTeacherSystemPrompt(
@@ -563,11 +796,13 @@ class AITutorService {
       classroom.lessonPlanContent,
       memState.phase,
       {},
-      memState.conversationHistory
+      memState.conversationHistory,
+      memState.segmentContext
     );
 
-    const transitionPrompt = `Transition the class to the ${memState.phase.replace('_', ' ')} phase. 
-Make a smooth, natural transition from what you were just doing.`;
+    const transitionPrompt = options.prompt || `Transition the class to the ${memState.phase.replace('_', ' ')} phase. 
+Make a smooth, natural transition from what you were just doing.
+${memState.segmentContext?.title ? `Anchor the transition around "${memState.segmentContext.title}".` : ''}`;
 
     const aiResponse = await aiService.chat([
       { role: 'system', content: systemPrompt },
@@ -575,21 +810,24 @@ Make a smooth, natural transition from what you were just doing.`;
     ]);
 
     const responseText = aiResponse.content;
+    const shouldGenerateAudio = options.generateAudio !== false;
 
     // Generate voice
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
-    try {
-      const ttsResult = await elevenLabsService.teacherSpeak(
-        responseText,
-        { voiceId: classroom.aiTutorVoiceId || undefined }
-      );
-      if (ttsResult) {
-        audioBuffer = ttsResult.audioBuffer;
-        audioContentType = ttsResult.contentType;
+    if (shouldGenerateAudio) {
+      try {
+        const ttsResult = await elevenLabsService.teacherSpeak(
+          responseText,
+          { voiceId: classroom.aiTutorVoiceId || undefined }
+        );
+        if (ttsResult) {
+          audioBuffer = ttsResult.audioBuffer;
+          audioContentType = ttsResult.contentType;
+        }
+      } catch (err) {
+        console.warn('[AITutor] TTS failed for phase transition:', err);
       }
-    } catch (err) {
-      console.warn('[AITutor] TTS failed for phase transition:', err);
     }
 
     // Save to history
@@ -603,7 +841,7 @@ Make a smooth, natural transition from what you were just doing.`;
     memState.conversationHistory.push(entry);
 
     // Save to DB
-    await prisma.classroomChat.create({
+    const transitionChat = await prisma.classroomChat.create({
       data: {
         classroomId: classroom.id,
         senderName: classroom.aiTutorName,
@@ -616,10 +854,20 @@ Make a smooth, natural transition from what you were just doing.`;
       where: { id: sessionId },
       data: {
         lessonPhase: memState.phase,
+        currentTopic: memState.currentTopic,
+        topicIndex: memState.topicIndex,
         totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
         totalTTSCharacters: { increment: responseText.length },
         conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
       },
+    });
+
+    this.emitTeacherMessage(classroom.id, transitionChat, {
+      audioBuffer,
+      audioContentType,
+      phase: memState.phase,
+      currentTopic: memState.currentTopic,
+      messageType: 'transition',
     });
 
     return {
@@ -665,13 +913,28 @@ Make a smooth, natural transition from what you were just doing.`;
     }
 
     // Save to DB
-    await prisma.classroomChat.create({
+    const spokenChat = await prisma.classroomChat.create({
       data: {
         classroomId: classroom.id,
         senderName: classroom.aiTutorName,
         isAI: true,
         message: text,
       },
+    });
+
+    await prisma.aITutorSession.update({
+      where: { id: sessionId },
+      data: {
+        totalTTSCharacters: { increment: text.length },
+      },
+    });
+
+    this.emitTeacherMessage(classroom.id, spokenChat, {
+      audioBuffer,
+      audioContentType,
+      phase: session.lessonPhase as string,
+      currentTopic: session.currentTopic || null,
+      messageType: 'speak',
     });
 
     return {
@@ -741,13 +1004,30 @@ After stating each question, pause and say you'll wait for answers.`;
       });
     }
 
-    await prisma.classroomChat.create({
+    const quizChat = await prisma.classroomChat.create({
       data: {
         classroomId: classroom.id,
         senderName: classroom.aiTutorName,
         isAI: true,
         message: quizText,
       },
+    });
+
+    await prisma.aITutorSession.update({
+      where: { id: sessionId },
+      data: {
+        totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
+        totalTTSCharacters: { increment: quizText.length },
+        conversationLog: (memState?.conversationHistory || session.conversationLog || []) as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    this.emitTeacherMessage(classroom.id, quizChat, {
+      audioBuffer,
+      audioContentType,
+      phase: session.lessonPhase as string,
+      currentTopic,
+      messageType: 'quiz',
     });
 
     return {
@@ -935,6 +1215,7 @@ Return a JSON object with these exact keys:
       sessionId: session.id,
       status: session.status,
       phase: memState?.phase || session.lessonPhase,
+      currentTopic: memState?.currentTopic || session.currentTopic,
       tutorName: session.classroom.aiTutorName,
       startedAt: session.startedAt,
       metrics: {

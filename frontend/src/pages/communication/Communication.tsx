@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../utils/api';
 import { 
   Send, Mail, Bell, Users, CheckCircle, AlertCircle, MessageSquare, 
   Megaphone, Clock, BarChart3, Smartphone, MessageCircle, AlertTriangle,
-  Sparkles, Calendar, FileText, Zap
+  Sparkles, Calendar, FileText, Zap, Plus, Trash2, Phone, Wand2, ChevronDown, Wallet
 } from 'lucide-react';
 import ChatInterface from './ChatInterface';
 import SentItems from './SentItems';
@@ -12,7 +13,7 @@ import { useAuth } from '../../context/AuthContext';
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
 
-type TabType = 'announcements' | 'messages' | 'sent' | 'history' | 'templates' | 'emergency';
+type TabType = 'announcements' | 'messages' | 'sent' | 'history' | 'templates' | 'emergency' | 'sms';
 
 const Communication = () => {
   const { user } = useAuth();
@@ -47,6 +48,20 @@ const Communication = () => {
   const [emergencySubject, setEmergencySubject] = useState('');
   const [emergencyMessage, setEmergencyMessage] = useState('');
   const [emergencySending, setEmergencySending] = useState(false);
+
+  // SMS Center state
+  const [smsMode, setSmsMode] = useState<'single' | 'bulk'>('single');
+  const [smsPhone, setSmsPhone] = useState('');
+  const [smsMessage, setSmsMessage] = useState('');
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsStatus, setSmsStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [smsBulkRecipients, setSmsBulkRecipients] = useState<{ phone: string; message: string }[]>([{ phone: '', message: '' }]);
+  const [smsBroadcastPhones, setSmsBroadcastPhones] = useState('');
+  const [smsBroadcastMessage, setSmsBroadcastMessage] = useState('');
+  const [smsBulkType, setSmsBulkType] = useState<'broadcast' | 'individual'>('broadcast');
+  const [smsBalance, setSmsBalance] = useState<string | null>(null);
+  const [smsBalanceLoading, setSmsBalanceLoading] = useState(false);
+  const [smsScheduledAt, setSmsScheduledAt] = useState('');
 
   const isAdmin = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY'].includes(user?.role || '');
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
@@ -215,6 +230,7 @@ const Communication = () => {
 
   const tabs: { key: TabType; label: string; icon: React.ReactNode; show: boolean }[] = [
     { key: 'announcements', label: 'New Announcement', icon: <Megaphone size={18} />, show: canSendAnnouncements },
+    { key: 'sms', label: 'SMS Center', icon: <Phone size={18} />, show: isAdmin },
     { key: 'history', label: 'History', icon: <Clock size={18} />, show: canSendAnnouncements },
     { key: 'messages', label: 'Messages', icon: <MessageSquare size={18} />, show: canChat },
     { key: 'templates', label: 'Templates', icon: <FileText size={18} />, show: canSendAnnouncements },
@@ -223,45 +239,460 @@ const Communication = () => {
   ];
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Communication Hub</h1>
-        <p className="text-gray-500 dark:text-gray-400">Manage announcements, messages, templates and track all communications</p>
+    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-6xl mx-auto space-y-6">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden relative">
+        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none stroke-current">
+          <Megaphone size={160} />
+        </div>
+        <div className="relative z-10">
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <Megaphone className="w-8 h-8 text-blue-200" />
+            Communication Hub
+          </h1>
+          <p className="text-blue-100 mt-2 text-sm md:text-base max-w-2xl leading-relaxed">
+            Centralized platform for announcements, direct messaging, and multi-channel broadcasts to students, parents, and staff.
+          </p>
+        </div>
       </div>
 
       {/* Status Banner */}
-      {status && (
-        <div className={`mb-4 p-4 rounded-lg flex items-center gap-2 ${
-          status.type === 'success' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-        }`}>
-          {status.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
-          {status.message}
-          <button onClick={() => setStatus(null)} className="ml-auto text-sm opacity-60 hover:opacity-100">✕</button>
-        </div>
-      )}
-
-      {/* Tab Navigation */}
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
-        {tabs.filter(t => t.show).map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 whitespace-nowrap text-sm ${
-              activeTab === tab.key
-                ? tab.key === 'emergency' 
-                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20' 
-                  : 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600'
+      <AnimatePresence>
+        {status && activeTab !== 'sms' && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, scale: 0.95 }}
+            className={`p-4 rounded-xl flex items-center gap-3 shadow-sm border ${
+              status.type === 'success' 
+                ? 'bg-green-50/80 border-green-200 dark:bg-green-900/20 dark:border-green-800/50 text-green-800 dark:text-green-300' 
+                : 'bg-red-50/80 border-red-200 dark:bg-red-900/20 dark:border-red-800/50 text-red-800 dark:text-red-300'
             }`}
           >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
+            {status.type === 'success' ? <CheckCircle size={20} className="text-green-600 dark:text-green-400" /> : <AlertCircle size={20} className="text-red-600 dark:text-red-400" />}
+            <span className="font-medium">{status.message}</span>
+            <button onClick={() => setStatus(null)} className="ml-auto p-1 hover:bg-black/5 rounded-lg transition-colors">✕</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Tab Navigation (Framer Motion) */}
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide relative z-0">
+        {tabs.filter(t => t.show).map(tab => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`relative px-4 py-2.5 rounded-xl font-medium transition-colors flex items-center gap-2 whitespace-nowrap text-sm ${
+                isActive
+                  ? tab.key === 'emergency' 
+                    ? 'text-red-700 dark:text-red-400' 
+                    : tab.key === 'sms'
+                    ? 'text-green-700 dark:text-green-400'
+                    : 'text-blue-700 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="communicationTabs"
+                  className="absolute inset-0 bg-white dark:bg-slate-800 shadow-sm border border-gray-200 dark:border-slate-700 rounded-xl -z-10"
+                  initial={false}
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                />
+              )}
+              <span className="relative z-10 flex items-center gap-2">
+                {tab.icon}
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'messages' && canChat ? (
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.2 }}
+        >
+      {activeTab === 'sms' && isAdmin ? (
+        // ===== SMS CENTER TAB =====
+        <div className="space-y-6">
+          {/* SMS Balance & Mode Selector */}
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 md:p-8">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                  <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg text-green-600 dark:text-green-400">
+                    <Phone size={24} />
+                  </div>
+                  SMS Command Center
+                </h2>
+                <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-sm text-sm">Send single or bulk text messages directly to parent and staff mobile numbers.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Balance Check */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSmsBalanceLoading(true);
+                    try {
+                      const res = await api.get('/sms/balance');
+                      setSmsBalance(res.data.balance);
+                    } catch (err: any) {
+                      setSmsBalance(err.response?.data?.error || 'Could not check balance');
+                    } finally {
+                      setSmsBalanceLoading(false);
+                    }
+                  }}
+                  disabled={smsBalanceLoading}
+                  className="px-4 py-2.5 text-sm bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600 font-medium transition-colors shadow-sm flex items-center gap-2"
+                >
+                  <Wallet size={16} className="text-gray-400" />
+                  {smsBalanceLoading ? 'Checking...' : 'Check Credits'}
+                </button>
+                {smsBalance !== null && (
+                  <span className="text-sm font-semibold text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 px-4 py-2.5 rounded-xl shadow-sm">
+                    Credits: {smsBalance}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Mode Toggle */}
+            <div className="flex bg-gray-100/50 dark:bg-slate-700/30 p-1.5 rounded-xl mt-6">
+              <button
+                type="button"
+                onClick={() => { setSmsMode('single'); setSmsStatus(null); }}
+                className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                  smsMode === 'single'
+                    ? 'bg-white dark:bg-slate-800 text-green-600 dark:text-green-400 shadow shadow-green-600/10'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                <Smartphone size={18} />
+                Single Recipient
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSmsMode('bulk'); setSmsStatus(null); }}
+                className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                  smsMode === 'bulk'
+                    ? 'bg-white dark:bg-slate-800 text-green-600 dark:text-green-400 shadow shadow-green-600/10'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                <Users size={18} />
+                Bulk Broadcast
+              </button>
+            </div>
+          </div>
+
+          {/* Status */}
+          <AnimatePresence>
+            {smsStatus && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }} 
+                animate={{ opacity: 1, height: 'auto' }} 
+                exit={{ opacity: 0, height: 0 }}
+                className={`p-4 rounded-xl flex items-center gap-3 border shadow-sm ${
+                smsStatus.type === 'success' 
+                  ? 'bg-green-50/80 border-green-200 dark:bg-green-900/20 dark:border-green-800/50 text-green-800 dark:text-green-300' 
+                  : 'bg-red-50/80 border-red-200 dark:bg-red-900/20 dark:border-red-800/50 text-red-800 dark:text-red-300'
+              }`}>
+                {smsStatus.type === 'success' ? <CheckCircle size={20} className="text-green-600" /> : <AlertCircle size={20} className="text-red-600" />}
+                <span className="font-medium">{smsStatus.message}</span>
+                <button onClick={() => setSmsStatus(null)} className="ml-auto p-1 hover:bg-black/5 rounded-lg opacity-60 hover:opacity-100">✕</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* SINGLE SMS */}
+          {smsMode === 'single' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }} 
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 md:p-8"
+            >
+              <h3 className="font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                <Smartphone size={18} className="text-green-600" />
+                Send Single SMS
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={smsPhone}
+                    onChange={(e) => setSmsPhone(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="e.g. 0977123456 or 260977123456"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Zambian numbers: 0977..., 260977..., or +260977...</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Message</label>
+                  <textarea
+                    rows={4}
+                    value={smsMessage}
+                    onChange={(e) => setSmsMessage(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Type your message..."
+                    maxLength={1600}
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {smsMessage.length}/1600 chars · {Math.ceil(smsMessage.length / 160) || 0} SMS credit{Math.ceil(smsMessage.length / 160) !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1 flex items-center gap-2">
+                    <Calendar size={14} />
+                    Schedule (optional)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="datetime-local"
+                      value={smsScheduledAt}
+                      onChange={(e) => setSmsScheduledAt(e.target.value)}
+                      className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white"
+                      min={new Date().toISOString().slice(0, 16)}
+                    />
+                    {smsScheduledAt && (
+                      <button type="button" onClick={() => setSmsScheduledAt('')} className="text-sm text-red-500 hover:text-red-700">Clear</button>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={smsSending || !smsPhone.trim() || !smsMessage.trim()}
+                  onClick={async () => {
+                    setSmsSending(true);
+                    setSmsStatus(null);
+                    try {
+                      const payload: any = { phone: smsPhone.trim(), message: smsMessage };
+                      if (smsScheduledAt) payload.scheduledAt = new Date(smsScheduledAt).toISOString();
+                      const res = await api.post('/sms/send', payload);
+                      setSmsStatus({ type: 'success', message: res.data.message || 'SMS sent!' });
+                      setSmsPhone('');
+                      setSmsMessage('');
+                      setSmsScheduledAt('');
+                    } catch (err: any) {
+                      setSmsStatus({ type: 'error', message: err.response?.data?.error || err.response?.data?.message || 'Failed to send SMS' });
+                    } finally {
+                      setSmsSending(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors font-medium shadow-sm"
+                >
+                  <Send size={18} />
+                  {smsSending ? 'Sending...' : smsScheduledAt ? 'Schedule SMS' : 'Send SMS'}
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* BULK SMS */}
+          {smsMode === 'bulk' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                  <Users size={18} className="text-green-600" />
+                  Bulk SMS
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSmsBulkType('broadcast')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                      smsBulkType === 'broadcast'
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-800'
+                        : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    Same message to all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSmsBulkType('individual')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                      smsBulkType === 'individual'
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-800'
+                        : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    Different messages
+                  </button>
+                </div>
+              </div>
+
+              {/* Broadcast: same message to many */}
+              {smsBulkType === 'broadcast' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Phone Numbers</label>
+                    <textarea
+                      rows={4}
+                      value={smsBroadcastPhones}
+                      onChange={(e) => setSmsBroadcastPhones(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-green-500 font-mono text-sm"
+                      placeholder={"Enter phone numbers, one per line or comma-separated:\n0977123456\n0966789012\n0955345678"}
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {smsBroadcastPhones.trim() ? smsBroadcastPhones.split(/[,\n]+/).filter(p => p.trim()).length : 0} number(s) entered
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Message (sent to all)</label>
+                    <textarea
+                      rows={4}
+                      value={smsBroadcastMessage}
+                      onChange={(e) => setSmsBroadcastMessage(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-green-500"
+                      placeholder="Type your message..."
+                      maxLength={1600}
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {smsBroadcastMessage.length}/1600 chars · {Math.ceil(smsBroadcastMessage.length / 160) || 0} SMS credit{Math.ceil(smsBroadcastMessage.length / 160) !== 1 ? 's' : ''} per recipient
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1 flex items-center gap-2">
+                      <Calendar size={14} />
+                      Schedule (optional)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        value={smsScheduledAt}
+                        onChange={(e) => setSmsScheduledAt(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white"
+                        min={new Date().toISOString().slice(0, 16)}
+                      />
+                      {smsScheduledAt && (
+                        <button type="button" onClick={() => setSmsScheduledAt('')} className="text-sm text-red-500 hover:text-red-700">Clear</button>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={smsSending || !smsBroadcastPhones.trim() || !smsBroadcastMessage.trim()}
+                    onClick={async () => {
+                      const phones = smsBroadcastPhones.split(/[,\n]+/).map(p => p.trim()).filter(Boolean);
+                      if (phones.length === 0) return;
+                      if (phones.length > 50 && !window.confirm(`You are about to send ${phones.length} SMS messages. Continue?`)) return;
+                      setSmsSending(true);
+                      setSmsStatus(null);
+                      try {
+                        const payload: any = { phones, message: smsBroadcastMessage };
+                        if (smsScheduledAt) payload.scheduledAt = new Date(smsScheduledAt).toISOString();
+                        const res = await api.post('/sms/broadcast', payload);
+                        setSmsStatus({ type: 'success', message: `✅ Broadcast complete: ${res.data.sent}/${res.data.total} sent successfully` });
+                        setSmsBroadcastPhones('');
+                        setSmsBroadcastMessage('');
+                        setSmsScheduledAt('');
+                      } catch (err: any) {
+                        setSmsStatus({ type: 'error', message: err.response?.data?.error || err.response?.data?.message || 'Broadcast failed' });
+                      } finally {
+                        setSmsSending(false);
+                      }
+                    }}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors font-medium shadow-sm"
+                  >
+                    <Send size={18} />
+                    {smsSending ? 'Sending...' : smsScheduledAt ? 'Schedule Broadcast' : `Send Broadcast (${smsBroadcastPhones.trim() ? smsBroadcastPhones.split(/[,\n]+/).filter(p => p.trim()).length : 0} recipients)`}
+                  </button>
+                </div>
+              )}
+
+              {/* Individual: different message per recipient */}
+              {smsBulkType === 'individual' && (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    {smsBulkRecipients.map((r, idx) => (
+                      <div key={idx} className="flex gap-3 items-start p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg border border-gray-200 dark:border-slate-600">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-700 dark:text-green-300 text-sm font-bold">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <input
+                            type="tel"
+                            value={r.phone}
+                            onChange={(e) => {
+                              const updated = [...smsBulkRecipients];
+                              updated[idx].phone = e.target.value;
+                              setSmsBulkRecipients(updated);
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white text-sm"
+                            placeholder="Phone number"
+                          />
+                          <textarea
+                            rows={2}
+                            value={r.message}
+                            onChange={(e) => {
+                              const updated = [...smsBulkRecipients];
+                              updated[idx].message = e.target.value;
+                              setSmsBulkRecipients(updated);
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white text-sm"
+                            placeholder="Message for this recipient..."
+                            maxLength={1600}
+                          />
+                        </div>
+                        {smsBulkRecipients.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setSmsBulkRecipients(smsBulkRecipients.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSmsBulkRecipients([...smsBulkRecipients, { phone: '', message: '' }])}
+                    className="flex items-center gap-2 px-4 py-2 text-sm border border-dashed border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+                  >
+                    <Plus size={16} />
+                    Add Recipient
+                  </button>
+                  <button
+                    type="button"
+                    disabled={smsSending || smsBulkRecipients.every(r => !r.phone.trim() || !r.message.trim())}
+                    onClick={async () => {
+                      const valid = smsBulkRecipients.filter(r => r.phone.trim() && r.message.trim());
+                      if (valid.length === 0) return;
+                      if (valid.length > 20 && !window.confirm(`You are about to send ${valid.length} individual SMS messages. Continue?`)) return;
+                      setSmsSending(true);
+                      setSmsStatus(null);
+                      try {
+                        const res = await api.post('/sms/bulk', { recipients: valid });
+                        setSmsStatus({ type: 'success', message: `✅ Bulk send complete: ${res.data.sent}/${res.data.total} sent successfully` });
+                        setSmsBulkRecipients([{ phone: '', message: '' }]);
+                      } catch (err: any) {
+                        setSmsStatus({ type: 'error', message: err.response?.data?.error || err.response?.data?.message || 'Bulk send failed' });
+                      } finally {
+                        setSmsSending(false);
+                      }
+                    }}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors font-medium shadow-sm"
+                  >
+                    <Send size={18} />
+                    {smsSending ? 'Sending...' : `Send ${smsBulkRecipients.filter(r => r.phone.trim() && r.message.trim()).length} Messages`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : activeTab === 'messages' && canChat ? (
         <ChatInterface />
       ) : activeTab === 'sent' && canViewLogs ? (
         <SentItems />
@@ -370,260 +801,342 @@ const Communication = () => {
         </div>
       ) : activeTab === 'emergency' && isSuperAdmin ? (
         // ===== EMERGENCY BROADCAST TAB =====
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border-2 border-red-200 dark:border-red-900 overflow-hidden">
-          <div className="p-6 border-b border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20">
-            <h2 className="font-semibold text-red-700 dark:text-red-300 flex items-center gap-2">
-              <AlertTriangle size={20} />
+        <div className="bg-red-50 dark:bg-slate-800 rounded-3xl shadow-sm border-2 border-red-500/30 overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none stroke-current text-red-900">
+            <AlertTriangle size={200} />
+          </div>
+          <div className="p-8 border-b border-red-200/50 dark:border-red-900/30 relative z-10">
+            <h2 className="text-2xl font-bold text-red-700 dark:text-red-400 flex items-center gap-3">
+              <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-xl text-red-600 animate-pulse">
+                <AlertTriangle size={28} />
+              </div>
               Emergency Broadcast
             </h2>
-            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-              Sends to ALL users via ALL channels simultaneously (Email, SMS, WhatsApp, Push, In-App)
+            <p className="text-red-600/80 dark:text-red-400/80 mt-2 max-w-xl font-medium">
+              CRITICAL: This sends to ALL users via ALL channels simultaneously (Email, SMS, WhatsApp, Push, In-App). Use only for severe emergencies.
             </p>
           </div>
 
-          <form onSubmit={handleEmergencyBroadcast} className="p-6 space-y-4">
-            <input
-              type="text"
-              value={emergencySubject}
-              onChange={(e) => setEmergencySubject(e.target.value)}
-              placeholder="Emergency subject..."
-              className="w-full px-4 py-2 border border-red-300 dark:border-red-800 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-red-500"
-            />
-            <textarea
-              rows={4}
-              value={emergencyMessage}
-              onChange={(e) => setEmergencyMessage(e.target.value)}
-              placeholder="Describe the emergency situation..."
-              className="w-full px-4 py-2 border border-red-300 dark:border-red-800 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-red-500"
-            />
-            <button
-              type="submit"
-              disabled={emergencySending || !emergencySubject || !emergencyMessage}
-              className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 font-bold shadow-lg"
-            >
-              <Zap size={20} />
-              {emergencySending ? 'Broadcasting...' : '🚨 Send Emergency Broadcast'}
-            </button>
+          <form onSubmit={handleEmergencyBroadcast} className="p-8 space-y-5 relative z-10">
+            <div>
+              <label className="block text-sm font-bold text-red-800 dark:text-red-300 mb-1.5 uppercase tracking-wide">Emergency Subject</label>
+              <input
+                type="text"
+                value={emergencySubject}
+                onChange={(e) => setEmergencySubject(e.target.value)}
+                placeholder="e.g. URGENT: SCHOOL CLOSURE DUE TO WEATHER"
+                className="w-full px-5 py-3 border-2 border-red-300 dark:border-red-800 rounded-xl bg-white dark:bg-slate-900 dark:text-white focus:ring-4 focus:ring-red-500/20 focus:border-red-500 outline-none transition-all placeholder:text-red-300 font-medium text-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-red-800 dark:text-red-300 mb-1.5 uppercase tracking-wide">Emergency Message</label>
+              <textarea
+                rows={5}
+                value={emergencyMessage}
+                onChange={(e) => setEmergencyMessage(e.target.value)}
+                placeholder="Describe the emergency situation clearly and provide immediate instructions..."
+                className="w-full px-5 py-4 border-2 border-red-300 dark:border-red-800 rounded-xl bg-white dark:bg-slate-900 dark:text-white focus:ring-4 focus:ring-red-500/20 focus:border-red-500 outline-none transition-all placeholder:text-red-300 font-medium text-lg"
+              />
+            </div>
+            <div className="pt-4">
+              <button
+                type="submit"
+                disabled={emergencySending || !emergencySubject || !emergencyMessage}
+                className="w-full flex justify-center items-center gap-3 px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg shadow-xl shadow-red-600/30 transition-all active:scale-[0.98]"
+              >
+                <Zap size={24} />
+                {emergencySending ? 'BROADCASTING EMERGENCY...' : '🚨 INITIATE EMERGENCY BROADCAST'}
+              </button>
+            </div>
           </form>
         </div>
       ) : canSendAnnouncements ? (
         // ===== NEW ANNOUNCEMENT TAB =====
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-          <div className="p-6 border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700 flex justify-between items-center">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+          <div className="p-6 md:p-8 border-b border-gray-100 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-              <h2 className="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-                <Send size={20} className="text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                  <Send size={24} />
+                </div>
                 New Announcement
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Broadcast via multiple channels. All deliveries are tracked.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Broadcast messages via multiple channels. All deliveries are tracked.</p>
             </div>
             <button
               onClick={() => setShowAIComposer(!showAIComposer)}
-              className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/40 text-sm font-medium border border-purple-200 dark:border-purple-800"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                showAIComposer
+                  ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-800'
+                  : 'bg-white text-purple-600 border-purple-200 hover:bg-purple-50 hover:border-purple-300 dark:bg-slate-700 dark:border-purple-900 dark:hover:bg-purple-900/20'
+              }`}
             >
-              <Sparkles size={16} />
-              AI Compose
+              <Wand2 size={18} />
+              {showAIComposer ? 'Close AI Assistant' : 'Write with AI'}
             </button>
           </div>
 
           {/* AI Composer Panel */}
-          {showAIComposer && (
-            <div className="p-6 border-b border-purple-100 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10">
-              <h3 className="font-medium text-purple-700 dark:text-purple-300 mb-3 flex items-center gap-2">
-                <Sparkles size={16} /> AI Announcement Composer
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  value={aiTopic}
-                  onChange={(e) => setAiTopic(e.target.value)}
-                  placeholder="What is the announcement about? e.g. 'School closing early on Friday'"
-                  className="w-full px-4 py-2 border border-purple-200 dark:border-purple-800 rounded-lg bg-white dark:bg-slate-700 dark:text-white"
-                />
-                <select
-                  value={aiTone}
-                  onChange={(e) => setAiTone(e.target.value as any)}
-                  className="px-4 py-2 border border-purple-200 dark:border-purple-800 rounded-lg bg-white dark:bg-slate-700 dark:text-white"
-                >
-                  <option value="formal">Formal</option>
-                  <option value="friendly">Friendly</option>
-                  <option value="urgent">Urgent</option>
-                  <option value="celebratory">Celebratory</option>
-                </select>
-              </div>
-              <button
-                onClick={handleAICompose}
-                disabled={aiLoading || !aiTopic}
-                className="mt-3 flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm font-medium"
+          <AnimatePresence>
+            {showAIComposer && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="border-b border-purple-100 dark:border-purple-900/50 bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 overflow-hidden"
               >
-                <Sparkles size={14} />
-                {aiLoading ? 'Generating...' : 'Generate Draft'}
-              </button>
-            </div>
-          )}
+                <div className="p-6 md:p-8 space-y-4">
+                  <h3 className="font-bold text-purple-800 dark:text-purple-300 flex items-center gap-2">
+                    <Sparkles size={18} className="text-purple-600 dark:text-purple-400" /> AI Announcement Composer
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-semibold text-purple-700/70 dark:text-purple-300/70 mb-1.5 uppercase">Topic or details</label>
+                      <input
+                        type="text"
+                        value={aiTopic}
+                        onChange={(e) => setAiTopic(e.target.value)}
+                        placeholder="e.g. 'School closing early tomorrow due to weather. Pickup at 1PM.'"
+                        className="w-full px-4 py-3 border border-purple-200 dark:border-purple-800/60 rounded-xl bg-white dark:bg-slate-800 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-purple-700/70 dark:text-purple-300/70 mb-1.5 uppercase">Tone</label>
+                      <div className="relative">
+                        <select
+                          value={aiTone}
+                          onChange={(e) => setAiTone(e.target.value as any)}
+                          className="w-full px-4 py-3 border border-purple-200 dark:border-purple-800/60 rounded-xl bg-white dark:bg-slate-800 dark:text-white appearance-none focus:ring-2 focus:ring-purple-500 outline-none font-medium"
+                        >
+                          <option value="formal">Formal & Professional</option>
+                          <option value="friendly">Friendly & Warm</option>
+                          <option value="urgent">Urgent & Direct</option>
+                          <option value="celebratory">Celebratory & Happy</option>
+                        </select>
+                        <ChevronDown size={16} className="absolute right-4 top-3.5 text-purple-400 pointer-events-none" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <button
+                      onClick={handleAICompose}
+                      disabled={aiLoading || !aiTopic}
+                      className="flex justify-center w-full sm:w-auto items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 text-sm font-bold shadow-md shadow-purple-600/20 transition-all active:scale-[0.98]"
+                    >
+                      {aiLoading ? <span className="animate-spin text-xl">✨</span> : <Sparkles size={18} />}
+                      {aiLoading ? 'Drafting with AI...' : 'Generate Draft'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {/* Priority Selector */}
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Priority:</label>
-              {(['NORMAL', 'URGENT', 'EMERGENCY'] as const).map(p => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={`px-3 py-1 rounded-full text-sm font-medium border transition-colors ${
-                    priority === p
-                      ? p === 'EMERGENCY' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'
-                        : p === 'URGENT' ? 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800'
-                        : 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800'
-                      : 'bg-white dark:bg-slate-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-slate-600'
-                  }`}
-                >
-                  {p === 'EMERGENCY' ? '🚨 ' : p === 'URGENT' ? '⚡ ' : ''}{p}
-                </button>
-              ))}
-            </div>
+          <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-8">
+            
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left Column: Message Content */}
+              <div className="lg:col-span-2 space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1.5">Subject</label>
+                  <input
+                    type="text"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    className="w-full px-4 py-3 text-lg font-medium border border-gray-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-gray-50/50 dark:bg-slate-700/50 focus:bg-white dark:focus:bg-slate-800 dark:text-white"
+                    placeholder="e.g. School Closure Notice"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Subject</label>
-              <input
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white dark:bg-slate-700 dark:text-white"
-                placeholder="e.g. School Closure Notice"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Message</label>
-              <textarea
-                rows={6}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white dark:bg-slate-700 dark:text-white"
-                placeholder="Type your announcement here..."
-              />
-            </div>
-
-            {/* Target Audience */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
-                <Users size={16} />
-                Target Audience (Leave empty for ALL users)
-              </label>
-              <div className="flex flex-wrap gap-3">
-                {ROLES.map(role => (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1.5">Message Content</label>
+                  <textarea
+                    rows={8}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-gray-50/50 dark:bg-slate-700/50 focus:bg-white dark:focus:bg-slate-800 dark:text-white resize-y"
+                    placeholder="Type your announcement here..."
+                  />
+                </div>
+                
+                {/* Save as Template Button */}
+                <div className="flex justify-end">
                   <button
-                    key={role}
                     type="button"
-                    onClick={() => handleRoleToggle(role)}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors border ${
-                      targetRoles.includes(role)
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                        : 'bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600'
-                    }`}
+                    onClick={() => {
+                      if (subject && message) {
+                        setTemplateName('');
+                        setTemplateSubject(subject);
+                        setTemplateBody(message);
+                        setShowTemplateForm(true);
+                        setActiveTab('templates');
+                      }
+                    }}
+                    disabled={!subject || !message}
+                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-30 flex items-center gap-1.5 transition-colors p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700"
                   >
-                    {role.replace('_', ' ')}
+                    <FileText size={16} /> Save this as a Template
                   </button>
-                ))}
+                </div>
               </div>
-            </div>
 
-            {/* Schedule */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1 flex items-center gap-2">
-                <Calendar size={16} />
-                Schedule (optional — leave empty to send immediately)
-              </label>
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full md:w-auto px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white"
-                min={new Date().toISOString().slice(0, 16)}
-              />
-              {scheduledAt && (
-                <button type="button" onClick={() => setScheduledAt('')} className="ml-2 text-sm text-red-500 hover:text-red-700">
-                  Clear schedule
-                </button>
-              )}
+              {/* Right Column: Settings & Delivery */}
+              <div className="space-y-8 lg:border-l border-gray-100 dark:border-slate-700 lg:pl-8">
+                {/* Priority Selection */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2.5 uppercase tracking-wider">Priority Level</label>
+                  <div className="flex flex-col gap-2">
+                    {(['NORMAL', 'URGENT', 'EMERGENCY'] as const).map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setPriority(p)}
+                        className={`px-4 py-2.5 rounded-xl text-sm font-bold border transition-all text-left flex items-center justify-between ${
+                          priority === p
+                            ? p === 'EMERGENCY' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800 ring-1 ring-red-500 shadow-sm'
+                              : p === 'URGENT' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800 ring-1 ring-amber-500 shadow-sm'
+                              : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800 ring-1 ring-blue-500 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          {p === 'EMERGENCY' ? '🚨 ' : p === 'URGENT' ? '⚡ ' : '📋 '} {p.charAt(0) + p.slice(1).toLowerCase()}
+                        </span>
+                        {priority === p && <CheckCircle size={16} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Target Audience */}
+                <div>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Users size={14} />
+                      Target Roles
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {ROLES.map(role => (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => handleRoleToggle(role)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                          targetRoles.includes(role)
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        {role.replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">Leave all unchecked to send to EVERYONE.</p>
+                </div>
+
+                {/* Schedule */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
+                    <Calendar size={14} />
+                    Schedule Send
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-slate-600 rounded-xl bg-gray-50 dark:bg-slate-700/50 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500 dark:text-white outline-none"
+                    min={new Date().toISOString().slice(0, 16)}
+                  />
+                  {scheduledAt && (
+                    <button type="button" onClick={() => setScheduledAt('')} className="mt-1.5 text-xs font-medium text-red-500 hover:text-red-600 text-right w-full">
+                      Clear Schedule
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Delivery Channels */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4 border-t border-gray-100 dark:border-slate-700">
-              {/* In-App Notification */}
-              <label className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all text-center ${
-                sendNotification ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
-              }`}>
-                <input type="checkbox" checked={sendNotification} onChange={(e) => setSendNotification(e.target.checked)} className="sr-only" />
-                <Bell size={24} className={sendNotification ? 'text-blue-600' : 'text-gray-400'} />
-                <span className="text-xs font-medium mt-2 text-gray-700 dark:text-gray-200">In-App</span>
-                {sendNotification && <CheckCircle size={14} className="mt-1 text-blue-600" />}
-              </label>
+            <div className="pt-6 border-t border-gray-100 dark:border-slate-700">
+              <label className="block text-sm font-semibold text-gray-800 dark:text-white mb-3">Delivery Channels</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* In-App Notification */}
+                <label className={`relative flex flex-col items-center justify-center p-4 min-h-[100px] border-2 rounded-2xl cursor-pointer transition-all ${
+                  sendNotification 
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' 
+                    : 'border-gray-200 dark:border-slate-600 hover:border-blue-300 dark:hover:border-blue-700 bg-white dark:bg-slate-800'
+                }`}>
+                  <input type="checkbox" checked={sendNotification} onChange={(e) => setSendNotification(e.target.checked)} className="sr-only" />
+                  <Bell size={28} className={`mb-2 ${sendNotification ? 'text-blue-600' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`text-sm font-bold ${sendNotification ? 'text-blue-800 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'}`}>In-App UI</span>
+                  {sendNotification && <div className="absolute top-2 right-2 text-blue-600"><CheckCircle size={18} className="fill-blue-100" /></div>}
+                </label>
 
-              {/* Email */}
-              <label className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all text-center ${
-                sendEmail ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
-              }`}>
-                <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} className="sr-only" />
-                <Mail size={24} className={sendEmail ? 'text-blue-600' : 'text-gray-400'} />
-                <span className="text-xs font-medium mt-2 text-gray-700 dark:text-gray-200">Email</span>
-                {sendEmail && <CheckCircle size={14} className="mt-1 text-blue-600" />}
-              </label>
+                {/* Email */}
+                <label className={`relative flex flex-col items-center justify-center p-4 min-h-[100px] border-2 rounded-2xl cursor-pointer transition-all ${
+                  sendEmail 
+                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 shadow-sm' 
+                    : 'border-gray-200 dark:border-slate-600 hover:border-indigo-300 dark:hover:border-indigo-700 bg-white dark:bg-slate-800'
+                }`}>
+                  <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} className="sr-only" />
+                  <Mail size={28} className={`mb-2 ${sendEmail ? 'text-indigo-600' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`text-sm font-bold ${sendEmail ? 'text-indigo-800 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`}>Email Inbox</span>
+                  {sendEmail && <div className="absolute top-2 right-2 text-indigo-600"><CheckCircle size={18} className="fill-indigo-100" /></div>}
+                </label>
 
-              {/* SMS */}
-              <label className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all text-center ${
-                sendSms ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
-              }`}>
-                <input type="checkbox" checked={sendSms} onChange={(e) => setSendSms(e.target.checked)} className="sr-only" />
-                <Smartphone size={24} className={sendSms ? 'text-green-600' : 'text-gray-400'} />
-                <span className="text-xs font-medium mt-2 text-gray-700 dark:text-gray-200">SMS</span>
-                {sendSms && <CheckCircle size={14} className="mt-1 text-green-600" />}
-              </label>
+                {/* SMS */}
+                <label className={`relative flex flex-col items-center justify-center p-4 min-h-[100px] border-2 rounded-2xl cursor-pointer transition-all ${
+                  sendSms 
+                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20 shadow-sm' 
+                    : 'border-gray-200 dark:border-slate-600 hover:border-green-300 dark:hover:border-green-700 bg-white dark:bg-slate-800'
+                }`}>
+                  <input type="checkbox" checked={sendSms} onChange={(e) => setSendSms(e.target.checked)} className="sr-only" />
+                  <Smartphone size={28} className={`mb-2 ${sendSms ? 'text-green-600' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`text-sm font-bold ${sendSms ? 'text-green-800 dark:text-green-300' : 'text-gray-500 dark:text-gray-400'}`}>Text / SMS</span>
+                  {sendSms && <div className="absolute top-2 right-2 text-green-600"><CheckCircle size={18} className="fill-green-100" /></div>}
+                </label>
 
-              {/* WhatsApp */}
-              <label className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all text-center ${
-                sendWhatsApp ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
-              }`}>
-                <input type="checkbox" checked={sendWhatsApp} onChange={(e) => setSendWhatsApp(e.target.checked)} className="sr-only" />
-                <MessageCircle size={24} className={sendWhatsApp ? 'text-emerald-600' : 'text-gray-400'} />
-                <span className="text-xs font-medium mt-2 text-gray-700 dark:text-gray-200">WhatsApp</span>
-                {sendWhatsApp && <CheckCircle size={14} className="mt-1 text-emerald-600" />}
-              </label>
+                {/* WhatsApp */}
+                <label className={`relative flex flex-col items-center justify-center p-4 min-h-[100px] border-2 rounded-2xl cursor-pointer transition-all ${
+                  sendWhatsApp 
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm' 
+                    : 'border-gray-200 dark:border-slate-600 hover:border-emerald-300 dark:hover:border-emerald-700 bg-white dark:bg-slate-800'
+                }`}>
+                  <input type="checkbox" checked={sendWhatsApp} onChange={(e) => setSendWhatsApp(e.target.checked)} className="sr-only" />
+                  <MessageCircle size={28} className={`mb-2 ${sendWhatsApp ? 'text-emerald-600' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`text-sm font-bold ${sendWhatsApp ? 'text-emerald-800 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'}`}>WhatsApp</span>
+                  {sendWhatsApp && <div className="absolute top-2 right-2 text-emerald-600"><CheckCircle size={18} className="fill-emerald-100" /></div>}
+                </label>
+              </div>
             </div>
 
-            <div className="flex justify-between items-center pt-4">
-              {/* Save as Template */}
-              <button
-                type="button"
-                onClick={() => {
-                  if (subject && message) {
-                    setTemplateName('');
-                    setTemplateSubject(subject);
-                    setTemplateBody(message);
-                    setShowTemplateForm(true);
-                    setActiveTab('templates');
-                  }
-                }}
-                disabled={!subject || !message}
-                className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 disabled:opacity-30 flex items-center gap-1"
-              >
-                <FileText size={14} /> Save as Template
-              </button>
-
+            {/* Submit Action */}
+            <div className="pt-6 border-t border-gray-100 dark:border-slate-700 flex justify-end">
               <button
                 type="submit"
-                disabled={sending || (!sendEmail && !sendNotification && !sendSms && !sendWhatsApp)}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors font-medium shadow-sm"
+                disabled={sending || (!sendEmail && !sendNotification && !sendSms && !sendWhatsApp) || !subject || !message}
+                className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-lg active:scale-[0.98] ${
+                  sending || (!sendEmail && !sendNotification && !sendSms && !sendWhatsApp) || !subject || !message
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:text-gray-500 shadow-none'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-blue-600/30'
+                }`}
               >
-                {scheduledAt ? <Calendar size={18} /> : <Send size={18} />}
-                {sending ? 'Sending...' : scheduledAt ? 'Schedule Announcement' : 'Send Announcement'}
+                {sending ? (
+                  <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Sending...</>
+                ) : scheduledAt ? (
+                  <><Calendar size={22} /> Schedule for Later</>
+                ) : (
+                  <><Send size={22} /> Send Announcement Now</>
+                )}
               </button>
             </div>
           </form>
         </div>
       ) : null}
+      
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 };

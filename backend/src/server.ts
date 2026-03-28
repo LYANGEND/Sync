@@ -6,6 +6,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import app from './app';
 import { initScheduler } from './utils/scheduler';
 import { processScheduledAnnouncements } from './controllers/communicationController';
+import { initClassroomAutomationScheduler } from './services/classroomAutomationService';
+import { setClassroomSocketServer } from './services/classroomRealtimeService';
 
 const PORT = process.env.PORT || 3000;
 
@@ -20,6 +22,7 @@ const io = new SocketIOServer(server, {
 
 // Attach io to app for use in controllers
 (app as any).io = io;
+setClassroomSocketServer(io);
 
 // Socket.io connection handler
 io.on('connection', (socket) => {
@@ -39,6 +42,14 @@ io.on('connection', (socket) => {
   // Leave a conversation room
   socket.on('leave_conversation', (conversationId: string) => {
     socket.leave(`conversation:${conversationId}`);
+  });
+
+  socket.on('join_classroom', (classroomId: string) => {
+    socket.join(`classroom:${classroomId}`);
+  });
+
+  socket.on('leave_classroom', (classroomId: string) => {
+    socket.leave(`classroom:${classroomId}`);
   });
 
   // Typing indicator
@@ -65,6 +76,7 @@ server.listen(PORT, () => {
 
   // Start background scheduler for automated debt collection
   initScheduler();
+  initClassroomAutomationScheduler();
 
   // Process scheduled announcements every minute
   setInterval(processScheduledAnnouncements, 60 * 1000);

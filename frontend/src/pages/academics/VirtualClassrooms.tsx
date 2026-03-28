@@ -8,7 +8,11 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
-import syllabusService, { Topic, parseLearningObjectives } from '../../services/syllabusService';
+import syllabusService, {
+  StructuredLessonPlan,
+  Topic,
+  parseLearningObjectives,
+} from '../../services/syllabusService';
 
 interface Classroom {
   id: string;
@@ -71,6 +75,7 @@ export default function VirtualClassrooms() {
   const [selectedTopicId, setSelectedTopicId] = useState('');
   const [selectedSubTopicIds, setSelectedSubTopicIds] = useState<string[]>([]);
   const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [generatedStructuredPlan, setGeneratedStructuredPlan] = useState<StructuredLessonPlan | null>(null);
   const [savedLessonPlans, setSavedLessonPlans] = useState<{ id: string; title: string; content: string; weekStartDate: string }[]>([]);
 
   const [form, setForm] = useState({
@@ -151,6 +156,7 @@ export default function VirtualClassrooms() {
       setTopics([]);
       setSelectedTopicId('');
       setSelectedSubTopicIds([]);
+      setGeneratedStructuredPlan(null);
       return;
     }
 
@@ -182,6 +188,7 @@ export default function VirtualClassrooms() {
       setTopics([]);
       setSelectedTopicId('');
       setSelectedSubTopicIds([]);
+      setGeneratedStructuredPlan(null);
       setSavedLessonPlans([]);
     }
   }, [form.subjectId, form.classId, classes, fetchTopics]);
@@ -221,6 +228,7 @@ export default function VirtualClassrooms() {
       });
 
       setForm(prev => ({ ...prev, lessonPlanContent: res.data.lessonPlan }));
+      setGeneratedStructuredPlan(res.data.structuredLessonPlan || null);
     } catch (err: any) {
       console.error('Generate lesson plan error:', err);
       alert('Failed to generate lesson plan. Please try again or write it manually.');
@@ -276,6 +284,7 @@ export default function VirtualClassrooms() {
     });
     setSelectedTopicId('');
     setSelectedSubTopicIds([]);
+    setGeneratedStructuredPlan(null);
     setTopics([]);
   };
 
@@ -653,6 +662,7 @@ export default function VirtualClassrooms() {
                           onChange={(e) => {
                             setSelectedTopicId(e.target.value);
                             setSelectedSubTopicIds([]);
+                            setGeneratedStructuredPlan(null);
                           }}
                           className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
                         >
@@ -738,18 +748,62 @@ export default function VirtualClassrooms() {
 
                       {/* AI Generate Lesson Plan button */}
                       {selectedTopicId && (
-                        <button
-                          type="button"
-                          onClick={handleGenerateLessonPlan}
-                          disabled={generatingPlan}
-                          className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-xl hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 text-xs font-medium transition w-full justify-center"
-                        >
-                          {generatingPlan ? (
-                            <><Loader2 size={14} className="animate-spin" /> Generating lesson plan with AI...</>
-                          ) : (
-                            <><Wand2 size={14} /> Generate Lesson Plan from Syllabus</>
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleGenerateLessonPlan}
+                            disabled={generatingPlan}
+                            className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-xl hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 text-xs font-medium transition w-full justify-center"
+                          >
+                            {generatingPlan ? (
+                              <><Loader2 size={14} className="animate-spin" /> Generating lesson plan with AI...</>
+                            ) : (
+                              <><Wand2 size={14} /> Generate Lesson Plan from Syllabus</>
+                            )}
+                          </button>
+
+                          {generatedStructuredPlan && (
+                            <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-3 space-y-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                                    Timed Lesson Flow
+                                  </p>
+                                  <p className="text-[11px] text-indigo-600/80 dark:text-indigo-300/70">
+                                    {generatedStructuredPlan.totalDurationMinutes} minutes • {generatedStructuredPlan.segments.length} segments
+                                  </p>
+                                </div>
+                                <span className="text-[10px] px-2 py-1 rounded-full bg-white/80 dark:bg-slate-900/60 text-indigo-700 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700">
+                                  {generatedStructuredPlan.source}
+                                </span>
+                              </div>
+
+                              <div className="max-h-48 overflow-y-auto space-y-2">
+                                {generatedStructuredPlan.segments.map(segment => (
+                                  <div
+                                    key={`${segment.phase}-${segment.index}-${segment.title}`}
+                                    className="rounded-lg bg-white/80 dark:bg-slate-900/40 border border-indigo-100 dark:border-indigo-900 px-3 py-2"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <p className="text-xs font-medium text-slate-800 dark:text-slate-100">
+                                        {segment.index + 1}. {segment.title}
+                                      </p>
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                        {segment.phase} • {segment.durationMinutes}m
+                                      </span>
+                                    </div>
+                                    {segment.objectives.length > 0 && (
+                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                        {segment.objectives[0]}
+                                        {segment.objectives.length > 1 ? ` +${segment.objectives.length - 1} more objective${segment.objectives.length > 2 ? 's' : ''}` : ''}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
-                        </button>
+                        </>
                       )}
                     </>
                   )}

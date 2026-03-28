@@ -885,6 +885,7 @@ IMPORTANT: Only ONE action block per response. Always confirm what you're about 
 - SEND_REMINDERS — Send fee reminders to debtors. Params: channels (EMAIL/SMS/WHATSAPP), segments (WILL_PAY/NEEDS_NUDGE/AT_RISK/HARDSHIP), minDaysOverdue
 - CREATE_CAMPAIGN — Create a debt collection campaign. Params: name, minAmountOwed, targetSegments
 - VIEW_DEBTORS — Navigate to the Debt Collection dashboard
+- SEND_SMS — Send customized SMS messages directly. Params: recipients (array of objects with phone and message)
 
 **PAYMENT OPERATIONS:**
 - AUTO_ALLOCATE_PAYMENTS — Automatically allocate all unallocated payments to outstanding student fee balances (oldest due date first). No params required. Use when user asks to allocate payments, fix balances, or reconcile ledger.
@@ -1481,6 +1482,24 @@ export const executeAIAction = async (req: Request, res: Response) => {
 
       case 'VIEW_DEBTORS':
         return res.json({ success: true, message: 'Switch to the Debt Collection tab to view all debtors' });
+
+      case 'SEND_SMS': {
+        const { recipients } = params;
+        if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+          return res.status(400).json({ error: 'recipients array containing phone and message properties is required' });
+        }
+        // Fall back to smsService dynamically to avoid circular dependencies if any
+        const { smsService } = await import('../services/smsService');
+        
+        // Format correctly for bulk send
+        const bulkRecipients = recipients.map((r: any) => ({
+          phone: r.phone || r.phoneNumber || String(r),
+          message: r.message || params.message || 'No message provided'
+        }));
+        
+        const result = await smsService.sendBulk(bulkRecipients, { sentById: user.userId });
+        return res.json({ success: true, message: `Sent SMS to ${result.sent} recipients`, data: result });
+      }
 
       default:
         return res.status(400).json({ error: `Unknown action type: ${type}` });

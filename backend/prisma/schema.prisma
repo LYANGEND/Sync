@@ -303,7 +303,7 @@ model SchoolSettings {
   smtpFromName  String?
 
   // Communication Settings (SMS)
-  smsProvider  String? // e.g., 'TWILIO', 'AFRICASTALKING'
+  smsProvider  String? // e.g., 'MSHASTRA', 'TWILIO', 'AFRICASTALKING'
   smsApiKey    String?
   smsApiSecret String?
   smsSenderId  String?

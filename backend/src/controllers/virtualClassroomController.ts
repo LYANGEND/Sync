@@ -3,6 +3,14 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { aiTutorService } from '../services/aiTutorService';
 import { elevenLabsService, TEACHING_VOICES } from '../services/elevenLabsService';
+import { syncClassroomAttendance } from '../services/classroomAttendanceService';
+import {
+  buildRuntimeLessonPlan,
+  buildRuntimeLessonPlanFromTopic,
+  getLessonRuntimeSnapshot,
+  renderRuntimeLessonPlan,
+} from '../services/lessonPlanRuntimeService';
+import { emitClassroomUpdated } from '../services/classroomRealtimeService';
 import crypto from 'crypto';
 
 // ==========================================
@@ -63,6 +71,32 @@ async function buildLessonPlanFromSyllabus(topicId: string, selectedSubTopicIds?
   return plan;
 }
 
+async function buildClassroomLessonRuntime(classroom: any, subjectName?: string | null) {
+  const runtimePlan = await buildRuntimeLessonPlan({
+    title: classroom.title,
+    subjectName,
+    scheduledStart: classroom.scheduledStart,
+    scheduledEnd: classroom.scheduledEnd,
+    topicId: classroom.topicId,
+    selectedSubTopicIds: classroom.selectedSubTopicIds,
+    lessonPlanContent: classroom.lessonPlanContent,
+  });
+
+  const activeSession = classroom.tutorSessions?.find((session: any) => session.status === 'ACTIVE')
+    || classroom.tutorSessions?.[0]
+    || null;
+
+  return getLessonRuntimeSnapshot(runtimePlan, {
+    actualStart: classroom.actualStart,
+    scheduledStart: classroom.scheduledStart,
+    scheduledEnd: classroom.scheduledEnd,
+  }, activeSession ? {
+    lessonPhase: activeSession.lessonPhase,
+    currentTopic: activeSession.currentTopic,
+    topicIndex: activeSession.topicIndex,
+  } : null);
+}
+
 // ==========================================
 // VIRTUAL CLASSROOM CONTROLLER
 // ==========================================
@@ -100,10 +134,17 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Title, scheduledStart, and scheduledEnd are required' });
     }
 
-    // If topic is selected, build structured lesson plan from syllabus
+    // If topic is selected, build a consistent lesson plan from the runtime segments
     let finalLessonPlan = lessonPlanContent || null;
     if (topicId && !lessonPlanContent) {
-      finalLessonPlan = await buildLessonPlanFromSyllabus(topicId, selectedSubTopicIds);
+      const runtimePlan = await buildRuntimeLessonPlanFromTopic({
+        title,
+        scheduledStart,
+        scheduledEnd,
+        topicId,
+        selectedSubTopicIds,
+      });
+      finalLessonPlan = runtimePlan ? renderRuntimeLessonPlan(runtimePlan) : await buildLessonPlanFromSyllabus(topicId, selectedSubTopicIds);
     }
 
     // Generate a unique Jitsi room name
@@ -293,7 +334,9 @@ export const getClassroom = async (req: AuthRequest, res: Response) => {
       teacherName = teacher?.fullName;
     }
 
-    res.json({ ...classroom, className, subjectName, teacherName });
+    const lessonRuntime = await buildClassroomLessonRuntime(classroom, subjectName);
+
+    res.json({ ...classroom, className, subjectName, teacherName, lessonRuntime });
   } catch (error: any) {
     console.error('[VirtualClassroom] Get error:', error);
     res.status(500).json({ error: error.message });
@@ -359,6 +402,31 @@ export const startClassroom = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    if (classroom.aiTutorEnabled) {
+      const activeSession = await prisma.aITutorSession.findFirst({
+        where: {
+          classroomId: id,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      });
+
+      if (!activeSession) {
+        const existingSessionCount = await prisma.aITutorSession.count({
+          where: { classroomId: id },
+        });
+
+        if (existingSessionCount === 0) {
+          try {
+            await aiTutorService.startSession(id, { generateAudio: true });
+          } catch (sessionError) {
+            console.error('[VirtualClassroom] Auto-start AI Tutor error:', sessionError);
+          }
+        }
+      }
+    }
+
+    emitClassroomUpdated(id, { reason: 'class_started' });
     res.json(classroom);
   } catch (error: any) {
     console.error('[VirtualClassroom] Start error:', error);
@@ -373,11 +441,14 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
-    // End any active tutor sessions
-    await prisma.aITutorSession.updateMany({
+    const activeSessions = await prisma.aITutorSession.findMany({
       where: { classroomId: id, status: 'ACTIVE' },
-      data: { status: 'ENDED', endedAt: new Date() },
+      select: { id: true },
     });
+
+    for (const session of activeSessions) {
+      await aiTutorService.endSession(session.id);
+    }
 
     const classroom = await prisma.virtualClassroom.update({
       where: { id },
@@ -387,7 +458,13 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    res.json(classroom);
+    const attendanceSync = await syncClassroomAttendance(id);
+
+    emitClassroomUpdated(id, { reason: 'class_ended' });
+    res.json({
+      ...classroom,
+      attendanceSync,
+    });
   } catch (error: any) {
     console.error('[VirtualClassroom] End error:', error);
     res.status(500).json({ error: error.message });
@@ -407,16 +484,23 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
 
     const result = await aiTutorService.startSession(id);
 
-    // Return response without audio buffer in JSON (audio served separately)
+    let audioBase64: string | null = null;
+    if (result.greeting.audioBuffer) {
+      audioBase64 = result.greeting.audioBuffer.toString('base64');
+    }
+
     res.json({
       sessionId: result.sessionId,
       greeting: {
         text: result.greeting.text,
+        audio: audioBase64,
+        audioContentType: result.greeting.audioContentType,
         phase: result.greeting.phase,
         suggestedActions: result.greeting.suggestedActions,
         hasAudio: !!result.greeting.audioBuffer,
       },
     });
+    emitClassroomUpdated(id, { reason: 'ai_tutor_started' });
   } catch (error: any) {
     console.error('[AITutor] Start error:', error);
     res.status(500).json({ error: error.message });
@@ -436,6 +520,7 @@ export const stopAITutor = async (req: AuthRequest, res: Response) => {
     }
 
     const result = await aiTutorService.endSession(sessionId);
+    emitClassroomUpdated(id, { reason: 'ai_tutor_stopped' });
     res.json(result);
   } catch (error: any) {
     console.error('[AITutor] Stop error:', error);
@@ -474,6 +559,7 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
       tokensUsed: result.tokensUsed,
       charactersUsed: result.charactersUsed,
     });
+    emitClassroomUpdated(id, { reason: 'ai_tutor_chat' });
   } catch (error: any) {
     console.error('[AITutor] Chat error:', error);
     res.status(500).json({ error: error.message });
@@ -505,6 +591,7 @@ export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
       phase: result.phase,
       suggestedActions: result.suggestedActions,
     });
+    emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_phase_advanced' });
   } catch (error: any) {
     console.error('[AITutor] Advance phase error:', error);
     res.status(500).json({ error: error.message });
@@ -535,6 +622,7 @@ export const tutorSpeak = async (req: AuthRequest, res: Response) => {
       audioContentType: result.audioContentType,
       phase: result.phase,
     });
+    emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_speak' });
   } catch (error: any) {
     console.error('[AITutor] Speak error:', error);
     res.status(500).json({ error: error.message });
@@ -566,6 +654,7 @@ export const tutorQuiz = async (req: AuthRequest, res: Response) => {
       phase: result.phase,
       suggestedActions: result.suggestedActions,
     });
+    emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_quiz' });
   } catch (error: any) {
     console.error('[AITutor] Quiz error:', error);
     res.status(500).json({ error: error.message });
@@ -606,6 +695,12 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { action, displayName, userId, studentId, role } = req.body;
+    const resolvedRole = role
+      || (req.user?.role === 'STUDENT'
+        ? 'STUDENT'
+        : req.user?.role === 'TEACHER' || req.user?.role === 'SUPER_ADMIN'
+          ? 'TEACHER'
+          : 'OBSERVER');
 
     if (action === 'join') {
       const participant = await prisma.classroomParticipant.create({
@@ -614,9 +709,10 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
           displayName: displayName || 'Anonymous',
           userId: userId || null,
           studentId: studentId || null,
-          role: role || 'STUDENT',
+          role: resolvedRole,
         },
       });
+      emitClassroomUpdated(id, { reason: 'participant_joined' });
       return res.json(participant);
     }
 
@@ -637,6 +733,7 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
           data: { leftAt: new Date() },
         });
       }
+      emitClassroomUpdated(id, { reason: 'participant_left' });
       return res.json({ message: 'Participant left recorded' });
     }
 

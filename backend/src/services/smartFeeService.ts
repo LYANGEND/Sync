@@ -1,7 +1,8 @@
 import { prisma } from '../utils/prisma';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
-import { sendEmail, generateFeeReminderEmail } from './notificationService';
+import { sendEmail } from './emailService';
+import { generateFeeReminderEmail } from './notificationService';
 import aiService from './aiService';
 
 interface PaymentPrediction {
@@ -387,12 +388,12 @@ class SmartFeeService {
             schoolName,
             isOverdue
           );
-          await sendEmail({
-            to: parentEmail,
-            subject: emailData.subject,
-            text: emailData.text,
-            html: emailData.html,
-          });
+          await sendEmail(
+            parentEmail,
+            emailData.subject,
+            emailData.html,
+            { source: 'smart_fee_reminder' }
+          );
         } catch (e) { /* continue */ }
       }
 

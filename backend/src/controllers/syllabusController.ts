@@ -3,6 +3,7 @@ import { TopicStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
+import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
 
 // ==========================================
 // VALIDATION SCHEMAS (DRY — reused across CRUD)
@@ -371,6 +372,14 @@ export const generateLessonPlan = handler(async (req, res) => {
     : topic.subject.name;
 
   const duration = durationMinutes || 45;
+  const runtimePlan = await buildRuntimeLessonPlanFromTopic({
+    title: topic.title,
+    subjectName,
+    scheduledStart: new Date(),
+    scheduledEnd: new Date(Date.now() + duration * 60_000),
+    topicId,
+    selectedSubTopicIds: subTopicIds,
+  });
   const subtopicList = topic.subtopics.map(st => {
     let objectives: string[] = [];
     try { objectives = st.learningObjectives ? JSON.parse(st.learningObjectives) : []; } catch { }
@@ -408,6 +417,7 @@ Format as a structured text plan that an AI tutor can follow during a live class
 
   res.json({
     lessonPlan: aiResponse.content,
+    structuredLessonPlan: runtimePlan,
     topic: { id: topic.id, title: topic.title },
     subtopics: topic.subtopics.map(st => ({ id: st.id, title: st.title })),
     subjectName,

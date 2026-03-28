@@ -1075,6 +1075,26 @@ Requirements:
       return { created, errors, summary: `${created.length} created, ${errors.length} failed` };
     },
   },
+
+  // ===================== COMMUNICATION =====================
+  {
+    name: 'send_sms',
+    description: 'Send SMS messages to a list of phone numbers or students. The AI should format message properly.',
+    parameters: [
+      { name: 'recipients', type: 'array', description: 'Array of objects: phone (string) and message (string)', required: true },
+    ],
+    execute: async (params, userId) => {
+      const { smsService } = await import('./smsService');
+      const recipients = params.recipients as any[];
+      if (!recipients || recipients.length === 0) return { error: 'No recipients provided' };
+      
+      const result = await smsService.sendBulk(recipients, { sentById: userId });
+      return { 
+        summary: `Sent SMS to ${result.sent} recipients. Failed: ${result.failed}`, 
+        details: result 
+      };
+    }
+  },
 ];
 
 // ==========================

@@ -50,6 +50,8 @@ import virtualClassroomRoutes from './routes/virtualClassroomRoutes';
 import masterAIRoutes from './routes/masterAIRoutes';
 // New AI Intelligence Features
 import aiIntelligenceRoutes from './routes/aiIntelligenceRoutes';
+// SMS Gateway Routes
+import smsRoutes from './routes/smsRoutes';
 // Middleware
 import { generalLimiter } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -139,6 +141,9 @@ app.use('/api/v1/master-ai', masterAIRoutes);
 
 // New AI Intelligence Features (grade forecast, fee defaulters, timetable, exam scheduling, parent letters)
 app.use('/api/v1/ai', aiIntelligenceRoutes);
+
+// SMS Gateway
+app.use('/api/v1/sms', smsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

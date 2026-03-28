@@ -125,15 +125,18 @@ const Settings = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [testSending, setTestSending] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ channel: string; success: boolean; message: string } | null>(null);
+  const [testRecipient, setTestRecipient] = useState('');
 
   const handleSendTest = async (channel: 'email' | 'sms' | 'whatsapp') => {
     setTestSending(channel);
     setTestResult(null);
     try {
-      const res = await api.post('/communication/test-message', { channel });
+      const payload: any = { channel };
+      if (testRecipient.trim()) payload.to = testRecipient.trim();
+      const res = await api.post('/communication/test-message', payload);
       setTestResult({ channel, success: true, message: res.data.message || 'Test sent successfully!' });
     } catch (error: any) {
-      setTestResult({ channel, success: false, message: error.response?.data?.error || 'Test failed' });
+      setTestResult({ channel, success: false, message: error.response?.data?.message || error.response?.data?.error || 'Test failed' });
     } finally {
       setTestSending(null);
     }
@@ -757,6 +760,7 @@ const Settings = () => {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Select Provider</option>
+                    <option value="MSHASTRA">mShastra (Zambia)</option>
                     <option value="TWILIO">Twilio</option>
                     <option value="AFRICASTALKING">Africa's Talking</option>
                     <option value="GENERIC">Generic HTTP</option>
@@ -770,27 +774,36 @@ const Settings = () => {
                     value={settings.smsSenderId}
                     onChange={(e) => setSettings({ ...settings, smsSenderId: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-                    placeholder="SCHOOL"
+                    placeholder={settings.smsProvider === 'MSHASTRA' ? 'MobiSMS' : 'SCHOOL'}
                   />
+                  {settings.smsProvider === 'MSHASTRA' && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Default: MobiSMS. Must match sender ID registered with mShastra.</p>
+                  )}
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Key / SID</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                    {settings.smsProvider === 'MSHASTRA' ? 'Username' : 'API Key / SID'}
+                  </label>
                   <input
                     type="password"
                     value={settings.smsApiKey}
                     onChange={(e) => setSettings({ ...settings, smsApiKey: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder={settings.smsProvider === 'MSHASTRA' ? 'mShastra username' : ''}
                   />
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">API Secret / Token</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                    {settings.smsProvider === 'MSHASTRA' ? 'Password' : 'API Secret / Token'}
+                  </label>
                   <input
                     type="password"
                     value={settings.smsApiSecret}
                     onChange={(e) => setSettings({ ...settings, smsApiSecret: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    placeholder={settings.smsProvider === 'MSHASTRA' ? 'mShastra password' : ''}
                   />
                 </div>
               </div>
@@ -861,7 +874,18 @@ const Settings = () => {
                 <Send className="text-orange-600 dark:text-orange-400" size={20} />
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Test Communications</h2>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Send a test message to yourself to verify your channel configuration works.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Send a test message to verify your channel configuration works. Enter a recipient below or leave blank to use the school's phone/email.</p>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Test Recipient (phone or email)</label>
+                <input
+                  type="text"
+                  value={testRecipient}
+                  onChange={(e) => setTestRecipient(e.target.value)}
+                  className="w-full md:w-1/2 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  placeholder="e.g. 0977123456 or admin@school.com"
+                />
+              </div>
 
               {testResult && (
                 <div className={`mb-4 p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>

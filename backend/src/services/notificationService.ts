@@ -1,226 +1,23 @@
 import { prisma } from '../utils/prisma';
-import nodemailer from 'nodemailer';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 import { sendPushToUser, broadcastPush } from './pushService';
+import { sendEmail as sendEmailViaService } from './emailService';
+import { smsService } from './smsService';
 
-interface NotificationOptions {
-  to: string;
-  subject: string;
-  text: string;
-  html?: string;
-}
+/**
+ * Notification Service — orchestration layer.
+ *
+ * IMPORTANT: This file does NOT contain its own email/SMS sending logic.
+ * It delegates to the canonical single-source-of-truth services:
+ *   • Email  → emailService.ts
+ *   • SMS    → smsService.ts
+ *   • Push   → pushService.ts
+ *
+ * This avoids the duplicated provider code that previously lived here.
+ */
 
-interface SmsOptions {
-  to: string;
-  message: string;
-}
+// ─── Send notification via email + SMS (based on what's provided) ───
 
-interface NotificationSettings {
-  emailNotificationsEnabled?: boolean;
-  smsNotificationsEnabled?: boolean;
-  smtpHost?: string | null;
-  smtpPort?: number | null;
-  smtpSecure?: boolean;
-  smtpUser?: string | null;
-  smtpPassword?: string | null;
-  smtpFromEmail?: string | null;
-  smtpFromName?: string | null;
-  smsProvider?: string | null;
-  smsApiKey?: string | null;
-  smsApiSecret?: string | null;
-  smsSenderId?: string | null;
-  schoolName?: string;
-}
-
-// Get school settings for notifications
-async function getNotificationSettings(): Promise<NotificationSettings | null> {
-  const settings = await prisma.schoolSettings.findFirst();
-  return settings as NotificationSettings | null;
-}
-
-// Send Email Notification (with logging)
-export async function sendEmail(options: NotificationOptions): Promise<boolean> {
-  const logId = await logCommunication({
-    channel: 'EMAIL',
-    status: 'PENDING',
-    recipientEmail: options.to,
-    subject: options.subject,
-    message: options.text,
-    htmlBody: options.html,
-    source: 'notification_service',
-  });
-
-  try {
-    const settings = await getNotificationSettings();
-
-    if (!settings) {
-      console.log('No settings found');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
-      return false;
-    }
-
-    // Check if email notifications are enabled (default to true if field doesn't exist)
-    const emailEnabled = settings.emailNotificationsEnabled ?? true;
-    if (!emailEnabled) {
-      console.log('Email notifications are disabled');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'Email notifications disabled');
-      return false;
-    }
-
-    if (!settings.smtpHost || !settings.smtpUser || !settings.smtpPassword) {
-      console.log('SMTP settings not configured');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMTP not configured');
-      return false;
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: settings.smtpHost,
-      port: settings.smtpPort || 587,
-      secure: settings.smtpSecure ?? true,
-      auth: {
-        user: settings.smtpUser,
-        pass: settings.smtpPassword,
-      },
-    });
-
-    const mailOptions = {
-      from: `"${settings.smtpFromName || settings.schoolName || 'School'}" <${settings.smtpFromEmail || settings.smtpUser}>`,
-      to: options.to,
-      subject: options.subject,
-      text: options.text,
-      html: options.html,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${options.to}`);
-    if (logId) await updateCommunicationLogStatus(logId, 'SENT');
-    return true;
-  } catch (error: any) {
-    console.error('Email sending failed:', error);
-    if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message || 'Unknown error');
-    return false;
-  }
-}
-
-// Send SMS Notification (with logging)
-export async function sendSms(options: SmsOptions): Promise<boolean> {
-  const logId = await logCommunication({
-    channel: 'SMS',
-    status: 'PENDING',
-    recipientPhone: options.to,
-    message: options.message,
-    source: 'notification_service',
-  });
-
-  try {
-    const settings = await getNotificationSettings();
-
-    if (!settings) {
-      console.log('No settings found');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
-      return false;
-    }
-
-    // Check if SMS notifications are enabled (default to false if field doesn't exist)
-    const smsEnabled = settings.smsNotificationsEnabled ?? false;
-    if (!smsEnabled) {
-      console.log('SMS notifications are disabled');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS notifications disabled');
-      return false;
-    }
-
-    if (!settings.smsProvider || !settings.smsApiKey) {
-      console.log('SMS settings not configured');
-      if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS not configured');
-      return false;
-    }
-
-    // Format phone number (remove spaces, ensure proper format)
-    const phone = options.to.replace(/\s+/g, '');
-
-    let sent = false;
-    // Provider-specific SMS sending
-    switch (settings.smsProvider.toUpperCase()) {
-      case 'AFRICASTALKING':
-        sent = await sendAfricasTalkingSms(phone, options.message, settings);
-        break;
-      case 'TWILIO':
-        sent = await sendTwilioSms(phone, options.message, settings);
-        break;
-      default:
-        console.log(`Unknown SMS provider: ${settings.smsProvider}`);
-        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', `Unknown provider: ${settings.smsProvider}`);
-        return false;
-    }
-
-    if (logId) await updateCommunicationLogStatus(logId, sent ? 'SENT' : 'FAILED', sent ? undefined : 'Provider returned failure');
-    return sent;
-  } catch (error: any) {
-    console.error('SMS sending failed:', error);
-    if (logId) await updateCommunicationLogStatus(logId, 'FAILED', error.message || 'Unknown error');
-    return false;
-  }
-}
-
-// Africa's Talking SMS Provider
-async function sendAfricasTalkingSms(to: string, message: string, settings: NotificationSettings): Promise<boolean> {
-  try {
-    const response = await fetch('https://api.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'apiKey': settings.smsApiKey || '',
-      },
-      body: new URLSearchParams({
-        username: settings.smsApiSecret || '', // AT uses username in apiSecret field
-        to: to,
-        message: message,
-        from: settings.smsSenderId || '',
-      }),
-    });
-
-    const result = await response.json();
-    console.log('Africa\'s Talking SMS response:', result);
-    return result.SMSMessageData?.Recipients?.[0]?.status === 'Success';
-  } catch (error) {
-    console.error('Africa\'s Talking SMS error:', error);
-    return false;
-  }
-}
-
-// Twilio SMS Provider
-async function sendTwilioSms(to: string, message: string, settings: NotificationSettings): Promise<boolean> {
-  try {
-    const accountSid = settings.smsApiKey || '';
-    const authToken = settings.smsApiSecret || '';
-
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          To: to,
-          From: settings.smsSenderId || '',
-          Body: message,
-        }),
-      }
-    );
-
-    const result = await response.json();
-    console.log('Twilio SMS response:', result);
-    return result.status === 'queued' || result.status === 'sent';
-  } catch (error) {
-    console.error('Twilio SMS error:', error);
-    return false;
-  }
-}
-
-// Send notification via both channels (based on settings)
 export async function sendNotification(
   email: string | undefined,
   phone: string | undefined,
@@ -233,21 +30,17 @@ export async function sendNotification(
   let smsSent = false;
 
   if (email) {
-    emailSent = await sendEmail({
-      to: email,
-      subject,
-      text: message,
-      html: htmlMessage,
+    emailSent = await sendEmailViaService(email, subject, htmlMessage || `<p>${message}</p>`, {
+      source: 'notification_service',
     });
   }
 
   if (phone) {
-    // Use provided SMS message or fallback to truncated email text
     const finalSmsMessage = smsMessage || message.substring(0, 160);
-    smsSent = await sendSms({
-      to: phone,
-      message: finalSmsMessage,
+    const result = await smsService.send(phone, finalSmsMessage, {
+      source: 'notification_service',
     });
+    smsSent = result.success;
   }
 
   return { emailSent, smsSent };
@@ -642,8 +435,6 @@ export async function broadcastNotification(
 }
 
 export default {
-  sendEmail,
-  sendSms,
   sendNotification,
   createNotification,
   broadcastNotification,

@@ -1847,9 +1847,8 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
     CREATE_BUDGET:      { label: 'Create Budget',     icon: Target,  color: 'purple',   confirmMsg: `Create budget "${action.params?.name || ''}"?` },
     CREATE_PETTY_CASH_TRANSACTION: { label: 'Record Petty Cash', icon: Coins, color: 'amber', confirmMsg: `Record petty cash ${action.params?.type?.toLowerCase() || 'transaction'}: ZMW ${Number(action.params?.amount || 0).toLocaleString()}?` },
     CREATE_FEE_TEMPLATE: { label: 'Create Fee Template', icon: Plus, color: 'indigo', confirmMsg: `Create fee "${action.params?.name || ''}" — ZMW ${Number(action.params?.amount || 0).toLocaleString()}?` },
-  };
-
-  // Legacy actions that call their own endpoints directly
+      SEND_SMS: { label: 'Send SMS', icon: Send, color: 'green', confirmMsg: `Send SMS to ${action.params?.recipients?.length || 0} recipient(s)?` },
+    };
   const legacyActions: Record<string, { label: string; icon: React.ElementType; color: string; endpoint: string; method: string }> = {
     SEND_REMINDERS: { label: 'Send Reminders', icon: Send, color: 'blue', endpoint: '/debt-collection/send', method: 'POST' },
     CREATE_CAMPAIGN: { label: 'Create Campaign', icon: Target, color: 'purple', endpoint: '/debt-collection/campaigns', method: 'POST' },
