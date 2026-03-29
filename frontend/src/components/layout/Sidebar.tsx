@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Zap } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -13,144 +13,64 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
   const { logout, user } = useAuth();
   const { settings } = useTheme();
 
-  const menuItems = [
+  const menuGroups = [
     {
-      icon: LayoutDashboard,
-      label: 'Dashboard',
-      path: '/',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY']
+      title: 'Overview',
+      items: [
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] }
+      ]
     },
     {
-      icon: GraduationCap,
-      label: 'My Children',
-      path: '/my-children',
-      roles: ['PARENT']
+      title: 'My Family',
+      items: [
+        { icon: GraduationCap, label: 'My Children', path: '/my-children', roles: ['PARENT'] },
+        { icon: TrendingUp, label: 'Academic Progress', path: '/academics/progress', roles: ['PARENT'] },
+        { icon: CalendarCheck, label: 'Timetable', path: '/academics/timetable', roles: ['PARENT'] },
+        { icon: Award, label: 'Academic Reports', path: '/academics/reports', roles: ['PARENT'] },
+      ]
     },
     {
-      icon: Users,
-      label: 'Students',
-      path: '/students',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY']
+      title: 'Academics',
+      items: [
+        { icon: BookOpen, label: 'Class Overview', path: '/academics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER'] },
+        { icon: Users, label: 'Students', path: '/students', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] },
+        { icon: Users, label: 'Attendance', path: '/academics/attendance', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY'] },
+        { icon: TrendingUp, label: 'Gradebook', path: '/academics/gradebook', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY'] },
+        { icon: Calendar, label: 'Academic Calendar', path: '/academics/calendar', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'PARENT'] },
+      ]
     },
     {
-      icon: BookOpen,
-      label: 'Academics',
-      path: '/academics',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']
+      title: 'Finance',
+      items: [
+        { icon: CreditCard, label: 'Finance Hub', path: '/finance', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR'] }
+      ]
     },
     {
-      icon: CreditCard,
-      label: 'Finance',
-      path: '/finance',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR']
+      title: 'Communication',
+      items: [
+        { icon: MessageSquare, label: 'Messages', path: '/communication', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] },
+        { icon: Video, label: 'Virtual Classroom', path: '/virtual-classroom', roles: ['SUPER_ADMIN', 'TEACHER', 'PARENT'] },
+      ]
     },
     {
-      icon: Users,
-      label: 'Attendance',
-      path: '/academics/attendance',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY']
+      title: 'Intelligence & AI',
+      items: [
+        { icon: Brain, label: 'Intelligence Hub', path: '/ai-intelligence', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER'] },
+        { icon: Cpu, label: 'Command Center', path: '/ai-analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
+        { icon: GraduationCap, label: 'Teaching AI', path: '/ai-assistant', roles: ['SUPER_ADMIN', 'TEACHER'] },
+        { icon: BarChart3, label: 'Analytics', path: '/analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
+        { icon: Sparkles, label: 'Master AI Ops', path: '/master-ai', roles: ['SUPER_ADMIN'] },
+      ]
     },
     {
-      icon: TrendingUp,
-      label: 'Gradebook',
-      path: '/academics/gradebook',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY']
-    },
-    {
-      icon: UserCog,
-      label: 'Users',
-      path: '/users',
-      roles: ['SUPER_ADMIN']
-    },
-    {
-      icon: GitBranch,
-      label: 'Branches',
-      path: '/branches',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
-    },
-    {
-      icon: MessageSquare,
-      label: 'Communication',
-      path: '/communication',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']
-    },
-    {
-      icon: BarChart3,
-      label: 'Analytics',
-      path: '/analytics',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
-    },
-    {
-      icon: GraduationCap,
-      label: 'Teaching AI',
-      path: '/ai-assistant',
-      roles: ['SUPER_ADMIN', 'TEACHER']
-    },
-    {
-      icon: Video,
-      label: 'Virtual Classroom',
-      path: '/virtual-classroom',
-      roles: ['SUPER_ADMIN', 'TEACHER', 'PARENT']
-    },
-    {
-      icon: Brain,
-      label: 'Intelligence',
-      path: '/intelligence',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']
-    },
-    {
-      icon: Zap,
-      label: 'AI Intelligence Hub',
-      path: '/ai-intelligence',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER']
-    },
-    {
-      icon: Cpu,
-      label: 'AI Command Center',
-      path: '/ai-analytics',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER']
-    },
-    {
-      icon: Sparkles,
-      label: 'Master AI Ops',
-      path: '/master-ai',
-      roles: ['SUPER_ADMIN']
-    },
-    {
-      icon: Settings,
-      label: 'Settings',
-      path: '/settings',
-      roles: ['SUPER_ADMIN']
-    },
-    {
-      icon: TrendingUp,
-      label: 'Academic Progress',
-      path: '/academics/progress',
-      roles: ['PARENT']
-    },
-    {
-      icon: CalendarCheck,
-      label: 'Timetable',
-      path: '/academics/timetable',
-      roles: ['PARENT']
-    },
-    {
-      icon: Calendar,
-      label: 'Academic Calendar',
-      path: '/academics/calendar',
-      roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'PARENT']
-    },
-    {
-      icon: Award,
-      label: 'Academic Reports',
-      path: '/academics/reports',
-      roles: ['PARENT']
-    },
+      title: 'Administration',
+      items: [
+        { icon: GitBranch, label: 'Branches', path: '/branches', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
+        { icon: UserCog, label: 'User Directory', path: '/users', roles: ['SUPER_ADMIN'] },
+        { icon: Settings, label: 'Settings', path: '/settings', roles: ['SUPER_ADMIN'] },
+      ]
+    }
   ];
-
-  const filteredMenuItems = menuItems.filter(item =>
-    user && item.roles.includes(user.role)
-  );
 
   return (
     <>
@@ -177,24 +97,38 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
           </button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {filteredMenuItems.map((item) => {
-            const isActive = item.path === '/' 
-              ? location.pathname === '/'
-              : location.pathname.startsWith(item.path);
+        <nav className="flex-1 px-4 py-6 space-y-6 overflow-y-auto custom-scrollbar">
+          {menuGroups.map((group, groupIdx) => {
+            const filteredItems = group.items.filter(item => user && item.roles.includes(user.role));
+            if (filteredItems.length === 0) return null;
+
             return (
-              <Link
-                key={item.label}
-                to={item.path}
-                onClick={onClose}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive
-                  ? 'bg-primary text-white'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                  }`}
-              >
-                <item.icon size={20} />
-                <span className="font-medium">{item.label}</span>
-              </Link>
+              <div key={groupIdx} className="space-y-1">
+                <h3 className="px-4 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  {group.title}
+                </h3>
+                {filteredItems.map((item) => {
+                  const isActive = item.path === '/'
+                    ? location.pathname === '/'
+                    : location.pathname.startsWith(item.path);
+                  return (
+                    <Link
+                      key={item.label}
+                      to={item.path}
+                      onClick={onClose}
+                      className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg transition-colors text-sm ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                      style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
+                    >
+                      <item.icon size={18} className={isActive ? "text-white" : "text-slate-400"} />
+                      <span className={isActive ? "font-medium" : ""}>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -202,9 +136,9 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         <div className="p-4 border-t border-slate-800">
           <button
             onClick={logout}
-            className="w-full flex items-center space-x-3 px-4 py-3 text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
+            className="w-full flex items-center space-x-3 px-4 py-3 text-red-400 hover:bg-slate-800 rounded-lg transition-colors text-sm"
           >
-            <LogOut size={20} />
+            <LogOut size={18} />
             <span className="font-medium">Sign Out</span>
           </button>
         </div>

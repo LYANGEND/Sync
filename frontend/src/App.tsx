@@ -44,7 +44,6 @@ import AIAssistant from './pages/ai/AIAssistant';
 import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
 import MasterAI from './pages/ai/MasterAI';
 import AIIntelligenceHub from './pages/ai/AIIntelligenceHub';
-import StudentIntelligence from './pages/intelligence/StudentIntelligence';
 
 function App() {
   return (
@@ -178,11 +177,7 @@ function App() {
                       <AIAssistant />
                     </RoleGuard>
                   } />
-                  <Route path="/intelligence" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER']}>
-                      <StudentIntelligence />
-                    </RoleGuard>
-                  } />
+
                   <Route path="/ai-analytics" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
                       <AIAnalyticsDashboard />

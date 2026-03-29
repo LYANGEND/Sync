@@ -423,6 +423,13 @@ class AIService {
     const config = await this.loadConfig();
     if (!config) throw new Error('AI is not configured.');
     
+    // Clean text to make the TTS sound much more natural (like ElevenLabs)
+    // Strip markdown bold/italic, bullet points, headers, and emojis which break the cadence
+    const cleanText = text
+      .replace(/(\*\*|\*|\_\_|\_|\#)/g, '') // remove markdown
+      .replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // remove emojis
+      .trim();
+
     try {
       const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
@@ -431,9 +438,10 @@ class AIService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'tts-1',
-          input: text,
-          voice: 'echo'
+          model: 'tts-1', // Using tts-1 for the lowest latency conversational speed
+          input: cleanText,
+          voice: 'nova',  // "nova" is widely considered the most natural, ElevenLabs-like conversational voice in OpenAI
+          response_format: 'mp3'
         })
       });
       

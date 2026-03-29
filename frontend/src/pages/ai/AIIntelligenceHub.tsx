@@ -3,7 +3,8 @@ import {
   Brain, TrendingUp, AlertTriangle, DollarSign, Calendar,
   Download, CheckCircle,
   ArrowRight, Loader2, Wand2,
-  BookOpen, BarChart3, Shield, Star, Activity
+  BookOpen, BarChart3, Shield, Star, Activity,
+  ShieldX, ShieldAlert, ShieldCheck, Bell, Eye, RefreshCw
 } from 'lucide-react';
 import aiIntelligenceService, {
   GradeForecastResponse,
@@ -13,12 +14,15 @@ import aiIntelligenceService, {
   StudentForecast,
   StudentDefaultRisk,
 } from '../../services/aiIntelligenceService';
+import intelligenceService, { RiskAssessment, AttendanceAlert } from '../../services/intelligenceService';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 
-type Tab = 'grade-forecast' | 'fee-defaulters' | 'timetable' | 'exam-schedule';
+type Tab = 'at-risk' | 'alerts' | 'grade-forecast' | 'fee-defaulters' | 'timetable' | 'exam-schedule';
 
 const TABS = [
+  { id: 'at-risk' as Tab, label: 'At-Risk Students', icon: AlertTriangle, color: 'red' },
+  { id: 'alerts' as Tab, label: 'Alerts', icon: Bell, color: 'amber' },
   { id: 'grade-forecast' as Tab, label: 'Grade Forecast', icon: TrendingUp, color: 'blue' },
   { id: 'fee-defaulters' as Tab, label: 'Fee Risk', icon: DollarSign, color: 'orange' },
   { id: 'timetable' as Tab, label: 'AI Timetable', icon: Calendar, color: 'purple' },
@@ -752,8 +756,229 @@ function ExamScheduleTab() {
 // Main Page
 // ─────────────────────────────────────────
 
+// ─────────────────────────────────────────
+// At-Risk Students Tab (merged from StudentIntelligence)
+// ─────────────────────────────────────────
+
+function AtRiskStudentsTab() {
+  const [atRiskStudents, setAtRiskStudents] = useState<RiskAssessment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedStudent, setSelectedStudent] = useState<RiskAssessment | null>(null);
+  const [recommendations, setRecommendations] = useState<string[]>([]);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [riskFilter, setRiskFilter] = useState<string>('ALL');
+
+  useEffect(() => { fetchData(); }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      let termId: string | undefined;
+      try { const termRes = await api.get('/terms/active'); termId = termRes.data?.id; } catch {}
+      const riskData = await intelligenceService.getAtRiskStudents({ termId, minLevel: 'MEDIUM' }).catch(() => []);
+      setAtRiskStudents(riskData);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  };
+
+  const fetchRecommendations = async (studentId: string) => {
+    setLoadingRecs(true);
+    try {
+      const data = await intelligenceService.getAIRecommendations(studentId, '');
+      setRecommendations(data.recommendations || []);
+    } catch {
+      toast.error('Could not load recommendations');
+      setRecommendations([]);
+    } finally { setLoadingRecs(false); }
+  };
+
+  const getRiskBadge = (level: string) => {
+    switch (level) {
+      case 'CRITICAL': return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"><ShieldX className="w-3 h-3" /> Critical</span>;
+      case 'HIGH': return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"><ShieldAlert className="w-3 h-3" /> High</span>;
+      case 'MEDIUM': return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"><Shield className="w-3 h-3" /> Medium</span>;
+      default: return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"><ShieldCheck className="w-3 h-3" /> Low</span>;
+    }
+  };
+
+  const filteredStudents = riskFilter === 'ALL' ? atRiskStudents : atRiskStudents.filter(s => s.riskLevel === riskFilter);
+  const riskCounts = {
+    CRITICAL: atRiskStudents.filter(s => s.riskLevel === 'CRITICAL').length,
+    HIGH: atRiskStudents.filter(s => s.riskLevel === 'HIGH').length,
+    MEDIUM: atRiskStudents.filter(s => s.riskLevel === 'MEDIUM').length,
+    LOW: atRiskStudents.filter(s => s.riskLevel === 'LOW').length,
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-red-500" /></div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 dark:text-gray-400">Students flagged by AI based on academic performance, attendance patterns, and financial risk factors.</p>
+        <button onClick={fetchData} className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"><RefreshCw className="w-4 h-4" /> Refresh</button>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'Critical', count: riskCounts.CRITICAL, color: 'red', filter: 'CRITICAL' },
+          { label: 'High', count: riskCounts.HIGH, color: 'orange', filter: 'HIGH' },
+          { label: 'Medium', count: riskCounts.MEDIUM, color: 'yellow', filter: 'MEDIUM' },
+          { label: 'Low', count: riskCounts.LOW, color: 'green', filter: 'LOW' },
+        ].map(card => (
+          <button key={card.label} onClick={() => setRiskFilter(riskFilter === card.filter ? 'ALL' : card.filter)}
+            className={`p-4 rounded-xl border transition-all ${ riskFilter === card.filter ? `border-${card.color}-500 bg-${card.color}-50 dark:bg-${card.color}-900/20 ring-2 ring-${card.color}-500/30` : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:shadow-md' }`}>
+            <p className={`text-3xl font-bold text-${card.color}-600`}>{card.count}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{card.label} Risk</p>
+          </button>
+        ))}
+      </div>
+
+      {/* Student Table */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-slate-700/50">
+              <tr>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Student</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Class</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Risk</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Score</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden md:table-cell">Factors</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">View</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+              {filteredStudents.map(student => (
+                <tr key={student.studentId} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{student.studentName}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{student.className}</td>
+                  <td className="px-4 py-3">{getRiskBadge(student.riskLevel)}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-gray-900 dark:text-white">{student.riskScore}/100</td>
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <div className="flex gap-2">
+                      {student.factors.academic > 15 && <span className="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 px-2 py-0.5 rounded-full">Academic</span>}
+                      {student.factors.attendance > 10 && <span className="text-xs bg-purple-50 dark:bg-purple-900/20 text-purple-700 px-2 py-0.5 rounded-full">Attendance</span>}
+                      {student.factors.financial > 8 && <span className="text-xs bg-green-50 dark:bg-green-900/20 text-green-700 px-2 py-0.5 rounded-full">Financial</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => { setSelectedStudent(student); fetchRecommendations(student.studentId); }} className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><Eye className="w-4 h-4" /></button>
+                  </td>
+                </tr>
+              ))}
+              {filteredStudents.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-12 text-center"><ShieldCheck className="w-12 h-12 text-green-400 mx-auto mb-3" /><p className="text-gray-500">No at-risk students detected</p></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Student Detail Modal */}
+      {selectedStudent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedStudent(null)}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedStudent.studentName}</h3><p className="text-sm text-gray-500">{selectedStudent.className}</p></div>
+              {getRiskBadge(selectedStudent.riskLevel)}
+            </div>
+            <div className="space-y-3 mb-6">
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase">Risk Factor Breakdown</h4>
+              {[
+                { label: 'Academic', score: selectedStudent.factors.academic, max: 40, color: 'blue' },
+                { label: 'Attendance', score: selectedStudent.factors.attendance, max: 30, color: 'purple' },
+                { label: 'Financial', score: selectedStudent.factors.financial, max: 20, color: 'green' },
+                { label: 'Trend', score: selectedStudent.factors.trend, max: 10, color: 'orange' },
+              ].map(factor => (
+                <div key={factor.label}>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-gray-600 dark:text-gray-400">{factor.label}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{factor.score}/{factor.max}</span>
+                  </div>
+                  <div className="w-full h-2 bg-gray-100 dark:bg-slate-700 rounded-full">
+                    <div className={`h-full rounded-full bg-${factor.color}-500`} style={{ width: `${(factor.score / factor.max) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {selectedStudent.details.averageScore !== undefined && <p className="text-sm text-gray-600 mb-1">Average Score: <span className="font-medium text-gray-900 dark:text-white">{selectedStudent.details.averageScore.toFixed(1)}%</span></p>}
+            {selectedStudent.details.attendanceRate !== undefined && <p className="text-sm text-gray-600 mb-4">Attendance Rate: <span className="font-medium text-gray-900 dark:text-white">{selectedStudent.details.attendanceRate.toFixed(1)}%</span></p>}
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase mb-3 flex items-center gap-2"><Brain className="w-4 h-4 text-purple-600" /> AI Recommendations</h4>
+              {loadingRecs ? <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</div>
+                : recommendations.length > 0 ? <ul className="space-y-2">{recommendations.map((rec, i) => <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"><span className="w-5 h-5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{i + 1}</span>{rec}</li>)}</ul>
+                : <p className="text-sm text-gray-400">No recommendations available.</p>}
+            </div>
+            <button onClick={() => setSelectedStudent(null)} className="w-full py-2.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium">Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+// Attendance Alerts Tab (merged from StudentIntelligence)
+// ─────────────────────────────────────────
+
+function AttendanceAlertsTab() {
+  const [alerts, setAlerts] = useState<AttendanceAlert[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchAlerts(); }, []);
+
+  const fetchAlerts = async () => {
+    setLoading(true);
+    try { const data = await intelligenceService.getAttendanceAlerts({ resolved: false }).catch(() => []); setAlerts(data); }
+    catch {} finally { setLoading(false); }
+  };
+
+  const resolveAlert = async (alertId: string) => {
+    try { await intelligenceService.resolveAlert(alertId, 'Resolved from hub'); setAlerts(prev => prev.filter(a => a.id !== alertId)); toast.success('Alert resolved'); }
+    catch { toast.error('Failed to resolve'); }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-amber-500" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 dark:text-gray-400">Unresolved attendance patterns flagged by AI — chronic absences, sudden drops, and concerning trends.</p>
+        <button onClick={async () => { try { await api.post('/intelligence/attendance/analyze'); toast.success('Analysis running...'); fetchAlerts(); } catch { toast.error('Failed'); } }}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm"><RefreshCw className="w-4 h-4" /> Run Analysis</button>
+      </div>
+
+      {alerts.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-12 border border-gray-200 dark:border-slate-700 text-center">
+          <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-500">No active attendance alerts</p>
+        </div>
+      ) : alerts.map(alert => (
+        <div key={alert.id} className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-gray-200 dark:border-slate-700 flex items-start gap-4">
+          <div className={`p-2 rounded-lg flex-shrink-0 ${alert.alertType === 'CHRONIC' ? 'bg-red-50 dark:bg-red-900/20' : 'bg-yellow-50 dark:bg-yellow-900/20'}`}>
+            <AlertTriangle className={`w-5 h-5 ${alert.alertType === 'CHRONIC' ? 'text-red-600' : 'text-yellow-600'}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">
+              {alert.student ? `${alert.student.firstName} ${alert.student.lastName}` : 'Student'}
+              {alert.student?.class && <span className="text-gray-400 font-normal ml-2">({alert.student.class.name})</span>}
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{alert.message}</p>
+            <p className="text-xs text-gray-400 mt-1">{new Date(alert.createdAt).toLocaleDateString()}</p>
+          </div>
+          <button onClick={() => resolveAlert(alert.id)} className="text-xs px-3 py-1.5 bg-green-50 dark:bg-green-900/20 text-green-700 rounded-lg hover:bg-green-100 flex-shrink-0">Resolve</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────
+
 export default function AIIntelligenceHub() {
-  const [activeTab, setActiveTab] = useState<Tab>('grade-forecast');
+  const [activeTab, setActiveTab] = useState<Tab>('at-risk');
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -764,10 +989,10 @@ export default function AIIntelligenceHub() {
             <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl">
               <Brain className="w-6 h-6 text-white" />
             </div>
-            AI Intelligence Hub
+            Intelligence Hub
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Predictive analytics, smart scheduling, and AI-powered academic insights
+            Student risk detection, predictive analytics, smart scheduling & AI-powered insights
           </p>
         </div>
       </div>
@@ -791,6 +1016,8 @@ export default function AIIntelligenceHub() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'at-risk' && <AtRiskStudentsTab />}
+      {activeTab === 'alerts' && <AttendanceAlertsTab />}
       {activeTab === 'grade-forecast' && <GradeForecastTab />}
       {activeTab === 'fee-defaulters' && <FeeDefaulterTab />}
       {activeTab === 'timetable' && <TimetableTab />}

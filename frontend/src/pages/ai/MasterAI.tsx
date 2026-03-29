@@ -5,7 +5,7 @@ import {
   CreditCard, Bell, BarChart3, ArrowRight, Zap, Terminal,
   Copy, Trash2, ChevronDown, Plus, MessageSquare, MoreHorizontal,
   Pencil, Check, X, Search, PanelLeftClose, PanelLeft,
-  Mic, MicOff, ImagePlus
+  Mic, MicOff, ImagePlus, Volume2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
@@ -476,6 +476,7 @@ const MasterAI = () => {
                 key={msg.id}
                 message={msg}
                 onSuggestionClick={sendCommand}
+                onPlayAudio={playResponseAudio}
               />
             ))
           )}
@@ -714,11 +715,21 @@ const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
 const MessageBubble = ({
   message,
   onSuggestionClick,
+  onPlayAudio,
 }: {
   message: ChatMessage;
   onSuggestionClick: (cmd: string) => void;
+  onPlayAudio: (text: string) => void;
 }) => {
   const isUser = message.role === 'user';
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const handlePlayClick = async () => {
+    setIsPlaying(true);
+    await onPlayAudio(message.content);
+    // Ideally we track when audio finishes, but we can just use a timeout or assume done
+    setTimeout(() => setIsPlaying(false), 2000); 
+  };
 
   if (message.isLoading) {
     return (
@@ -766,6 +777,15 @@ const MessageBubble = ({
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700">
+            <button
+              onClick={handlePlayClick}
+              disabled={isPlaying}
+              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+            >
+              {isPlaying ? <Loader2 size={10} className="animate-spin" /> : <Volume2 size={10} />}
+              {isPlaying ? 'Playing' : 'Play'}
+            </button>
+            <span className="text-[10px] text-gray-300 dark:text-gray-600">•</span>
             <button
               onClick={() => { navigator.clipboard.writeText(message.content); toast.success('Copied!'); }}
               className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
