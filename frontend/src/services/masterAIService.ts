@@ -66,14 +66,35 @@ const masterAIService = {
 
   // ---- Execute ----
 
-  async executeCommand(message: string, conversationId?: string): Promise<MasterAIResponse> {
-    const { data } = await api.post('/master-ai/execute', { message, conversationId });
+  async executeCommand(message: string, conversationId?: string, imageBase64?: string): Promise<MasterAIResponse> {
+    const { data } = await api.post('/master-ai/execute', { message, conversationId, imageBase64 });
     return data;
   },
 
   async getTools(): Promise<MasterAITool[]> {
     const { data } = await api.get('/master-ai/tools');
     return data;
+  },
+
+  // ---- Audio ----
+
+  async transcribeAudio(audioBlob: Blob): Promise<string> {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.webm');
+    
+    const { data } = await api.post('/master-ai/transcribe', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return data.text;
+  },
+
+  async generateSpeech(text: string): Promise<Blob> {
+    const response = await api.post('/master-ai/speech', { text }, {
+      responseType: 'blob'
+    });
+    return response.data;
   },
 };
 

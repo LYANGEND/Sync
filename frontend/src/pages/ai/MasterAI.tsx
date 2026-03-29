@@ -4,7 +4,8 @@ import {
   Calendar, BookOpen, GraduationCap,
   CreditCard, Bell, BarChart3, ArrowRight, Zap, Terminal,
   Copy, Trash2, ChevronDown, Plus, MessageSquare, MoreHorizontal,
-  Pencil, Check, X, Search, PanelLeftClose, PanelLeft
+  Pencil, Check, X, Search, PanelLeftClose, PanelLeft,
+  Mic, MicOff, ImagePlus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
@@ -14,6 +15,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  image?: string;
   actions?: MasterAIAction[];
   suggestions?: string[];
   timestamp: Date;
@@ -107,6 +109,12 @@ function groupConversationsByDate(conversations: MasterAIConversation[]) {
 const MasterAI = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -120,6 +128,76 @@ const MasterAI = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Play response audio when new assistant message arrives (TTS)
+  const playResponseAudio = async (text: string) => {
+    try {
+      const blob = await masterAIService.generateSpeech(text);
+      const url = URL.createObjectURL(blob);
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+      }
+      const audio = new Audio(url);
+      currentAudioRef.current = audio;
+      audio.play();
+    } catch (e) {
+      console.error('Failed to play TTS', e);
+    }
+  };
+
+  const toggleListening = async () => {
+    if (isListening && mediaRecorderRef.current) {
+      // STOP listening
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+    } else {
+      // START listening
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          stream.getTracks().forEach(track => track.stop());
+          
+          try {
+            const toastId = toast.loading('Transcribing...');
+            const transcribedText = await masterAIService.transcribeAudio(audioBlob);
+            setInput(prev => (prev + ' ' + transcribedText).trim());
+            toast.dismiss(toastId);
+          } catch (e) {
+            toast.error('Failed to transcribe audio');
+          }
+        };
+
+        mediaRecorder.start();
+        setIsListening(true);
+      } catch (err) {
+        toast.error('Microphone access denied or not available');
+      }
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Image must be less than 5MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => setImageBase64(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Load conversations on mount
   const loadConversations = useCallback(async () => {
@@ -184,10 +262,17 @@ const MasterAI = () => {
     const text = command || input.trim();
     if (!text || isProcessing) return;
 
+    const currentImage = imageBase64;
+    
+    // Clear early so user feels responsive
+    setInput('');
+    setImageBase64(null);
+
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: text,
+      image: currentImage || undefined,
       timestamp: new Date(),
     };
 
@@ -200,11 +285,10 @@ const MasterAI = () => {
     };
 
     setMessages(prev => [...prev, userMsg, loadingMsg]);
-    setInput('');
     setIsProcessing(true);
 
     try {
-      const result = await masterAIService.executeCommand(text, activeConversationId || undefined);
+      const result = await masterAIService.executeCommand(text, activeConversationId || undefined, currentImage || undefined);
 
       // If a new conversation was created, update state
       if (result.isNewConversation || !activeConversationId) {
@@ -222,6 +306,7 @@ const MasterAI = () => {
       };
 
       setMessages(prev => [...prev.filter(m => !m.isLoading), assistantMsg]);
+      playResponseAudio(result.message);
 
       // Update the conversation's updatedAt in the sidebar
       setConversations(prev => {
@@ -418,29 +503,60 @@ const MasterAI = () => {
 
         {/* Input Area */}
         <div className="px-4 pb-4 flex-shrink-0">
+          {imageBase64 && (
+            <div className="relative inline-block mb-3">
+              <img src={imageBase64} alt="Upload preview" className="h-20 w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
+              <button 
+                onClick={() => setImageBase64(null)}
+                className="absolute -top-2 -right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
-            <Terminal size={16} className="text-gray-400 ml-2 mb-3 flex-shrink-0" />
+            <input 
+              type="file" 
+              accept="image/*" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={handleImageUpload} 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
+              title="Add Image"
+            >
+              <ImagePlus size={18} />
+            </button>
+            <button 
+              onClick={toggleListening}
+              className={`p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+              title={isListening ? "Stop listening" : "Start speaking"}
+            >
+              {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+            </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder='Tell me what to do... e.g. "Add all Zambian holidays for 2025"'
-              className="flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-2 py-2 max-h-32"
+              placeholder={isListening ? 'Listening...' : 'Tell me what to do... e.g. "Add all Zambian holidays for 2025"'}
+              className="flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-2 py-2.5 max-h-32"
               rows={1}
               style={{ minHeight: '40px' }}
               disabled={isProcessing}
             />
             <button
               onClick={() => sendCommand()}
-              disabled={!input.trim() || isProcessing}
-              className="p-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+              disabled={(!input.trim() && !imageBase64) || isProcessing}
+              className="p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             >
               {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
             </button>
           </div>
           <p className="text-[10px] text-gray-400 text-center mt-2">
-            Master AI can create, read, and manage data across all modules. Actions are executed immediately.
+            Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.
           </p>
         </div>
       </div>
@@ -624,7 +740,12 @@ const MessageBubble = ({
     return (
       <div className="flex gap-3 justify-end">
         <div className="max-w-[85%] bg-purple-600 text-white rounded-2xl rounded-br-md px-4 py-3">
-          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          {message.image && (
+            <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-60 object-cover border border-purple-400" />
+          )}
+          {message.content && (
+            <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          )}
           <p className="text-[10px] text-purple-200 mt-1">
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </p>

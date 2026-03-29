@@ -15,6 +15,7 @@ interface AIConfig {
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  image?: string; // Base64 encoded image data URL
 }
 
 interface AIResponse {
@@ -168,6 +169,21 @@ class AIService {
     }
   }
 
+  private formatOpenAIMessages(messages: ChatMessage[]) {
+    return messages.map(m => {
+      if (m.image) {
+        return {
+          role: m.role,
+          content: [
+            { type: 'text', text: m.content },
+            { type: 'image_url', image_url: { url: m.image } }
+          ]
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+  }
+
   /**
    * OpenAI Chat Completion
    */
@@ -178,11 +194,12 @@ class AIService {
     temperature: number,
     maxTokens: number
   ): Promise<AIResponse> {
+    const formattedMessages = this.formatOpenAIMessages(messages);
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
         model,
-        messages,
+        messages: formattedMessages,
         temperature,
         max_tokens: maxTokens,
       },
@@ -218,8 +235,9 @@ class AIService {
 
     // Some models (o-series, gpt-5.x) don't support temperature or max_tokens
     const isReasoningModel = /^(o[1-9]|gpt-5)/i.test(deployment);
+    const formattedMessages = this.formatOpenAIMessages(messages);
     const body: any = {
-      messages,
+      messages: formattedMessages,
       max_completion_tokens: maxTokens,
     };
     if (!isReasoningModel) {
@@ -262,10 +280,23 @@ class AIService {
         max_tokens: maxTokens,
         temperature,
         system: systemMessage?.content || '',
-        messages: conversationMessages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: conversationMessages.map(m => {
+          if (m.image) {
+            const base64Data = m.image.split(',')[1] || m.image;
+            const mimeType = m.image.split(';')[0].split(':')[1] || 'image/jpeg';
+            return {
+              role: m.role,
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Data } },
+                { type: 'text', text: m.content }
+              ]
+            };
+          }
+          return {
+            role: m.role,
+            content: m.content,
+          };
+        }),
       },
       {
         headers: {
@@ -302,10 +333,20 @@ class AIService {
     const systemMessage = messages.find(m => m.role === 'system');
     const conversationMessages = messages.filter(m => m.role !== 'system');
 
-    const contents = conversationMessages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+    const contents = conversationMessages.map(m => {
+      const parts: any[] = [{ text: m.content }];
+      if (m.image) {
+        const base64Data = m.image.split(',')[1] || m.image;
+        const mimeType = m.image.split(';')[0].split(':')[1] || 'image/jpeg';
+        parts.push({
+          inline_data: { mime_type: mimeType, data: base64Data }
+        });
+      }
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts,
+      };
+    });
 
     const body: any = {
       contents,
@@ -336,6 +377,77 @@ class AIService {
       tokensUsed: response.data.usageMetadata?.totalTokenCount,
       model: geminiModel,
     };
+  }
+
+  /**
+   * Transcribe Audio to Text (OpenAI Whisper)
+   */
+  async transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string> {
+    const config = await this.loadConfig();
+    if (!config || (config.provider !== 'openai' && config.provider !== 'azure')) {
+      // Fallback: If not explicitly configured, we still check if apiKey works for OpenAI or we fail.
+      if (!config) throw new Error('AI is not configured.');
+    }
+    // We will enforce using OpenAI API for Whisper here if azure doesn't have an endpoint set up specifically for it
+    const apiKey = config.apiKey;
+
+    const blob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
+    const formData = new FormData();
+    formData.append('file', blob as any, 'audio.webm');
+    formData.append('model', 'whisper-1');
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: formData as any
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Whisper API error: ${response.statusText} - ${errText}`);
+      }
+      const data: any = await response.json();
+      return data.text;
+    } catch (error: any) {
+      console.error('Audio transcription error:', error.message);
+      throw new Error(`Failed to transcribe audio: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate Speech from Text (OpenAI TTS)
+   */
+  async generateSpeech(text: string): Promise<Buffer> {
+    const config = await this.loadConfig();
+    if (!config) throw new Error('AI is not configured.');
+    
+    try {
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: text,
+          voice: 'echo'
+        })
+      });
+      
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`TTS API error: ${response.statusText} - ${errText}`);
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (error: any) {
+      console.error('TTS error:', error.message);
+      throw new Error(`Failed to generate speech: ${error.message}`);
+    }
   }
 
   /**

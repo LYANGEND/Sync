@@ -88,7 +88,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { message, conversationId } = req.body;
+    const { message, conversationId, imageBase64 } = req.body;
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
@@ -122,7 +122,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }));
 
     // Execute via Master AI service
-    const result = await masterAIService.processCommand(message, userId, conversationHistory);
+    const result = await masterAIService.processCommand(message, userId, conversationHistory, imageBase64);
 
     // Build assistant content for DB storage
     let assistantContent = result.message;
@@ -169,5 +169,42 @@ export const getTools = async (_req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Master AI tools error:', error);
     res.status(500).json({ error: 'Failed to list tools' });
+  }
+};
+
+export const transcribeAudio = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const text = await aiService.transcribeAudio(req.file.buffer, req.file.mimetype);
+    res.json({ text });
+  } catch (error: any) {
+    console.error('Transcription error:', error);
+    res.status(500).json({ error: error.message || 'Failed to transcribe audio' });
+  }
+};
+
+export const generateSpeech = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { text } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const audioBuffer = await aiService.generateSpeech(text);
+    
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.send(audioBuffer);
+  } catch (error: any) {
+    console.error('TTS error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate speech' });
   }
 };

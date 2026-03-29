@@ -1200,9 +1200,9 @@ class MasterAIService {
   /**
    * Process a natural language command and execute the resulting actions
    */
-  async processCommand(userMessage: string, userId: string, conversationHistory?: { role: string; content: string }[]): Promise<MasterAIResponse> {
+  async processCommand(userMessage: string, userId: string, conversationHistory?: { role: string; content: string }[], imageBase64?: string): Promise<MasterAIResponse> {
     // Build messages
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
       { role: 'system', content: buildSystemPrompt() },
     ];
 
@@ -1216,7 +1216,7 @@ class MasterAIService {
       }
     }
 
-    messages.push({ role: 'user', content: userMessage });
+    messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
 
     // Call AI to get the action plan
     const aiResponse = await aiService.chat(messages, {

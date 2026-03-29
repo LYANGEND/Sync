@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   executeCommand,
   getTools,
@@ -7,14 +8,21 @@ import {
   getConversation,
   updateConversation,
   deleteConversation,
+  transcribeAudio,
+  generateSpeech,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // All master AI routes require authentication + SUPER_ADMIN role
 router.use(authenticateToken);
 router.use(authorizeRole(['SUPER_ADMIN']));
+
+// Audio Features
+router.post('/transcribe', upload.single('audio'), transcribeAudio);
+router.post('/speech', generateSpeech);
 
 // Conversations (ChatGPT-style)
 router.post('/conversations', createConversation);
