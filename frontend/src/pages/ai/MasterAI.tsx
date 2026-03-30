@@ -118,7 +118,8 @@ const MasterAI = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Sidebar closed by default on mobile, open on desktop
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingConversation, setLoadingConversation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -213,6 +214,20 @@ const MasterAI = () => {
     loadConversations();
   }, [loadConversations]);
 
+  // Close sidebar on mobile when clicking outside or after selecting conversation
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Load a specific conversation's messages
   const loadConversation = async (convoId: string) => {
     if (convoId === activeConversationId) return;
@@ -227,6 +242,11 @@ const MasterAI = () => {
       }));
       setMessages(chatMsgs);
       setActiveConversationId(convoId);
+      
+      // Close sidebar on mobile after selecting conversation
+      if (window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
     } catch {
       toast.error('Failed to load conversation');
     } finally {
@@ -354,12 +374,14 @@ const MasterAI = () => {
   const groupedConversations = groupConversationsByDate(filteredConversations);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative">
+    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden">
       {/* ============ SIDEBAR ============ */}
       <div
         className={`${
-          sidebarOpen ? 'w-72 md:w-72' : 'w-0'
-        } transition-all duration-300 flex-shrink-0 overflow-hidden border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col absolute md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none`}
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        } ${
+          sidebarOpen ? 'w-72' : 'w-0 md:w-0'
+        } transition-all duration-300 flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col fixed md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none h-full`}
       >
         {/* Sidebar Header */}
         <div className="p-3 flex-shrink-0">
@@ -434,7 +456,7 @@ const MasterAI = () => {
       )}
 
       {/* ============ MAIN CHAT AREA ============ */}
-      <div className="flex-1 flex flex-col min-w-0 w-full md:w-auto">
+      <div className="flex-1 flex flex-col min-w-0 w-full relative">
         {/* Header */}
         <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
           <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-3">
@@ -672,18 +694,18 @@ const ConversationItem = ({
 // WELCOME SCREEN
 // ==========================================
 const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
-  <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-3 md:px-4">
+  <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-4 md:px-4">
     <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-4 md:mb-6">
       <Sparkles className="w-8 h-8 md:w-10 md:h-10 text-purple-600 dark:text-purple-400" />
     </div>
-    <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center">
+    <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center px-2">
       What would you like me to do?
     </h3>
-    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-4">
+    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-2">
       Tell me in plain English and I'll execute it across any module — calendar, students, classes, fees, and more.
     </p>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl px-2">
       {quickCommands.map((cmd, i) => (
         <button
           key={i}
@@ -702,18 +724,20 @@ const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
       ))}
     </div>
 
-    <div className="mt-8 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-xl p-5 border border-purple-100 dark:border-purple-800/30 max-w-lg w-full">
+    <div className="mt-6 md:mt-8 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-xl p-4 md:p-5 border border-purple-100 dark:border-purple-800/30 max-w-lg w-full mx-2">
       <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-        <Zap size={14} className="text-purple-600 dark:text-purple-400" />
-        What can I do?
+        <Zap size={14} className="text-purple-600 dark:text-purple-400 flex-shrink-0" />
+        <span>What can I do?</span>
       </h4>
       <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1.5">
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Add public holidays by country to the academic calendar</li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Create classes, subjects, and fee structures</li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Search for students, teachers, and users</li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Create announcements and send notifications</li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Set up academic terms and assessment schedules</li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> Record expenses and manage scholarships</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Add public holidays by country to the academic calendar</span></li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Create classes, subjects, and fee structures</span></li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Search for students, teachers, and users</span></li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Create announcements and send notifications</span></li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Set up academic terms and assessment schedules</span></li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Record expenses and manage scholarships</span></li>
+      </ul>
+    </div>
         <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> View school statistics and analytics</li>
       </ul>
     </div>
