@@ -13,10 +13,16 @@ const PORT = process.env.PORT || 3000;
 
 // Create HTTP server and attach Socket.io
 const server = http.createServer(app);
+
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  : ['http://localhost:5173', 'http://localhost:3000'];
+
 const io = new SocketIOServer(server, {
   cors: {
-    origin: '*',
+    origin: process.env.NODE_ENV === 'production' ? allowedOrigins : '*',
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 

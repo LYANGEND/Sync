@@ -14,7 +14,17 @@ import {
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed'));
+    }
+  },
+});
 
 // All master AI routes require authentication + SUPER_ADMIN role
 router.use(authenticateToken);

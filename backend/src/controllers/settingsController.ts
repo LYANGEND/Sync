@@ -77,7 +77,16 @@ export const getSettings = async (req: Request, res: Response) => {
       });
     }
 
-    res.json(settings);
+    // Mask sensitive keys before sending to client
+    const sensitiveFields = ['aiApiKey', 'smsApiKey', 'smsApiSecret', 'whatsappApiKey', 'lencoApiKey', 'smtpPassword'] as const;
+    const masked: any = { ...settings };
+    for (const field of sensitiveFields) {
+      if (masked[field] && typeof masked[field] === 'string' && masked[field].length > 4) {
+        masked[field] = '••••' + masked[field].slice(-4);
+      }
+    }
+
+    res.json(masked);
   } catch (error) {
     console.error('Get settings error:', error);
     res.status(500).json({ message: 'Internal server error' });

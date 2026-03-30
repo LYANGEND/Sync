@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { SchoolSettings } from '@prisma/client';
 import axios from 'axios';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 
@@ -7,6 +8,32 @@ interface SmsResult {
   messageId?: string;
   errorCode?: string;
   error?: string;
+}
+
+// ─── Security constants ─────────────────────────────────────
+
+/** Valid Zambian mobile number patterns (after stripping formatting) */
+const ZAMBIAN_PHONE_REGEX = /^(260[79][5-7]\d{7}|0[79][5-7]\d{7})$/;
+
+/** Daily SMS rate limits */
+const RATE_LIMITS = {
+  perUser: 500,   // max SMS per user per day
+  global: 5000,   // max SMS across all users per day
+};
+
+/**
+ * Sanitize user-supplied values before interpolating into SMS text.
+ * Strips URLs, HTML tags, and control characters that could be used for
+ * SMS injection / phishing.
+ */
+function sanitizeSmsField(value: string): string {
+  return value
+    .replace(/https?:\/\/[^\s]+/gi, '')       // strip URLs
+    .replace(/<[^>]*>/g, '')                    // strip HTML tags
+    .replace(/[\r\n\t]/g, ' ')                  // normalise whitespace
+    .replace(/[^\w\s.,'-]/g, '')                // keep only safe chars
+    .trim()
+    .substring(0, 100);                          // cap length
 }
 
 /**
@@ -56,6 +83,12 @@ class SmsService {
     message: string,
     options?: { source?: string; sentById?: string; recipientName?: string; scheduledAt?: string },
   ): Promise<SmsResult> {
+    // ── Phone validation ──
+    const validationError = this.validatePhone(phone);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
+
     const logId = await logCommunication({
       channel: 'SMS',
       status: 'PENDING',
@@ -67,6 +100,13 @@ class SmsService {
     });
 
     try {
+      // ── Rate limiting ──
+      const rateLimitError = await this.checkRateLimit(options?.sentById);
+      if (rateLimitError) {
+        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', rateLimitError);
+        return { success: false, error: rateLimitError };
+      }
+
       const settings = await prisma.schoolSettings.findFirst();
       if (!settings) {
         if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
@@ -199,7 +239,9 @@ class SmsService {
     absentDays: number,
     schoolName: string,
   ): Promise<SmsResult> {
-    const message = `Dear Parent, ${studentName} has been absent for ${absentDays} consecutive days at ${schoolName}. Please contact the school. Reply STOP to unsubscribe.`;
+    const safeName = sanitizeSmsField(studentName);
+    const safeSchool = sanitizeSmsField(schoolName);
+    const message = `Dear Parent, ${safeName} has been absent for ${absentDays} consecutive days at ${safeSchool}. Please contact the school. Reply STOP to unsubscribe.`;
     return this.send(parentPhone, message, { source: 'attendance_alert' });
   }
 
@@ -211,8 +253,10 @@ class SmsService {
     dueDate: string,
     schoolName: string,
   ): Promise<SmsResult> {
+    const safeName = sanitizeSmsField(studentName);
+    const safeSchool = sanitizeSmsField(schoolName);
     const formattedAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
-    const message = `Dear Parent, a fee of ZMW ${formattedAmount} for ${studentName} is due on ${dueDate} at ${schoolName}. Pay via mobile money or visit the school.`;
+    const message = `Dear Parent, a fee of ZMW ${formattedAmount} for ${safeName} is due on ${dueDate} at ${safeSchool}. Pay via mobile money or visit the school.`;
     return this.send(parentPhone, message, { source: 'fee_reminder' });
   }
 
@@ -224,9 +268,63 @@ class SmsService {
     transactionId: string,
     schoolName: string,
   ): Promise<SmsResult> {
+    const safeName = sanitizeSmsField(studentName);
+    const safeSchool = sanitizeSmsField(schoolName);
     const formattedAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2 });
-    const message = `Payment received: ZMW ${formattedAmount} for ${studentName} at ${schoolName}. Ref: ${transactionId}. Thank you!`;
+    // Only show last 6 chars of transaction ID to limit exposure over insecure SMS channel
+    const maskedRef = transactionId.length > 6 ? '…' + transactionId.slice(-6) : transactionId;
+    const message = `Payment received: ZMW ${formattedAmount} for ${safeName} at ${safeSchool}. Ref: ${maskedRef}. Thank you!`;
     return this.send(parentPhone, message, { source: 'payment_confirmation' });
+  }
+
+  // ─── security: validation & rate limiting ───────────────
+
+  /**
+   * Validate phone number — must be a valid Zambian mobile number.
+   * Returns an error string if invalid, or null if valid.
+   */
+  private validatePhone(phone: string): string | null {
+    const cleaned = phone.replace(/[\s\-\(\)\+]/g, '');
+    if (!ZAMBIAN_PHONE_REGEX.test(cleaned)) {
+      return `Invalid Zambian mobile number: ${phone.substring(0, 4)}***. Must be a valid 09x/07x number.`;
+    }
+    return null;
+  }
+
+  /**
+   * Check daily SMS rate limits (per-user and global).
+   * Returns an error string if limit is exceeded, or null if within limits.
+   */
+  private async checkRateLimit(sentById?: string): Promise<string | null> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Global daily limit
+    const globalCount = await prisma.communicationLog.count({
+      where: {
+        channel: 'SMS',
+        createdAt: { gte: todayStart },
+      },
+    });
+    if (globalCount >= RATE_LIMITS.global) {
+      return `Global daily SMS limit reached (${RATE_LIMITS.global}). Try again tomorrow.`;
+    }
+
+    // Per-user daily limit
+    if (sentById) {
+      const userCount = await prisma.communicationLog.count({
+        where: {
+          channel: 'SMS',
+          sentById,
+          createdAt: { gte: todayStart },
+        },
+      });
+      if (userCount >= RATE_LIMITS.perUser) {
+        return `Your daily SMS limit reached (${RATE_LIMITS.perUser}). Try again tomorrow.`;
+      }
+    }
+
+    return null;
   }
 
   // ─── phone formatting ─────────────────────────────────────
@@ -271,7 +369,7 @@ class SmsService {
   private async sendViaMshastra(
     to: string,
     message: string,
-    settings: any,
+    settings: SchoolSettings,
     scheduledAt?: string,
   ): Promise<SmsResult> {
     try {
@@ -294,13 +392,15 @@ class SmsService {
       }
 
       const url = `https://mshastra.com/sendurl.aspx?${new URLSearchParams(params).toString()}`;
+      // Log destination only — never log the full URL (contains credentials)
       console.log(`[mShastra] Sending SMS to ${phoneNumber}${scheduledAt ? ` (scheduled: ${params.scheduledDate})` : ''}`);
 
       const response = await axios.get(url, { timeout: 30000 });
       const body = typeof response.data === 'string' ? response.data.trim() : String(response.data);
 
-      console.log(`[mShastra] Response: ${body}`);
-      return this.parseMshastraResponse(body);
+      const result = this.parseMshastraResponse(body);
+      console.log(`[mShastra] Result: success=${result.success}, errorCode=${result.errorCode || 'n/a'}`);
+      return result;
     } catch (error: any) {
       console.error('[mShastra] SMS send error:', error.message);
       return { success: false, error: error.message };
@@ -314,7 +414,7 @@ class SmsService {
   private async sendBulkViaMshastra(
     phones: string[],
     message: string,
-    settings: any,
+    settings: SchoolSettings,
     scheduledAt?: string,
   ): Promise<SmsResult> {
     try {
@@ -338,8 +438,9 @@ class SmsService {
       const response = await axios.get(url, { timeout: 60000 });
       const body = typeof response.data === 'string' ? response.data.trim() : String(response.data);
 
-      console.log(`[mShastra] Bulk response: ${body}`);
-      return this.parseMshastraResponse(body);
+      const result = this.parseMshastraResponse(body);
+      console.log(`[mShastra] Bulk result: success=${result.success}, errorCode=${result.errorCode || 'n/a'}, recipients=${phones.length}`);
+      return result;
     } catch (error: any) {
       console.error('[mShastra] Bulk SMS error:', error.message);
       return { success: false, error: error.message };
@@ -353,7 +454,7 @@ class SmsService {
    */
   private async sendViaJsonApi(
     recipients: { phone: string; message: string }[],
-    settings: any,
+    settings: SchoolSettings,
     options?: { source?: string; sentById?: string },
   ): Promise<{ total: number; sent: number; failed: number; results: SmsResult[] }> {
     // Log each recipient
@@ -380,6 +481,7 @@ class SmsService {
         language: 'English',
       }));
 
+      // Never log payload — it contains credentials repeated per-recipient
       console.log(`[mShastra] JSON API — sending ${recipients.length} messages`);
 
       const response = await axios.post(
@@ -448,7 +550,7 @@ class SmsService {
       const response = await axios.get(url, { timeout: 15000 });
       const body = typeof response.data === 'string' ? response.data.trim() : String(response.data);
 
-      console.log(`[mShastra] Balance: ${body}`);
+      console.log('[mShastra] Balance check completed');
       return { success: true, balance: body };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -493,13 +595,14 @@ class SmsService {
       return { success: false, error: raw };
     }
 
-    // If response looks like a message ID (numeric), treat as success
-    if (/^\d+$/.test(raw)) {
+    // If response looks like a message ID (numeric, 6+ digits), treat as success
+    if (/^\d{6,}$/.test(raw)) {
       return { success: true, messageId: raw };
     }
 
-    // Unknown response — treat as success with raw body as ID
-    return { success: true, messageId: raw };
+    // Unknown response — treat as FAILURE to prevent silent data loss
+    console.warn(`[mShastra] Unrecognised response treated as failure: ${raw.substring(0, 80)}`);
+    return { success: false, error: `Unrecognised provider response: ${raw.substring(0, 100)}` };
   }
 
   /**
@@ -519,7 +622,7 @@ class SmsService {
 
   // ─── Africa's Talking provider ────────────────────────────
 
-  private async sendViaAfricasTalking(to: string, message: string, settings: any): Promise<SmsResult> {
+  private async sendViaAfricasTalking(to: string, message: string, settings: SchoolSettings): Promise<SmsResult> {
     try {
       const response = await fetch('https://api.africastalking.com/version1/messaging', {
         method: 'POST',
@@ -550,7 +653,7 @@ class SmsService {
 
   // ─── Twilio provider ──────────────────────────────────────
 
-  private async sendViaTwilio(to: string, message: string, settings: any): Promise<SmsResult> {
+  private async sendViaTwilio(to: string, message: string, settings: SchoolSettings): Promise<SmsResult> {
     try {
       const accountSid = settings.smsApiKey || '';
       const authToken = settings.smsApiSecret || '';

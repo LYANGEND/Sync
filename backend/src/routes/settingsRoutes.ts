@@ -9,7 +9,7 @@ router.get('/public', getPublicSettings);
 
 router.use(authenticateToken);
 
-router.get('/', getSettings);
+router.get('/', authorizeRole(['SUPER_ADMIN']), getSettings);
 router.put('/', authorizeRole(['SUPER_ADMIN']), updateSettings);
 
 // Logo upload routes

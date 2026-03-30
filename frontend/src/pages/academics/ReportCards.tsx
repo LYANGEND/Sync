@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import DOMPurify from 'dompurify';
 import { FileText, AlertCircle, CheckCircle, Printer, Download, FileSpreadsheet, Mail, Brain, Loader2, X } from 'lucide-react';
 import { exportToCSV, exportToExcel } from '../../utils/exportUtils';
 import { reportCardService, StudentReport } from '../../services/reportCardService';
@@ -428,7 +429,7 @@ const ReportCards: React.FC = () => {
             <div className="overflow-y-auto flex-1 p-8">
               <div
                 className="prose prose-sm dark:prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: parentLetter.letterHtml || `<p style="white-space:pre-wrap">${parentLetter.letterPlainText}</p>` }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parentLetter.letterHtml || `<p style="white-space:pre-wrap">${parentLetter.letterPlainText}</p>`) }}
               />
             </div>
             <div className="p-4 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500 text-center">

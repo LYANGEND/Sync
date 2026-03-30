@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import {
   Users, Send, Eye, Play, Plus, RefreshCw, Settings as SettingsIcon,
   TrendingUp, AlertTriangle, CheckCircle, Clock, DollarSign,
@@ -1147,7 +1148,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
                   <span className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase">AI Generated Preview</span>
                 </div>
                 {previewChannel === 'EMAIL' ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: previewMessage }} />
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewMessage) }} />
                 ) : (
                   <p className="text-sm text-slate-700 dark:text-gray-300 whitespace-pre-wrap">{previewMessage}</p>
                 )}
