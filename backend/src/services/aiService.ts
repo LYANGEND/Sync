@@ -384,41 +384,82 @@ class AIService {
    */
   async transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string> {
     const config = await this.loadConfig();
-    if (!config || (config.provider !== 'openai' && config.provider !== 'azure')) {
-      if (!config) throw new Error('AI is not configured.');
+    if (!config) {
+      throw new Error('AI is not configured.');
     }
 
-    const apiKey = config.apiKey;
+    // For Azure OpenAI, we need to use Azure's Whisper endpoint
+    if (config.provider === 'azure') {
+      if (!config.azureEndpoint) {
+        throw new Error('Azure OpenAI endpoint not configured. Please set AZURE_OPENAI_ENDPOINT in environment variables.');
+      }
 
-    // Use axios with form-data for Node.js
-    const FormData = require('form-data');
-    const formData = new FormData();
-    
-    // Append the audio buffer as a file
-    formData.append('file', audioBuffer, {
-      filename: 'audio.webm',
-      contentType: mimeType || 'audio/webm',
-    });
-    formData.append('model', 'whisper-1');
+      const FormData = require('form-data');
+      const formData = new FormData();
+      
+      formData.append('file', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: mimeType || 'audio/webm',
+      });
 
-    try {
-      const axios = require('axios');
-      const response = await axios.post(
-        'https://api.openai.com/v1/audio/transcriptions',
-        formData,
-        {
+      try {
+        const axios = require('axios');
+        
+        // Azure Whisper endpoint format
+        const whisperDeployment = process.env.AZURE_WHISPER_DEPLOYMENT || 'whisper';
+        const url = `${config.azureEndpoint}/openai/deployments/${whisperDeployment}/audio/transcriptions?api-version=${config.azureApiVersion || '2024-02-15-preview'}`;
+        
+        const response = await axios.post(url, formData, {
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
+            'api-key': config.apiKey,
             ...formData.getHeaders(),
           },
-        }
-      );
+        });
 
-      return response.data.text;
-    } catch (error: any) {
-      console.error('Audio transcription error:', error.response?.data || error.message);
-      throw new Error(`Failed to transcribe audio: ${error.response?.data?.error?.message || error.message}`);
+        return response.data.text;
+      } catch (error: any) {
+        console.error('Azure Whisper transcription error:', error.response?.data || error.message);
+        
+        if (error.response?.status === 404) {
+          throw new Error('Azure Whisper deployment not found. Please deploy a Whisper model in your Azure OpenAI resource or set AZURE_WHISPER_DEPLOYMENT environment variable.');
+        }
+        
+        throw new Error(`Failed to transcribe audio: ${error.response?.data?.error?.message || error.message}`);
+      }
     }
+
+    // For standard OpenAI
+    if (config.provider === 'openai') {
+      const FormData = require('form-data');
+      const formData = new FormData();
+      
+      formData.append('file', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: mimeType || 'audio/webm',
+      });
+      formData.append('model', 'whisper-1');
+
+      try {
+        const axios = require('axios');
+        const response = await axios.post(
+          'https://api.openai.com/v1/audio/transcriptions',
+          formData,
+          {
+            headers: {
+              'Authorization': `Bearer ${config.apiKey}`,
+              ...formData.getHeaders(),
+            },
+          }
+        );
+
+        return response.data.text;
+      } catch (error: any) {
+        console.error('OpenAI Whisper transcription error:', error.response?.data || error.message);
+        throw new Error(`Failed to transcribe audio: ${error.response?.data?.error?.message || error.message}`);
+      }
+    }
+
+    throw new Error(`Audio transcription not supported for provider: ${config.provider}`);
   }
 
   /**
@@ -428,39 +469,85 @@ class AIService {
     const config = await this.loadConfig();
     if (!config) throw new Error('AI is not configured.');
     
-    // Clean text to make the TTS sound much more natural (like ElevenLabs)
-    // Strip markdown bold/italic, bullet points, headers, and emojis which break the cadence
+    // Clean text to make the TTS sound much more natural
     const cleanText = text
       .replace(/(\*\*|\*|\_\_|\_|\#)/g, '') // remove markdown
       .replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // remove emojis
       .trim();
 
-    try {
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'tts-1', // Using tts-1 for the lowest latency conversational speed
-          input: cleanText,
-          voice: 'nova',  // "nova" is widely considered the most natural, ElevenLabs-like conversational voice in OpenAI
-          response_format: 'mp3'
-        })
-      });
-      
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`TTS API error: ${response.statusText} - ${errText}`);
+    // Azure OpenAI TTS
+    if (config.provider === 'azure') {
+      if (!config.azureEndpoint) {
+        throw new Error('Azure OpenAI endpoint not configured.');
       }
-      
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (error: any) {
-      console.error('TTS error:', error.message);
-      throw new Error(`Failed to generate speech: ${error.message}`);
+
+      try {
+        const ttsDeployment = process.env.AZURE_TTS_DEPLOYMENT || 'tts';
+        const url = `${config.azureEndpoint}/openai/deployments/${ttsDeployment}/audio/speech?api-version=${config.azureApiVersion || '2024-02-15-preview'}`;
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'api-key': config.apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'tts-1',
+            input: cleanText,
+            voice: 'nova',
+            response_format: 'mp3'
+          })
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          
+          if (response.status === 404) {
+            throw new Error('Azure TTS deployment not found. Please deploy a TTS model in your Azure OpenAI resource or set AZURE_TTS_DEPLOYMENT environment variable.');
+          }
+          
+          throw new Error(`Azure TTS API error: ${response.statusText} - ${errText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      } catch (error: any) {
+        console.error('Azure TTS error:', error.message);
+        throw new Error(`Failed to generate speech: ${error.message}`);
+      }
     }
+
+    // Standard OpenAI TTS
+    if (config.provider === 'openai') {
+      try {
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${config.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'tts-1',
+            input: cleanText,
+            voice: 'nova',
+            response_format: 'mp3'
+          })
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`TTS API error: ${response.statusText} - ${errText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      } catch (error: any) {
+        console.error('TTS error:', error.message);
+        throw new Error(`Failed to generate speech: ${error.message}`);
+      }
+    }
+
+    throw new Error(`Text-to-speech not supported for provider: ${config.provider}`);
   }
 
   /**
