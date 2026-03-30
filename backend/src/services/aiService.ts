@@ -385,34 +385,39 @@ class AIService {
   async transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string> {
     const config = await this.loadConfig();
     if (!config || (config.provider !== 'openai' && config.provider !== 'azure')) {
-      // Fallback: If not explicitly configured, we still check if apiKey works for OpenAI or we fail.
       if (!config) throw new Error('AI is not configured.');
     }
-    // We will enforce using OpenAI API for Whisper here if azure doesn't have an endpoint set up specifically for it
+
     const apiKey = config.apiKey;
 
-    const blob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
+    // Use axios with form-data for Node.js
+    const FormData = require('form-data');
     const formData = new FormData();
-    formData.append('file', blob as any, 'audio.webm');
+    
+    // Append the audio buffer as a file
+    formData.append('file', audioBuffer, {
+      filename: 'audio.webm',
+      contentType: mimeType || 'audio/webm',
+    });
     formData.append('model', 'whisper-1');
 
     try {
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: formData as any
-      });
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Whisper API error: ${response.statusText} - ${errText}`);
-      }
-      const data: any = await response.json();
-      return data.text;
+      const axios = require('axios');
+      const response = await axios.post(
+        'https://api.openai.com/v1/audio/transcriptions',
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            ...formData.getHeaders(),
+          },
+        }
+      );
+
+      return response.data.text;
     } catch (error: any) {
-      console.error('Audio transcription error:', error.message);
-      throw new Error(`Failed to transcribe audio: ${error.message}`);
+      console.error('Audio transcription error:', error.response?.data || error.message);
+      throw new Error(`Failed to transcribe audio: ${error.response?.data?.error?.message || error.message}`);
     }
   }
 
