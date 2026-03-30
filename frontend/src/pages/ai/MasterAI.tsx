@@ -354,12 +354,12 @@ const MasterAI = () => {
   const groupedConversations = groupConversationsByDate(filteredConversations);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900">
+    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative">
       {/* ============ SIDEBAR ============ */}
       <div
         className={`${
-          sidebarOpen ? 'w-72' : 'w-0'
-        } transition-all duration-300 flex-shrink-0 overflow-hidden border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col`}
+          sidebarOpen ? 'w-72 md:w-72' : 'w-0'
+        } transition-all duration-300 flex-shrink-0 overflow-hidden border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col absolute md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none`}
       >
         {/* Sidebar Header */}
         <div className="p-3 flex-shrink-0">
@@ -425,45 +425,54 @@ const MasterAI = () => {
         </div>
       </div>
 
+      {/* Mobile Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* ============ MAIN CHAT AREA ============ */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full md:w-auto">
         {/* Header */}
         <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
-          <div className="flex items-center gap-3 px-4 py-3">
+          <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
               title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             >
               {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
             </button>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
             </div>
             <div className="flex-1 min-w-0">
-              <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2 text-sm">
-                Master AI Ops
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium">BETA</span>
+              <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5 md:gap-2 text-xs md:text-sm">
+                <span className="truncate">Master AI Ops</span>
+                <span className="text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium flex-shrink-0">BETA</span>
               </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Natural language control across all modules
+              <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+                <span className="hidden sm:inline">Natural language control across all modules</span>
+                <span className="sm:hidden">AI Operations</span>
               </p>
             </div>
             {activeConversationId && (
               <button
                 onClick={startNewChat}
-                className="p-2 rounded-lg text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                className="p-2 rounded-lg text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors flex-shrink-0"
                 title="New Chat"
               >
-                <Plus size={18} />
+                <Plus size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
             )}
           </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-4 py-4 md:py-6 space-y-3 md:space-y-4">
           {loadingConversation ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
@@ -485,17 +494,18 @@ const MasterAI = () => {
 
         {/* Quick Commands Strip */}
         {messages.length > 0 && (
-          <div className="px-4 pb-2 flex-shrink-0">
+          <div className="px-3 md:px-4 pb-2 flex-shrink-0">
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
               {quickCommands.slice(0, 4).map((cmd, i) => (
                 <button
                   key={i}
                   onClick={() => sendCommand(cmd.command)}
                   disabled={isProcessing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-full text-[11px] md:text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 flex-shrink-0"
                 >
-                  <cmd.icon size={12} />
-                  {cmd.label}
+                  <cmd.icon size={12} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">{cmd.label}</span>
+                  <span className="sm:hidden">{cmd.label.split(' ')[0]}</span>
                 </button>
               ))}
             </div>
@@ -503,19 +513,19 @@ const MasterAI = () => {
         )}
 
         {/* Input Area */}
-        <div className="px-4 pb-4 flex-shrink-0">
+        <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
           {imageBase64 && (
-            <div className="relative inline-block mb-3">
-              <img src={imageBase64} alt="Upload preview" className="h-20 w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
+            <div className="relative inline-block mb-2 md:mb-3">
+              <img src={imageBase64} alt="Upload preview" className="h-16 w-16 md:h-20 md:w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
               <button 
                 onClick={() => setImageBase64(null)}
-                className="absolute -top-2 -right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
+                className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
               >
                 <X size={12} />
               </button>
             </div>
           )}
-          <div className="flex items-end gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
+          <div className="flex items-end gap-1.5 md:gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-1.5 md:p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
             <input 
               type="file" 
               accept="image/*" 
@@ -525,39 +535,40 @@ const MasterAI = () => {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
+              className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
               title="Add Image"
             >
-              <ImagePlus size={18} />
+              <ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />
             </button>
             <button 
               onClick={toggleListening}
-              className={`p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+              className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
               title={isListening ? "Stop listening" : "Start speaking"}
             >
-              {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+              {isListening ? <MicOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
             </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isListening ? 'Listening...' : 'Tell me what to do... e.g. "Add all Zambian holidays for 2025"'}
-              className="flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-2 py-2.5 max-h-32"
+              placeholder={isListening ? 'Listening...' : 'Tell me what to do...'}
+              className="flex-1 resize-none bg-transparent text-xs md:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-1.5 md:px-2 py-2 md:py-2.5 max-h-32"
               rows={1}
-              style={{ minHeight: '40px' }}
+              style={{ minHeight: '36px' }}
               disabled={isProcessing}
             />
             <button
               onClick={() => sendCommand()}
               disabled={(!input.trim() && !imageBase64) || isProcessing}
-              className="p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+              className="p-2 md:p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             >
-              {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+              {isProcessing ? <Loader2 size={16} className="md:w-[18px] md:h-[18px] animate-spin" /> : <Send size={16} className="md:w-[18px] md:h-[18px]" />}
             </button>
           </div>
-          <p className="text-[10px] text-gray-400 text-center mt-2">
-            Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.
+          <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
+            <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.</span>
+            <span className="sm:hidden">AI can process images, voice, and execute actions immediately.</span>
           </p>
         </div>
       </div>
@@ -661,32 +672,32 @@ const ConversationItem = ({
 // WELCOME SCREEN
 // ==========================================
 const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
-  <div className="flex flex-col items-center justify-center min-h-full py-8 px-4">
-    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-6">
-      <Sparkles className="w-10 h-10 text-purple-600 dark:text-purple-400" />
+  <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-3 md:px-4">
+    <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-4 md:mb-6">
+      <Sparkles className="w-8 h-8 md:w-10 md:h-10 text-purple-600 dark:text-purple-400" />
     </div>
-    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+    <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center">
       What would you like me to do?
     </h3>
-    <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 text-center max-w-md">
+    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-4">
       Tell me in plain English and I'll execute it across any module — calendar, students, classes, fees, and more.
     </p>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl">
       {quickCommands.map((cmd, i) => (
         <button
           key={i}
           onClick={() => onCommand(cmd.command)}
-          className="flex items-center gap-3 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-all text-left group"
+          className="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-all text-left group"
         >
-          <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
-            <cmd.icon size={18} />
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
+            <cmd.icon size={16} className="md:w-[18px] md:h-[18px]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 dark:text-white">{cmd.label}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
+            <p className="text-xs md:text-sm font-medium text-gray-900 dark:text-white">{cmd.label}</p>
+            <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
           </div>
-          <ArrowRight size={14} className="text-gray-300 dark:text-gray-600 flex-shrink-0 group-hover:text-purple-500 transition-colors" />
+          <ArrowRight size={12} className="md:w-[14px] md:h-[14px] text-gray-300 dark:text-gray-600 flex-shrink-0 group-hover:text-purple-500 transition-colors" />
         </button>
       ))}
     </div>
@@ -749,15 +760,15 @@ const MessageBubble = ({
 
   if (isUser) {
     return (
-      <div className="flex gap-3 justify-end">
-        <div className="max-w-[85%] bg-purple-600 text-white rounded-2xl rounded-br-md px-4 py-3">
+      <div className="flex gap-2 md:gap-3 justify-end">
+        <div className="max-w-[90%] md:max-w-[85%] bg-purple-600 text-white rounded-2xl rounded-br-md px-3 md:px-4 py-2.5 md:py-3">
           {message.image && (
-            <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-60 object-cover border border-purple-400" />
+            <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-48 md:max-h-60 object-cover border border-purple-400" />
           )}
           {message.content && (
-            <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            <p className="text-xs md:text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
           )}
-          <p className="text-[10px] text-purple-200 mt-1">
+          <p className="text-[9px] md:text-[10px] text-purple-200 mt-1">
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
@@ -766,34 +777,34 @@ const MessageBubble = ({
   }
 
   return (
-    <div className="flex gap-3">
-      <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-1">
-        <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+    <div className="flex gap-2 md:gap-3">
+      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-1">
+        <Sparkles size={14} className="md:w-4 md:h-4 text-purple-600 dark:text-purple-400" />
       </div>
-      <div className="flex-1 min-w-0 space-y-3">
+      <div className="flex-1 min-w-0 space-y-2 md:space-y-3">
         {/* Message Text */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-200 dark:border-slate-700 inline-block max-w-[85%]">
-          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-gray-900 dark:text-white leading-relaxed">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-3 md:px-4 py-2.5 md:py-3 border border-gray-200 dark:border-slate-700 inline-block max-w-[90%] md:max-w-[85%]">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-xs md:text-sm text-gray-900 dark:text-white leading-relaxed">
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700">
+          <div className="flex items-center gap-1.5 md:gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700 flex-wrap">
             <button
               onClick={handlePlayClick}
               disabled={isPlaying}
-              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 text-[9px] md:text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
             >
               {isPlaying ? <Loader2 size={10} className="animate-spin" /> : <Volume2 size={10} />}
               {isPlaying ? 'Playing' : 'Play'}
             </button>
-            <span className="text-[10px] text-gray-300 dark:text-gray-600">•</span>
+            <span className="text-[9px] md:text-[10px] text-gray-300 dark:text-gray-600">•</span>
             <button
               onClick={() => { navigator.clipboard.writeText(message.content); toast.success('Copied!'); }}
-              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+              className="flex items-center gap-1 text-[9px] md:text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
             >
               <Copy size={10} /> Copy
             </button>
-            <span className="text-[10px] text-gray-300 dark:text-gray-600">•</span>
-            <span className="text-[10px] text-gray-400">
+            <span className="text-[9px] md:text-[10px] text-gray-300 dark:text-gray-600">•</span>
+            <span className="text-[9px] md:text-[10px] text-gray-400">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -801,7 +812,7 @@ const MessageBubble = ({
 
         {/* Action Results */}
         {message.actions && message.actions.length > 0 && (
-          <div className="space-y-2 max-w-[85%]">
+          <div className="space-y-2 max-w-[90%] md:max-w-[85%]">
             {message.actions.map((action, i) => (
               <ActionResult key={i} action={action} />
             ))}
@@ -810,15 +821,15 @@ const MessageBubble = ({
 
         {/* Suggestions */}
         {message.suggestions && message.suggestions.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 md:gap-2">
             {message.suggestions.map((suggestion, i) => (
               <button
                 key={i}
                 onClick={() => onSuggestionClick(suggestion)}
-                className="text-xs px-3 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-600 transition-colors flex items-center gap-1"
+                className="text-[10px] md:text-xs px-2.5 md:px-3 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-600 transition-colors flex items-center gap-1"
               >
                 <ChevronRight size={10} />
-                {suggestion}
+                <span className="truncate max-w-[200px]">{suggestion}</span>
               </button>
             ))}
           </div>
@@ -845,12 +856,12 @@ const formatCurrency = (n: number) =>
 
 /** Render a key-value stat row */
 const StatRow = ({ label, value, icon }: { label: string; value: string | number; icon?: string }) => (
-  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/60 dark:bg-slate-800/60">
-    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-      {icon && <span>{icon}</span>}
-      {label}
+  <div className="flex items-center justify-between py-1.5 md:py-2 px-2 md:px-3 rounded-lg bg-white/60 dark:bg-slate-800/60">
+    <span className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 md:gap-2 truncate">
+      {icon && <span className="flex-shrink-0">{icon}</span>}
+      <span className="truncate">{label}</span>
     </span>
-    <span className="text-sm font-semibold text-gray-900 dark:text-white">{value}</span>
+    <span className="text-xs md:text-sm font-semibold text-gray-900 dark:text-white flex-shrink-0 ml-2">{value}</span>
   </div>
 );
 
@@ -905,7 +916,7 @@ const statIcon = (key: string): string => {
 
 /** Render statistics object as a nice grid */
 const StatsDisplay = ({ data }: { data: Record<string, any> }) => (
-  <div className="grid grid-cols-2 gap-2">
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 md:gap-2">
     {Object.entries(data)
       .filter(([k]) => !['id', 'schoolId', 'createdAt', 'updatedAt'].includes(k))
       .map(([key, value]) => (
@@ -1018,27 +1029,27 @@ const ItemListDisplay = ({ items, toolName }: { items: any[]; toolName: string }
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 overflow-x-auto">
       {/* Header row */}
-      <div className="flex items-center gap-2 px-3 py-1.5">
+      <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1 md:py-1.5 min-w-max">
         {fields.map(f => (
-          <span key={f.key} className="flex-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+          <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-[9px] md:text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider truncate">
             {f.label}
           </span>
         ))}
       </div>
       {/* Data rows */}
       {displayItems.map((item, idx) => (
-        <div key={item.id || idx} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 transition-colors">
+        <div key={item.id || idx} className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 transition-colors min-w-max">
           {fields.map(f => (
-            <span key={f.key} className="flex-1 text-xs text-gray-700 dark:text-gray-300 truncate">
+            <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-[10px] md:text-xs text-gray-700 dark:text-gray-300 truncate">
               {formatValue(item, f.key)}
             </span>
           ))}
         </div>
       ))}
       {hasMore && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center pt-1">
+        <p className="text-[9px] md:text-[10px] text-gray-400 dark:text-gray-500 text-center pt-1">
           ... and {items.length - 20} more items
         </p>
       )}
@@ -1063,10 +1074,10 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
     if (data.existing?.length) sections.push({ label: 'Already Existed', emoji: 'ℹ️', items: data.existing });
 
     return (
-      <div className="space-y-3">
+      <div className="space-y-2 md:space-y-3">
         {sections.map(sec => (
           <div key={sec.label}>
-            <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1.5">
+            <p className="text-[9px] md:text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
               <span>{sec.emoji}</span> {sec.label} ({sec.items.length})
             </p>
             <ItemListDisplay items={sec.items} toolName={toolName} />
@@ -1074,12 +1085,12 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
         ))}
         {data.errors?.length > 0 && (
           <div>
-            <p className="text-[10px] font-semibold text-red-500 uppercase tracking-wider px-2 mb-1 flex items-center gap-1.5">
+            <p className="text-[9px] md:text-[10px] font-semibold text-red-500 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
               <span>⚠️</span> Issues ({data.errors.length})
             </p>
             <div className="space-y-1">
               {data.errors.map((err: string, i: number) => (
-                <p key={i} className="text-xs text-red-500 dark:text-red-400 px-3 py-1.5 rounded-lg bg-red-50/50 dark:bg-red-900/10">
+                <p key={i} className="text-[10px] md:text-xs text-red-500 dark:text-red-400 px-2 md:px-3 py-1.5 rounded-lg bg-red-50/50 dark:bg-red-900/10">
                   {err}
                 </p>
               ))}
@@ -1098,8 +1109,8 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
   // Delete result
   if (typeof data?.deleted === 'number') {
     return (
-      <div className="px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
-        <p className="text-xs text-gray-700 dark:text-gray-300">
+      <div className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
+        <p className="text-[10px] md:text-xs text-gray-700 dark:text-gray-300">
           🗑️ {data.deleted} item{data.deleted !== 1 ? 's' : ''} removed successfully
         </p>
       </div>
@@ -1116,8 +1127,8 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
 
   // Last resort — formatted text (not raw JSON)
   return (
-    <div className="px-3 py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
-      <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+    <div className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
+      <p className="text-[10px] md:text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
         {typeof data === 'string' ? data : JSON.stringify(data, null, 2)}
       </p>
     </div>
@@ -1140,32 +1151,32 @@ const ActionResult = ({ action }: { action: MasterAIAction }) => {
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-3 py-2.5 cursor-pointer hover:bg-white/30 dark:hover:bg-slate-800/30 transition-colors"
+        className="flex items-center justify-between px-2.5 md:px-3 py-2 md:py-2.5 cursor-pointer hover:bg-white/30 dark:hover:bg-slate-800/30 transition-colors gap-2"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 md:gap-2 min-w-0 flex-1">
           {action.success ? (
-            <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+            <CheckCircle2 size={14} className="md:w-4 md:h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           ) : (
-            <XCircle size={16} className="text-red-600 dark:text-red-400 flex-shrink-0" />
+            <XCircle size={14} className="md:w-4 md:h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
           )}
-          <span className="text-sm font-medium text-gray-900 dark:text-white">{action.summary}</span>
+          <span className="text-xs md:text-sm font-medium text-gray-900 dark:text-white truncate">{action.summary}</span>
         </div>
         {action.data && (
-          <ChevronDown size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+          <ChevronDown size={12} className="md:w-[14px] md:h-[14px] text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}" />
         )}
       </div>
 
       {/* Error */}
       {action.error && !action.success && (
-        <p className="text-xs text-red-600 dark:text-red-400 px-3 pb-2 ml-6">
+        <p className="text-[10px] md:text-xs text-red-600 dark:text-red-400 px-2.5 md:px-3 pb-2 ml-5 md:ml-6">
           {action.error}
         </p>
       )}
 
       {/* Smart Data Display */}
       {expanded && action.data && (
-        <div className="px-3 pb-3">
+        <div className="px-2.5 md:px-3 pb-2.5 md:pb-3">
           <SmartDataDisplay data={action.data} toolName={action.tool} />
         </div>
       )}
