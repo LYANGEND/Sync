@@ -736,9 +736,7 @@ const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
         <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Create announcements and send notifications</span></li>
         <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Set up academic terms and assessment schedules</span></li>
         <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Record expenses and manage scholarships</span></li>
-      </ul>
-    </div>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> View school statistics and analytics</li>
+        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>View school statistics and analytics</span></li>
       </ul>
     </div>
   </div>
