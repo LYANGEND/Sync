@@ -5,11 +5,12 @@ import {
   CreditCard, Bell, BarChart3, ArrowRight, Zap, Terminal,
   Copy, Trash2, ChevronDown, Plus, MessageSquare, MoreHorizontal,
   Pencil, Check, X, Search, PanelLeftClose, PanelLeft,
-  Mic, MicOff, ImagePlus, Volume2
+  Mic, MicOff, ImagePlus, Volume2, Phone, PhoneOff
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
 import ReactMarkdown from 'react-markdown';
+import { useVoiceConversation } from '../../hooks/useVoiceConversation';
 
 interface ChatMessage {
   id: string;
@@ -111,7 +112,7 @@ const MasterAI = () => {
   const [input, setInput] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [voiceMode, setVoiceMode] = useState(false); // Voice-only mode
+  const [voiceMode, setVoiceMode] = useState(false);
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -122,15 +123,68 @@ const MasterAI = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const errorCountRef = useRef<number>(0); // Track consecutive errors
+  const errorCountRef = useRef<number>(0);
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  // Sidebar closed by default on mobile, open on desktop
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingConversation, setLoadingConversation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // ---- Smooth voice conversation hook (ElevenLabs-style) ----
+  const voice = useVoiceConversation({
+    conversationId: activeConversationId,
+    onResponse: (resp) => {
+      // Update conversation ID if new
+      if (resp.isNewConversation || !activeConversationId) {
+        setActiveConversationId(resp.conversationId);
+        loadConversations();
+      }
+      // Add AI message to chat
+      const assistantMsg: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: resp.message,
+        actions: resp.actions,
+        suggestions: resp.suggestions,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev.filter(m => !m.isLoading), assistantMsg]);
+      loadConversations();
+      const successCount = resp.actions?.filter(a => a.success).length || 0;
+      const failCount = resp.actions?.filter(a => !a.success).length || 0;
+      if (successCount > 0) toast.success(`${successCount} action(s) completed`);
+      if (failCount > 0) toast.error(`${failCount} action(s) failed`);
+    },
+    onTranscript: (text) => {
+      // Add user message to chat when voice transcript is ready
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: text,
+        timestamp: new Date(),
+      };
+      const loadingMsg: ChatMessage = {
+        id: `loading-${Date.now()}`,
+        role: 'assistant',
+        content: 'Thinking...',
+        timestamp: new Date(),
+        isLoading: true,
+      };
+      setMessages(prev => [...prev, userMsg, loadingMsg]);
+    },
+    onConversationEnd: () => {
+      setVoiceMode(false);
+      toast.success('Voice conversation ended');
+    },
+    onConversationIdChange: (id) => {
+      setActiveConversationId(id);
+    },
+    onError: (error) => {
+      toast.error(error);
+    },
+  });
 
   // Auto-scroll
   useEffect(() => {
@@ -318,52 +372,32 @@ const MasterAI = () => {
   };
 
   const toggleVoiceMode = async () => {
-    if (voiceMode) {
+    if (voiceMode || voice.isActive) {
       // Exit voice mode
+      voice.stopVoiceMode();
       stopListening();
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
       }
       setVoiceMode(false);
       setIsAISpeaking(false);
-      errorCountRef.current = 0; // Reset error count
+      errorCountRef.current = 0;
     } else {
-      // Enter voice mode - start with AI greeting
+      // Enter smooth voice mode
       setVoiceMode(true);
-      errorCountRef.current = 0; // Reset error count
-      toast.success('Voice mode activated - starting conversation...');
-      
-      // AI greets the user first
-      const greeting = "Hello! I'm ready to help. What would you like me to do?";
+      errorCountRef.current = 0;
+
+      // Add greeting message to chat
       const greetingMsg: ChatMessage = {
         id: `greeting-${Date.now()}`,
         role: 'assistant',
-        content: greeting,
+        content: "Hi there! I'm listening. How can I help you today?",
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, greetingMsg]);
-      
-      // Play greeting and then start listening
-      try {
-        setIsAISpeaking(true);
-        const blob = await masterAIService.generateSpeech(greeting);
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudioRef.current = audio;
-        
-        audio.onended = () => {
-          setIsAISpeaking(false);
-          // Automatically start listening after greeting
-          setTimeout(() => startListening(), 500);
-        };
-        
-        await audio.play();
-      } catch (e) {
-        console.error('Failed to play greeting', e);
-        setIsAISpeaking(false);
-        toast.error('Audio service unavailable. Please check your configuration.');
-        setVoiceMode(false);
-      }
+
+      // Start the voice conversation engine (greeting + auto-listen)
+      await voice.startVoiceMode();
     }
   };
 
@@ -680,14 +714,14 @@ const MasterAI = () => {
             )}
             <button
               onClick={toggleVoiceMode}
-              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
+              className={`p-2 rounded-lg transition-all flex-shrink-0 ${
                 voiceMode
-                  ? 'bg-purple-600 text-white hover:bg-purple-700'
+                  ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/30 animate-pulse'
                   : 'text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
               }`}
-              title={voiceMode ? 'Exit Voice Mode' : 'Enter Voice Mode'}
+              title={voiceMode ? 'End Voice Call' : 'Start Voice Call'}
             >
-              {voiceMode ? <Volume2 size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
+              {voiceMode ? <PhoneOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Phone size={16} className="md:w-[18px] md:h-[18px]" />}
             </button>
           </div>
         </div>
@@ -735,64 +769,128 @@ const MasterAI = () => {
 
         {/* Input Area */}
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
-          {voiceMode && (
-            <div className="mb-3 p-6 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
-              <div className="flex flex-col items-center gap-4">
-                {isAISpeaking ? (
-                  <>
-                    <div className="relative">
-                      <div className="w-24 h-24 rounded-full bg-purple-600 flex items-center justify-center">
-                        <Volume2 size={40} className="text-white animate-pulse" />
-                      </div>
-                      <div className="absolute inset-0 rounded-full bg-purple-400 animate-ping opacity-75" />
-                    </div>
-                    <span className="text-base font-medium text-purple-900 dark:text-purple-100">Speaking...</span>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
-                      I'm responding to your request
+          {/* Full-screen voice conversation overlay */}
+          {voiceMode && voice.isActive && (
+            <div className="fixed inset-0 z-50 bg-gradient-to-b from-slate-900 via-purple-950 to-slate-900 flex flex-col items-center justify-center">
+              {/* Ambient glow behind the orb */}
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl opacity-30 transition-all duration-700"
+                  style={{
+                    width: `${200 + voice.audioLevel * 300}px`,
+                    height: `${200 + voice.audioLevel * 300}px`,
+                    background: voice.voiceState === 'listening'
+                      ? 'radial-gradient(circle, rgba(239,68,68,0.5), transparent)'
+                      : voice.voiceState === 'speaking'
+                      ? 'radial-gradient(circle, rgba(147,51,234,0.5), transparent)'
+                      : voice.voiceState === 'processing'
+                      ? 'radial-gradient(circle, rgba(59,130,246,0.4), transparent)'
+                      : 'radial-gradient(circle, rgba(100,116,139,0.3), transparent)',
+                  }}
+                />
+              </div>
+
+              {/* Central orb */}
+              <div className="relative z-10 flex flex-col items-center gap-6">
+                <div
+                  className="relative rounded-full flex items-center justify-center transition-all duration-300"
+                  style={{
+                    width: `${100 + voice.audioLevel * 40}px`,
+                    height: `${100 + voice.audioLevel * 40}px`,
+                  }}
+                >
+                  {/* Pulsing ring */}
+                  {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
+                    <div
+                      className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
+                        voice.voiceState === 'listening' ? 'bg-red-400' : 'bg-purple-400'
+                      }`}
+                      style={{ animationDuration: '2s' }}
+                    />
+                  )}
+                  {/* Inner orb */}
+                  <div
+                    className={`w-full h-full rounded-full flex items-center justify-center shadow-2xl transition-colors duration-500 ${
+                      voice.voiceState === 'listening'
+                        ? 'bg-gradient-to-br from-red-500 to-red-600'
+                        : voice.voiceState === 'speaking'
+                        ? 'bg-gradient-to-br from-purple-500 to-purple-700'
+                        : voice.voiceState === 'processing'
+                        ? 'bg-gradient-to-br from-blue-500 to-indigo-600'
+                        : voice.voiceState === 'ending'
+                        ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
+                        : 'bg-gradient-to-br from-slate-600 to-slate-700'
+                    }`}
+                  >
+                    {voice.voiceState === 'listening' && <Mic size={44} className="text-white drop-shadow-lg" />}
+                    {voice.voiceState === 'speaking' && <Volume2 size={44} className="text-white drop-shadow-lg animate-pulse" />}
+                    {voice.voiceState === 'processing' && <Loader2 size={44} className="text-white drop-shadow-lg animate-spin" />}
+                    {voice.voiceState === 'ending' && <Check size={44} className="text-white drop-shadow-lg" />}
+                    {voice.voiceState === 'idle' && <Mic size={44} className="text-white/60 drop-shadow-lg" />}
+                  </div>
+                </div>
+
+                {/* State label */}
+                <div className="text-center">
+                  <p className="text-lg font-semibold text-white">
+                    {voice.voiceState === 'listening' && 'Listening...'}
+                    {voice.voiceState === 'speaking' && 'Speaking...'}
+                    {voice.voiceState === 'processing' && 'Thinking...'}
+                    {voice.voiceState === 'ending' && 'Goodbye!'}
+                    {voice.voiceState === 'idle' && 'Ready'}
+                  </p>
+                  <p className="text-sm text-white/50 mt-1 max-w-xs text-center">
+                    {voice.voiceState === 'listening' && 'Speak naturally — I\'ll know when you\'re done'}
+                    {voice.voiceState === 'speaking' && 'Tap the orb to interrupt me'}
+                    {voice.voiceState === 'processing' && 'Processing your request...'}
+                    {voice.voiceState === 'ending' && 'It was great talking to you!'}
+                    {voice.voiceState === 'idle' && 'Starting...'}
+                  </p>
+                </div>
+
+                {/* Transcript preview */}
+                {voice.currentTranscript && (
+                  <div className="mt-2 px-5 py-3 bg-white/10 backdrop-blur-sm rounded-2xl max-w-sm">
+                    <p className="text-white/80 text-sm italic text-center">
+                      "{voice.currentTranscript}"
                     </p>
-                  </>
-                ) : isListening ? (
-                  <>
-                    <div className="relative">
-                      <div className="w-24 h-24 rounded-full bg-red-500 flex items-center justify-center">
-                        <Mic size={40} className="text-white" />
-                      </div>
-                      <div className="absolute inset-0 rounded-full bg-red-400 animate-ping opacity-75" />
-                    </div>
-                    <span className="text-base font-medium text-gray-900 dark:text-white">I'm listening...</span>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
-                      Speak naturally. I'll know when you're done.
-                    </p>
-                  </>
-                ) : isProcessing ? (
-                  <>
-                    <div className="w-24 h-24 rounded-full bg-purple-600 flex items-center justify-center">
-                      <Loader2 size={40} className="text-white animate-spin" />
-                    </div>
-                    <span className="text-base font-medium text-gray-900 dark:text-white">Thinking...</span>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
-                      Processing your request
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                      <Mic size={40} className="text-gray-400" />
-                    </div>
-                    <span className="text-base font-medium text-gray-500 dark:text-gray-400">Ready</span>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
-                      Waiting for response to complete...
-                    </p>
-                  </>
+                  </div>
                 )}
               </div>
-              <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-800/30 flex justify-center">
+
+              {/* Interrupt button (tap orb area while speaking) */}
+              {voice.voiceState === 'speaking' && (
+                <button
+                  onClick={() => voice.interruptAI()}
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full z-20 opacity-0 cursor-pointer"
+                  title="Tap to interrupt"
+                />
+              )}
+
+              {/* End call button */}
+              <div className="absolute bottom-12 z-10">
                 <button
                   onClick={toggleVoiceMode}
-                  className="px-4 py-2 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border border-gray-200 dark:border-slate-600"
+                  className="flex items-center gap-3 px-8 py-4 bg-red-500/90 hover:bg-red-600 text-white rounded-full text-base font-medium shadow-xl shadow-red-500/30 transition-all hover:scale-105 active:scale-95"
                 >
-                  Exit Voice Mode
+                  <PhoneOff size={22} />
+                  End Conversation
                 </button>
+              </div>
+
+              {/* Tip */}
+              <p className="absolute bottom-4 text-white/30 text-xs">
+                Say "goodbye" or "thank you" to end the conversation naturally
+              </p>
+            </div>
+          )}
+
+          {/* Inline voice mode panel (when hook is not yet started but voiceMode toggled) */}
+          {voiceMode && !voice.isActive && (
+            <div className="mb-3 p-6 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 size={40} className="text-purple-600 animate-spin" />
+                <span className="text-base font-medium text-gray-900 dark:text-white">Starting voice mode...</span>
               </div>
             </div>
           )}

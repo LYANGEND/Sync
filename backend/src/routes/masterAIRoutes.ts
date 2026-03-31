@@ -10,6 +10,9 @@ import {
   deleteConversation,
   transcribeAudio,
   generateSpeech,
+  streamSpeech,
+  voiceExecute,
+  getVoiceConfig,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -33,6 +36,11 @@ router.use(authorizeRole(['SUPER_ADMIN']));
 // Audio Features
 router.post('/transcribe', upload.single('audio'), transcribeAudio);
 router.post('/speech', generateSpeech);
+router.post('/speech/stream', streamSpeech);
+
+// Voice Conversation (combined execute + streaming TTS)
+router.post('/voice-execute', voiceExecute);
+router.get('/voice-config', getVoiceConfig);
 
 // Conversations (ChatGPT-style)
 router.post('/conversations', createConversation);
