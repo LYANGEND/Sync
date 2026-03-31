@@ -94,7 +94,8 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
   const abortControllerRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId);
   const errorCountRef = useRef(0);
-  const noiseFloorRef = useRef(8); // Adaptive noise floor
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxRecordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep conversationId ref in sync
   useEffect(() => {
@@ -174,7 +175,20 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
     }
   }, []);
 
-  // ---- Microphone recording with adaptive VAD ----
+  // ---- Microphone recording with robust silence detection ----
+
+  // Stop recording helper — defined first so startListeningInternal can reference it
+  const doStopRecording = useCallback(() => {
+    // Cancel all timers
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (maxRecordTimerRef.current) { clearTimeout(maxRecordTimerRef.current); maxRecordTimerRef.current = null; }
+    cancelAnimationFrame(animFrameRef.current);
+    setAudioLevel(0);
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
 
   const startListeningInternal = useCallback(async () => {
     if (!isActiveRef.current) return;
@@ -197,64 +211,73 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      // Audio analysis for silence detection + visual level
+      // ---- Audio analysis for silence detection + visual level ----
       const audioCtx = new AudioContext();
       audioContextRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyserRef.current = analyser;
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.8;
+      analyser.fftSize = 512;                // Smaller FFT = faster response
+      analyser.smoothingTimeConstant = 0.3;  // Low smoothing = responsive to silence
       source.connect(analyser);
 
-      const bufferLength = analyser.frequencyBinCount;
+      const bufferLength = analyser.frequencyBinCount; // 256
       const dataArray = new Uint8Array(bufferLength);
-      let silenceStart: number | null = null;
+
+      // --- Silence detection state ---
       let speechDetected = false;
-      const SILENCE_DURATION = 1400; // 1.4s silence after speech = done
-      const INITIAL_WAIT = 5000;     // Wait up to 5s for first speech
-      const startTime = Date.now();
-      let noiseFloorSamples: number[] = [];
+      let silenceStartTime: number | null = null;
+      const SILENCE_THRESHOLD = 12;     // Fixed threshold — works reliably with noiseSuppression
+      const SILENCE_AFTER_SPEECH = 1500; // 1.5s of silence after speech → stop
+      const MAX_WAIT_FOR_SPEECH = 6000;  // 6s with no speech → stop
+      const MAX_RECORDING = 30000;       // 30s absolute max recording
+      const recordStartTime = Date.now();
+
+      // Safety net: absolute max recording duration
+      maxRecordTimerRef.current = setTimeout(() => {
+        console.log('[Voice] Max recording duration reached, stopping');
+        doStopRecording();
+      }, MAX_RECORDING);
 
       const checkAudio = () => {
         if (!analyserRef.current || !isActiveRef.current) return;
 
         analyser.getByteFrequencyData(dataArray);
-        const avg = dataArray.reduce((a, b) => a + b, 0) / bufferLength;
-
-        // Normalize level for UI (0–1)
-        setAudioLevel(Math.min(avg / 80, 1));
-
-        // Adaptive noise floor: sample first 500ms
-        if (Date.now() - startTime < 500) {
-          noiseFloorSamples.push(avg);
-          if (noiseFloorSamples.length > 10) {
-            noiseFloorRef.current = Math.max(
-              (noiseFloorSamples.reduce((a, b) => a + b) / noiseFloorSamples.length) * 1.8,
-              6,
-            );
-          }
+        // Use RMS-style energy (more reliable than simple average)
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i] * dataArray[i];
         }
+        const rms = Math.sqrt(sum / bufferLength);
 
-        const threshold = noiseFloorRef.current;
+        // Normalize for UI visualisation (0–1)
+        setAudioLevel(Math.min(rms / 60, 1));
 
-        if (avg > threshold) {
+        const now = Date.now();
+
+        if (rms > SILENCE_THRESHOLD) {
+          // Sound detected
           speechDetected = true;
-          silenceStart = null;
+          silenceStartTime = null;
         } else {
+          // Silence
           if (speechDetected) {
-            // Speech was detected before, now silence
-            if (silenceStart === null) {
-              silenceStart = Date.now();
-            } else if (Date.now() - silenceStart > SILENCE_DURATION) {
-              // Done speaking
-              stopListeningInternal();
+            // User WAS speaking, now silent
+            if (silenceStartTime === null) {
+              silenceStartTime = now;
+            } else if (now - silenceStartTime > SILENCE_AFTER_SPEECH) {
+              // 1.5s of silence after speech → done!
+              console.log('[Voice] Silence after speech detected, stopping');
+              doStopRecording();
               return;
             }
-          } else if (Date.now() - startTime > INITIAL_WAIT) {
-            // No speech for 5s — stop
-            stopListeningInternal();
-            return;
+          } else {
+            // Never detected speech
+            if (now - recordStartTime > MAX_WAIT_FOR_SPEECH) {
+              console.log('[Voice] No speech detected for 6s, stopping');
+              doStopRecording();
+              return;
+            }
           }
         }
 
@@ -266,7 +289,13 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       };
 
       mediaRecorder.onstop = async () => {
-        // Cleanup audio context
+        // Cancel timers
+        if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+        if (maxRecordTimerRef.current) { clearTimeout(maxRecordTimerRef.current); maxRecordTimerRef.current = null; }
+        cancelAnimationFrame(animFrameRef.current);
+        setAudioLevel(0);
+
+        // Cleanup audio context & stream
         if (audioContextRef.current) {
           audioContextRef.current.close().catch(() => {});
           audioContextRef.current = null;
@@ -275,18 +304,16 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
           streamRef.current.getTracks().forEach(t => t.stop());
           streamRef.current = null;
         }
-        cancelAnimationFrame(animFrameRef.current);
-        setAudioLevel(0);
 
         if (!isActiveRef.current) return;
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
 
-        // Skip very short recordings (noise/accidental)
-        if (audioBlob.size < 4000) {
+        // Skip very short recordings (noise / no actual speech)
+        if (audioBlob.size < 4000 || !speechDetected) {
           if (isActiveRef.current && errorCountRef.current < 3) {
             setVoiceState('listening');
-            setTimeout(() => startListeningInternal(), 500);
+            setTimeout(() => startListeningInternal(), 600);
           }
           return;
         }
@@ -334,7 +361,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
         }
       };
 
-      mediaRecorder.start(250); // 250ms timeslice for smoother data collection
+      mediaRecorder.start(250);
       setVoiceState('listening');
       checkAudio();
     } catch (err) {
@@ -342,15 +369,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       onError('Microphone access denied or unavailable');
       stopVoiceMode();
     }
-  }, [onTranscript, onError]);
-
-  const stopListeningInternal = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    cancelAnimationFrame(animFrameRef.current);
-    setAudioLevel(0);
-  }, []);
+  }, [onTranscript, onError, doStopRecording]);
 
   // ---- Send voice command via SSE pipeline ----
 
@@ -491,6 +510,11 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
     setCurrentTranscript('');
     setAudioLevel(0);
 
+    // Clear all timers
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (maxRecordTimerRef.current) { clearTimeout(maxRecordTimerRef.current); maxRecordTimerRef.current = null; }
+    cancelAnimationFrame(animFrameRef.current);
+
     // Stop recording
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -503,7 +527,6 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    cancelAnimationFrame(animFrameRef.current);
 
     // Stop audio playback
     interruptAI();
@@ -515,6 +538,9 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (maxRecordTimerRef.current) clearTimeout(maxRecordTimerRef.current);
+      cancelAnimationFrame(animFrameRef.current);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
@@ -531,7 +557,6 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-      cancelAnimationFrame(animFrameRef.current);
     };
   }, []);
 
