@@ -122,6 +122,7 @@ const MasterAI = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const errorCountRef = useRef<number>(0); // Track consecutive errors
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   // Sidebar closed by default on mobile, open on desktop
@@ -239,7 +240,7 @@ const MasterAI = () => {
         // Only process if we have meaningful audio (> 0.5 seconds)
         if (audioBlob.size < 5000) {
           // Too short, probably just noise
-          if (voiceMode && !isProcessing) {
+          if (voiceMode && !isProcessing && errorCountRef.current < 3) {
             setTimeout(() => startListening(), 500);
           }
           return;
@@ -248,13 +249,18 @@ const MasterAI = () => {
         try {
           const transcribedText = await masterAIService.transcribeAudio(audioBlob);
           
+          // Reset error count on success
+          errorCountRef.current = 0;
+          
           if (voiceMode) {
             // In voice mode, automatically send the command
             if (transcribedText.trim()) {
               await sendCommand(transcribedText);
             } else {
               // Empty transcription, restart listening
-              setTimeout(() => startListening(), 500);
+              if (errorCountRef.current < 3) {
+                setTimeout(() => startListening(), 500);
+              }
             }
           } else {
             // In normal mode, just populate the input field
@@ -262,10 +268,22 @@ const MasterAI = () => {
           }
         } catch (e) {
           console.error('Transcription error:', e);
+          errorCountRef.current += 1;
+          
+          // After 3 consecutive errors, exit voice mode
+          if (errorCountRef.current >= 3) {
+            toast.error('Audio service unavailable. Exiting voice mode.');
+            setVoiceMode(false);
+            setIsListening(false);
+            return;
+          }
+          
           toast.error('Failed to transcribe audio');
-          if (voiceMode) {
-            // Restart listening in voice mode even on error
-            setTimeout(() => startListening(), 1000);
+          
+          if (voiceMode && !isProcessing) {
+            // Restart listening with exponential backoff
+            const backoffDelay = Math.min(1000 * Math.pow(2, errorCountRef.current - 1), 5000);
+            setTimeout(() => startListening(), backoffDelay);
           }
         }
       };
@@ -308,9 +326,11 @@ const MasterAI = () => {
       }
       setVoiceMode(false);
       setIsAISpeaking(false);
+      errorCountRef.current = 0; // Reset error count
     } else {
       // Enter voice mode - start with AI greeting
       setVoiceMode(true);
+      errorCountRef.current = 0; // Reset error count
       toast.success('Voice mode activated - starting conversation...');
       
       // AI greets the user first
@@ -341,8 +361,8 @@ const MasterAI = () => {
       } catch (e) {
         console.error('Failed to play greeting', e);
         setIsAISpeaking(false);
-        // Start listening anyway
-        setTimeout(() => startListening(), 500);
+        toast.error('Audio service unavailable. Please check your configuration.');
+        setVoiceMode(false);
       }
     }
   };
