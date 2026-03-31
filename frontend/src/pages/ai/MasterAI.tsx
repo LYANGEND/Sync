@@ -111,6 +111,8 @@ const MasterAI = () => {
   const [input, setInput] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false); // Voice-only mode
+  const [isAISpeaking, setIsAISpeaking] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -133,6 +135,7 @@ const MasterAI = () => {
   // Play response audio when new assistant message arrives (TTS)
   const playResponseAudio = async (text: string) => {
     try {
+      setIsAISpeaking(true);
       const blob = await masterAIService.generateSpeech(text);
       const url = URL.createObjectURL(blob);
       if (currentAudioRef.current) {
@@ -140,50 +143,100 @@ const MasterAI = () => {
       }
       const audio = new Audio(url);
       currentAudioRef.current = audio;
-      audio.play();
+      
+      audio.onended = () => {
+        setIsAISpeaking(false);
+        // In voice mode, automatically start listening again after AI finishes speaking
+        if (voiceMode && !isProcessing) {
+          setTimeout(() => startListening(), 500);
+        }
+      };
+      
+      await audio.play();
     } catch (e) {
       console.error('Failed to play TTS', e);
+      setIsAISpeaking(false);
+    }
+  };
+
+  const startListening = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        
+        try {
+          const transcribedText = await masterAIService.transcribeAudio(audioBlob);
+          
+          if (voiceMode) {
+            // In voice mode, automatically send the command
+            if (transcribedText.trim()) {
+              await sendCommand(transcribedText);
+            }
+          } else {
+            // In normal mode, just populate the input field
+            setInput(prev => (prev + ' ' + transcribedText).trim());
+          }
+        } catch (e) {
+          toast.error('Failed to transcribe audio');
+          if (voiceMode) {
+            // Restart listening in voice mode even on error
+            setTimeout(() => startListening(), 1000);
+          }
+        }
+      };
+
+      mediaRecorder.start();
+      setIsListening(true);
+    } catch (err) {
+      toast.error('Microphone access denied or not available');
+      setIsListening(false);
+      if (voiceMode) {
+        setVoiceMode(false); // Exit voice mode if mic fails
+      }
+    }
+  };
+
+  const stopListening = () => {
+    if (mediaRecorderRef.current && isListening) {
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+    }
+  };
+
+  const toggleVoiceMode = async () => {
+    if (voiceMode) {
+      // Exit voice mode
+      stopListening();
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+      }
+      setVoiceMode(false);
+      setIsAISpeaking(false);
+    } else {
+      // Enter voice mode
+      setVoiceMode(true);
+      toast.success('Voice mode activated - speak naturally!');
+      await startListening();
     }
   };
 
   const toggleListening = async () => {
-    if (isListening && mediaRecorderRef.current) {
-      // STOP listening
-      mediaRecorderRef.current.stop();
-      setIsListening(false);
+    if (isListening) {
+      stopListening();
     } else {
-      // START listening
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-        audioChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
-          }
-        };
-
-        mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          stream.getTracks().forEach(track => track.stop());
-          
-          try {
-            const toastId = toast.loading('Transcribing...');
-            const transcribedText = await masterAIService.transcribeAudio(audioBlob);
-            setInput(prev => (prev + ' ' + transcribedText).trim());
-            toast.dismiss(toastId);
-          } catch (e) {
-            toast.error('Failed to transcribe audio');
-          }
-        };
-
-        mediaRecorder.start();
-        setIsListening(true);
-      } catch (err) {
-        toast.error('Microphone access denied or not available');
-      }
+      await startListening();
     }
   };
 
@@ -490,6 +543,17 @@ const MasterAI = () => {
                 <Plus size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
             )}
+            <button
+              onClick={toggleVoiceMode}
+              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
+                voiceMode
+                  ? 'bg-purple-600 text-white hover:bg-purple-700'
+                  : 'text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+              }`}
+              title={voiceMode ? 'Exit Voice Mode' : 'Enter Voice Mode'}
+            >
+              {voiceMode ? <Volume2 size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
+            </button>
           </div>
         </div>
 
@@ -536,62 +600,99 @@ const MasterAI = () => {
 
         {/* Input Area */}
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
-          {imageBase64 && (
-            <div className="relative inline-block mb-2 md:mb-3">
-              <img src={imageBase64} alt="Upload preview" className="h-16 w-16 md:h-20 md:w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
-              <button 
-                onClick={() => setImageBase64(null)}
-                className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
-              >
-                <X size={12} />
-              </button>
+          {voiceMode && (
+            <div className="mb-3 p-4 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
+              <div className="flex items-center justify-center gap-3">
+                {isAISpeaking ? (
+                  <>
+                    <Volume2 size={20} className="text-purple-600 dark:text-purple-400 animate-pulse" />
+                    <span className="text-sm font-medium text-purple-900 dark:text-purple-100">AI is speaking...</span>
+                  </>
+                ) : isListening ? (
+                  <>
+                    <div className="relative">
+                      <Mic size={20} className="text-red-500 animate-pulse" />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                    </div>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">Listening... speak now</span>
+                  </>
+                ) : isProcessing ? (
+                  <>
+                    <Loader2 size={20} className="text-purple-600 dark:text-purple-400 animate-spin" />
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic size={20} className="text-gray-400" />
+                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Waiting...</span>
+                  </>
+                )}
+              </div>
+              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-2">
+                Voice mode active - speak naturally and I'll respond with voice
+              </p>
             </div>
           )}
-          <div className="flex items-end gap-1.5 md:gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-1.5 md:p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
-            <input 
-              type="file" 
-              accept="image/*" 
-              ref={fileInputRef} 
-              className="hidden" 
-              onChange={handleImageUpload} 
-            />
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
-              title="Add Image"
-            >
-              <ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />
-            </button>
-            <button 
-              onClick={toggleListening}
-              className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
-              title={isListening ? "Stop listening" : "Start speaking"}
-            >
-              {isListening ? <MicOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
-            </button>
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={isListening ? 'Listening...' : 'Tell me what to do...'}
-              className="flex-1 resize-none bg-transparent text-xs md:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-1.5 md:px-2 py-2 md:py-2.5 max-h-32"
-              rows={1}
-              style={{ minHeight: '36px' }}
-              disabled={isProcessing}
-            />
-            <button
-              onClick={() => sendCommand()}
-              disabled={(!input.trim() && !imageBase64) || isProcessing}
-              className="p-2 md:p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-            >
-              {isProcessing ? <Loader2 size={16} className="md:w-[18px] md:h-[18px] animate-spin" /> : <Send size={16} className="md:w-[18px] md:h-[18px]" />}
-            </button>
-          </div>
-          <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
-            <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.</span>
-            <span className="sm:hidden">AI can process images, voice, and execute actions immediately.</span>
-          </p>
+          {!voiceMode && (
+            <>
+              {imageBase64 && (
+                <div className="relative inline-block mb-2 md:mb-3">
+                  <img src={imageBase64} alt="Upload preview" className="h-16 w-16 md:h-20 md:w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
+                  <button 
+                    onClick={() => setImageBase64(null)}
+                    className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-end gap-1.5 md:gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-1.5 md:p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  onChange={handleImageUpload} 
+                />
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
+                  title="Add Image"
+                >
+                  <ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />
+                </button>
+                <button 
+                  onClick={toggleListening}
+                  className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+                  title={isListening ? "Stop listening" : "Start speaking"}
+                >
+                  {isListening ? <MicOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
+                </button>
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={isListening ? 'Listening...' : 'Tell me what to do...'}
+                  className="flex-1 resize-none bg-transparent text-xs md:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-1.5 md:px-2 py-2 md:py-2.5 max-h-32"
+                  rows={1}
+                  style={{ minHeight: '36px' }}
+                  disabled={isProcessing}
+                />
+                <button
+                  onClick={() => sendCommand()}
+                  disabled={(!input.trim() && !imageBase64) || isProcessing}
+                  className="p-2 md:p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                >
+                  {isProcessing ? <Loader2 size={16} className="md:w-[18px] md:h-[18px] animate-spin" /> : <Send size={16} className="md:w-[18px] md:h-[18px]" />}
+                </button>
+              </div>
+              <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
+                <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.</span>
+                <span className="sm:hidden">AI can process images, voice, and execute actions immediately.</span>
+              </p>
+            </>
+          )}
         </div>
       </div>
     </div>
