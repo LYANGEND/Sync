@@ -309,10 +309,41 @@ const MasterAI = () => {
       setVoiceMode(false);
       setIsAISpeaking(false);
     } else {
-      // Enter voice mode
+      // Enter voice mode - start with AI greeting
       setVoiceMode(true);
-      toast.success('Voice mode activated - tap the button to speak!');
-      // Don't auto-start listening, let user tap the button
+      toast.success('Voice mode activated - starting conversation...');
+      
+      // AI greets the user first
+      const greeting = "Hello! I'm ready to help. What would you like me to do?";
+      const greetingMsg: ChatMessage = {
+        id: `greeting-${Date.now()}`,
+        role: 'assistant',
+        content: greeting,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, greetingMsg]);
+      
+      // Play greeting and then start listening
+      try {
+        setIsAISpeaking(true);
+        const blob = await masterAIService.generateSpeech(greeting);
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudioRef.current = audio;
+        
+        audio.onended = () => {
+          setIsAISpeaking(false);
+          // Automatically start listening after greeting
+          setTimeout(() => startListening(), 500);
+        };
+        
+        await audio.play();
+      } catch (e) {
+        console.error('Failed to play greeting', e);
+        setIsAISpeaking(false);
+        // Start listening anyway
+        setTimeout(() => startListening(), 500);
+      }
     }
   };
 
@@ -685,49 +716,64 @@ const MasterAI = () => {
         {/* Input Area */}
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
           {voiceMode && (
-            <div className="mb-3 p-4 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
-              <div className="flex flex-col items-center gap-3">
+            <div className="mb-3 p-6 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
+              <div className="flex flex-col items-center gap-4">
                 {isAISpeaking ? (
                   <>
-                    <Volume2 size={24} className="text-purple-600 dark:text-purple-400 animate-pulse" />
-                    <span className="text-sm font-medium text-purple-900 dark:text-purple-100">AI is speaking...</span>
+                    <div className="relative">
+                      <div className="w-24 h-24 rounded-full bg-purple-600 flex items-center justify-center">
+                        <Volume2 size={40} className="text-white animate-pulse" />
+                      </div>
+                      <div className="absolute inset-0 rounded-full bg-purple-400 animate-ping opacity-75" />
+                    </div>
+                    <span className="text-base font-medium text-purple-900 dark:text-purple-100">Speaking...</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
+                      I'm responding to your request
+                    </p>
                   </>
                 ) : isListening ? (
                   <>
                     <div className="relative">
-                      <Mic size={24} className="text-red-500 animate-pulse" />
-                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />
+                      <div className="w-24 h-24 rounded-full bg-red-500 flex items-center justify-center">
+                        <Mic size={40} className="text-white" />
+                      </div>
+                      <div className="absolute inset-0 rounded-full bg-red-400 animate-ping opacity-75" />
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">Listening... speak now</span>
-                    <button
-                      onClick={stopListening}
-                      className="px-4 py-2 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors"
-                    >
-                      Stop Speaking
-                    </button>
+                    <span className="text-base font-medium text-gray-900 dark:text-white">I'm listening...</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
+                      Speak naturally. I'll know when you're done.
+                    </p>
                   </>
                 ) : isProcessing ? (
                   <>
-                    <Loader2 size={24} className="text-purple-600 dark:text-purple-400 animate-spin" />
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">Processing...</span>
+                    <div className="w-24 h-24 rounded-full bg-purple-600 flex items-center justify-center">
+                      <Loader2 size={40} className="text-white animate-spin" />
+                    </div>
+                    <span className="text-base font-medium text-gray-900 dark:text-white">Thinking...</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
+                      Processing your request
+                    </p>
                   </>
                 ) : (
                   <>
-                    <button
-                      onClick={startListening}
-                      className="w-20 h-20 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center shadow-lg hover:shadow-xl transition-all active:scale-95"
-                    >
-                      <Mic size={32} />
-                    </button>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">Tap to speak</span>
+                    <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                      <Mic size={40} className="text-gray-400" />
+                    </div>
+                    <span className="text-base font-medium text-gray-500 dark:text-gray-400">Ready</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
+                      Waiting for response to complete...
+                    </p>
                   </>
                 )}
               </div>
-              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-3">
-                {isListening 
-                  ? 'Speak clearly. I\'ll automatically detect when you\'re done.' 
-                  : 'Voice mode active - tap the button and speak your command'}
-              </p>
+              <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-800/30 flex justify-center">
+                <button
+                  onClick={toggleVoiceMode}
+                  className="px-4 py-2 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border border-gray-200 dark:border-slate-600"
+                >
+                  Exit Voice Mode
+                </button>
+              </div>
             </div>
           )}
           {!voiceMode && (
