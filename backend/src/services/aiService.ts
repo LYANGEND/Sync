@@ -390,9 +390,11 @@ class AIService {
 
     // For Azure OpenAI, we need to use Azure's Whisper endpoint
     if (config.provider === 'azure') {
-      if (!config.azureEndpoint) {
-        throw new Error('Azure OpenAI endpoint not configured. Please set AZURE_OPENAI_ENDPOINT in environment variables.');
-      }
+      // Use separate Whisper endpoint if provided, otherwise fall back to main endpoint
+      const whisperEndpoint = (process.env.AZURE_WHISPER_ENDPOINT || config.azureEndpoint)!.replace(/\/$/, '');
+      const whisperApiKey = process.env.AZURE_WHISPER_API_KEY || config.apiKey;
+      const whisperDeployment = process.env.AZURE_WHISPER_DEPLOYMENT || 'whisper';
+      const whisperApiVersion = process.env.AZURE_WHISPER_API_VERSION || '2024-06-01';
 
       const FormData = require('form-data');
       const formData = new FormData();
@@ -404,14 +406,11 @@ class AIService {
 
       try {
         const axios = require('axios');
-        
-        // Azure Whisper endpoint format
-        const whisperDeployment = process.env.AZURE_WHISPER_DEPLOYMENT || 'whisper';
-        const url = `${config.azureEndpoint}/openai/deployments/${whisperDeployment}/audio/transcriptions?api-version=${config.azureApiVersion || '2024-02-15-preview'}`;
+        const url = `${whisperEndpoint}/openai/deployments/${whisperDeployment}/audio/transcriptions?api-version=${whisperApiVersion}`;
         
         const response = await axios.post(url, formData, {
           headers: {
-            'api-key': config.apiKey,
+            'api-key': whisperApiKey,
             ...formData.getHeaders(),
           },
         });
@@ -477,22 +476,23 @@ class AIService {
 
     // Azure OpenAI TTS
     if (config.provider === 'azure') {
-      if (!config.azureEndpoint) {
-        throw new Error('Azure OpenAI endpoint not configured.');
-      }
+      // Use separate TTS endpoint if provided, otherwise fall back to main endpoint
+      const ttsEndpoint = (process.env.AZURE_TTS_ENDPOINT || config.azureEndpoint)!.replace(/\/$/, '');
+      const ttsApiKey = process.env.AZURE_TTS_API_KEY || config.apiKey;
+      const ttsDeployment = process.env.AZURE_TTS_DEPLOYMENT || 'tts-hd';
+      const ttsApiVersion = process.env.AZURE_TTS_API_VERSION || '2025-03-01-preview';
 
       try {
-        const ttsDeployment = process.env.AZURE_TTS_DEPLOYMENT || 'tts';
-        const url = `${config.azureEndpoint}/openai/deployments/${ttsDeployment}/audio/speech?api-version=${config.azureApiVersion || '2024-02-15-preview'}`;
+        const url = `${ttsEndpoint}/openai/deployments/${ttsDeployment}/audio/speech?api-version=${ttsApiVersion}`;
         
         const response = await fetch(url, {
           method: 'POST',
           headers: {
-            'api-key': config.apiKey,
+            'api-key': ttsApiKey,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'tts-1',
+            model: 'tts-1-hd',
             input: cleanText,
             voice: 'nova',
             response_format: 'mp3'
