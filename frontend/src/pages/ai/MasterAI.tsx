@@ -118,6 +118,10 @@ const MasterAI = () => {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   // Sidebar closed by default on mobile, open on desktop
@@ -162,9 +166,54 @@ const MasterAI = () => {
   const startListening = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+
+      // Set up audio analysis for silence detection in voice mode
+      if (voiceMode) {
+        const audioContext = new AudioContext();
+        audioContextRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyserRef.current = analyser;
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+
+        // Monitor audio levels
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        let silenceStart: number | null = null;
+        const SILENCE_THRESHOLD = 10; // Adjust sensitivity (lower = more sensitive)
+        const SILENCE_DURATION = 1500; // Stop after 1.5 seconds of silence
+
+        const checkAudioLevel = () => {
+          if (!analyserRef.current || !isListening) return;
+          
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+
+          if (average < SILENCE_THRESHOLD) {
+            // Silence detected
+            if (silenceStart === null) {
+              silenceStart = Date.now();
+            } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+              // Stop recording after silence duration
+              stopListening();
+              return;
+            }
+          } else {
+            // Sound detected, reset silence timer
+            silenceStart = null;
+          }
+
+          requestAnimationFrame(checkAudioLevel);
+        };
+
+        checkAudioLevel();
+      }
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -174,7 +223,27 @@ const MasterAI = () => {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(track => track.stop());
+        
+        // Clean up audio context
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        }
+        
+        // Stop all tracks
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+        
+        // Only process if we have meaningful audio (> 0.5 seconds)
+        if (audioBlob.size < 5000) {
+          // Too short, probably just noise
+          if (voiceMode && !isProcessing) {
+            setTimeout(() => startListening(), 500);
+          }
+          return;
+        }
         
         try {
           const transcribedText = await masterAIService.transcribeAudio(audioBlob);
@@ -183,12 +252,16 @@ const MasterAI = () => {
             // In voice mode, automatically send the command
             if (transcribedText.trim()) {
               await sendCommand(transcribedText);
+            } else {
+              // Empty transcription, restart listening
+              setTimeout(() => startListening(), 500);
             }
           } else {
             // In normal mode, just populate the input field
             setInput(prev => (prev + ' ' + transcribedText).trim());
           }
         } catch (e) {
+          console.error('Transcription error:', e);
           toast.error('Failed to transcribe audio');
           if (voiceMode) {
             // Restart listening in voice mode even on error
@@ -200,6 +273,7 @@ const MasterAI = () => {
       mediaRecorder.start();
       setIsListening(true);
     } catch (err) {
+      console.error('Microphone error:', err);
       toast.error('Microphone access denied or not available');
       setIsListening(false);
       if (voiceMode) {
@@ -212,6 +286,16 @@ const MasterAI = () => {
     if (mediaRecorderRef.current && isListening) {
       mediaRecorderRef.current.stop();
       setIsListening(false);
+    }
+    
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
   };
 
@@ -227,8 +311,8 @@ const MasterAI = () => {
     } else {
       // Enter voice mode
       setVoiceMode(true);
-      toast.success('Voice mode activated - speak naturally!');
-      await startListening();
+      toast.success('Voice mode activated - tap the button to speak!');
+      // Don't auto-start listening, let user tap the button
     }
   };
 
@@ -602,34 +686,47 @@ const MasterAI = () => {
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
           {voiceMode && (
             <div className="mb-3 p-4 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
-              <div className="flex items-center justify-center gap-3">
+              <div className="flex flex-col items-center gap-3">
                 {isAISpeaking ? (
                   <>
-                    <Volume2 size={20} className="text-purple-600 dark:text-purple-400 animate-pulse" />
+                    <Volume2 size={24} className="text-purple-600 dark:text-purple-400 animate-pulse" />
                     <span className="text-sm font-medium text-purple-900 dark:text-purple-100">AI is speaking...</span>
                   </>
                 ) : isListening ? (
                   <>
                     <div className="relative">
-                      <Mic size={20} className="text-red-500 animate-pulse" />
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                      <Mic size={24} className="text-red-500 animate-pulse" />
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />
                     </div>
                     <span className="text-sm font-medium text-gray-900 dark:text-white">Listening... speak now</span>
+                    <button
+                      onClick={stopListening}
+                      className="px-4 py-2 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors"
+                    >
+                      Stop Speaking
+                    </button>
                   </>
                 ) : isProcessing ? (
                   <>
-                    <Loader2 size={20} className="text-purple-600 dark:text-purple-400 animate-spin" />
+                    <Loader2 size={24} className="text-purple-600 dark:text-purple-400 animate-spin" />
                     <span className="text-sm font-medium text-gray-900 dark:text-white">Processing...</span>
                   </>
                 ) : (
                   <>
-                    <Mic size={20} className="text-gray-400" />
-                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Waiting...</span>
+                    <button
+                      onClick={startListening}
+                      className="w-20 h-20 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center shadow-lg hover:shadow-xl transition-all active:scale-95"
+                    >
+                      <Mic size={32} />
+                    </button>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">Tap to speak</span>
                   </>
                 )}
               </div>
-              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-2">
-                Voice mode active - speak naturally and I'll respond with voice
+              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-3">
+                {isListening 
+                  ? 'Speak clearly. I\'ll automatically detect when you\'re done.' 
+                  : 'Voice mode active - tap the button and speak your command'}
               </p>
             </div>
           )}
