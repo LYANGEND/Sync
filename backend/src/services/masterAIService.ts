@@ -1625,8 +1625,8 @@ function cleanFinalMessage(message: string): string {
   cleaned = cleaned.replace(/```[\s\S]*?```/g, '').trim();
 
   // Remove standalone JSON objects (e.g. { "message": ..., "actions": ... })
-  cleaned = cleaned.replace(/\{\s*"message"\s*:.*?\}\s*$/s, '').trim();
-  cleaned = cleaned.replace(/\{\s*"actions"\s*:.*?\}\s*$/s, '').trim();
+  cleaned = cleaned.replace(/\{\s*"message"\s*:[\s\S]*?\}\s*$/, '').trim();
+  cleaned = cleaned.replace(/\{\s*"actions"\s*:[\s\S]*?\}\s*$/, '').trim();
 
   // If the entire message looks like JSON, extract just the message field
   if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
@@ -1641,7 +1641,8 @@ function cleanFinalMessage(message: string): string {
   }
 
   // Remove excessive emojis (keep max 2)
-  const emojiPattern = /[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}]/gu;
+  // Use surrogate pair ranges compatible with es2016 (no /u flag)
+  const emojiPattern = /(?:\uD83D[\uDE00-\uDEFF]|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDE80-\uDEFF]|[\u2600-\u26FF]|[\u2700-\u27BF]|\uD83E[\uDD00-\uDDFF])/g;
   const emojis = cleaned.match(emojiPattern) || [];
   if (emojis.length > 2) {
     let count = 0;
