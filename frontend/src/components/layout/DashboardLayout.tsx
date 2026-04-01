@@ -5,6 +5,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import BottomNav from './BottomNav';
 import { FloatingActionButton } from '../mobile';
+import GlobalVoiceCommand from '../voice/GlobalVoiceCommand';
 
 const DashboardLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -47,6 +48,9 @@ const DashboardLayout = () => {
 
       {/* Floating Action Button - Mobile only, context-aware */}
       {showFAB && <FloatingActionButton />}
+
+      {/* Global Voice Command - available on all pages */}
+      <GlobalVoiceCommand />
 
       {/* Bottom Navigation - Mobile only */}
       <BottomNav onMenuClick={() => setIsMobileMenuOpen(true)} />

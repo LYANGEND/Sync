@@ -1095,6 +1095,414 @@ Requirements:
       };
     }
   },
+
+  // ===================== PAYMENT TRANSACTIONS =====================
+  {
+    name: 'search_payments',
+    description: 'Search and list fee payment transactions. Can filter by status (COMPLETED/FAILED/PENDING/VOIDED), payment method (CASH/MOBILE_MONEY/BANK_DEPOSIT), date range, student name/admission number, or amount range. Returns transaction details including student name, amount, method, status, and date.',
+    parameters: [
+      { name: 'status', type: 'string', description: 'Filter by payment status', enum: ['PENDING', 'COMPLETED', 'FAILED', 'VOIDED'] },
+      { name: 'method', type: 'string', description: 'Filter by payment method', enum: ['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'] },
+      { name: 'startDate', type: 'string', description: 'Filter from date (YYYY-MM-DD)' },
+      { name: 'endDate', type: 'string', description: 'Filter to date (YYYY-MM-DD)' },
+      { name: 'studentQuery', type: 'string', description: 'Search by student name or admission number' },
+      { name: 'minAmount', type: 'number', description: 'Minimum payment amount' },
+      { name: 'maxAmount', type: 'number', description: 'Maximum payment amount' },
+      { name: 'limit', type: 'number', description: 'Max results to return (default 25)' },
+    ],
+    execute: async (params) => {
+      const where: any = {};
+      if (params.status) where.status = params.status;
+      if (params.method) where.method = params.method;
+      if (params.startDate || params.endDate) {
+        where.paymentDate = {};
+        if (params.startDate) where.paymentDate.gte = new Date(params.startDate);
+        if (params.endDate) where.paymentDate.lte = new Date(params.endDate + 'T23:59:59');
+      }
+      if (params.minAmount || params.maxAmount) {
+        where.amount = {};
+        if (params.minAmount) where.amount.gte = params.minAmount;
+        if (params.maxAmount) where.amount.lte = params.maxAmount;
+      }
+      if (params.studentQuery) {
+        where.student = {
+          OR: [
+            { firstName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { lastName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { admissionNumber: { contains: params.studentQuery, mode: 'insensitive' } },
+          ],
+        };
+      }
+      const payments = await prisma.payment.findMany({
+        where,
+        include: {
+          student: { select: { firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } } },
+          allocations: { include: { studentFee: { include: { feeTemplate: { select: { name: true } } } } } },
+        },
+        orderBy: { paymentDate: 'desc' },
+        take: params.limit || 25,
+      });
+      return {
+        count: payments.length,
+        payments: payments.map(p => ({
+          transactionId: p.transactionId,
+          student: `${p.student.firstName} ${p.student.lastName} (${p.student.admissionNumber})`,
+          class: p.student.class?.name || 'N/A',
+          amount: Number(p.amount),
+          method: p.method,
+          status: p.status,
+          date: p.paymentDate.toISOString().split('T')[0],
+          feeItems: p.allocations.map(a => a.studentFee.feeTemplate.name).join(', ') || 'Unallocated',
+          notes: p.notes || null,
+          voidReason: p.voidReason || null,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'get_payment_analytics',
+    description: 'Get a breakdown/summary of payment transactions — by status (paid/failed/pending/voided), by payment method (cash vs mobile money vs bank), totals collected, success rates, and daily/monthly trends. Perfect for financial reporting and dashboards.',
+    parameters: [
+      { name: 'startDate', type: 'string', description: 'Analysis period start (YYYY-MM-DD)' },
+      { name: 'endDate', type: 'string', description: 'Analysis period end (YYYY-MM-DD)' },
+      { name: 'groupBy', type: 'string', description: 'Group results by period', enum: ['day', 'week', 'month'] },
+    ],
+    execute: async (params) => {
+      const dateFilter: any = {};
+      if (params.startDate || params.endDate) {
+        dateFilter.paymentDate = {};
+        if (params.startDate) dateFilter.paymentDate.gte = new Date(params.startDate);
+        if (params.endDate) dateFilter.paymentDate.lte = new Date(params.endDate + 'T23:59:59');
+      }
+
+      // Status breakdown
+      const statusBreakdown = await prisma.payment.groupBy({
+        by: ['status'],
+        where: dateFilter,
+        _count: { id: true },
+        _sum: { amount: true },
+      });
+
+      // Method breakdown
+      const methodBreakdown = await prisma.payment.groupBy({
+        by: ['method'],
+        where: { ...dateFilter, status: 'COMPLETED' },
+        _count: { id: true },
+        _sum: { amount: true },
+      });
+
+      // Overall totals
+      const totalCompleted = await prisma.payment.aggregate({
+        where: { ...dateFilter, status: 'COMPLETED' },
+        _sum: { amount: true },
+        _count: { id: true },
+      });
+      const totalAll = await prisma.payment.aggregate({
+        where: dateFilter,
+        _count: { id: true },
+      });
+
+      // Mobile money specific stats
+      const mobileMoneyStats = await prisma.mobileMoneyCollection.groupBy({
+        by: ['status'],
+        where: params.startDate || params.endDate ? {
+          initiatedAt: dateFilter.paymentDate,
+        } : {},
+        _count: { id: true },
+        _sum: { amount: true },
+      });
+
+      // Recent failed transactions (last 10)
+      const recentFailed = await prisma.payment.findMany({
+        where: { ...dateFilter, status: 'FAILED' },
+        include: { student: { select: { firstName: true, lastName: true, admissionNumber: true } } },
+        orderBy: { paymentDate: 'desc' },
+        take: 10,
+      });
+
+      const successRate = totalAll._count.id > 0
+        ? ((totalCompleted._count.id / totalAll._count.id) * 100).toFixed(1)
+        : '0';
+
+      return {
+        summary: {
+          totalTransactions: totalAll._count.id,
+          totalCollected: Number(totalCompleted._sum.amount || 0),
+          successfulPayments: totalCompleted._count.id,
+          successRate: `${successRate}%`,
+        },
+        byStatus: statusBreakdown.map(s => ({
+          status: s.status,
+          count: s._count.id,
+          totalAmount: Number(s._sum.amount || 0),
+        })),
+        byMethod: methodBreakdown.map(m => ({
+          method: m.method,
+          count: m._count.id,
+          totalAmount: Number(m._sum.amount || 0),
+        })),
+        mobileMoneyBreakdown: mobileMoneyStats.map(mm => ({
+          status: mm.status,
+          count: mm._count.id,
+          totalAmount: Number(mm._sum.amount || 0),
+        })),
+        recentFailedTransactions: recentFailed.map(f => ({
+          transactionId: f.transactionId,
+          student: `${f.student.firstName} ${f.student.lastName} (${f.student.admissionNumber})`,
+          amount: Number(f.amount),
+          date: f.paymentDate.toISOString().split('T')[0],
+          notes: f.notes,
+        })),
+      };
+    },
+  },
+
+  {
+    name: 'get_student_payment_history',
+    description: 'Get the complete payment history for a specific student — every transaction they have made, including amounts, methods, statuses, dates, and what fee items each payment was allocated to. Can search by student name or admission number.',
+    parameters: [
+      { name: 'studentQuery', type: 'string', description: 'Student name or admission number to look up', required: true },
+      { name: 'status', type: 'string', description: 'Filter by payment status', enum: ['PENDING', 'COMPLETED', 'FAILED', 'VOIDED'] },
+      { name: 'limit', type: 'number', description: 'Max transactions to return (default 50)' },
+    ],
+    execute: async (params) => {
+      // Find the student
+      const students = await prisma.student.findMany({
+        where: {
+          OR: [
+            { firstName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { lastName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { admissionNumber: { contains: params.studentQuery, mode: 'insensitive' } },
+            { admissionNumber: { equals: params.studentQuery } },
+          ],
+        },
+        select: { id: true, firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } },
+        take: 5,
+      });
+
+      if (students.length === 0) {
+        return { error: `No student found matching "${params.studentQuery}"` };
+      }
+
+      // If multiple matches, get history for the best match
+      const student = students[0];
+      const paymentWhere: any = { studentId: student.id };
+      if (params.status) paymentWhere.status = params.status;
+
+      const payments = await prisma.payment.findMany({
+        where: paymentWhere,
+        include: {
+          allocations: { include: { studentFee: { include: { feeTemplate: { select: { name: true } } } } } },
+          mobileMoneyCollection: { select: { phone: true, operator: true, status: true, reference: true } },
+        },
+        orderBy: { paymentDate: 'desc' },
+        take: params.limit || 50,
+      });
+
+      // Get fee balances too
+      const feeStructures = await prisma.studentFeeStructure.findMany({
+        where: { studentId: student.id },
+        include: { feeTemplate: { select: { name: true } } },
+      });
+
+      const totalPaid = payments
+        .filter(p => p.status === 'COMPLETED')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalDue = feeStructures.reduce((sum, f) => sum + Number(f.amountDue), 0);
+      const totalBalance = totalDue - feeStructures.reduce((sum, f) => sum + Number(f.amountPaid), 0);
+
+      return {
+        student: {
+          name: `${student.firstName} ${student.lastName}`,
+          admissionNumber: student.admissionNumber,
+          class: student.class?.name || 'N/A',
+        },
+        financialSummary: {
+          totalFeesDue: totalDue,
+          totalPaid,
+          outstandingBalance: totalBalance,
+          transactionCount: payments.length,
+        },
+        feeBalances: feeStructures.map(f => ({
+          feeItem: f.feeTemplate.name,
+          amountDue: Number(f.amountDue),
+          amountPaid: Number(f.amountPaid),
+          balance: Number(f.amountDue) - Number(f.amountPaid),
+        })),
+        transactions: payments.map(p => ({
+          transactionId: p.transactionId,
+          amount: Number(p.amount),
+          method: p.method,
+          status: p.status,
+          date: p.paymentDate.toISOString().split('T')[0],
+          feeItems: p.allocations.map(a => `${a.studentFee.feeTemplate.name} (K${Number(a.amount)})`).join(', ') || 'Unallocated',
+          mobileMoney: p.mobileMoneyCollection ? {
+            phone: p.mobileMoneyCollection.phone,
+            operator: p.mobileMoneyCollection.operator,
+            status: p.mobileMoneyCollection.status,
+            reference: p.mobileMoneyCollection.reference,
+          } : null,
+          notes: p.notes,
+          voidReason: p.voidReason || null,
+        })),
+        otherMatches: students.length > 1 ? students.slice(1).map(s => `${s.firstName} ${s.lastName} (${s.admissionNumber})`) : [],
+      };
+    },
+  },
+
+  {
+    name: 'get_student_fee_balances',
+    description: 'Get fee balance status for students — who has paid, who has outstanding balances, which fee items are unpaid. Can filter by class/grade, or show only students with overdue balances. Great for identifying defaulters or checking collection rates.',
+    parameters: [
+      { name: 'classId', type: 'string', description: 'Filter by class ID (use list_classes first to get IDs)' },
+      { name: 'className', type: 'string', description: 'Filter by class name (e.g. "Grade 1", "10A")' },
+      { name: 'onlyWithBalance', type: 'string', description: 'Set to "true" to show only students with outstanding balances', enum: ['true', 'false'] },
+      { name: 'limit', type: 'number', description: 'Max students to return (default 30)' },
+    ],
+    execute: async (params) => {
+      const studentWhere: any = { status: 'ACTIVE' };
+      if (params.classId) studentWhere.classId = params.classId;
+      if (params.className) {
+        studentWhere.class = { name: { contains: params.className, mode: 'insensitive' } };
+      }
+
+      const students = await prisma.student.findMany({
+        where: studentWhere,
+        include: {
+          class: { select: { name: true } },
+          feeStructures: {
+            include: { feeTemplate: { select: { name: true } } },
+          },
+        },
+        orderBy: [{ firstName: 'asc' }],
+        take: params.limit || 30,
+      });
+
+      const results = students.map(s => {
+        const fees = s.feeStructures.map(f => ({
+          feeItem: f.feeTemplate.name,
+          amountDue: Number(f.amountDue),
+          amountPaid: Number(f.amountPaid),
+          balance: Number(f.amountDue) - Number(f.amountPaid),
+        }));
+        const totalDue = fees.reduce((sum, f) => sum + f.amountDue, 0);
+        const totalPaid = fees.reduce((sum, f) => sum + f.amountPaid, 0);
+        return {
+          name: `${s.firstName} ${s.lastName}`,
+          admissionNumber: s.admissionNumber,
+          class: s.class?.name || 'N/A',
+          totalDue,
+          totalPaid,
+          outstandingBalance: totalDue - totalPaid,
+          percentagePaid: totalDue > 0 ? `${((totalPaid / totalDue) * 100).toFixed(0)}%` : 'N/A',
+          fees,
+        };
+      });
+
+      const filtered = params.onlyWithBalance === 'true'
+        ? results.filter(r => r.outstandingBalance > 0)
+        : results;
+
+      const totalStudents = filtered.length;
+      const totalDueAll = filtered.reduce((s, r) => s + r.totalDue, 0);
+      const totalPaidAll = filtered.reduce((s, r) => s + r.totalPaid, 0);
+      const totalOutstanding = totalDueAll - totalPaidAll;
+      const studentsFullyPaid = filtered.filter(r => r.outstandingBalance <= 0).length;
+      const studentsWithBalance = filtered.filter(r => r.outstandingBalance > 0).length;
+
+      return {
+        summary: {
+          totalStudents,
+          studentsFullyPaid,
+          studentsWithBalance,
+          totalFeesDue: totalDueAll,
+          totalCollected: totalPaidAll,
+          totalOutstanding,
+          collectionRate: totalDueAll > 0 ? `${((totalPaidAll / totalDueAll) * 100).toFixed(1)}%` : 'N/A',
+        },
+        students: filtered,
+      };
+    },
+  },
+
+  {
+    name: 'get_invoice_summary',
+    description: 'Get a summary of all invoices — counts and totals by status (DRAFT/SENT/PARTIALLY_PAID/PAID/OVERDUE/CANCELLED), overdue invoices, and recent invoice activity. Useful for accounts receivable reporting.',
+    parameters: [
+      { name: 'status', type: 'string', description: 'Filter by invoice status', enum: ['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED', 'CREDITED'] },
+      { name: 'startDate', type: 'string', description: 'Filter from issue date (YYYY-MM-DD)' },
+      { name: 'endDate', type: 'string', description: 'Filter to issue date (YYYY-MM-DD)' },
+      { name: 'studentQuery', type: 'string', description: 'Search by student name or admission number' },
+      { name: 'limit', type: 'number', description: 'Max invoices to return (default 20)' },
+    ],
+    execute: async (params) => {
+      const where: any = {};
+      if (params.status) where.status = params.status;
+      if (params.startDate || params.endDate) {
+        where.issueDate = {};
+        if (params.startDate) where.issueDate.gte = new Date(params.startDate);
+        if (params.endDate) where.issueDate.lte = new Date(params.endDate + 'T23:59:59');
+      }
+      if (params.studentQuery) {
+        where.student = {
+          OR: [
+            { firstName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { lastName: { contains: params.studentQuery, mode: 'insensitive' } },
+            { admissionNumber: { contains: params.studentQuery, mode: 'insensitive' } },
+          ],
+        };
+      }
+
+      // Status breakdown (overall)
+      const statusBreakdown = await prisma.invoice.groupBy({
+        by: ['status'],
+        _count: { id: true },
+        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+      });
+
+      // Overdue invoices
+      const overdueCount = await prisma.invoice.count({
+        where: { status: { in: ['SENT', 'PARTIALLY_PAID'] }, dueDate: { lt: new Date() } },
+      });
+
+      // Filtered invoices list
+      const invoices = await prisma.invoice.findMany({
+        where,
+        include: {
+          student: { select: { firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } } },
+          items: { select: { description: true, amount: true } },
+        },
+        orderBy: { issueDate: 'desc' },
+        take: params.limit || 20,
+      });
+
+      return {
+        overview: {
+          byStatus: statusBreakdown.map(s => ({
+            status: s.status,
+            count: s._count.id,
+            totalAmount: Number(s._sum.totalAmount || 0),
+            amountPaid: Number(s._sum.amountPaid || 0),
+            balanceDue: Number(s._sum.balanceDue || 0),
+          })),
+          overdueInvoices: overdueCount,
+        },
+        invoices: invoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          student: `${inv.student.firstName} ${inv.student.lastName} (${inv.student.admissionNumber})`,
+          class: inv.student.class?.name || 'N/A',
+          issueDate: inv.issueDate.toISOString().split('T')[0],
+          dueDate: inv.dueDate.toISOString().split('T')[0],
+          totalAmount: Number(inv.totalAmount),
+          amountPaid: Number(inv.amountPaid),
+          balanceDue: Number(inv.balanceDue),
+          status: inv.status,
+          items: inv.items.map(i => `${i.description} (K${Number(i.amount)})`).join(', '),
+        })),
+      };
+    },
+  },
 ];
 
 // ==========================
@@ -1143,6 +1551,11 @@ const toolFriendlyNames: Record<string, string> = {
   generate_syllabus: 'AI Syllabus Generator',
   create_topics: 'Syllabus Topics',
   delete_topics: 'Syllabus Topics',
+  search_payments: 'Payment Transactions',
+  get_payment_analytics: 'Payment Analytics',
+  get_student_payment_history: 'Student Payment History',
+  get_student_fee_balances: 'Student Fee Balances',
+  get_invoice_summary: 'Invoice Summary',
 };
 
 // ==========================
@@ -1151,19 +1564,18 @@ const toolFriendlyNames: Record<string, string> = {
 function buildSystemPrompt(): string {
   const currentYear = new Date().getFullYear();
   return `You are Sync Master AI — the intelligent operations assistant for a school management system called Sync.
-You can perform real actions across ALL modules: academic calendar, students, classes, subjects, subject-class assignments, syllabus/topics, fees, assessments, timetables, announcements, expenses, and more.
+You can perform real actions across ALL modules: academic calendar, students, classes, subjects, subject-class assignments, syllabus/topics, fees, payment transactions, invoices, financial analytics, assessments, timetables, announcements, expenses, and more.
 
 CURRENT DATE: ${new Date().toISOString().split('T')[0]}
 CURRENT YEAR: ${currentYear}
 
 ## YOUR PERSONALITY:
-- You are helpful, friendly, and conversational
-- Speak naturally like a human assistant, not a robot
-- Use casual, warm language: "Sure!", "Got it!", "Let me help with that", "Done!"
-- Keep responses brief and to the point - users may be listening via voice
-- Acknowledge requests before executing: "Okay, adding those holidays now"
-- Celebrate successes: "Perfect! I've added all 15 holidays"
-- Be empathetic with errors: "Hmm, I couldn't find that class. Let me show you what's available"
+- You are helpful, professional, and concise
+- Speak naturally like a human assistant — warm but never verbose
+- Keep every response SHORT — 1 sentence max for the "message" field
+- NEVER narrate what you're about to do ("I'll move fast", "hang tight", "doing it now") — just do it
+- NEVER describe your process ("First I'll list classes, then...") — just call the tools
+- Be empathetic with errors: "Hmm, I couldn't find that class."
 
 ## YOUR CAPABILITIES (TOOLS):
 ${buildToolDescriptions()}
@@ -1181,24 +1593,68 @@ ${buildToolDescriptions()}
 10. **GRADE LEVELS**: ECE grades are -3 (Baby Class), -2 (Middle Class), -1 (Top Class), 0 (Reception). Primary is 1-7. Secondary is 8-12.
 
 ## RESPONSE FORMAT:
-Always respond with valid JSON in this exact format:
+Always respond with ONLY this JSON — nothing else:
 {
-  "message": "A brief, friendly, conversational response. Speak naturally like you're talking to a friend. Keep it under 2 sentences for voice users.",
+  "message": "<1 sentence, max 15 words>",
   "actions": [
-    {
-      "tool": "tool_name",
-      "params": { ... parameters for the tool ... }
-    }
+    { "tool": "tool_name", "params": { ... } }
   ],
-  "suggestions": ["Optional follow-up suggestions in plain English"]
+  "suggestions": ["Optional short follow-up"]
 }
 
-NOTE: After actions execute, the system will automatically generate a detailed, accurate summary using the real data. Your "message" field is just a quick intent note — the system handles the final conversational answer.
+## CRITICAL RULES FOR "message":
+- The "message" field is a PLACEHOLDER — the system replaces it with a data-driven summary after tools run.
+- So keep it EXTREMELY short: "Pulling up the data." or "Here are the results."
+- NEVER include: emojis, commentary, narration, process descriptions, or filler phrases.
+- NEVER repeat the JSON structure or action details inside the message.
+- BAD: "Got it — doing it now 👍 I'll move fast and sample one student..."
+- GOOD: "Fetching student samples."
+- If no actions needed, answer the question directly and concisely in 1-3 sentences.
 
-If the user asks a question that doesn't require an action, still use the JSON format but with an empty actions array, and provide a helpful conversational answer in the message.
-If you need to call multiple tools (e.g., list classes first, then create assessments), include all actions in order.
+IMPORTANT: Respond ONLY with valid JSON. No markdown wrapping, no text outside the JSON.`;
+}
 
-IMPORTANT: Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.`;
+// ==========================
+// CLEAN UP LEAKED JSON / VERBOSE FILLER
+// ==========================
+function cleanFinalMessage(message: string): string {
+  let cleaned = message.trim();
+
+  // Strip any JSON blocks that leaked into the message
+  cleaned = cleaned.replace(/```json[\s\S]*?```/g, '').trim();
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, '').trim();
+
+  // Remove standalone JSON objects (e.g. { "message": ..., "actions": ... })
+  cleaned = cleaned.replace(/\{\s*"message"\s*:.*?\}\s*$/s, '').trim();
+  cleaned = cleaned.replace(/\{\s*"actions"\s*:.*?\}\s*$/s, '').trim();
+
+  // If the entire message looks like JSON, extract just the message field
+  if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.message && typeof parsed.message === 'string') {
+        cleaned = parsed.message;
+      }
+    } catch {
+      // Not valid JSON, keep as-is
+    }
+  }
+
+  // Remove excessive emojis (keep max 2)
+  const emojiPattern = /[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}]/gu;
+  const emojis = cleaned.match(emojiPattern) || [];
+  if (emojis.length > 2) {
+    let count = 0;
+    cleaned = cleaned.replace(emojiPattern, (match) => {
+      count++;
+      return count <= 2 ? match : '';
+    });
+  }
+
+  // Collapse extra whitespace
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+
+  return cleaned || message;
 }
 
 // ==========================
@@ -1334,7 +1790,7 @@ class MasterAIService {
     }
 
     return {
-      message: finalMessage,
+      message: cleanFinalMessage(finalMessage),
       actions: results,
       suggestions: plan.suggestions,
     };
@@ -1390,23 +1846,24 @@ class MasterAIService {
 
     const failedResults = results.filter(r => !r.success);
 
-    const summarizerPrompt = `You are a friendly school assistant. The user asked: "${userMessage}"
+    const summarizerPrompt = `You are a school management assistant. The user asked: "${userMessage}"
 
 Here are the ACTUAL results from the system:
 ${JSON.stringify(dataSnapshot, null, 2)}
 ${failedResults.length > 0 ? `\nSome actions failed: ${failedResults.map(r => r.summary).join('; ')}` : ''}
 
-Write a SHORT, PRECISE, conversational answer (2-4 sentences max) that directly answers what the user asked using the REAL numbers from the data above.
+Write a SHORT, PRECISE answer (2-4 sentences max) using the REAL data above.
 
 RULES:
 - Be SPECIFIC — use exact numbers, names, and values from the data.
-- If the user asked about ONE thing (e.g. "how many students"), answer ONLY that — don't dump everything else.
-- If data was created, confirm exactly what was created with a count.
+- Answer ONLY what was asked — don't dump extra information.
 - Write in plain English for a non-technical school admin.
-- Use 1-2 relevant emojis.
-- Do NOT use bullet points or lists — just a natural paragraph.
-- Do NOT mention tools, databases, APIs, or technical terms.
-- Respond with ONLY the message text, nothing else.`;
+- Use at most 1 emoji, only if natural.
+- Do NOT use bullet points, lists, or markdown formatting.
+- Do NOT narrate your process ("I looked up...", "I found...") — just state the answer.
+- Do NOT mention tools, databases, APIs, JSON, or technical terms.
+- Do NOT include any JSON in your response.
+- Respond with ONLY the answer text, nothing else.`;
 
     try {
       const summaryResponse = await aiService.chat([
