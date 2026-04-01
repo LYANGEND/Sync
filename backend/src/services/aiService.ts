@@ -403,6 +403,7 @@ class AIService {
         filename: 'audio.webm',
         contentType: mimeType || 'audio/webm',
       });
+      formData.append('language', 'en');  // Force English — prevents language switching on unclear audio
 
       try {
         const axios = require('axios');
@@ -437,6 +438,7 @@ class AIService {
         contentType: mimeType || 'audio/webm',
       });
       formData.append('model', 'whisper-1');
+      formData.append('language', 'en');  // Force English — prevents language switching on unclear audio
 
       try {
         const axios = require('axios');
