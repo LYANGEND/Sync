@@ -492,10 +492,11 @@ class AIService {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'tts-1-hd',
+            model: 'tts-1',
             input: cleanText,
             voice: 'nova',
-            response_format: 'mp3'
+            response_format: 'mp3',
+            speed: 1.0
           })
         });
         
@@ -530,7 +531,8 @@ class AIService {
             model: 'tts-1',
             input: cleanText,
             voice: 'nova',
-            response_format: 'mp3'
+            response_format: 'mp3',
+            speed: 1.0
           })
         });
         

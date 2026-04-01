@@ -1687,7 +1687,7 @@ class MasterAIService {
     // Call AI to get the action plan
     const aiResponse = await aiService.chat(messages, {
       temperature: 0.3,
-      maxTokens: 4000,
+      maxTokens: 2000,
     });
 
     // Parse the AI response
@@ -1870,8 +1870,8 @@ RULES:
       const summaryResponse = await aiService.chat([
         { role: 'user', content: summarizerPrompt },
       ], {
-        temperature: 0.4,
-        maxTokens: 300,
+        temperature: 0.2,
+        maxTokens: 150,
       });
       const cleaned = summaryResponse.content.trim();
       // Sanity check: if AI returned something useful

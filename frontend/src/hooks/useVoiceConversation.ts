@@ -153,6 +153,10 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
   const errorCountRef = useRef(0);
   const maxRecordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cached greeting audio — generated once, reused on every activation
+  const greetingBlobRef = useRef<Blob | null>(null);
+  const greetingPrefetchedRef = useRef(false);
+
   // ---- FUNCTION REFS: these break circular closure dependencies ----
   const startListeningRef = useRef<() => Promise<void>>();
   const sendVoiceCommandRef = useRef<(text: string, isFarewell: boolean) => void>();
@@ -173,7 +177,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       if (isActiveRef.current) {
         console.log('[Voice] Audio queue empty, restarting listening');
         setVoiceState('listening');
-        setTimeout(() => startListeningRef.current?.(), 300);
+        setTimeout(() => startListeningRef.current?.(), 100);
       }
       return;
     }
@@ -269,8 +273,8 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       let speechDetected = false;
       let silenceStartTime: number | null = null;
       const SILENCE_THRESHOLD = 12;
-      const SILENCE_AFTER_SPEECH = 1500;
-      const MAX_WAIT_FOR_SPEECH = 6000;
+      const SILENCE_AFTER_SPEECH = 1000;   // 1s (was 1.5s) — snappier turn-taking
+      const MAX_WAIT_FOR_SPEECH = 4000;    // 4s (was 6s)
       const MAX_RECORDING = 30000;
       const recordStartTime = Date.now();
 
@@ -345,7 +349,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
           console.log('[Voice] No meaningful audio, restarting listening');
           if (isActiveRef.current && errorCountRef.current < 3) {
             setVoiceState('listening');
-            setTimeout(() => startListeningRef.current?.(), 600);
+            setTimeout(() => startListeningRef.current?.(), 200);
           }
           return;
         }
@@ -364,7 +368,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
             console.log('[Voice] Empty transcription, restarting');
             if (isActiveRef.current) {
               setVoiceState('listening');
-              setTimeout(() => startListeningRef.current?.(), 400);
+              setTimeout(() => startListeningRef.current?.(), 150);
             }
             return;
           }
@@ -466,7 +470,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
           }, 800);
         } else if (isActiveRef.current) {
           setVoiceState('listening');
-          setTimeout(() => startListeningRef.current?.(), 300);
+          setTimeout(() => startListeningRef.current?.(), 100);
         }
         return;
       }
@@ -500,6 +504,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
           if (r.ok && r.blob && isActiveRef.current) {
             const url = URL.createObjectURL(r.blob);
             const audio = new Audio(url);
+            audio.preload = 'auto';  // Start decoding immediately
             audioQueueRef.current.push(audio);
 
             // Start playback as soon as the first chunk is ready
@@ -561,17 +566,32 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
   // ==================================================================
   // PUBLIC API
   // ==================================================================
+  const GREETING = "Hi! How can I help?";
+
+  // Pre-fetch greeting audio on first mount so it's instant
+  useEffect(() => {
+    if (!greetingPrefetchedRef.current) {
+      greetingPrefetchedRef.current = true;
+      masterAIService.generateSpeech(GREETING)
+        .then(blob => { greetingBlobRef.current = blob; })
+        .catch(() => { /* Non-critical — will fetch on-demand */ });
+    }
+  }, []);
+
   const startVoiceMode = useCallback(async () => {
     isActiveRef.current = true;
     errorCountRef.current = 0;
     setVoiceState('speaking');
     setCurrentTranscript('');
 
-    const greeting = "Hi there! I'm listening. How can I help you today?";
     try {
-      const blob = await masterAIService.generateSpeech(greeting);
+      // Use cached greeting if available, otherwise fetch
+      const blob = greetingBlobRef.current || await masterAIService.generateSpeech(GREETING);
+      if (!greetingBlobRef.current) greetingBlobRef.current = blob;
+
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      audio.preload = 'auto';
       currentAudioRef.current = audio;
       isPlayingRef.current = true;
 
@@ -589,6 +609,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       await audio.play();
     } catch (e) {
       console.error('[Voice] Greeting TTS failed:', e);
+      // Skip greeting entirely — just start listening immediately
       if (isActiveRef.current) {
         setVoiceState('listening');
         startListeningRef.current?.();
