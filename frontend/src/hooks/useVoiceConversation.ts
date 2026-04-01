@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import masterAIService from '../services/masterAIService';
-import type { MasterAIResponse, MasterAIAction } from '../services/masterAIService';
+import type { MasterAIAction } from '../services/masterAIService';
 import toast from 'react-hot-toast';
 
 // ================================================================
@@ -354,6 +354,10 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
           return;
         }
 
+        // 🔔 Instant confirmation tone — fills the silence gap while
+        // Whisper transcribes (ElevenLabs-style perceived latency fix)
+        playProcessingTone();
+
         // Transcribe
         setVoiceState('processing');
         setCurrentTranscript('');
@@ -414,115 +418,217 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
   useEffect(() => { startListeningRef.current = startListeningImpl; }, [startListeningImpl]);
 
   // ==================================================================
-  // SEND VOICE COMMAND via existing stable endpoints (no SSE)
-  // Uses executeCommand() + generateSpeech() per sentence for
-  // pipelined TTS with no gaps.
+  // PROCESSING TONE — instant audio feedback via Web Audio API
+  // ==================================================================
+  // A short, warm confirmation tone that plays immediately when the
+  // user finishes speaking, before transcription even starts. This
+  // eliminates perceived dead silence (ElevenLabs-style).
+  const playProcessingTone = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      // Pleasant rising two-note chime (C5 → E5)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);         // C5
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.08);  // E5
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+
+      // Clean up
+      setTimeout(() => ctx.close().catch(() => {}), 300);
+    } catch { /* non-critical — older browsers */ }
+  }, []);
+
+  // ==================================================================
+  // SEND VOICE COMMAND — Two-phase streaming pipeline
+  // ==================================================================
+  // Uses the ElevenLabs-inspired voiceExecuteV2 SSE endpoint:
+  //   1. AI planning call completes → backend streams "quick" message
+  //      ("Let me check...") → frontend starts TTS immediately
+  //   2. Tools execute + summarizer runs → backend streams "result"
+  //      → frontend queues TTS for the actual answer
+  //   3. Audio queue plays quick filler → seamless transition → answer
+  //
+  // For no-tool queries: only "result" arrives, so latency is the same
+  // as before. For tool queries: first audio plays ~2-3s sooner.
   // ==================================================================
   const sendVoiceCommandImpl = useCallback(async (text: string, isFarewell: boolean) => {
-    console.log('[Voice] Sending voice command via stable endpoints...');
+    console.log('[Voice] Sending voice command via streaming pipeline...');
     setVoiceState('processing');
 
     try {
-      // 1. Get AI text response via the existing working endpoint
-      const response: MasterAIResponse = await masterAIService.executeCommand(
+      // Track whether we've received the result phase
+      let gotResult = false;
+      let shouldEnd = isFarewell;
+      let resultMessage = '';
+      let resolveStream: () => void;
+      const streamDone = new Promise<void>((resolve) => { resolveStream = resolve; });
+
+      const abortController = masterAIService.voiceExecuteStream(
         text,
         conversationIdRef.current || undefined,
+        (event) => {
+          if (!isActiveRef.current) return;
+
+          // ---- PHASE 1: Quick filler message ----
+          if (event.type === 'quick' && 'message' in event && event.message) {
+            console.log('[Voice] Quick filler:', event.message);
+            setVoiceState('speaking');
+
+            // Start TTS for the filler immediately
+            const sentences = splitIntoSentences(event.message);
+            for (const sentence of sentences) {
+              masterAIService.generateSpeech(sentence)
+                .then(blob => {
+                  if (!isActiveRef.current) return;
+                  const url = URL.createObjectURL(blob);
+                  const audio = new Audio(url);
+                  audio.preload = 'auto';
+                  audioQueueRef.current.push(audio);
+                  if (!isPlayingRef.current) {
+                    isPlayingRef.current = true;
+                    playNextInQueue();
+                  }
+                })
+                .catch(err => console.warn('[Voice] Quick TTS failed:', err));
+            }
+          }
+
+          // ---- PHASE 2: Final result ----
+          if (event.type === 'result' && 'message' in event) {
+            gotResult = true;
+            const resp = event as any;
+            resultMessage = resp.message || '';
+
+            console.log('[Voice] Got result:', resultMessage.slice(0, 60));
+
+            // Notify parent
+            optionsRef.current.onResponse({
+              type: 'response',
+              message: resp.message,
+              actions: resp.actions || [],
+              suggestions: resp.suggestions,
+              conversationId: resp.conversationId,
+              isNewConversation: resp.isNewConversation,
+              shouldEndConversation: resp.shouldEndConversation,
+            });
+
+            // Track conversation ID
+            if (resp.conversationId && resp.conversationId !== conversationIdRef.current) {
+              conversationIdRef.current = resp.conversationId;
+              optionsRef.current.onConversationIdChange(resp.conversationId);
+            }
+
+            if (resp.shouldEndConversation) shouldEnd = true;
+            if (isAIFarewell(resultMessage)) shouldEnd = true;
+
+            // Queue TTS for the final answer
+            setVoiceState('speaking');
+            const sentences = splitIntoSentences(resultMessage);
+            console.log(`[Voice] Result split into ${sentences.length} sentences for TTS`);
+
+            const ttsPromises = sentences.map((sentence, index) =>
+              masterAIService.generateSpeech(sentence)
+                .then(blob => ({ blob, index, ok: true as const }))
+                .catch(err => {
+                  console.warn(`[Voice] TTS failed for sentence ${index}:`, err);
+                  return { blob: null, index, ok: false as const };
+                })
+            );
+
+            const results = new Array<{ blob: Blob | null; ok: boolean }>(sentences.length);
+            let nextToEnqueue = 0;
+
+            const inFlightPromises = ttsPromises.map(async (promise, idx) => {
+              const result = await promise;
+              results[idx] = { blob: result.ok ? result.blob : null, ok: result.ok };
+              while (nextToEnqueue < results.length && results[nextToEnqueue] !== undefined) {
+                const r = results[nextToEnqueue];
+                if (r.ok && r.blob && isActiveRef.current) {
+                  const url = URL.createObjectURL(r.blob);
+                  const audio = new Audio(url);
+                  audio.preload = 'auto';
+                  audioQueueRef.current.push(audio);
+                  if (!isPlayingRef.current) {
+                    isPlayingRef.current = true;
+                    playNextInQueue();
+                  }
+                }
+                nextToEnqueue++;
+              }
+            });
+
+            Promise.all(inFlightPromises).catch(() => {});
+          }
+
+          // ---- DONE ----
+          if (event.type === 'done') {
+            console.log('[Voice] Stream complete');
+            resolveStream!();
+          }
+
+          // ---- ERROR ----
+          if (event.type === 'error') {
+            console.error('[Voice] Stream error:', (event as any).error);
+            resolveStream!();
+          }
+        },
       );
 
-      console.log('[Voice] Got AI response:', response.message?.slice(0, 60));
+      // Wait for the stream to complete
+      await streamDone;
 
-      // Notify parent of the response (to update chat UI)
-      optionsRef.current.onResponse({
-        type: 'response',
-        message: response.message,
-        actions: response.actions,
-        suggestions: response.suggestions,
-        conversationId: response.conversationId,
-        isNewConversation: response.isNewConversation,
-        shouldEndConversation: response.shouldEndConversation,
-      });
+      // If no result was received (error case), fall back to normal endpoint
+      if (!gotResult && isActiveRef.current) {
+        console.log('[Voice] No result from stream, falling back to normal endpoint');
+        abortController.abort();
+        const response = await masterAIService.executeCommand(text, conversationIdRef.current || undefined);
+        resultMessage = response.message || '';
 
-      // Track conversation ID
-      if (response.conversationId && response.conversationId !== conversationIdRef.current) {
-        conversationIdRef.current = response.conversationId;
-        optionsRef.current.onConversationIdChange(response.conversationId);
-      }
+        optionsRef.current.onResponse({
+          type: 'response',
+          message: response.message,
+          actions: response.actions,
+          suggestions: response.suggestions,
+          conversationId: response.conversationId,
+          isNewConversation: response.isNewConversation,
+          shouldEndConversation: response.shouldEndConversation,
+        });
 
-      // Check if conversation should end
-      const shouldEnd = isFarewell
-        || response.shouldEndConversation
-        || isAIFarewell(response.message || '');
-
-      if (!isActiveRef.current) return;
-
-      // 2. Split response into sentences for pipelined TTS
-      const sentences = splitIntoSentences(response.message || '');
-      console.log(`[Voice] Split into ${sentences.length} sentences for TTS`);
-
-      if (sentences.length === 0) {
-        // No speakable content — go back to listening or end
-        if (shouldEnd) {
-          setVoiceState('ending');
-          isActiveRef.current = false;
-          setTimeout(() => {
-            stopVoiceModeRef.current?.();
-            optionsRef.current.onConversationEnd();
-          }, 800);
-        } else if (isActiveRef.current) {
-          setVoiceState('listening');
-          setTimeout(() => startListeningRef.current?.(), 100);
+        if (response.conversationId && response.conversationId !== conversationIdRef.current) {
+          conversationIdRef.current = response.conversationId;
+          optionsRef.current.onConversationIdChange(response.conversationId);
         }
-        return;
-      }
 
-      // 3. Generate TTS for each sentence progressively (pipeline)
-      //    Start playing as soon as the first chunk arrives.
-      setVoiceState('speaking');
+        if (response.shouldEndConversation) shouldEnd = true;
+        if (isAIFarewell(resultMessage)) shouldEnd = true;
 
-      // Fire all TTS requests concurrently but enqueue in order
-      const ttsPromises = sentences.map((sentence, index) =>
-        masterAIService.generateSpeech(sentence)
-          .then(blob => ({ blob, index, ok: true as const }))
-          .catch(err => {
-            console.warn(`[Voice] TTS failed for sentence ${index}:`, err);
-            return { blob: null, index, ok: false as const };
-          })
-      );
-
-      // Process results as they come in, but enqueue in sentence order
-      const results = new Array<{ blob: Blob | null; ok: boolean }>(sentences.length);
-      let nextToEnqueue = 0;
-
-      // Wrap each promise to track completion
-      const inFlightPromises = ttsPromises.map(async (promise, idx) => {
-        const result = await promise;
-        results[idx] = { blob: result.ok ? result.blob : null, ok: result.ok };
-
-        // Enqueue all consecutive ready results in order
-        while (nextToEnqueue < results.length && results[nextToEnqueue] !== undefined) {
-          const r = results[nextToEnqueue];
-          if (r.ok && r.blob && isActiveRef.current) {
-            const url = URL.createObjectURL(r.blob);
+        setVoiceState('speaking');
+        const sentences = splitIntoSentences(resultMessage);
+        for (const sentence of sentences) {
+          try {
+            const blob = await masterAIService.generateSpeech(sentence);
+            if (!isActiveRef.current) break;
+            const url = URL.createObjectURL(blob);
             const audio = new Audio(url);
-            audio.preload = 'auto';  // Start decoding immediately
+            audio.preload = 'auto';
             audioQueueRef.current.push(audio);
-
-            // Start playback as soon as the first chunk is ready
             if (!isPlayingRef.current) {
               isPlayingRef.current = true;
               playNextInQueue();
             }
-          }
-          nextToEnqueue++;
+          } catch { /* skip failed sentence */ }
         }
-      });
+      }
 
-      // Wait for all TTS to complete
-      await Promise.all(inFlightPromises);
-
-      console.log(`[Voice] All ${sentences.length} TTS chunks generated, shouldEnd=${shouldEnd}`);
-
-      // 4. Handle farewell / end of conversation
+      // Handle farewell / end of conversation
       if (shouldEnd) {
         const waitAndEnd = () => {
           if (isPlayingRef.current || audioQueueRef.current.length > 0) {
@@ -538,8 +644,6 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
         };
         waitAndEnd();
       }
-      // If NOT farewell: playNextInQueue will auto-restart listening
-      // when the audio queue empties (already handled in playNextInQueue)
 
     } catch (err: any) {
       console.error('[Voice] Command execution error:', err);
@@ -558,7 +662,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
         setTimeout(() => startListeningRef.current?.(), delay);
       }
     }
-  }, [playNextInQueue]);
+  }, [playNextInQueue, playProcessingTone]);
 
   // Keep the ref updated
   useEffect(() => { sendVoiceCommandRef.current = sendVoiceCommandImpl; }, [sendVoiceCommandImpl]);

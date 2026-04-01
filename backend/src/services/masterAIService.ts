@@ -1604,11 +1604,14 @@ Always respond with ONLY this JSON — nothing else:
 
 ## CRITICAL RULES FOR "message":
 - The "message" field is a PLACEHOLDER — the system replaces it with a data-driven summary after tools run.
-- So keep it EXTREMELY short: "Pulling up the data." or "Here are the results."
-- NEVER include: emojis, commentary, narration, process descriptions, or filler phrases.
+- So keep it EXTREMELY short: a natural spoken filler like "Checking that now." or "Let me look that up."
+- Write it as something a human assistant would say OUT LOUD while working — warm, brief, conversational.
+- NEVER include: emojis, commentary, narration, process descriptions, or filler phrases that mention tools.
 - NEVER repeat the JSON structure or action details inside the message.
 - BAD: "Got it — doing it now 👍 I'll move fast and sample one student..."
-- GOOD: "Fetching student samples."
+- GOOD: "Let me check the records."
+- GOOD: "Pulling that up now."
+- GOOD: "One moment."
 - If no actions needed, answer the question directly and concisely in 1-3 sentences.
 
 IMPORTANT: Respond ONLY with valid JSON. No markdown wrapping, no text outside the JSON.`;
@@ -1890,6 +1893,138 @@ RULES:
    */
   getAvailableTools(): { name: string; description: string }[] {
     return tools.map(t => ({ name: t.name, description: t.description }));
+  }
+
+  /**
+   * Streaming two-phase command execution (ElevenLabs-inspired pipeline).
+   *
+   * Phase 1 ("quick"): AI generates the plan → immediately yields the
+   *   plan.message so the frontend can start TTS while tools execute.
+   * Phase 2 ("result"): Tools finish + summarizer runs → yields the
+   *   final data-driven answer.
+   *
+   * For simple conversational queries (no tools), there's only one
+   * phase — "result" fires immediately.
+   */
+  async processCommandStreaming(
+    userMessage: string,
+    userId: string,
+    onPhase: (phase: 'quick' | 'result', data: Partial<MasterAIResponse>) => void,
+    conversationHistory?: { role: string; content: string }[],
+    imageBase64?: string,
+  ): Promise<MasterAIResponse> {
+    // Build messages
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
+      { role: 'system', content: buildSystemPrompt() },
+    ];
+
+    if (conversationHistory?.length) {
+      for (const msg of conversationHistory.slice(-10)) {
+        messages.push({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+        });
+      }
+    }
+
+    messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
+
+    // ---- Phase 1: AI planning call ----
+    const aiResponse = await aiService.chat(messages, {
+      temperature: 0.3,
+      maxTokens: 2000,
+    });
+
+    let plan: { message: string; actions: { tool: string; params: Record<string, any> }[]; suggestions?: string[] };
+
+    try {
+      let cleaned = aiResponse.content.trim();
+      if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+      if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+      if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+      cleaned = cleaned.trim();
+      plan = JSON.parse(cleaned);
+    } catch {
+      const result: MasterAIResponse = {
+        message: aiResponse.content,
+        actions: [],
+        suggestions: [],
+      };
+      onPhase('result', result);
+      return result;
+    }
+
+    const hasActions = (plan.actions || []).length > 0;
+
+    // If there ARE tool actions, send the plan.message immediately as a
+    // spoken filler ("Let me check...") so the user hears something while
+    // tools execute. For no-tool responses, skip straight to result.
+    if (hasActions && plan.message) {
+      onPhase('quick', { message: cleanFinalMessage(plan.message) });
+    }
+
+    // ---- Phase 2: Execute tools + summarize ----
+    const results: ExecutionResult[] = [];
+
+    for (const action of (plan.actions || [])) {
+      const toolDef = tools.find(t => t.name === action.tool);
+      if (!toolDef) {
+        results.push({ tool: action.tool, success: false, error: `Unknown tool: ${action.tool}`, summary: `Failed: unknown tool "${action.tool}"` });
+        continue;
+      }
+      try {
+        const data = await toolDef.execute(action.params || {}, userId);
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        let summaryText: string;
+        if (data?.summary && typeof data.summary === 'string') {
+          const hasErrors = data.errors?.length > 0;
+          summaryText = `${friendlyName} — ${data.summary}`;
+          if (hasErrors) summaryText += ` (${data.errors.length} issue${data.errors.length > 1 ? 's' : ''} encountered)`;
+        } else if (Array.isArray(data)) {
+          summaryText = `${friendlyName} — ${data.length} item${data.length !== 1 ? 's' : ''} found`;
+        } else {
+          const count = data?.deleted ?? 1;
+          summaryText = `${friendlyName} — ${count} item${count !== 1 ? 's' : ''} processed`;
+        }
+        results.push({ tool: action.tool, success: true, data, summary: summaryText });
+      } catch (execError: any) {
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        results.push({ tool: action.tool, success: false, error: execError.message, summary: `${friendlyName} — Could not complete this action` });
+      }
+    }
+
+    // Build accurate summary
+    let finalMessage = plan.message;
+    try {
+      finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+    } catch { /* fallback */ }
+
+    // Log usage (non-critical)
+    try {
+      await prisma.aIUsageLog.create({
+        data: {
+          userId,
+          feature: 'master-ai-ops',
+          action: 'execute-command',
+          tokensUsed: aiResponse.tokensUsed || 0,
+          metadata: {
+            userMessage,
+            toolsCalled: results.map(r => r.tool),
+            successCount: results.filter(r => r.success).length,
+            failureCount: results.filter(r => !r.success).length,
+          } as any,
+        },
+      });
+    } catch { /* non-critical */ }
+
+    const fullResult: MasterAIResponse = {
+      message: cleanFinalMessage(finalMessage),
+      actions: results,
+      suggestions: plan.suggestions,
+    };
+
+    onPhase('result', fullResult);
+    return fullResult;
   }
 }
 

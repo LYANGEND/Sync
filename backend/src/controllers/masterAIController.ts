@@ -386,6 +386,113 @@ export const voiceExecute = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * POST /api/v1/master-ai/voice-execute-v2
+ * ──────────────────────────────────────────
+ * Two-phase streaming voice pipeline (ElevenLabs-inspired):
+ *
+ *   Phase 1 ("quick"):  AI plan ready → immediately sends plan.message
+ *                        so the frontend can start TTS ("Let me check...")
+ *                        while tools execute in the background.
+ *   Phase 2 ("result"): Tools + summarizer done → sends the final
+ *                        data-driven answer for TTS playback.
+ *
+ * For simple queries (no tools), only "result" fires.
+ * Uses Server-Sent Events to push each phase as it becomes ready.
+ */
+export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { message, conversationId } = req.body;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // SSE setup
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let aborted = false;
+    req.on('close', () => { aborted = true; });
+
+    const isAvailable = await aiService.isAvailable();
+    if (!isAvailable) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'AI is not configured.' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Conversation management
+    const autoTitle = message.length > 60 ? message.substring(0, 57) + '...' : message;
+    const { id: convoId, isNew: isNewConvo } = await convoService.getOrCreateConversation(
+      userId, CTX, conversationId, autoTitle,
+    );
+    await convoService.saveMessage(convoId, 'user', message);
+
+    const previousMessages = await convoService.getMessageHistory(convoId, 20);
+    const conversationHistory = previousMessages.slice(0, -1).map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const userFarewell = detectFarewell(message);
+
+    // Two-phase streaming execution
+    const result = await masterAIService.processCommandStreaming(
+      message,
+      userId,
+      (phase, data) => {
+        if (aborted) return;
+        if (phase === 'quick') {
+          // Filler message — frontend starts TTS immediately
+          res.write(`data: ${JSON.stringify({ type: 'quick', message: data.message })}\n\n`);
+        } else if (phase === 'result') {
+          const aiFarewell = detectAIFarewell(data.message || '');
+          const shouldEnd = userFarewell.isFarewell || aiFarewell;
+          res.write(`data: ${JSON.stringify({
+            type: 'result',
+            message: data.message,
+            actions: data.actions,
+            suggestions: data.suggestions,
+            conversationId: convoId,
+            isNewConversation: isNewConvo,
+            shouldEndConversation: shouldEnd,
+          })}\n\n`);
+        }
+      },
+      conversationHistory,
+    );
+
+    // Persist assistant message
+    let assistantContent = result.message;
+    if (result.actions?.length) {
+      assistantContent += '\n\n---\n';
+      for (const action of result.actions) assistantContent += `\n${action.summary}`;
+    }
+    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+
+    if (!aborted) {
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.end();
+    }
+  } catch (error: any) {
+    console.error('Voice execute V2 error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || 'Failed to process voice command' });
+    } else {
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message || 'Processing failed' })}\n\n`);
+        res.end();
+      } catch { /* closed */ }
+    }
+  }
+};
+
+/**
  * GET /api/v1/master-ai/voice-config
  * Returns voice configuration — available voices, whether ElevenLabs is configured, etc.
  */

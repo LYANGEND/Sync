@@ -111,6 +111,78 @@ const masterAIService = {
     return data;
   },
 
+  /**
+   * Two-phase streaming voice execute (ElevenLabs-inspired pipeline).
+   * Uses SSE to receive the plan filler message immediately, then the
+   * full result after tools execute — so the frontend can start TTS
+   * on the filler while tools run in the background.
+   *
+   * Events:
+   *   { type: 'quick',  message }              — spoken filler, TTS immediately
+   *   { type: 'result', message, actions, ... } — final answer
+   *   { type: 'done' }                          — stream complete
+   *   { type: 'error',  error }                 — something went wrong
+   */
+  voiceExecuteStream(
+    message: string,
+    conversationId: string | undefined,
+    onEvent: (event: VoiceSSEEvent | { type: 'quick'; message: string } | { type: 'result'; message: string; actions: MasterAIAction[]; suggestions?: string[]; conversationId: string; isNewConversation?: boolean; shouldEndConversation?: boolean }) => void,
+  ): AbortController {
+    const controller = new AbortController();
+    const token = localStorage.getItem('token');
+
+    fetch('/api/v1/master-ai/voice-execute-v2', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ message, conversationId }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ error: 'Request failed' }));
+          onEvent({ type: 'error', error: errData.error || `HTTP ${response.status}` });
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          onEvent({ type: 'error', error: 'No response stream' });
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onEvent(data);
+              } catch { /* skip malformed */ }
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          onEvent({ type: 'error', error: err.message || 'Voice execute failed' });
+        }
+      });
+
+    return controller;
+  },
+
   async getTools(): Promise<MasterAITool[]> {
     const { data } = await api.get('/master-ai/tools');
     return data;

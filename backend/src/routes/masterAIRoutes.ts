@@ -12,6 +12,7 @@ import {
   generateSpeech,
   streamSpeech,
   voiceExecute,
+  voiceExecuteV2,
   getVoiceConfig,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
@@ -40,6 +41,7 @@ router.post('/speech/stream', streamSpeech);
 
 // Voice Conversation (combined execute + streaming TTS)
 router.post('/voice-execute', voiceExecute);
+router.post('/voice-execute-v2', voiceExecuteV2);
 router.get('/voice-config', getVoiceConfig);
 
 // Conversations (ChatGPT-style)
