@@ -785,6 +785,32 @@ model SubTopic {
   @@map("sub_topics")
 }
 
+// Approved teaching content extracted from official curriculum documents
+// (PDFs, textbooks, teaching modules). Used to ground the AI Tutor
+// so it teaches ONLY from verified educational materials.
+model TeachingContent {
+  id          String   @id @default(uuid())
+  subjectId   String
+  gradeLevel  Int      // 1-12, matches Topic.gradeLevel
+  topicId     String?  // Optional link to a specific Topic
+  subTopicId  String?  // Optional link to a specific SubTopic
+
+  title       String
+  content     String   @db.Text  // The actual teaching notes / extracted text
+  source      String   // e.g. "Zambia CDC Syllabus", "Form 1 Teaching Module"
+  sourceFile  String?  // Original filename (e.g. "Chemistry Form 1.pdf")
+  contentType String   @default("NOTES") // NOTES, SYLLABUS, MODULE, TEXTBOOK
+  approved    Boolean  @default(true)     // Only approved content is used
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([subjectId, gradeLevel])
+  @@index([topicId])
+  @@index([subTopicId])
+  @@map("teaching_content")
+}
+
 model TopicProgress {
   id          String      @id @default(uuid())
   topicId     String

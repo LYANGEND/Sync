@@ -105,7 +105,8 @@ function buildTeacherSystemPrompt(
   phase: LessonPhase,
   classInfo: { className?: string; subjectName?: string; studentNames?: string[] },
   conversationHistory: ConversationEntry[],
-  segmentContext?: PromptSegmentContext | null
+  segmentContext?: PromptSegmentContext | null,
+  approvedContent?: ApprovedTeachingContent | null
 ): string {
   const defaultPersona = `You are ${tutorName}, a warm, patient, and engaging teacher. 
 You speak clearly, use simple language appropriate for the students' level, and make learning fun.
@@ -177,7 +178,10 @@ Use their names when calling on them or responding to them.`;
   }
 
   let lessonContext = '';
-  if (lessonPlan) {
+  // Use approved content if available, fall back to raw lessonPlan text
+  if (approvedContent) {
+    lessonContext = formatApprovedContentForPrompt(approvedContent);
+  } else if (lessonPlan) {
     lessonContext = `\n\nLESSON PLAN:\n${lessonPlan}`;
   }
 
@@ -235,12 +239,13 @@ TEACHING RULES:
 13. Do NOT narrate your actions or add stage directions. Just speak naturally.
 
 CRITICAL — ANTI-HALLUCINATION RULES:
-14. ONLY teach facts, definitions, formulas, and concepts that are in the LESSON PLAN above. If no lesson plan is provided, keep to widely-accepted textbook knowledge for the subject.
+14. ONLY teach facts, definitions, formulas, and concepts that appear in the APPROVED TEACHING NOTES section above. This is your single source of truth — verified syllabus content and teacher-created lesson plans.
 15. Do NOT invent dates, statistics, research findings, or quotes. If you are unsure, say: "I'd need to double-check that — let's look it up together next time."
 16. Do NOT fabricate student names. Only use the names listed under STUDENTS IN CLASS above. If no student names are listed, address the class generally ("everyone", "class").
-17. Do NOT reference previous lessons or homework unless the LESSON PLAN or conversation history explicitly mentions them. If unsure, say "In our last lesson..." only if you have concrete context.
-18. When a question is outside the scope of the current lesson, say so honestly: "That's a great question, but it's outside what we're covering today. We can explore that another time."
-19. Never make up examples with specific numbers, names, or places unless they come from the lesson plan. Use generic examples instead: "For example, if we have a number X..."
+17. Do NOT reference previous lessons or homework unless the APPROVED TEACHING NOTES or conversation history explicitly mentions them. If unsure, say "In our last lesson..." only if you have concrete context.
+18. When a question is outside the scope of the APPROVED TEACHING NOTES, say so honestly: "That's a great question, but it's outside what we're covering today. We can explore that another time."
+19. Never make up examples with specific numbers, names, or places unless they come from the APPROVED TEACHING NOTES. Use generic examples instead: "For example, if we have a number X..."
+20. If no APPROVED TEACHING NOTES are provided, teach only widely-accepted textbook facts and be extra cautious. Prefer saying "I believe..." or "Generally speaking..." over stating uncertain facts as definitive.
 
 RECENT CONVERSATION:
 ${recentConvo || '(Class is just starting)'}
@@ -311,6 +316,175 @@ async function resolveSegmentContext(
     segmentIndex: segment.index + 1,
     totalSegments: runtimePlan.segments.length,
   };
+}
+
+// ================================================================
+// APPROVED CONTENT LOADER
+// ================================================================
+// Loads verified teaching content from the database:
+// 1. Topic description + SubTopic descriptions/objectives (from syllabus)
+// 2. Teacher-created lesson plan content (from LessonPlan table)
+// 3. Classroom-specific lesson plan content (manual override)
+//
+// This content becomes the SINGLE SOURCE OF TRUTH that the tutor
+// must teach from — preventing hallucination of facts.
+
+interface ApprovedTeachingContent {
+  topicNotes: string | null;         // From Topic + SubTopics in DB
+  teacherLessonPlan: string | null;  // From teacher's LessonPlan records
+  classroomPlan: string | null;      // From classroom.lessonPlanContent
+  curriculumContent: string | null;  // From TeachingContent table (PDF-extracted)
+}
+
+async function loadApprovedTeachingContent(
+  classroom: {
+    classId: string | null;
+    subjectId: string | null;
+    topicId: string | null;
+    selectedSubTopicIds: unknown;
+    lessonPlanContent: string | null;
+  }
+): Promise<ApprovedTeachingContent> {
+  const result: ApprovedTeachingContent = {
+    topicNotes: null,
+    teacherLessonPlan: null,
+    classroomPlan: classroom.lessonPlanContent || null,
+    curriculumContent: null,
+  };
+
+  // 1. Load Topic + SubTopics with full descriptions and objectives
+  if (classroom.topicId) {
+    const topic = await prisma.topic.findUnique({
+      where: { id: classroom.topicId },
+      include: {
+        subject: { select: { name: true } },
+        subtopics: { orderBy: { orderIndex: 'asc' } },
+      },
+    });
+
+    if (topic) {
+      const parts: string[] = [];
+      parts.push(`TOPIC: ${topic.title}`);
+      if (topic.description) {
+        parts.push(`Overview: ${topic.description}`);
+      }
+
+      // Filter to selected subtopics if specified
+      let selectedIds: string[] = [];
+      if (classroom.selectedSubTopicIds) {
+        try {
+          const raw = typeof classroom.selectedSubTopicIds === 'string'
+            ? JSON.parse(classroom.selectedSubTopicIds)
+            : classroom.selectedSubTopicIds;
+          if (Array.isArray(raw)) selectedIds = raw.filter((id: any) => typeof id === 'string');
+        } catch { /* ignore */ }
+      }
+
+      const subtopics = selectedIds.length > 0
+        ? topic.subtopics.filter(st => selectedIds.includes(st.id))
+        : topic.subtopics;
+
+      subtopics.forEach((st, i) => {
+        parts.push(`\n--- Subtopic ${i + 1}: ${st.title} ---`);
+        if (st.description) {
+          parts.push(`Content: ${st.description}`);
+        }
+        if (st.learningObjectives) {
+          try {
+            const objectives = JSON.parse(st.learningObjectives);
+            if (Array.isArray(objectives) && objectives.length > 0) {
+              parts.push(`Learning Objectives:`);
+              objectives.forEach((obj: string) => parts.push(`  • ${obj}`));
+            }
+          } catch { /* ignore */ }
+        }
+        if (st.duration) {
+          parts.push(`Suggested Duration: ${st.duration} minutes`);
+        }
+      });
+
+      result.topicNotes = parts.join('\n');
+    }
+  }
+
+  // 2. Load teacher-created lesson plans for this class + subject
+  if (classroom.classId && classroom.subjectId) {
+    const recentPlans = await prisma.lessonPlan.findMany({
+      where: {
+        classId: classroom.classId,
+        subjectId: classroom.subjectId,
+      },
+      orderBy: { weekStartDate: 'desc' },
+      take: 2,
+      select: { title: true, content: true, weekStartDate: true },
+    });
+
+    if (recentPlans.length > 0) {
+      const planParts = recentPlans.map((plan, i) => {
+        return `--- Teacher Lesson Plan ${i + 1}: ${plan.title} (${new Date(plan.weekStartDate).toLocaleDateString()}) ---\n${plan.content}`;
+      });
+      result.teacherLessonPlan = planParts.join('\n\n');
+    }
+  }
+
+  // 3. Load approved curriculum content from TeachingContent table
+  //    (sourced from official PDF syllabi, teaching modules, textbooks)
+  if (classroom.subjectId) {
+    const whereClause: any = {
+      subjectId: classroom.subjectId,
+      approved: true,
+    };
+    // Prefer topic-specific content, fall back to subject-wide
+    if (classroom.topicId) {
+      whereClause.topicId = classroom.topicId;
+    }
+
+    const teachingContent = await prisma.teachingContent.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { title: true, content: true, source: true, contentType: true },
+    });
+
+    if (teachingContent.length > 0) {
+      const contentParts = teachingContent.map(tc =>
+        `--- ${tc.contentType}: ${tc.title} (Source: ${tc.source}) ---\n${tc.content}`
+      );
+      result.curriculumContent = contentParts.join('\n\n');
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Format approved content into a system prompt section.
+ * This is the ONLY content the tutor should teach from.
+ */
+function formatApprovedContentForPrompt(content: ApprovedTeachingContent): string {
+  const sections: string[] = [];
+
+  if (content.topicNotes) {
+    sections.push(`=== SYLLABUS CONTENT (from approved curriculum) ===\n${content.topicNotes}`);
+  }
+
+  if (content.curriculumContent) {
+    sections.push(`=== OFFICIAL CURRICULUM MATERIAL (from verified documents) ===\n${content.curriculumContent}`);
+  }
+
+  if (content.teacherLessonPlan) {
+    sections.push(`=== TEACHER'S LESSON PLAN (teacher-created notes) ===\n${content.teacherLessonPlan}`);
+  }
+
+  if (content.classroomPlan && content.classroomPlan !== content.teacherLessonPlan) {
+    sections.push(`=== CLASSROOM LESSON NOTES ===\n${content.classroomPlan}`);
+  }
+
+  if (sections.length === 0) {
+    return `\n\nAPPROVED TEACHING NOTES:\nNo specific teaching content has been loaded for this session. Teach only widely-accepted, factual, textbook-level knowledge for the subject. Be conservative — if unsure about a fact, say so.`;
+  }
+
+  return `\n\nAPPROVED TEACHING NOTES — YOUR SINGLE SOURCE OF TRUTH:\nThe content below comes from the school's approved syllabus and teacher lesson plans. You MUST teach from this content. Do NOT invent facts, examples, or concepts beyond what is written here.\n\n${sections.join('\n\n')}`;
 }
 
 // ================================================================
@@ -512,6 +686,7 @@ class AITutorService {
     });
 
     // Generate greeting
+    const approvedContent = await loadApprovedTeachingContent(classroom);
     const systemPrompt = buildTeacherSystemPrompt(
       classroom.aiTutorName,
       classroom.aiTutorPersona,
@@ -519,7 +694,8 @@ class AITutorService {
       'GREETING',
       { className, subjectName, studentNames },
       [],
-      initialSegmentContext
+      initialSegmentContext,
+      approvedContent
     );
 
     const greetingPrompt = `The class is about to start. Students are joining the virtual classroom. Greet them and introduce today's lesson on ${subjectName}. Be warm and enthusiastic.`;
@@ -704,6 +880,7 @@ class AITutorService {
     }
 
     // Build system prompt for current phase
+    const approvedContent = await loadApprovedTeachingContent(classroom);
     const systemPrompt = buildTeacherSystemPrompt(
       classroom.aiTutorName,
       classroom.aiTutorPersona,
@@ -711,7 +888,8 @@ class AITutorService {
       memState.phase,
       { className, subjectName, studentNames },
       memState.conversationHistory,
-      memState.segmentContext
+      memState.segmentContext,
+      approvedContent
     );
 
     // Build message array for AI
@@ -890,6 +1068,7 @@ class AITutorService {
     }
 
     // Generate transition message
+    const approvedContent = await loadApprovedTeachingContent(classroom);
     const systemPrompt = buildTeacherSystemPrompt(
       classroom.aiTutorName,
       classroom.aiTutorPersona,
@@ -897,7 +1076,8 @@ class AITutorService {
       memState.phase,
       { className: transitionClassName, subjectName: transitionSubjectName },
       memState.conversationHistory,
-      memState.segmentContext
+      memState.segmentContext,
+      approvedContent
     );
 
     const transitionPrompt = options.prompt || `Transition the class to the ${memState.phase.replace('_', ' ')} phase. 
@@ -1055,7 +1235,9 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const memState = this.activeSessions.get(sessionId);
     const currentTopic = topic || session.currentTopic || 'the lesson so far';
 
-    // Build quiz context from conversation history so questions are grounded
+    // Load approved content + recent teaching for quiz grounding
+    const approvedContent = await loadApprovedTeachingContent(classroom);
+    const approvedNotes = approvedContent.topicNotes || approvedContent.teacherLessonPlan || '';
     const recentTeaching = (memState?.conversationHistory || [])
       .filter(e => e.role === 'teacher')
       .slice(-6)
@@ -1064,19 +1246,25 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
 
     const quizPrompt = `Generate a quick 3-question verbal quiz about ${currentTopic}.
 
-IMPORTANT: Base your questions ONLY on the content that was actually taught in the lesson.
-Here is what was covered:
+IMPORTANT: Base your questions ONLY on the APPROVED CONTENT and what was actually taught.
+
+APPROVED SYLLABUS CONTENT:
 ---
-${recentTeaching || 'No specific content available — ask general comprehension questions about ' + currentTopic}
+${approvedNotes || 'No syllabus content available.'}
+---
+
+WHAT WAS TAUGHT IN CLASS:
+---
+${recentTeaching || 'No specific teaching recorded yet.'}
 ---
 
 Format it as a teacher would say it out loud in class:
 "Alright class, let's do a quick check! Question 1: [question]."
 Make the questions progressively harder: easy, medium, challenging.
-Only ask about facts and concepts that were explicitly taught. Do NOT invent content.`;
+Only ask about facts and concepts from the approved content or what was explicitly taught. Do NOT invent content.`;
 
     const aiResponse = await aiService.chat([
-      { role: 'system', content: `You are ${classroom.aiTutorName}, a teacher conducting a verbal quiz in class. Be encouraging and fun. Only quiz students on content that was actually taught — never make up facts.` },
+      { role: 'system', content: `You are ${classroom.aiTutorName}, a teacher conducting a verbal quiz in class. Be encouraging and fun. Only quiz students on content from the approved syllabus or what was actually taught — never make up facts.` },
       { role: 'user', content: quizPrompt },
     ], { temperature: 0.3, maxTokens: 400 });
 
