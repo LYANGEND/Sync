@@ -1919,7 +1919,7 @@ RULES:
     ];
 
     if (conversationHistory?.length) {
-      for (const msg of conversationHistory.slice(-10)) {
+      for (const msg of conversationHistory.slice(-6)) {
         messages.push({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
@@ -1930,9 +1930,10 @@ RULES:
     messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
 
     // ---- Phase 1: AI planning call ----
+    // Voice commands are short — keep maxTokens low for speed
     const aiResponse = await aiService.chat(messages, {
       temperature: 0.3,
-      maxTokens: 2000,
+      maxTokens: 800,
     });
 
     let plan: { message: string; actions: { tool: string; params: Record<string, any> }[]; suggestions?: string[] };
@@ -1993,11 +1994,20 @@ RULES:
       }
     }
 
-    // Build accurate summary
+    // Build accurate summary — skip the extra LLM call for simple cases
     let finalMessage = plan.message;
-    try {
-      finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
-    } catch { /* fallback */ }
+    const successResults = results.filter(r => r.success);
+    const needsSummarizer = successResults.length > 0 && (
+      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
+    );
+    if (needsSummarizer) {
+      try {
+        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+      } catch { /* fallback */ }
+    } else if (results.length > 0) {
+      // Simple case: just use the tool summaries directly
+      finalMessage = results.map(r => r.summary).join('. ') + '.';
+    }
 
     // Log usage (non-critical)
     try {
