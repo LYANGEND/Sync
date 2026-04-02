@@ -296,17 +296,16 @@ const MasterAI = () => {
         const dataArray = new Uint8Array(bufferLength);
         let speechDetected = false;
         let silenceStart: number | null = null;
+        let debugCounter = 0;
         const recordStart = Date.now();
-        // Post-noise-cancellation the background floor is near-zero,
-        // so lower threshold catches real speech more reliably.
-        const SILENCE_THRESHOLD = 8;        // ↓ from 10 — NC removes noise floor
+        const SILENCE_THRESHOLD = 15;        // RMS from time-domain data
         const SILENCE_AFTER_SPEECH = 1000;  // 1s — snappy turn-taking
         const MAX_WAIT_FOR_SPEECH = 4000;   // 4s — give user time to start talking
-        const MAX_RECORDING = 30000;        // 30s hard cap
+        const MAX_RECORDING = 15000;        // 15s hard cap — voice commands are short
 
         // Safety net: hard max recording
         const maxRecordTimer = setTimeout(() => {
-          console.log('[MasterAI] Max recording reached (30s), stopping');
+          console.log('[MasterAI] Max recording reached (15s), stopping');
           stopListening();
         }, MAX_RECORDING);
 
@@ -316,12 +315,20 @@ const MasterAI = () => {
             return;
           }
           
-          analyser.getByteFrequencyData(dataArray);
-          // Use RMS for better energy measurement
+          // Use TIME-DOMAIN data for silence detection
+          analyser.getByteTimeDomainData(dataArray);
           let sum = 0;
-          for (let i = 0; i < bufferLength; i++) sum += dataArray[i] * dataArray[i];
-          const rms = Math.sqrt(sum / bufferLength);
+          for (let i = 0; i < bufferLength; i++) {
+            const v = (dataArray[i] - 128) / 128; // Normalize to -1..1
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / bufferLength) * 100; // Scale to 0-100 range
           const now = Date.now();
+
+          // Debug: log RMS every ~0.5s
+          if (++debugCounter % 30 === 0) {
+            console.log(`[MasterAI] RMS: ${rms.toFixed(1)}, speech: ${speechDetected}, threshold: ${SILENCE_THRESHOLD}`);
+          }
 
           if (rms > SILENCE_THRESHOLD) {
             // Sound detected

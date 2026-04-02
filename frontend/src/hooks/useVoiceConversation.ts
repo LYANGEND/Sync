@@ -327,30 +327,39 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       // ---- Silence detection state (all in local closure) ----
       let speechDetected = false;
       let silenceStartTime: number | null = null;
-      // Post-noise-cancellation the background floor is near-zero,
-      // so lower threshold catches real speech more reliably.
-      const SILENCE_THRESHOLD = 8;          // ↓ from 12 — NC removes noise floor
+      let debugCounter = 0;  // Log every ~30 frames for debugging
+      const SILENCE_THRESHOLD = 15;         // RMS from time-domain data
       const SILENCE_AFTER_SPEECH = 1000;    // 1s — snappy turn-taking
       const MAX_WAIT_FOR_SPEECH = 4000;     // 4s — give user time to start talking
-      const MAX_RECORDING = 30000;
+      const MAX_RECORDING = 15000;          // 15s hard cap — voice commands are short
       const recordStartTime = Date.now();
 
       // Safety net: hard max recording
       maxRecordTimerRef.current = setTimeout(() => {
-        console.log('[Voice] Max recording reached (30s), stopping');
+        console.log('[Voice] Max recording reached (15s), stopping');
         doStopRecording();
       }, MAX_RECORDING);
 
       const checkAudio = () => {
         if (!analyserRef.current || !isActiveRef.current) return;
 
-        analyser.getByteFrequencyData(dataArray);
+        // Use TIME-DOMAIN data for silence detection (much better
+        // than frequency data — gives clean 0-centered waveform)
+        analyser.getByteTimeDomainData(dataArray);
         let sum = 0;
-        for (let i = 0; i < bufferLength; i++) sum += dataArray[i] * dataArray[i];
-        const rms = Math.sqrt(sum / bufferLength);
+        for (let i = 0; i < bufferLength; i++) {
+          const v = (dataArray[i] - 128) / 128; // Normalize to -1..1
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / bufferLength) * 100; // Scale to 0-100 range
 
-        setAudioLevel(Math.min(rms / 60, 1));
+        setAudioLevel(Math.min(rms / 40, 1));
         const now = Date.now();
+
+        // Debug: log RMS every ~0.5s so we can see actual levels
+        if (++debugCounter % 30 === 0) {
+          console.log(`[Voice] RMS: ${rms.toFixed(1)}, speech: ${speechDetected}, threshold: ${SILENCE_THRESHOLD}`);
+        }
 
         if (rms > SILENCE_THRESHOLD) {
           speechDetected = true;
