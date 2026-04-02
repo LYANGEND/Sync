@@ -245,26 +245,84 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          // Request higher quality where supported
+          sampleRate: { ideal: 16000 },
+          channelCount: 1,
+        },
       });
       streamRef.current = stream;
 
-      const mediaRecorder = new MediaRecorder(stream, {
+      // ---- Noise-cancellation audio processing chain ----
+      // Raw mic → HighPass (cut rumble) → Noise Gate → Compressor → Analyser → MediaRecorder
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+
+      // 1) High-pass filter — removes low-frequency rumble (fans, AC, traffic)
+      const highPass = audioCtx.createBiquadFilter();
+      highPass.type = 'highpass';
+      highPass.frequency.value = 85;  // Cut below 85 Hz (speech starts ~100 Hz)
+      highPass.Q.value = 0.7;
+
+      // 2) Low-pass filter — removes high-frequency hiss (above speech range)
+      const lowPass = audioCtx.createBiquadFilter();
+      lowPass.type = 'lowpass';
+      lowPass.frequency.value = 8000; // Speech tops out ~7-8 kHz
+      lowPass.Q.value = 0.7;
+
+      // 3) Noise gate via DynamicsCompressor — squash quiet noise floor
+      //    Low threshold + high ratio effectively mutes background noise
+      const noiseGate = audioCtx.createDynamicsCompressor();
+      noiseGate.threshold.value = -50;  // dB — signals below this get compressed hard
+      noiseGate.knee.value = 5;
+      noiseGate.ratio.value = 12;       // Heavy compression = noise gating
+      noiseGate.attack.value = 0.003;   // Fast attack — catch noise immediately
+      noiseGate.release.value = 0.1;    // Quick release — speech comes through naturally
+
+      // 4) Speech compressor — even out loud/soft speech for cleaner transcription
+      const speechComp = audioCtx.createDynamicsCompressor();
+      speechComp.threshold.value = -24;
+      speechComp.knee.value = 10;
+      speechComp.ratio.value = 4;
+      speechComp.attack.value = 0.005;
+      speechComp.release.value = 0.15;
+
+      // 5) Output gain — restore level after compression
+      const outputGain = audioCtx.createGain();
+      outputGain.gain.value = 1.4;
+
+      // Analyser for level monitoring / silence detection
+      const analyser = audioCtx.createAnalyser();
+      analyserRef.current = analyser;
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+
+      // Chain: source → highPass → lowPass → noiseGate → speechComp → outputGain → analyser
+      source.connect(highPass);
+      highPass.connect(lowPass);
+      lowPass.connect(noiseGate);
+      noiseGate.connect(speechComp);
+      speechComp.connect(outputGain);
+      outputGain.connect(analyser);
+
+      // Create a clean processed stream for the MediaRecorder
+      const destNode = audioCtx.createMediaStreamDestination();
+      outputGain.connect(destNode);
+
+      const processedStream = destNode.stream;
+
+      const mediaRecorder = new MediaRecorder(processedStream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus' : 'audio/webm',
       });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      // ---- Audio analysis ----
-      const audioCtx = new AudioContext();
-      audioContextRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyserRef.current = analyser;
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.3;
-      source.connect(analyser);
+      console.log('[Voice] Noise cancellation chain active: HighPass(85Hz) → LowPass(8kHz) → NoiseGate → Compressor → Gain(1.4)');
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);

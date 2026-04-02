@@ -220,22 +220,80 @@ const MasterAI = () => {
 
   const startListening = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: { ideal: 16000 },
+          channelCount: 1,
+        },
+      });
       streamRef.current = stream;
-      
-      const mediaRecorder = new MediaRecorder(stream);
+
+      // ---- Noise-cancellation audio processing chain ----
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+
+      // High-pass: cut rumble below 85 Hz
+      const highPass = audioContext.createBiquadFilter();
+      highPass.type = 'highpass';
+      highPass.frequency.value = 85;
+      highPass.Q.value = 0.7;
+
+      // Low-pass: cut hiss above 8 kHz
+      const lowPass = audioContext.createBiquadFilter();
+      lowPass.type = 'lowpass';
+      lowPass.frequency.value = 8000;
+      lowPass.Q.value = 0.7;
+
+      // Noise gate via compressor
+      const noiseGate = audioContext.createDynamicsCompressor();
+      noiseGate.threshold.value = -50;
+      noiseGate.knee.value = 5;
+      noiseGate.ratio.value = 12;
+      noiseGate.attack.value = 0.003;
+      noiseGate.release.value = 0.1;
+
+      // Speech compressor — even out volume
+      const speechComp = audioContext.createDynamicsCompressor();
+      speechComp.threshold.value = -24;
+      speechComp.knee.value = 10;
+      speechComp.ratio.value = 4;
+      speechComp.attack.value = 0.005;
+      speechComp.release.value = 0.15;
+
+      // Output gain
+      const outputGain = audioContext.createGain();
+      outputGain.gain.value = 1.4;
+
+      // Chain: source → highPass → lowPass → noiseGate → speechComp → outputGain
+      source.connect(highPass);
+      highPass.connect(lowPass);
+      lowPass.connect(noiseGate);
+      noiseGate.connect(speechComp);
+      speechComp.connect(outputGain);
+
+      // Create processed stream for MediaRecorder
+      const destNode = audioContext.createMediaStreamDestination();
+      outputGain.connect(destNode);
+      const processedStream = destNode.stream;
+
+      const mediaRecorder = new MediaRecorder(processedStream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus' : 'audio/webm',
+      });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       // Set up audio analysis for silence detection in voice mode
       if (voiceMode) {
-        const audioContext = new AudioContext();
-        audioContextRef.current = audioContext;
-        const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
         analyserRef.current = analyser;
-        analyser.fftSize = 2048;
-        source.connect(analyser);
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.3;
+        outputGain.connect(analyser);
 
         // Monitor audio levels
         const bufferLength = analyser.frequencyBinCount;
