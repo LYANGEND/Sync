@@ -304,8 +304,8 @@ const MasterAI = () => {
         // Post-noise-cancellation the background floor is near-zero,
         // so lower threshold catches real speech more reliably.
         const SILENCE_THRESHOLD = 8;        // ↓ from 10 — NC removes noise floor
-        const SILENCE_AFTER_SPEECH = 1200;  // 1.2s — avoids cutting mid-sentence
-        const MAX_WAIT_FOR_SPEECH = 5000;   // 5s — give user time to start talking
+        const SILENCE_AFTER_SPEECH = 1000;  // 1s — snappy turn-taking
+        const MAX_WAIT_FOR_SPEECH = 4000;   // 4s — give user time to start talking
         const MAX_RECORDING = 30000;        // 30s hard cap
 
         // Safety net: hard max recording
