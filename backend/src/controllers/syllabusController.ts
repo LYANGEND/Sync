@@ -4,7 +4,7 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
 import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
-import { ingestAllPDFs, getIngestionStatus } from '../services/contentIngestionService';
+import { ingestAllPDFs, getIngestionStatus, ingestUploadedPDF } from '../services/contentIngestionService';
 
 // ==========================================
 // VALIDATION SCHEMAS (DRY — reused across CRUD)
@@ -786,4 +786,36 @@ export const ingestContent = handler(async (req, res) => {
 export const ingestionStatus = handler(async (req, res) => {
   const status = await getIngestionStatus();
   res.json(status);
+});
+
+/**
+ * POST /api/v1/syllabus/upload-content
+ * Upload one or more PDF files and ingest them into TeachingContent.
+ * Uses multipart/form-data with field name "pdfs".
+ */
+export const uploadContent = handler(async (req, res) => {
+  const files = (req as any).files as Express.Multer.File[] | undefined;
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'No PDF files uploaded. Use field name "pdfs".' });
+  }
+
+  console.log(`[Syllabus] PDF upload ingestion: ${files.length} file(s) by user ${(req as any).user?.id}`);
+
+  const results = [];
+  for (const file of files) {
+    const result = await ingestUploadedPDF(file.buffer, file.originalname);
+    results.push(result);
+  }
+
+  const successful = results.filter(r => !r.error).length;
+  const failed = results.filter(r => r.error).length;
+  const totalChunks = results.reduce((s, r) => s + r.chunksCreated, 0);
+
+  res.json({
+    totalFiles: files.length,
+    successfulFiles: successful,
+    failedFiles: failed,
+    totalChunks,
+    results,
+  });
 });

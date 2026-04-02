@@ -478,12 +478,46 @@ function findPDFsRecursively(dir: string): string[] {
 }
 
 /**
+ * Resolve the project root (backend/) regardless of whether we're
+ * running via ts-node (src/services/) or compiled JS (dist/src/services/).
+ */
+function getProjectRoot(): string {
+  // __dirname in dev: <root>/src/services  → go up 2
+  // __dirname in prod: <root>/dist/src/services → go up 3
+  const candidate = path.resolve(__dirname, '../../');
+  if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
+  const candidate2 = path.resolve(__dirname, '../../../');
+  if (fs.existsSync(path.join(candidate2, 'package.json'))) return candidate2;
+  return candidate; // fallback
+}
+
+/**
+ * Ingest a single PDF buffer directly (for upload-based ingestion).
+ */
+export async function ingestUploadedPDF(
+  buffer: Buffer,
+  filename: string
+): Promise<IngestionResult> {
+  // Write to a temp location, ingest, then clean up
+  const tmpDir = path.join(getProjectRoot(), 'uploads', 'pdf-ingestion');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const tmpPath = path.join(tmpDir, filename);
+  fs.writeFileSync(tmpPath, buffer);
+  try {
+    const result = await ingestPDF(tmpPath);
+    return result;
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch (_) {}
+  }
+}
+
+/**
  * Ingest all PDFs from the Finalised Syllabi and Teaching Modules directories.
  */
 export async function ingestAllPDFs(
   options: { syllabi?: boolean; modules?: boolean } = { syllabi: true, modules: true }
 ): Promise<IngestionSummary> {
-  const baseDir = path.resolve(__dirname, '../../');
+  const baseDir = getProjectRoot();
   const pdfFiles: string[] = [];
 
   if (options.syllabi !== false) {

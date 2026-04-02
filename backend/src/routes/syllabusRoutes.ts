@@ -23,8 +23,19 @@ import {
   getNextTopic,
   ingestContent,
   ingestionStatus,
+  uploadContent,
 } from '../controllers/syllabusController';
+import multer from 'multer';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only PDF files are allowed'));
+  },
+});
 
 const router = Router();
 
@@ -71,5 +82,6 @@ router.get('/next-topic', getNextTopic);
 // Content Ingestion (SUPER_ADMIN only)
 router.post('/ingest-content', superAdminOnly, ingestContent);
 router.get('/ingestion-status', superAdminOnly, ingestionStatus);
+router.post('/upload-content', superAdminOnly, pdfUpload.array('pdfs', 20), uploadContent);
 
 export default router;
