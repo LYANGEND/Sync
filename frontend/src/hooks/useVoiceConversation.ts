@@ -257,7 +257,12 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       streamRef.current = stream;
 
       // ---- Noise-cancellation audio processing chain ----
-      // Raw mic → HighPass (cut rumble) → Noise Gate → Compressor → Analyser → MediaRecorder
+      // ── Audio processing chain ──────────────────────────────────
+      // Bandpass (85Hz–8kHz) → gentle compressor → gain → recorder
+      // NOTE: The old "noise gate" compressor (-50dB, 12:1) was
+      // squashing ALL audio (speech + silence) since DynamicsCompressor
+      // compresses ABOVE threshold — destroying dynamic range and
+      // breaking silence detection. Removed.
       const audioCtx = new AudioContext();
       audioContextRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -274,40 +279,32 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       lowPass.frequency.value = 8000; // Speech tops out ~7-8 kHz
       lowPass.Q.value = 0.7;
 
-      // 3) Noise gate via DynamicsCompressor — squash quiet noise floor
-      //    Low threshold + high ratio effectively mutes background noise
-      const noiseGate = audioCtx.createDynamicsCompressor();
-      noiseGate.threshold.value = -50;  // dB — signals below this get compressed hard
-      noiseGate.knee.value = 5;
-      noiseGate.ratio.value = 12;       // Heavy compression = noise gating
-      noiseGate.attack.value = 0.003;   // Fast attack — catch noise immediately
-      noiseGate.release.value = 0.1;    // Quick release — speech comes through naturally
-
-      // 4) Speech compressor — even out loud/soft speech for cleaner transcription
+      // 3) Gentle speech compressor — evens out loud/soft speech without
+      //    destroying the silence-vs-speech dynamic range
       const speechComp = audioCtx.createDynamicsCompressor();
-      speechComp.threshold.value = -24;
-      speechComp.knee.value = 10;
-      speechComp.ratio.value = 4;
+      speechComp.threshold.value = -20; // Only compress louder speech
+      speechComp.knee.value = 12;
+      speechComp.ratio.value = 3;       // Gentle — preserves dynamics
       speechComp.attack.value = 0.005;
       speechComp.release.value = 0.15;
 
-      // 5) Output gain — restore level after compression
+      // 4) Output gain — slight boost for Whisper clarity
       const outputGain = audioCtx.createGain();
-      outputGain.gain.value = 1.4;
+      outputGain.gain.value = 1.1;
 
       // Analyser for level monitoring / silence detection
+      // Connected BEFORE gain so we measure the true signal level
       const analyser = audioCtx.createAnalyser();
       analyserRef.current = analyser;
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.3;
 
-      // Chain: source → highPass → lowPass → noiseGate → speechComp → outputGain → analyser
+      // Chain: source → highPass → lowPass → speechComp → analyser → outputGain
       source.connect(highPass);
       highPass.connect(lowPass);
-      lowPass.connect(noiseGate);
-      noiseGate.connect(speechComp);
-      speechComp.connect(outputGain);
-      outputGain.connect(analyser);
+      lowPass.connect(speechComp);
+      speechComp.connect(analyser);
+      analyser.connect(outputGain);
 
       // Create a clean processed stream for the MediaRecorder
       const destNode = audioCtx.createMediaStreamDestination();
@@ -322,7 +319,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      console.log('[Voice] Noise cancellation chain active: HighPass(85Hz) → LowPass(8kHz) → NoiseGate → Compressor → Gain(1.4)');
+      console.log('[Voice] Audio chain: HighPass(85Hz) → LowPass(8kHz) → Compressor(-20dB/3:1) → Analyser → Gain(1.1)');
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);

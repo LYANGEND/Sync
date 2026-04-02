@@ -237,6 +237,8 @@ const MasterAI = () => {
       const source = audioContext.createMediaStreamSource(stream);
 
       // High-pass: cut rumble below 85 Hz
+      // ── Audio processing chain ──────────────────────────────────
+      // Bandpass (85–8kHz) → gentle compressor → gain → recorder
       const highPass = audioContext.createBiquadFilter();
       highPass.type = 'highpass';
       highPass.frequency.value = 85;
@@ -248,31 +250,22 @@ const MasterAI = () => {
       lowPass.frequency.value = 8000;
       lowPass.Q.value = 0.7;
 
-      // Noise gate via compressor
-      const noiseGate = audioContext.createDynamicsCompressor();
-      noiseGate.threshold.value = -50;
-      noiseGate.knee.value = 5;
-      noiseGate.ratio.value = 12;
-      noiseGate.attack.value = 0.003;
-      noiseGate.release.value = 0.1;
-
-      // Speech compressor — even out volume
+      // Gentle speech compressor — preserves silence-vs-speech dynamics
       const speechComp = audioContext.createDynamicsCompressor();
-      speechComp.threshold.value = -24;
-      speechComp.knee.value = 10;
-      speechComp.ratio.value = 4;
+      speechComp.threshold.value = -20;
+      speechComp.knee.value = 12;
+      speechComp.ratio.value = 3;
       speechComp.attack.value = 0.005;
       speechComp.release.value = 0.15;
 
-      // Output gain
+      // Output gain — slight boost for Whisper clarity
       const outputGain = audioContext.createGain();
-      outputGain.gain.value = 1.4;
+      outputGain.gain.value = 1.1;
 
-      // Chain: source → highPass → lowPass → noiseGate → speechComp → outputGain
+      // Chain: source → highPass → lowPass → speechComp → outputGain
       source.connect(highPass);
       highPass.connect(lowPass);
-      lowPass.connect(noiseGate);
-      noiseGate.connect(speechComp);
+      lowPass.connect(speechComp);
       speechComp.connect(outputGain);
 
       // Create processed stream for MediaRecorder
@@ -293,7 +286,10 @@ const MasterAI = () => {
         analyserRef.current = analyser;
         analyser.fftSize = 512;
         analyser.smoothingTimeConstant = 0.3;
-        outputGain.connect(analyser);
+        // Connect analyser between compressor and gain for accurate silence detection
+        speechComp.disconnect(outputGain);
+        speechComp.connect(analyser);
+        analyser.connect(outputGain);
 
         // Monitor audio levels with speech-aware silence detection
         const bufferLength = analyser.frequencyBinCount;
