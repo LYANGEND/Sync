@@ -295,31 +295,60 @@ const MasterAI = () => {
         analyser.smoothingTimeConstant = 0.3;
         outputGain.connect(analyser);
 
-        // Monitor audio levels
+        // Monitor audio levels with speech-aware silence detection
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
+        let speechDetected = false;
         let silenceStart: number | null = null;
-        const SILENCE_THRESHOLD = 10; // Adjust sensitivity (lower = more sensitive)
-        const SILENCE_DURATION = 1500; // Stop after 1.5 seconds of silence
+        const recordStart = Date.now();
+        // Post-noise-cancellation the background floor is near-zero,
+        // so lower threshold catches real speech more reliably.
+        const SILENCE_THRESHOLD = 8;        // ↓ from 10 — NC removes noise floor
+        const SILENCE_AFTER_SPEECH = 1200;  // 1.2s — avoids cutting mid-sentence
+        const MAX_WAIT_FOR_SPEECH = 5000;   // 5s — give user time to start talking
+        const MAX_RECORDING = 30000;        // 30s hard cap
+
+        // Safety net: hard max recording
+        const maxRecordTimer = setTimeout(() => {
+          console.log('[MasterAI] Max recording reached (30s), stopping');
+          stopListening();
+        }, MAX_RECORDING);
 
         const checkAudioLevel = () => {
-          if (!analyserRef.current || !isListening) return;
+          if (!analyserRef.current || !isListening) {
+            clearTimeout(maxRecordTimer);
+            return;
+          }
           
           analyser.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+          // Use RMS for better energy measurement
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) sum += dataArray[i] * dataArray[i];
+          const rms = Math.sqrt(sum / bufferLength);
+          const now = Date.now();
 
-          if (average < SILENCE_THRESHOLD) {
-            // Silence detected
-            if (silenceStart === null) {
-              silenceStart = Date.now();
-            } else if (Date.now() - silenceStart > SILENCE_DURATION) {
-              // Stop recording after silence duration
+          if (rms > SILENCE_THRESHOLD) {
+            // Sound detected
+            speechDetected = true;
+            silenceStart = null;
+          } else {
+            if (speechDetected) {
+              // Silence after speech — wait SILENCE_AFTER_SPEECH before stopping
+              if (silenceStart === null) {
+                silenceStart = now;
+              } else if (now - silenceStart > SILENCE_AFTER_SPEECH) {
+                console.log('[MasterAI] Silence after speech detected, stopping');
+                clearTimeout(maxRecordTimer);
+                stopListening();
+                return;
+              }
+            } else if (now - recordStart > MAX_WAIT_FOR_SPEECH) {
+              // No speech detected for MAX_WAIT period
+              console.log('[MasterAI] No speech detected, stopping');
+              clearTimeout(maxRecordTimer);
               stopListening();
               return;
             }
-          } else {
-            // Sound detected, reset silence timer
-            silenceStart = null;
           }
 
           requestAnimationFrame(checkAudioLevel);

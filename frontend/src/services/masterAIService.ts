@@ -190,9 +190,72 @@ const masterAIService = {
 
   // ---- Audio ----
 
+  /**
+   * Convert an audio blob (webm/opus) to 16 kHz mono WAV (PCM-16).
+   * Whisper is significantly more accurate with uncompressed audio —
+   * especially for short utterances and accented speech.
+   */
+  async _convertToWav(blob: Blob): Promise<Blob> {
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      // Down-mix to mono, resample to 16 kHz via OfflineAudioContext
+      const offlineCtx = new OfflineAudioContext(1, decoded.duration * 16000, 16000);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = decoded;
+      source.connect(offlineCtx.destination);
+      source.start(0);
+
+      const rendered = await offlineCtx.startRendering();
+      const pcm = rendered.getChannelData(0);
+
+      // Build WAV container
+      const wavHeader = 44;
+      const dataLen = pcm.length * 2; // 16-bit PCM
+      const buffer = new ArrayBuffer(wavHeader + dataLen);
+      const view = new DataView(buffer);
+
+      const writeStr = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataLen, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);        // Subchunk1Size
+      view.setUint16(20, 1, true);         // PCM format
+      view.setUint16(22, 1, true);         // Mono
+      view.setUint32(24, 16000, true);     // Sample rate
+      view.setUint32(28, 16000 * 2, true); // Byte rate
+      view.setUint16(32, 2, true);         // Block align
+      view.setUint16(34, 16, true);        // Bits per sample
+      writeStr(36, 'data');
+      view.setUint32(40, dataLen, true);
+
+      // Float32 → Int16
+      let offset = 44;
+      for (let i = 0; i < pcm.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, pcm[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+
+      audioCtx.close();
+      return new Blob([buffer], { type: 'audio/wav' });
+    } catch (err) {
+      console.warn('[transcribeAudio] WAV conversion failed, sending original webm:', err);
+      return blob; // Fallback — still works, just less accurate
+    }
+  },
+
   async transcribeAudio(audioBlob: Blob): Promise<string> {
+    // Convert to WAV for better Whisper accuracy
+    const wavBlob = await this._convertToWav(audioBlob);
+    const isWav = wavBlob.type === 'audio/wav';
+
     const formData = new FormData();
-    formData.append('audio', audioBlob, 'recording.webm');
+    formData.append('audio', wavBlob, isWav ? 'recording.wav' : 'recording.webm');
     
     const { data } = await api.post('/master-ai/transcribe', formData, {
       headers: {

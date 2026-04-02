@@ -388,6 +388,23 @@ class AIService {
       throw new Error('AI is not configured.');
     }
 
+    // ── Domain-specific prompt for Whisper ──────────────────────────
+    // Providing a prompt with expected vocabulary dramatically improves
+    // Whisper accuracy for domain-specific words it might otherwise
+    // mis-hear (e.g. "Sync" → "sink", "syllabus" → "syllables").
+    const WHISPER_PROMPT = [
+      'Sync, school, student, students, teacher, teachers, classroom,',
+      'attendance, syllabus, syllabi, curriculum, grade, grades,',
+      'timetable, schedule, assessment, exam, examination, enrollment,',
+      'fee, fees, tuition, term, semester, homework, assignment,',
+      'lesson plan, mathematics, maths, science, English, literacy,',
+      'numeracy, geography, history, biology, chemistry, physics,',
+      'primary, secondary, high school, headteacher, principal,',
+      'report card, transcript, performance, marks, score, percentage,',
+      'parent, guardian, dashboard, analytics, data, statistics,',
+      'Zambia, Lusaka, ECZ, Ministry of Education',
+    ].join(' ');
+
     // For Azure OpenAI, we need to use Azure's Whisper endpoint
     if (config.provider === 'azure') {
       // Use separate Whisper endpoint if provided, otherwise fall back to main endpoint
@@ -403,7 +420,9 @@ class AIService {
         filename: 'audio.webm',
         contentType: mimeType || 'audio/webm',
       });
-      formData.append('language', 'en');  // Force English — prevents language switching on unclear audio
+      formData.append('language', 'en');       // Force English — prevents language switching
+      formData.append('prompt', WHISPER_PROMPT); // Domain vocab — boosts accuracy
+      formData.append('temperature', '0');     // Most deterministic — reduces hallucination
 
       try {
         const axios = require('axios');
@@ -416,7 +435,8 @@ class AIService {
           },
         });
 
-        return response.data.text;
+        const rawText: string = response.data.text || '';
+        return this.cleanWhisperTranscription(rawText);
       } catch (error: any) {
         console.error('Azure Whisper transcription error:', error.response?.data || error.message);
         
@@ -438,7 +458,9 @@ class AIService {
         contentType: mimeType || 'audio/webm',
       });
       formData.append('model', 'whisper-1');
-      formData.append('language', 'en');  // Force English — prevents language switching on unclear audio
+      formData.append('language', 'en');       // Force English — prevents language switching
+      formData.append('prompt', WHISPER_PROMPT); // Domain vocab — boosts accuracy
+      formData.append('temperature', '0');     // Most deterministic — reduces hallucination
 
       try {
         const axios = require('axios');
@@ -453,7 +475,8 @@ class AIService {
           }
         );
 
-        return response.data.text;
+        const rawText: string = response.data.text || '';
+        return this.cleanWhisperTranscription(rawText);
       } catch (error: any) {
         console.error('OpenAI Whisper transcription error:', error.response?.data || error.message);
         throw new Error(`Failed to transcribe audio: ${error.response?.data?.error?.message || error.message}`);
@@ -461,6 +484,41 @@ class AIService {
     }
 
     throw new Error(`Audio transcription not supported for provider: ${config.provider}`);
+  }
+
+  /**
+   * Post-process Whisper output — reject known hallucination patterns.
+   * Whisper sometimes generates phantom text from silence or noise
+   * (e.g. "Thanks for watching", "Subscribe", "♪", repeated words).
+   */
+  private cleanWhisperTranscription(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed) return '';
+
+    // ── Known Whisper hallucination phrases ──────────────────────
+    const HALLUCINATION_PATTERNS = [
+      /^thanks?\s*(for\s*)?(watching|listening|viewing)/i,
+      /^(please\s+)?subscribe/i,
+      /^(please\s+)?like\s+and\s+subscribe/i,
+      /^see\s+you\s+(next\s+time|later|in\s+the\s+next)/i,
+      /^bye[\s!.]*$/i,
+      /^goodbye[\s!.]*$/i,
+      /^(the\s+end|end\s+of\s+video)[\s!.]*$/i,
+      /^you$/i,
+      /^\.+$/,                  // Just dots
+      /^[♪♫🎵🎶\s]+$/,          // Just music symbols
+      /^[\s.,!?;:]+$/,          // Just punctuation
+      /^(.{1,4})\1{3,}$/i,      // Same tiny string repeated 4+ times ("um um um um")
+    ];
+
+    for (const pattern of HALLUCINATION_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        console.log(`[Whisper] Rejected hallucination: "${trimmed}"`);
+        return '';
+      }
+    }
+
+    return trimmed;
   }
 
   /**
