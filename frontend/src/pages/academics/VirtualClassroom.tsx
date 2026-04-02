@@ -1194,7 +1194,7 @@ export default function VirtualClassroom() {
 
               {/* Info */}
               <div className="bg-gray-700/30 rounded-xl p-3 text-xs text-gray-400">
-                <p className="mb-1">💡 The AI Tutor uses ElevenLabs for natural voice and your configured LLM for intelligent responses.</p>
+                <p className="mb-1">💡 The AI Tutor uses Azure AI for natural voice with automatic ElevenLabs fallback.</p>
                 <p>Students can ask questions via the chat panel, and the AI will respond with both text and voice.</p>
               </div>
             </div>

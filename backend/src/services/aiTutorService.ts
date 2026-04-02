@@ -287,6 +287,43 @@ async function resolveSegmentContext(
   };
 }
 
+// ================================================================
+// TEACHER TTS — Azure TTS primary, ElevenLabs fallback
+// ================================================================
+// Uses Azure OpenAI TTS first (fast, cost-effective, already
+// configured for Master AI voice). Falls back to ElevenLabs if
+// Azure fails (quota, misconfigured, etc).
+// Returns null if both fail — the tutor continues with text only.
+
+async function generateTeacherAudio(
+  text: string,
+  voiceId?: string | null
+): Promise<{ audioBuffer: Buffer; contentType: string } | null> {
+  // Primary: Azure OpenAI TTS
+  try {
+    const buffer = await aiService.generateSpeech(text);
+    if (buffer && buffer.length > 0) {
+      return { audioBuffer: buffer, contentType: 'audio/mpeg' };
+    }
+  } catch (err) {
+    console.warn('[AITutor] Azure TTS failed, trying ElevenLabs fallback:', (err as Error).message);
+  }
+
+  // Fallback: ElevenLabs (if configured)
+  try {
+    const result = await elevenLabsService.teacherSpeak(text, {
+      voiceId: voiceId || undefined,
+    });
+    if (result) {
+      return { audioBuffer: result.audioBuffer, contentType: result.contentType };
+    }
+  } catch (err) {
+    console.warn('[AITutor] ElevenLabs fallback also failed:', (err as Error).message);
+  }
+
+  return null;
+}
+
 class AITutorService {
   // In-memory session states (for active sessions)
   private activeSessions: Map<string, {
@@ -450,22 +487,13 @@ class AITutorService {
     const greetingText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
 
-    // Generate voice for the greeting
+    // Generate voice (Azure TTS primary, ElevenLabs fallback)
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
     if (shouldGenerateAudio) {
-      try {
-        const ttsResult = await elevenLabsService.teacherSpeak(
-          greetingText,
-          { voiceId: classroom.aiTutorVoiceId || undefined }
-        );
-        if (ttsResult) {
-          audioBuffer = ttsResult.audioBuffer;
-          audioContentType = ttsResult.contentType;
-        }
-      } catch (err) {
-        console.warn('[AITutor] TTS failed for greeting, continuing with text only:', err);
-      }
+      const ttsResult = await generateTeacherAudio(greetingText, classroom.aiTutorVoiceId);
+      audioBuffer = ttsResult?.audioBuffer || null;
+      audioContentType = ttsResult?.contentType || '';
     }
 
     // Save to conversation history
@@ -639,21 +667,10 @@ class AITutorService {
     const aiResponse = await aiService.chat(messages);
     const responseText = aiResponse.content;
 
-    // Generate voice
-    let audioBuffer: Buffer | null = null;
-    let audioContentType = '';
-    try {
-      const ttsResult = await elevenLabsService.teacherSpeak(
-        responseText,
-        { voiceId: classroom.aiTutorVoiceId || undefined }
-      );
-      if (ttsResult) {
-        audioBuffer = ttsResult.audioBuffer;
-        audioContentType = ttsResult.contentType;
-      }
-    } catch (err) {
-      console.warn('[AITutor] TTS failed, continuing with text:', err);
-    }
+    // Generate voice (Azure TTS primary, ElevenLabs fallback)
+    const ttsResult = await generateTeacherAudio(responseText, classroom.aiTutorVoiceId);
+    const audioBuffer = ttsResult?.audioBuffer || null;
+    const audioContentType = ttsResult?.contentType || '';
 
     // Save teacher response to history
     const teacherEntry: ConversationEntry = {
@@ -812,22 +829,13 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const responseText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
 
-    // Generate voice
+    // Generate voice (Azure TTS primary, ElevenLabs fallback)
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
     if (shouldGenerateAudio) {
-      try {
-        const ttsResult = await elevenLabsService.teacherSpeak(
-          responseText,
-          { voiceId: classroom.aiTutorVoiceId || undefined }
-        );
-        if (ttsResult) {
-          audioBuffer = ttsResult.audioBuffer;
-          audioContentType = ttsResult.contentType;
-        }
-      } catch (err) {
-        console.warn('[AITutor] TTS failed for phase transition:', err);
-      }
+      const ttsResult = await generateTeacherAudio(responseText, classroom.aiTutorVoiceId);
+      audioBuffer = ttsResult?.audioBuffer || null;
+      audioContentType = ttsResult?.contentType || '';
     }
 
     // Save to history
@@ -896,21 +904,10 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
 
     const classroom = session.classroom;
 
-    // Generate voice directly (no AI processing needed)
-    let audioBuffer: Buffer | null = null;
-    let audioContentType = '';
-    try {
-      const ttsResult = await elevenLabsService.teacherSpeak(
-        text,
-        { voiceId: classroom.aiTutorVoiceId || undefined }
-      );
-      if (ttsResult) {
-        audioBuffer = ttsResult.audioBuffer;
-        audioContentType = ttsResult.contentType;
-      }
-    } catch (err) {
-      console.warn('[AITutor] TTS failed for speak:', err);
-    }
+    // Generate voice (Azure TTS primary, ElevenLabs fallback)
+    const ttsResult = await generateTeacherAudio(text, classroom.aiTutorVoiceId);
+    const audioBuffer = ttsResult?.audioBuffer || null;
+    const audioContentType = ttsResult?.contentType || '';
 
     // Save to DB
     const spokenChat = await prisma.classroomChat.create({
@@ -977,21 +974,10 @@ After stating each question, pause and say you'll wait for answers.`;
 
     const quizText = aiResponse.content;
 
-    // Generate voice
-    let audioBuffer: Buffer | null = null;
-    let audioContentType = '';
-    try {
-      const ttsResult = await elevenLabsService.teacherSpeak(
-        quizText,
-        { voiceId: classroom.aiTutorVoiceId || undefined }
-      );
-      if (ttsResult) {
-        audioBuffer = ttsResult.audioBuffer;
-        audioContentType = ttsResult.contentType;
-      }
-    } catch (err) {
-      console.warn('[AITutor] TTS failed for quiz:', err);
-    }
+    // Generate voice (Azure TTS primary, ElevenLabs fallback)
+    const ttsResult = await generateTeacherAudio(quizText, classroom.aiTutorVoiceId);
+    const audioBuffer = ttsResult?.audioBuffer || null;
+    const audioContentType = ttsResult?.contentType || '';
 
     // Save to conversation
     if (memState) {
