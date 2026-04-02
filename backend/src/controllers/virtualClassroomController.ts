@@ -481,8 +481,9 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
 export const startAITutor = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const { mode } = req.body; // 'LEAD_TEACHER' or 'CO_TEACHER'
 
-    const result = await aiTutorService.startSession(id);
+    const result = await aiTutorService.startSession(id, { mode: mode || 'CO_TEACHER' });
 
     let audioBase64: string | null = null;
     if (result.greeting.audioBuffer) {
@@ -491,6 +492,7 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
 
     res.json({
       sessionId: result.sessionId,
+      mode: mode || 'CO_TEACHER',
       greeting: {
         text: result.greeting.text,
         audio: audioBase64,
@@ -498,6 +500,7 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
         phase: result.greeting.phase,
         suggestedActions: result.greeting.suggestedActions,
         hasAudio: !!result.greeting.audioBuffer,
+        voiceOnly: result.greeting.channel === 'VOICE_ONLY',
       },
     });
     emitClassroomUpdated(id, { reason: 'ai_tutor_started' });
@@ -558,6 +561,7 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
       suggestedActions: result.suggestedActions,
       tokensUsed: result.tokensUsed,
       charactersUsed: result.charactersUsed,
+      voiceOnly: result.channel === 'VOICE_ONLY',
     });
     emitClassroomUpdated(id, { reason: 'ai_tutor_chat' });
   } catch (error: any) {
@@ -590,6 +594,7 @@ export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
       audioContentType: result.audioContentType,
       phase: result.phase,
       suggestedActions: result.suggestedActions,
+      voiceOnly: result.channel === 'VOICE_ONLY',
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_phase_advanced' });
   } catch (error: any) {
@@ -621,6 +626,7 @@ export const tutorSpeak = async (req: AuthRequest, res: Response) => {
       audio: audioBase64,
       audioContentType: result.audioContentType,
       phase: result.phase,
+      voiceOnly: result.channel === 'VOICE_ONLY',
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_speak' });
   } catch (error: any) {
@@ -653,6 +659,7 @@ export const tutorQuiz = async (req: AuthRequest, res: Response) => {
       audioContentType: result.audioContentType,
       phase: result.phase,
       suggestedActions: result.suggestedActions,
+      voiceOnly: result.channel === 'VOICE_ONLY',
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_quiz' });
   } catch (error: any) {

@@ -18,6 +18,7 @@ interface ChatMessage {
   createdAt: string;
   audio?: string | null;
   audioContentType?: string | null;
+  voiceOnly?: boolean;
 }
 
 interface ClassroomData {
@@ -79,6 +80,7 @@ interface TutorState {
   currentTopic?: string | null;
   suggestedActions: string[];
   loading: boolean;
+  mode: 'LEAD_TEACHER' | 'CO_TEACHER';
 }
 
 interface ClassroomUpdatedPayload {
@@ -115,6 +117,7 @@ interface ClassroomAIMessagePayload {
   phase?: string | null;
   currentTopic?: string | null;
   messageType?: string | null;
+  voiceOnly?: boolean;
 }
 
 const SOCKET_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || '';
@@ -168,6 +171,7 @@ export default function VirtualClassroom() {
     phase: 'GREETING',
     suggestedActions: [],
     loading: false,
+    mode: 'CO_TEACHER',
   });
 
   // Chat state
@@ -213,6 +217,7 @@ export default function VirtualClassroom() {
         ...message,
         audio: message.audio ?? updatedMessages[existingIndex].audio ?? null,
         audioContentType: message.audioContentType ?? updatedMessages[existingIndex].audioContentType ?? null,
+        voiceOnly: message.voiceOnly ?? updatedMessages[existingIndex].voiceOnly ?? false,
       };
       return updatedMessages;
     });
@@ -408,6 +413,7 @@ export default function VirtualClassroom() {
         createdAt: payload.createdAt || payload.emittedAt || new Date().toISOString(),
         audio: payload.audio ?? null,
         audioContentType: payload.audioContentType ?? null,
+        voiceOnly: payload.voiceOnly ?? false,
       });
 
       if (payload.phase || payload.currentTopic !== undefined) {
@@ -532,12 +538,17 @@ export default function VirtualClassroom() {
   // ==========================================
   // AI TUTOR CONTROLS
   // ==========================================
+  // AI Tutor mode selection
+  const [selectedMode, setSelectedMode] = useState<'LEAD_TEACHER' | 'CO_TEACHER'>('LEAD_TEACHER');
+
   const startAITutor = async () => {
     if (!classroom) return;
     setTutor(prev => ({ ...prev, loading: true }));
 
     try {
-      const res = await api.post(`/virtual-classroom/${classroom.id}/ai-tutor/start`);
+      const res = await api.post(`/virtual-classroom/${classroom.id}/ai-tutor/start`, {
+        mode: selectedMode,
+      });
       const data = res.data;
       const useRealtimeAI = Boolean(socketRef.current?.connected);
 
@@ -548,6 +559,7 @@ export default function VirtualClassroom() {
         currentTopic: classroom.lessonRuntime?.tutorCurrentTopic || null,
         suggestedActions: data.greeting.suggestedActions || [],
         loading: false,
+        mode: data.mode || selectedMode,
       });
 
       if (!useRealtimeAI) {
@@ -591,6 +603,7 @@ export default function VirtualClassroom() {
         currentTopic: null,
         suggestedActions: [],
         loading: false,
+        mode: 'CO_TEACHER',
       });
 
       // Show summary in chat
@@ -624,6 +637,7 @@ export default function VirtualClassroom() {
         currentTopic: null,
         suggestedActions: [],
         loading: false,
+        mode: 'CO_TEACHER',
       });
 
       setActivePanel('chat');
@@ -844,6 +858,11 @@ export default function VirtualClassroom() {
                 <Brain size={14} className="text-purple-400" />
                 <span className="text-purple-300">{classroom.aiTutorName}</span>
                 <span className="text-purple-500">• {phaseLabel}</span>
+                <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${
+                  tutor.mode === 'LEAD_TEACHER' ? 'bg-purple-700 text-purple-200' : 'bg-blue-700 text-blue-200'
+                }`}>
+                  {tutor.mode === 'LEAD_TEACHER' ? 'Lead' : 'Co-teach'}
+                </span>
               </div>
             )}
 
@@ -930,34 +949,56 @@ export default function VirtualClassroom() {
                   </div>
                 )}
 
-                {chatMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.isAI ? 'justify-start' : 'justify-end'}`}
-                  >
-                    <div className={`max-w-[85%] rounded-xl px-3 py-2 ${
-                      msg.isAI
-                        ? 'bg-purple-900/40 border border-purple-800/50'
-                        : 'bg-blue-600'
-                    }`}>
-                      <p className={`text-[10px] font-medium mb-0.5 ${
-                        msg.isAI ? 'text-purple-300' : 'text-blue-200'
+                {chatMessages.map((msg) => {
+                  // Voice-only messages show as a small indicator, not a full chat bubble
+                  if (msg.voiceOnly && msg.isAI) {
+                    return (
+                      <div key={msg.id} className="flex justify-center">
+                        <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-900/20 rounded-full text-[11px] text-purple-400">
+                          <Volume2 size={11} className="animate-pulse" />
+                          <span>{msg.senderName} is speaking...</span>
+                          {msg.audio && (
+                            <button
+                              onClick={() => playAudio(msg.audio!, msg.audioContentType || 'audio/mpeg')}
+                              className="ml-1 underline hover:text-purple-300"
+                            >
+                              Replay
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${msg.isAI ? 'justify-start' : 'justify-end'}`}
+                    >
+                      <div className={`max-w-[85%] rounded-xl px-3 py-2 ${
+                        msg.isAI
+                          ? 'bg-purple-900/40 border border-purple-800/50'
+                          : 'bg-blue-600'
                       }`}>
-                        {msg.isAI && <Bot size={10} className="inline mr-1" />}
-                        {msg.senderName}
-                      </p>
-                      <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
-                      {msg.audio && (
-                        <button
-                          onClick={() => playAudio(msg.audio!, msg.audioContentType || 'audio/mpeg')}
-                          className="mt-1 text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1"
-                        >
-                          <Volume2 size={12} /> Play voice
-                        </button>
-                      )}
+                        <p className={`text-[10px] font-medium mb-0.5 ${
+                          msg.isAI ? 'text-purple-300' : 'text-blue-200'
+                        }`}>
+                          {msg.isAI && <Bot size={10} className="inline mr-1" />}
+                          {msg.senderName}
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+                        {msg.audio && (
+                          <button
+                            onClick={() => playAudio(msg.audio!, msg.audioContentType || 'audio/mpeg')}
+                            className="mt-1 text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1"
+                          >
+                            <Volume2 size={12} /> Play voice
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div ref={chatEndRef} />
               </div>
 
@@ -1037,26 +1078,71 @@ export default function VirtualClassroom() {
               {isTeacherOrAdmin && (
                 <div>
                   {!tutor.active ? (
-                    <button
-                      onClick={startAITutor}
-                      disabled={tutor.loading}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 font-medium"
-                    >
-                      {tutor.loading ? (
-                        <><Loader2 size={18} className="animate-spin" /> Starting...</>
-                      ) : (
-                        <><Play size={18} /> Start AI Tutor</>
-                      )}
-                    </button>
+                    <div className="space-y-3">
+                      {/* Mode selector */}
+                      <div>
+                        <h4 className="text-xs text-gray-400 mb-2 uppercase">Teaching Mode</h4>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => setSelectedMode('LEAD_TEACHER')}
+                            className={`p-2 rounded-lg text-xs font-medium border transition ${
+                              selectedMode === 'LEAD_TEACHER'
+                                ? 'bg-purple-600 border-purple-500 text-white'
+                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
+                            }`}
+                          >
+                            <GraduationCap size={16} className="mx-auto mb-1" />
+                            Lead Teacher
+                            <p className="text-[10px] opacity-70 mt-0.5">AI runs the whole class</p>
+                          </button>
+                          <button
+                            onClick={() => setSelectedMode('CO_TEACHER')}
+                            className={`p-2 rounded-lg text-xs font-medium border transition ${
+                              selectedMode === 'CO_TEACHER'
+                                ? 'bg-blue-600 border-blue-500 text-white'
+                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
+                            }`}
+                          >
+                            <Users size={16} className="mx-auto mb-1" />
+                            Co-Teacher
+                            <p className="text-[10px] opacity-70 mt-0.5">AI assists you</p>
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={startAITutor}
+                        disabled={tutor.loading}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 font-medium"
+                      >
+                        {tutor.loading ? (
+                          <><Loader2 size={18} className="animate-spin" /> Starting...</>
+                        ) : (
+                          <><Play size={18} /> Start as {selectedMode === 'LEAD_TEACHER' ? 'Lead Teacher' : 'Co-Teacher'}</>
+                        )}
+                      </button>
+                    </div>
                   ) : (
                     <div className="space-y-2">
-                      <button
-                        onClick={advancePhase}
-                        disabled={tutor.loading}
-                        className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
-                      >
-                        <SkipForward size={16} /> Next Phase
-                      </button>
+                      {/* Mode badge */}
+                      <div className={`text-center text-xs px-3 py-1.5 rounded-lg ${
+                        tutor.mode === 'LEAD_TEACHER'
+                          ? 'bg-purple-900/50 text-purple-300 border border-purple-700'
+                          : 'bg-blue-900/50 text-blue-300 border border-blue-700'
+                      }`}>
+                        {tutor.mode === 'LEAD_TEACHER' ? '🎓 Leading class autonomously' : '🤝 Co-teaching with you'}
+                      </div>
+
+                      {/* Only show manual controls in CO_TEACHER mode */}
+                      {tutor.mode === 'CO_TEACHER' && (
+                        <button
+                          onClick={advancePhase}
+                          disabled={tutor.loading}
+                          className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                        >
+                          <SkipForward size={16} /> Next Phase
+                        </button>
+                      )}
 
                       <button
                         onClick={launchQuiz}
@@ -1086,8 +1172,8 @@ export default function VirtualClassroom() {
                 </div>
               )}
 
-              {/* Suggested Actions */}
-              {tutor.active && tutor.suggestedActions.length > 0 && (
+              {/* Suggested Actions — only in CO_TEACHER mode */}
+              {tutor.active && tutor.mode === 'CO_TEACHER' && tutor.suggestedActions.length > 0 && (
                 <div>
                   <h4 className="text-xs text-gray-400 mb-2 uppercase">Suggested Actions</h4>
                   <div className="space-y-1">
@@ -1194,8 +1280,9 @@ export default function VirtualClassroom() {
 
               {/* Info */}
               <div className="bg-gray-700/30 rounded-xl p-3 text-xs text-gray-400">
-                <p className="mb-1">💡 The AI Tutor uses Azure AI for natural voice with automatic ElevenLabs fallback.</p>
-                <p>Students can ask questions via the chat panel, and the AI will respond with both text and voice.</p>
+                <p className="mb-1">💡 The AI Tutor speaks aloud to the class. Voice responses are not shown as chat text.</p>
+                <p className="mb-1">Students can type questions in chat — the tutor will reply with both text and voice.</p>
+                <p>In <span className="text-purple-300">Lead</span> mode the tutor runs the full lesson. In <span className="text-blue-300">Co-teach</span> mode you control the pace.</p>
               </div>
             </div>
           )}

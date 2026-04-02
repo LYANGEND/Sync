@@ -14,12 +14,22 @@ import { emitClassroomAIMessage } from './classroomRealtimeService';
 // - Generates quizzes, explanations, and teaching content
 // - Tracks conversation history and engagement
 
+// Teaching modes
+export type TutorMode = 'LEAD_TEACHER' | 'CO_TEACHER';
+
+// How the tutor delivers a response
+// VOICE_ONLY  — spoken aloud, NOT shown as a chat bubble (default for teaching)
+// CHAT_ONLY   — typed reply in chat, no TTS (for @mention / typed Q&A)
+// VOICE_AND_CHAT — both (fallback / explicit)
+export type ResponseChannel = 'VOICE_ONLY' | 'CHAT_ONLY' | 'VOICE_AND_CHAT';
+
 interface ConversationEntry {
   role: 'teacher' | 'student' | 'system';
   speaker: string;
   message: string;
   timestamp: string;
   audioGenerated?: boolean;
+  channel?: ResponseChannel;
 }
 
 interface TutorResponse {
@@ -30,6 +40,7 @@ interface TutorResponse {
   suggestedActions?: string[];
   charactersUsed: number;
   tokensUsed: number;
+  channel?: ResponseChannel;
 }
 
 interface LessonPlan {
@@ -49,6 +60,7 @@ interface LessonSection {
 
 interface SessionStartOptions {
   generateAudio?: boolean;
+  mode?: TutorMode;
 }
 
 interface PhaseTransitionOptions {
@@ -215,6 +227,9 @@ TEACHING RULES:
 8. When asking a question, WAIT for the student to respond before continuing.
 9. If multiple students respond, acknowledge each one.
 10. Stay on topic but be flexible enough to address relevant tangents briefly.
+11. Your voice responses are SPOKEN ALOUD to the class — write as you would speak, not as you would type.
+12. When a student asks a question in chat, answer naturally as if they raised their hand in class.
+13. Do NOT narrate your actions or add stage directions. Just speak naturally.
 
 RECENT CONVERSATION:
 ${recentConvo || '(Class is just starting)'}
@@ -333,6 +348,9 @@ class AITutorService {
     currentTopic: string | null;
     segmentContext: PromptSegmentContext | null;
     startedAt: Date;
+    mode: TutorMode;
+    autoAdvanceTimer?: ReturnType<typeof setTimeout> | null;
+    classroomId: string;
   }> = new Map();
 
   private encodeAudioBuffer(audioBuffer?: Buffer | null) {
@@ -353,6 +371,7 @@ class AITutorService {
       phase?: string | null;
       currentTopic?: string | null;
       messageType: 'greeting' | 'reply' | 'transition' | 'speak' | 'quiz';
+      channel?: ResponseChannel;
     }
   ) {
     emitClassroomAIMessage(classroomId, {
@@ -366,6 +385,7 @@ class AITutorService {
       phase: options.phase || null,
       currentTopic: options.currentTopic || null,
       messageType: options.messageType,
+      voiceOnly: options.channel === 'VOICE_ONLY',
     });
   }
 
@@ -456,6 +476,8 @@ class AITutorService {
       },
     });
 
+    const tutorMode: TutorMode = options.mode || 'CO_TEACHER';
+
     // Initialize in-memory state
     this.activeSessions.set(session.id, {
       conversationHistory: [],
@@ -464,6 +486,9 @@ class AITutorService {
       currentTopic: initialSegmentContext?.title || null,
       segmentContext: initialSegmentContext,
       startedAt: new Date(),
+      mode: tutorMode,
+      autoAdvanceTimer: null,
+      classroomId,
     });
 
     // Generate greeting
@@ -503,6 +528,7 @@ class AITutorService {
       message: greetingText,
       timestamp: new Date().toISOString(),
       audioGenerated: !!audioBuffer,
+      channel: 'VOICE_ONLY',
     };
 
     const memState = this.activeSessions.get(session.id)!;
@@ -534,7 +560,13 @@ class AITutorService {
       phase: 'GREETING',
       currentTopic: initialSegmentContext?.title || null,
       messageType: 'greeting',
+      channel: 'VOICE_ONLY',
     });
+
+    // In LEAD_TEACHER mode, auto-advance through lesson phases
+    if (tutorMode === 'LEAD_TEACHER') {
+      this.scheduleAutoAdvance(session.id, 'GREETING', 20_000); // 20s greeting then move on
+    }
 
     return {
       sessionId: session.id,
@@ -543,9 +575,10 @@ class AITutorService {
         audioBuffer,
         audioContentType,
         phase: 'GREETING',
-        suggestedActions: ['Take Attendance', 'Start Teaching'],
+        suggestedActions: tutorMode === 'LEAD_TEACHER' ? [] : ['Take Attendance', 'Start Teaching'],
         charactersUsed: greetingText.length,
         tokensUsed: aiResponse.tokensUsed || 0,
+        channel: 'VOICE_ONLY' as ResponseChannel,
       },
     };
   }
@@ -580,6 +613,9 @@ class AITutorService {
         currentTopic: session.currentTopic || null,
         segmentContext: null,
         startedAt: session.startedAt || new Date(),
+        mode: 'CO_TEACHER',
+        autoAdvanceTimer: null,
+        classroomId: session.classroomId,
       };
       this.activeSessions.set(sessionId, memState);
     }
@@ -667,6 +703,13 @@ class AITutorService {
     const aiResponse = await aiService.chat(messages);
     const responseText = aiResponse.content;
 
+    // Determine response channel:
+    // Student TYPED a message → the tutor replies in CHAT (text visible)
+    // The tutor also speaks the reply aloud for the classroom
+    // This mirrors how a human teacher answers a raised hand — they
+    // speak to the whole class but the question came via chat.
+    const channel: ResponseChannel = 'VOICE_AND_CHAT';
+
     // Generate voice (Azure TTS primary, ElevenLabs fallback)
     const ttsResult = await generateTeacherAudio(responseText, classroom.aiTutorVoiceId);
     const audioBuffer = ttsResult?.audioBuffer || null;
@@ -679,6 +722,7 @@ class AITutorService {
       message: responseText,
       timestamp: new Date().toISOString(),
       audioGenerated: !!audioBuffer,
+      channel,
     };
     memState.conversationHistory.push(teacherEntry);
 
@@ -721,6 +765,7 @@ class AITutorService {
       phase: memState.phase,
       currentTopic: memState.currentTopic,
       messageType: 'reply',
+      channel,
     });
 
     return {
@@ -731,6 +776,7 @@ class AITutorService {
       suggestedActions: this.getSuggestedActions(memState.phase),
       charactersUsed: responseText.length,
       tokensUsed: aiResponse.tokensUsed || 0,
+      channel,
     };
   }
 
@@ -781,6 +827,9 @@ class AITutorService {
         currentTopic: session.currentTopic || null,
         segmentContext: null,
         startedAt: session.startedAt || new Date(),
+        mode: 'CO_TEACHER',
+        autoAdvanceTimer: null,
+        classroomId: session.classroomId,
       };
       this.activeSessions.set(sessionId, memState);
     }
@@ -876,16 +925,24 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
       phase: memState.phase,
       currentTopic: memState.currentTopic,
       messageType: 'transition',
+      channel: 'VOICE_ONLY',
     });
+
+    // In LEAD_TEACHER mode, schedule the next auto-advance
+    if (memState.mode === 'LEAD_TEACHER' && memState.phase !== 'WRAP_UP') {
+      const durationMs = this.getPhaseAutoAdvanceDuration(memState.phase, memState.segmentContext);
+      this.scheduleAutoAdvance(sessionId, memState.phase, durationMs);
+    }
 
     return {
       text: responseText,
       audioBuffer,
       audioContentType,
       phase: memState.phase,
-      suggestedActions: this.getSuggestedActions(memState.phase),
+      suggestedActions: memState.mode === 'LEAD_TEACHER' ? [] : this.getSuggestedActions(memState.phase),
       charactersUsed: responseText.length,
       tokensUsed: aiResponse.tokensUsed || 0,
+      channel: 'VOICE_ONLY' as ResponseChannel,
     };
   }
 
@@ -932,6 +989,7 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
       phase: session.lessonPhase as string,
       currentTopic: session.currentTopic || null,
       messageType: 'speak',
+      channel: 'VOICE_ONLY',
     });
 
     return {
@@ -941,6 +999,7 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
       phase: session.lessonPhase as string,
       charactersUsed: text.length,
       tokensUsed: 0,
+      channel: 'VOICE_ONLY' as ResponseChannel,
     };
   }
 
@@ -1014,6 +1073,7 @@ After stating each question, pause and say you'll wait for answers.`;
       phase: session.lessonPhase as string,
       currentTopic,
       messageType: 'quiz',
+      channel: 'VOICE_ONLY',
     });
 
     return {
@@ -1024,6 +1084,7 @@ After stating each question, pause and say you'll wait for answers.`;
       suggestedActions: ['Reveal Answers', 'Continue Teaching'],
       charactersUsed: quizText.length,
       tokensUsed: aiResponse.tokensUsed || 0,
+      channel: 'VOICE_ONLY' as ResponseChannel,
     };
   }
 
@@ -1167,7 +1228,11 @@ Return a JSON object with these exact keys:
       }
     }
 
-    // Clean up in-memory state
+    // Clean up auto-advance timer and in-memory state
+    const activeState = this.activeSessions.get(sessionId);
+    if (activeState?.autoAdvanceTimer) {
+      clearTimeout(activeState.autoAdvanceTimer);
+    }
     this.activeSessions.delete(sessionId);
 
     return {
@@ -1215,6 +1280,71 @@ Return a JSON object with these exact keys:
         (memState?.phase || session.lessonPhase) as LessonPhase
       ),
     };
+  }
+
+  // ================================================================
+  // AUTO-ADVANCE ENGINE (LEAD_TEACHER mode)
+  // ================================================================
+  // When the tutor is the lead teacher, it drives the lesson
+  // autonomously through each phase on a timer — just like a
+  // human teacher would pace the class.
+
+  /**
+   * Schedule the next automatic phase advance.
+   * Clears any existing timer first.
+   */
+  private scheduleAutoAdvance(sessionId: string, currentPhase: LessonPhase, delayMs: number) {
+    const state = this.activeSessions.get(sessionId);
+    if (!state) return;
+
+    // Clear existing timer
+    if (state.autoAdvanceTimer) {
+      clearTimeout(state.autoAdvanceTimer);
+      state.autoAdvanceTimer = null;
+    }
+
+    state.autoAdvanceTimer = setTimeout(async () => {
+      try {
+        const s = this.activeSessions.get(sessionId);
+        if (!s || s.phase !== currentPhase) return; // phase changed manually, skip
+
+        // Auto-advance to next phase
+        await this.advancePhase(sessionId);
+        console.log(`[AITutor] Auto-advanced ${sessionId} from ${currentPhase} → ${s.phase}`);
+      } catch (err) {
+        console.warn('[AITutor] Auto-advance failed:', (err as Error).message);
+      }
+    }, delayMs);
+  }
+
+  /**
+   * How long the tutor should spend in each phase before auto-advancing.
+   * Uses lesson segment durations if available, otherwise sensible defaults.
+   */
+  private getPhaseAutoAdvanceDuration(
+    phase: LessonPhase,
+    segmentContext: PromptSegmentContext | null
+  ): number {
+    // Segment-based duration takes priority (runtime lesson plan)
+    // Phase defaults mirror real classroom timing
+    switch (phase) {
+      case 'GREETING':     return 20_000;          // 20 seconds
+      case 'ATTENDANCE':   return 30_000;          // 30 seconds
+      case 'RECAP':        return 2 * 60_000;      // 2 minutes
+      case 'TEACHING':     return 8 * 60_000;      // 8 minutes (main block)
+      case 'Q_AND_A':      return 3 * 60_000;      // 3 minutes
+      case 'ACTIVITY':     return 5 * 60_000;      // 5 minutes
+      case 'WRAP_UP':      return 2 * 60_000;      // 2 minutes
+      default:             return 3 * 60_000;      // 3 minutes fallback
+    }
+  }
+
+  /**
+   * Get the mode for a session
+   */
+  getSessionMode(sessionId: string): TutorMode {
+    const state = this.activeSessions.get(sessionId);
+    return state?.mode || 'CO_TEACHER';
   }
 
   /**
