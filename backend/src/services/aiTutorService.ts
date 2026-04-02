@@ -121,48 +121,51 @@ You are culturally aware and use local examples when possible.`;
       phaseInstructions = `You are in the GREETING phase. Welcome the students warmly. 
 Introduce yourself and the topic for today. Set the mood with enthusiasm.
 Ask if everyone is ready to begin. Keep it brief (2-3 sentences).
+IMPORTANT: Only mention the topic/subject if it is provided in the CLASS INFORMATION or LESSON PLAN. Do not invent a topic.
 After greeting, the phase will move to ATTENDANCE.`;
       break;
     case 'ATTENDANCE':
-      phaseInstructions = `You are taking ATTENDANCE. Call out student names one by one.
-Acknowledge each student who responds. Note who is absent.
-Be warm and personal — "Good morning, Tendai! Glad to see you today."
-After checking all students, move to RECAP.`;
+      phaseInstructions = `You are taking ATTENDANCE. 
+If student names are listed under STUDENTS IN CLASS, call out a few names warmly.
+If NO student names are listed, simply ask: "Can everyone hear me? Type in the chat to let me know you're here!"
+Do NOT invent student names. Only use names from the STUDENTS IN CLASS list.
+After checking attendance, move to RECAP.`;
       break;
     case 'RECAP':
       phaseInstructions = `You are doing a RECAP of previous lessons. 
-Briefly summarize key points from the last class. Ask 1-2 quick recall questions.
-"Last time, we learned about [topic]. Who can remind us what [key concept] means?"
-If the lesson plan shows this is part of a syllabus sequence, reference what was covered before.
-Keep this to 2-3 minutes worth of content. Then transition to TEACHING.`;
+IMPORTANT: Only recap content that is explicitly mentioned in the LESSON PLAN or the RECENT CONVERSATION history.
+If there is no prior lesson information available, say: "Since this is our first session together, let's dive right into today's topic!"
+Do NOT fabricate or guess what was covered in previous classes.
+Keep this to 1-2 minutes worth of content. Then transition to TEACHING.`;
       break;
     case 'TEACHING':
       phaseInstructions = `You are in the main TEACHING phase. This is the core of the lesson.
-Follow the lesson plan below carefully — cover each subtopic and its learning objectives.
+Follow the LESSON PLAN and CURRENT SEGMENT below carefully — cover only the content listed there.
 Explain concepts step by step using examples, analogies, and visual descriptions.
 Pause after each key point and ask "Does everyone understand?" or check comprehension.
 Break complex ideas into smaller pieces. Use numbered steps for processes.
 Teach one subtopic fully before moving to the next.
-Use local/Zambian examples wherever possible to make content relatable.`;
+IMPORTANT: Do NOT teach content that is not in the lesson plan. Stick to the objectives and talking points provided.
+If no lesson plan is available, teach only widely-accepted, factual, textbook-level content for the subject.`;
       break;
     case 'Q_AND_A':
       phaseInstructions = `You are in the Q&A phase. Invite questions from students.
 "Does anyone have questions about what we've covered?"
-Answer questions thoroughly but concisely. If a question goes beyond the lesson scope,
-acknowledge it and promise to cover it later. Redirect off-topic questions politely.`;
+Answer questions thoroughly but concisely. Base your answers ONLY on the lesson plan content and widely-accepted facts.
+If a question goes beyond the lesson scope, say honestly: "That's a great question but it's outside today's lesson. Let's come back to that another time."
+Do NOT guess or fabricate answers.`;
       break;
     case 'ACTIVITY':
       phaseInstructions = `You are running a class ACTIVITY or exercise.
-Give the students a problem or task to work on. Explain the instructions clearly.
-Walk through the first step as an example. Give them time to think.
-Ask students to share their answers. Discuss correct and incorrect approaches.`;
+Give the students a problem or task based on today's LESSON PLAN content.
+Explain the instructions clearly. Walk through the first step as an example.
+Give them time to think. Ask students to share their answers.
+IMPORTANT: Only create exercises that directly relate to the lesson plan content. Do NOT introduce new concepts.`;
       break;
     case 'WRAP_UP':
       phaseInstructions = `You are WRAPPING UP the lesson. 
-Summarize the 3-4 key points covered today.
-"Today we learned: 1) [point], 2) [point], 3) [point]."
-Give a brief preview of what's coming next class.
-Assign any homework if applicable.
+Summarize ONLY the key points that were actually covered in the RECENT CONVERSATION and lesson plan.
+Do NOT add points that were not discussed. Only reference homework if the lesson plan specifies it.
 End with encouragement: "Great job today, everyone! See you next class."`;
       break;
   }
@@ -230,6 +233,14 @@ TEACHING RULES:
 11. Your voice responses are SPOKEN ALOUD to the class — write as you would speak, not as you would type.
 12. When a student asks a question in chat, answer naturally as if they raised their hand in class.
 13. Do NOT narrate your actions or add stage directions. Just speak naturally.
+
+CRITICAL — ANTI-HALLUCINATION RULES:
+14. ONLY teach facts, definitions, formulas, and concepts that are in the LESSON PLAN above. If no lesson plan is provided, keep to widely-accepted textbook knowledge for the subject.
+15. Do NOT invent dates, statistics, research findings, or quotes. If you are unsure, say: "I'd need to double-check that — let's look it up together next time."
+16. Do NOT fabricate student names. Only use the names listed under STUDENTS IN CLASS above. If no student names are listed, address the class generally ("everyone", "class").
+17. Do NOT reference previous lessons or homework unless the LESSON PLAN or conversation history explicitly mentions them. If unsure, say "In our last lesson..." only if you have concrete context.
+18. When a question is outside the scope of the current lesson, say so honestly: "That's a great question, but it's outside what we're covering today. We can explore that another time."
+19. Never make up examples with specific numbers, names, or places unless they come from the lesson plan. Use generic examples instead: "For example, if we have a number X..."
 
 RECENT CONVERSATION:
 ${recentConvo || '(Class is just starting)'}
@@ -337,6 +348,15 @@ async function generateTeacherAudio(
   }
 
   return null;
+}
+
+// Cap conversation history to prevent unbounded memory growth.
+// Keeps the first entry (greeting) + last N entries for context.
+const MAX_HISTORY_ENTRIES = 60;
+function trimConversationHistory(history: ConversationEntry[]): ConversationEntry[] {
+  if (history.length <= MAX_HISTORY_ENTRIES) return history;
+  const first = history[0]; // preserve greeting
+  return [first, ...history.slice(-(MAX_HISTORY_ENTRIES - 1))];
 }
 
 class AITutorService {
@@ -507,7 +527,7 @@ class AITutorService {
     const aiResponse = await aiService.chat([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: greetingPrompt },
-    ]);
+    ], { temperature: 0.4, maxTokens: 400 });
 
     const greetingText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
@@ -700,7 +720,7 @@ class AITutorService {
       { role: 'user' as const, content: `${studentName} says: "${message}"` },
     ];
 
-    const aiResponse = await aiService.chat(messages);
+    const aiResponse = await aiService.chat(messages, { temperature: 0.4, maxTokens: 500 });
     const responseText = aiResponse.content;
 
     // Determine response channel:
@@ -725,6 +745,7 @@ class AITutorService {
       channel,
     };
     memState.conversationHistory.push(teacherEntry);
+    memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
 
     // Save to DB
     await prisma.classroomChat.create({
@@ -843,6 +864,19 @@ class AITutorService {
     }
 
     const classroom = session.classroom;
+
+    // Resolve class info for the system prompt
+    let transitionClassName = '';
+    let transitionSubjectName = '';
+    if (classroom.classId) {
+      const classInfo = await prisma.class.findUnique({ where: { id: classroom.classId }, select: { name: true } });
+      if (classInfo) transitionClassName = classInfo.name;
+    }
+    if (classroom.subjectId) {
+      const subject = await prisma.subject.findUnique({ where: { id: classroom.subjectId }, select: { name: true } });
+      if (subject) transitionSubjectName = subject.name;
+    }
+
     memState.segmentContext = await resolveSegmentContext(classroom, {
       topicIndex: memState.topicIndex,
       currentTopic: memState.currentTopic,
@@ -861,7 +895,7 @@ class AITutorService {
       classroom.aiTutorPersona,
       classroom.lessonPlanContent,
       memState.phase,
-      {},
+      { className: transitionClassName, subjectName: transitionSubjectName },
       memState.conversationHistory,
       memState.segmentContext
     );
@@ -873,7 +907,7 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const aiResponse = await aiService.chat([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: transitionPrompt },
-    ]);
+    ], { temperature: 0.4, maxTokens: 500 });
 
     const responseText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
@@ -896,6 +930,7 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
       audioGenerated: !!audioBuffer,
     };
     memState.conversationHistory.push(entry);
+    memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
 
     // Save to DB
     const transitionChat = await prisma.classroomChat.create({
@@ -1020,16 +1055,30 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const memState = this.activeSessions.get(sessionId);
     const currentTopic = topic || session.currentTopic || 'the lesson so far';
 
+    // Build quiz context from conversation history so questions are grounded
+    const recentTeaching = (memState?.conversationHistory || [])
+      .filter(e => e.role === 'teacher')
+      .slice(-6)
+      .map(e => e.message)
+      .join('\n');
+
     const quizPrompt = `Generate a quick 3-question verbal quiz about ${currentTopic}.
+
+IMPORTANT: Base your questions ONLY on the content that was actually taught in the lesson.
+Here is what was covered:
+---
+${recentTeaching || 'No specific content available — ask general comprehension questions about ' + currentTopic}
+---
+
 Format it as a teacher would say it out loud in class:
-"Alright class, let's do a quick check! Question 1: [question]. Raise your hand if you know!"
+"Alright class, let's do a quick check! Question 1: [question]."
 Make the questions progressively harder: easy, medium, challenging.
-After stating each question, pause and say you'll wait for answers.`;
+Only ask about facts and concepts that were explicitly taught. Do NOT invent content.`;
 
     const aiResponse = await aiService.chat([
-      { role: 'system', content: `You are ${classroom.aiTutorName}, a teacher conducting a verbal quiz in class. Be encouraging and fun.` },
+      { role: 'system', content: `You are ${classroom.aiTutorName}, a teacher conducting a verbal quiz in class. Be encouraging and fun. Only quiz students on content that was actually taught — never make up facts.` },
       { role: 'user', content: quizPrompt },
-    ]);
+    ], { temperature: 0.3, maxTokens: 400 });
 
     const quizText = aiResponse.content;
 
@@ -1047,6 +1096,7 @@ After stating each question, pause and say you'll wait for answers.`;
         timestamp: new Date().toISOString(),
         audioGenerated: !!audioBuffer,
       });
+      memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
     }
 
     const quizChat = await prisma.classroomChat.create({
@@ -1307,6 +1357,16 @@ Return a JSON object with these exact keys:
       try {
         const s = this.activeSessions.get(sessionId);
         if (!s || s.phase !== currentPhase) return; // phase changed manually, skip
+
+        // Verify session is still active in DB before advancing
+        const dbSession = await prisma.aITutorSession.findUnique({
+          where: { id: sessionId },
+          select: { status: true },
+        });
+        if (!dbSession || dbSession.status !== 'ACTIVE') {
+          console.log(`[AITutor] Auto-advance skipped — session ${sessionId} is no longer active`);
+          return;
+        }
 
         // Auto-advance to next phase
         await this.advancePhase(sessionId);
