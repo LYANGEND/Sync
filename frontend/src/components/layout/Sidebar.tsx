@@ -87,12 +87,29 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         md:translate-x-0
       `}>
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-blue-400" style={{ color: 'var(--primary-color)' }}>{settings.schoolName}</h1>
-            <p className="text-xs text-slate-400">School Management</p>
+        <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* School Logo — persisted from Settings */}
+            {settings.logoUrl ? (
+              <img
+                src={settings.logoUrl.startsWith('http') ? settings.logoUrl : settings.logoUrl}
+                alt="Logo"
+                className="w-10 h-10 rounded-lg object-contain bg-white/10 p-0.5 shrink-0"
+              />
+            ) : (
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0"
+                style={{ background: `linear-gradient(135deg, var(--primary-color), var(--accent-color, #f59e0b))` }}
+              >
+                {settings.schoolName?.charAt(0) || 'S'}
+              </div>
+            )}
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold truncate" style={{ color: 'var(--primary-color)' }}>{settings.schoolName}</h1>
+              <p className="text-[10px] text-slate-400 truncate">School Management</p>
+            </div>
           </div>
-          <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white">
+          <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white ml-2">
             <X size={24} />
           </button>
         </div>

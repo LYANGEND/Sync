@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
@@ -19,8 +19,13 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [publicSettings, setPublicSettings] = useState<{ schoolName?: string; logoUrl?: string }>({});
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    api.get('/settings/public').then(r => setPublicSettings(r.data)).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,10 +53,18 @@ const Login = () => {
 
         <div className="relative z-10">
           <div className="flex items-center space-x-3 mb-8">
-            <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
-              <GraduationCap size={28} className="text-white" />
-            </div>
-            <span className="text-2xl font-bold tracking-tight">Sync Portal</span>
+            {publicSettings.logoUrl ? (
+              <img
+                src={publicSettings.logoUrl.startsWith('http') ? publicSettings.logoUrl : publicSettings.logoUrl}
+                alt="School Logo"
+                className="w-12 h-12 rounded-lg object-contain bg-white/10 p-1"
+              />
+            ) : (
+              <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
+                <GraduationCap size={28} className="text-white" />
+              </div>
+            )}
+            <span className="text-2xl font-bold tracking-tight">{publicSettings.schoolName || 'Sync Portal'}</span>
           </div>
 
           <div className="space-y-6 max-w-lg">
@@ -98,10 +111,18 @@ const Login = () => {
           <div className="space-y-2">
             {/* Mobile Logo */}
             <div className="flex items-center space-x-2 md:hidden mb-6">
-              <div className="bg-blue-600 p-2 rounded-lg">
-                <GraduationCap size={24} className="text-white" />
-              </div>
-              <span className="text-xl font-bold tracking-tight text-blue-900 dark:text-white">Sync Portal</span>
+              {publicSettings.logoUrl ? (
+                <img
+                  src={publicSettings.logoUrl.startsWith('http') ? publicSettings.logoUrl : publicSettings.logoUrl}
+                  alt="Logo"
+                  className="w-10 h-10 rounded-lg object-contain"
+                />
+              ) : (
+                <div className="bg-blue-600 p-2 rounded-lg">
+                  <GraduationCap size={24} className="text-white" />
+                </div>
+              )}
+              <span className="text-xl font-bold tracking-tight text-blue-900 dark:text-white">{publicSettings.schoolName || 'Sync Portal'}</span>
             </div>
 
             <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome back</h2>

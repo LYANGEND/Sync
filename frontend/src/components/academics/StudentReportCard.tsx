@@ -63,8 +63,16 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                 {/* Header Section */}
                 <div className="relative z-10 border-b-2 border-slate-800 pb-6 mb-6">
                     <div className="flex justify-between items-center gap-6">
-                        <div className="w-24 h-24 flex items-center justify-center bg-slate-900 text-white rounded-full print:bg-slate-900 print:text-white shrink-0">
-                            <School size={48} />
+                        <div className="w-24 h-24 flex items-center justify-center bg-slate-900 text-white rounded-full print:bg-slate-900 print:text-white shrink-0 overflow-hidden">
+                            {report.school?.logoUrl ? (
+                                <img
+                                    src={report.school.logoUrl.startsWith('http') ? report.school.logoUrl : report.school.logoUrl}
+                                    alt="School Logo"
+                                    className="w-20 h-20 object-contain"
+                                />
+                            ) : (
+                                <School size={48} />
+                            )}
                         </div>
                         <div className="text-center flex-1">
                             <h1 className="text-3xl font-serif font-bold text-slate-900 uppercase tracking-widest mb-2">

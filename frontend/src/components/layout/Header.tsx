@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, Search, Check, X, BellRing, Trash2 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { subscribeToPushNotifications } from '../../utils/push';
 import { ThemeToggle, VoiceSearchButton } from '../mobile';
 import { hapticLight } from '../../utils/haptic';
@@ -17,6 +18,7 @@ interface Notification {
 
 const Header = () => {
   const { user } = useAuth();
+  const { settings: themeSettings } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -131,10 +133,18 @@ const Header = () => {
       <div className="h-16 px-4 flex items-center justify-between gap-4">
         {/* Mobile: Logo & Greeting */}
         <div className="md:hidden flex items-center gap-3 flex-1 min-w-0">
-          {/* Logo */}
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center text-white font-bold text-lg shadow-sm flex-shrink-0">
-            S
-          </div>
+          {/* School Logo */}
+          {themeSettings.logoUrl ? (
+            <img
+              src={themeSettings.logoUrl.startsWith('http') ? themeSettings.logoUrl : themeSettings.logoUrl}
+              alt="Logo"
+              className="w-9 h-9 rounded-xl object-contain bg-white/80 dark:bg-slate-800 p-0.5 shadow-sm flex-shrink-0"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center text-white font-bold text-lg shadow-sm flex-shrink-0">
+              {themeSettings.schoolName?.charAt(0) || 'S'}
+            </div>
+          )}
 
           {/* Greeting */}
           <div className="min-w-0">
