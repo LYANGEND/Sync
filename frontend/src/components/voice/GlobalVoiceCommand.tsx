@@ -232,117 +232,64 @@ const GlobalVoiceCommand = () => {
 
       {/* ============== FLOATING VOICE WIDGET (active) ============== */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-[100] w-[320px] animate-in slide-in-from-bottom-4 fade-in duration-300">
-          {/* Glass card */}
-          <div className="relative rounded-2xl bg-slate-900/90 backdrop-blur-xl border border-white/10 shadow-2xl shadow-purple-500/10 overflow-hidden">
+        <div className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-[100] pointer-events-none">
+          {/* Compact pill — pointer events only on the pill itself */}
+          <div className="pointer-events-auto flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-900/90 backdrop-blur-md border border-white/10 shadow-xl shadow-purple-500/10">
 
-            {/* Ambient glow behind card */}
-            <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
-              <div
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl opacity-20 transition-all duration-700"
-                style={{
-                  width: `${160 + voice.audioLevel * 120}px`,
-                  height: `${160 + voice.audioLevel * 120}px`,
-                  background: getGlowGradient(voice.voiceState),
-                }}
-              />
-            </div>
-
-            {/* Header row */}
-            <div className="relative z-10 flex items-center justify-between px-4 pt-3 pb-1">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${stateColor.dot} animate-pulse`} />
-                <span className="text-white/60 text-xs font-medium">Master AI Voice</span>
-              </div>
-              <button
-                onClick={openFullChat}
-                className="text-white/40 hover:text-white/70 transition-colors"
-                title="Open full chat"
-              >
-                <ExternalLink size={14} />
-              </button>
-            </div>
-
-            {/* Main body — orb + state */}
-            <div className="relative z-10 flex items-center gap-3 px-4 py-3">
-              {/* Mini orb — tappable to interrupt when speaking */}
-              <button
-                onClick={() => { if (voice.voiceState === 'speaking') voice.interruptAI(); }}
-                className="relative flex-shrink-0"
-                title={voice.voiceState === 'speaking' ? 'Tap to interrupt' : undefined}
-              >
-                {/* Pulse ring */}
-                {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
-                  <div
-                    className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
-                      voice.voiceState === 'listening' ? 'bg-red-400' : 'bg-purple-400'
-                    }`}
-                    style={{ animationDuration: '2s' }}
-                  />
-                )}
+            {/* Mini orb — tappable to interrupt when speaking */}
+            <button
+              onClick={() => { if (voice.voiceState === 'speaking') voice.interruptAI(); }}
+              className="relative flex-shrink-0"
+              title={voice.voiceState === 'speaking' ? 'Tap to interrupt' : undefined}
+            >
+              {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
                 <div
-                  className={`rounded-full flex items-center justify-center shadow-lg transition-all duration-500 ${getOrbClasses(voice.voiceState)}`}
-                  style={{ width: `${orbSize}px`, height: `${orbSize}px` }}
-                >
-                  {voice.voiceState === 'listening' && <Mic size={22} className="text-white drop-shadow" />}
-                  {voice.voiceState === 'speaking' && <Volume2 size={22} className="text-white drop-shadow animate-pulse" />}
-                  {voice.voiceState === 'processing' && <Loader2 size={22} className="text-white drop-shadow animate-spin" />}
-                  {voice.voiceState === 'ending' && <Check size={22} className="text-white drop-shadow" />}
-                  {voice.voiceState === 'idle' && <Mic size={22} className="text-white/60 drop-shadow" />}
-                </div>
-              </button>
-
-              {/* State text + transcript */}
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm font-semibold ${stateColor.text}`}>
-                  {getStateLabel(voice.voiceState)}
-                </p>
-                {voice.currentTranscript ? (
-                  <p className="text-xs text-white/50 mt-0.5 truncate italic">
-                    "{voice.currentTranscript}"
-                  </p>
-                ) : (
-                  <p className="text-xs text-white/30 mt-0.5">
-                    {getStateHint(voice.voiceState)}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* AI response preview */}
-            {lastResponse && voice.voiceState !== 'processing' && (
-              <div className="relative z-10 px-4 pb-2">
-                <p className="text-xs text-white/40 leading-relaxed line-clamp-2">
-                  {lastResponse.slice(0, 120)}{lastResponse.length > 120 ? '...' : ''}
-                </p>
-              </div>
-            )}
-
-            {/* Audio level bar */}
-            {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
-              <div className="relative z-10 px-4 pb-2">
-                <div className="h-1 rounded-full bg-white/5 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-150 ${stateColor.bar}`}
-                    style={{ width: `${Math.min(100, voice.audioLevel * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Footer — end button */}
-            <div className="relative z-10 px-4 pb-3 pt-1 flex items-center justify-between">
-              <p className="text-[10px] text-white/20">
-                Say "goodbye" to end
-              </p>
-              <button
-                onClick={stopGlobalVoice}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-full text-xs font-medium shadow-lg shadow-red-500/20 transition-all hover:scale-105 active:scale-95"
+                  className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
+                    voice.voiceState === 'listening' ? 'bg-red-400' : 'bg-purple-400'
+                  }`}
+                  style={{ animationDuration: '2s' }}
+                />
+              )}
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center shadow transition-all duration-500 ${getOrbClasses(voice.voiceState)}`}
               >
-                <PhoneOff size={12} />
-                End
-              </button>
+                {voice.voiceState === 'listening' && <Mic size={18} className="text-white" />}
+                {voice.voiceState === 'speaking' && <Volume2 size={18} className="text-white animate-pulse" />}
+                {voice.voiceState === 'processing' && <Loader2 size={18} className="text-white animate-spin" />}
+                {voice.voiceState === 'ending' && <Check size={18} className="text-white" />}
+                {voice.voiceState === 'idle' && <Mic size={18} className="text-white/60" />}
+              </div>
+            </button>
+
+            {/* State label — compact */}
+            <div className="min-w-0 max-w-[120px]">
+              <p className={`text-xs font-semibold truncate ${stateColor.text}`}>
+                {getStateLabel(voice.voiceState)}
+              </p>
+              {voice.currentTranscript ? (
+                <p className="text-[10px] text-white/40 truncate italic">
+                  "{voice.currentTranscript}"
+                </p>
+              ) : null}
             </div>
+
+            {/* Open full chat */}
+            <button
+              onClick={openFullChat}
+              className="p-1.5 text-white/30 hover:text-white/60 transition-colors"
+              title="Open full chat"
+            >
+              <ExternalLink size={12} />
+            </button>
+
+            {/* End button */}
+            <button
+              onClick={stopGlobalVoice}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-full text-[11px] font-medium shadow shadow-red-500/20 transition-all hover:scale-105 active:scale-95"
+            >
+              <PhoneOff size={11} />
+              End
+            </button>
           </div>
         </div>
       )}

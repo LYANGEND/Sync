@@ -21,6 +21,8 @@ import {
   generateHomework,
   generateSyllabus,
   getNextTopic,
+  ingestContent,
+  ingestionStatus,
 } from '../controllers/syllabusController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -29,6 +31,7 @@ const router = Router();
 router.use(authenticateToken);
 
 const teacherOrAdmin = authorizeRole(['SUPER_ADMIN', 'TEACHER']);
+const superAdminOnly = authorizeRole(['SUPER_ADMIN']);
 
 // Syllabus Overview (subject-level stats)
 router.get('/overview', getSyllabusOverview);
@@ -64,5 +67,9 @@ router.post('/generate-questions', teacherOrAdmin, generateQuestions);
 router.post('/generate-homework', teacherOrAdmin, generateHomework);
 router.post('/generate-syllabus', teacherOrAdmin, generateSyllabus);
 router.get('/next-topic', getNextTopic);
+
+// Content Ingestion (SUPER_ADMIN only)
+router.post('/ingest-content', superAdminOnly, ingestContent);
+router.get('/ingestion-status', superAdminOnly, ingestionStatus);
 
 export default router;

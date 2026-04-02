@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
 import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
+import { ingestAllPDFs, getIngestionStatus } from '../services/contentIngestionService';
 
 // ==========================================
 // VALIDATION SCHEMAS (DRY — reused across CRUD)
@@ -760,4 +761,29 @@ export const getNextTopic = handler(async (req, res) => {
       percentage: totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0,
     },
   });
+});
+
+// ==========================================
+// CONTENT INGESTION (SUPER_ADMIN only)
+// ==========================================
+
+/**
+ * POST /api/v1/syllabus/ingest-content
+ * Ingest all CDC PDFs into TeachingContent table.
+ * Body: { syllabi?: boolean, modules?: boolean }
+ */
+export const ingestContent = handler(async (req, res) => {
+  const { syllabi = true, modules = true } = req.body || {};
+  console.log(`[Syllabus] Content ingestion triggered by user ${(req as any).user?.id}`);
+  const summary = await ingestAllPDFs({ syllabi, modules });
+  res.json(summary);
+});
+
+/**
+ * GET /api/v1/syllabus/ingestion-status
+ * Check what content has been ingested.
+ */
+export const ingestionStatus = handler(async (req, res) => {
+  const status = await getIngestionStatus();
+  res.json(status);
 });

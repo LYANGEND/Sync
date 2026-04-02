@@ -769,37 +769,49 @@ const MasterAI = () => {
 
         {/* Input Area */}
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
-          {/* Full-screen voice conversation overlay */}
+          {/* Compact floating voice panel — keeps page visible */}
           {voiceMode && voice.isActive && (
-            <div className="fixed inset-0 z-50 bg-gradient-to-b from-slate-900 via-purple-950 to-slate-900 flex flex-col items-center justify-center">
-              {/* Ambient glow behind the orb */}
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="mb-3 relative rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-purple-500/10 overflow-hidden">
+              {/* Ambient glow inside card */}
+              <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
                 <div
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl opacity-30 transition-all duration-700"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl opacity-20 transition-all duration-700"
                   style={{
-                    width: `${200 + voice.audioLevel * 300}px`,
-                    height: `${200 + voice.audioLevel * 300}px`,
+                    width: `${160 + voice.audioLevel * 120}px`,
+                    height: `${160 + voice.audioLevel * 120}px`,
                     background: voice.voiceState === 'listening'
-                      ? 'radial-gradient(circle, rgba(239,68,68,0.5), transparent)'
+                      ? 'radial-gradient(circle, rgba(239,68,68,0.6), transparent)'
                       : voice.voiceState === 'speaking'
-                      ? 'radial-gradient(circle, rgba(147,51,234,0.5), transparent)'
+                      ? 'radial-gradient(circle, rgba(147,51,234,0.6), transparent)'
                       : voice.voiceState === 'processing'
-                      ? 'radial-gradient(circle, rgba(59,130,246,0.4), transparent)'
+                      ? 'radial-gradient(circle, rgba(59,130,246,0.5), transparent)'
                       : 'radial-gradient(circle, rgba(100,116,139,0.3), transparent)',
                   }}
                 />
               </div>
 
-              {/* Central orb */}
-              <div className="relative z-10 flex flex-col items-center gap-6">
-                <div
-                  className="relative rounded-full flex items-center justify-center transition-all duration-300"
-                  style={{
-                    width: `${100 + voice.audioLevel * 40}px`,
-                    height: `${100 + voice.audioLevel * 40}px`,
-                  }}
+              {/* Header row */}
+              <div className="relative z-10 flex items-center justify-between px-4 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${
+                    voice.voiceState === 'listening' ? 'bg-red-400' :
+                    voice.voiceState === 'speaking' ? 'bg-purple-400' :
+                    voice.voiceState === 'processing' ? 'bg-blue-400' :
+                    voice.voiceState === 'ending' ? 'bg-emerald-400' : 'bg-slate-400'
+                  }`} />
+                  <span className="text-white/60 text-xs font-medium">Voice Conversation</span>
+                </div>
+              </div>
+
+              {/* Main body — orb + state */}
+              <div className="relative z-10 flex items-center gap-4 px-4 py-3">
+                {/* Mini orb — tappable to interrupt when speaking */}
+                <button
+                  onClick={() => { if (voice.voiceState === 'speaking') voice.interruptAI(); }}
+                  className="relative flex-shrink-0"
+                  title={voice.voiceState === 'speaking' ? 'Tap to interrupt' : undefined}
                 >
-                  {/* Pulsing ring */}
+                  {/* Pulse ring */}
                   {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
                     <div
                       className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
@@ -808,9 +820,8 @@ const MasterAI = () => {
                       style={{ animationDuration: '2s' }}
                     />
                   )}
-                  {/* Inner orb */}
                   <div
-                    className={`w-full h-full rounded-full flex items-center justify-center shadow-2xl transition-colors duration-500 ${
+                    className={`rounded-full flex items-center justify-center shadow-lg transition-all duration-500 ${
                       voice.voiceState === 'listening'
                         ? 'bg-gradient-to-br from-red-500 to-red-600'
                         : voice.voiceState === 'speaking'
@@ -821,67 +832,73 @@ const MasterAI = () => {
                         ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
                         : 'bg-gradient-to-br from-slate-600 to-slate-700'
                     }`}
+                    style={{ width: `${48 + voice.audioLevel * 12}px`, height: `${48 + voice.audioLevel * 12}px` }}
                   >
-                    {voice.voiceState === 'listening' && <Mic size={44} className="text-white drop-shadow-lg" />}
-                    {voice.voiceState === 'speaking' && <Volume2 size={44} className="text-white drop-shadow-lg animate-pulse" />}
-                    {voice.voiceState === 'processing' && <Loader2 size={44} className="text-white drop-shadow-lg animate-spin" />}
-                    {voice.voiceState === 'ending' && <Check size={44} className="text-white drop-shadow-lg" />}
-                    {voice.voiceState === 'idle' && <Mic size={44} className="text-white/60 drop-shadow-lg" />}
+                    {voice.voiceState === 'listening' && <Mic size={22} className="text-white drop-shadow" />}
+                    {voice.voiceState === 'speaking' && <Volume2 size={22} className="text-white drop-shadow animate-pulse" />}
+                    {voice.voiceState === 'processing' && <Loader2 size={22} className="text-white drop-shadow animate-spin" />}
+                    {voice.voiceState === 'ending' && <Check size={22} className="text-white drop-shadow" />}
+                    {voice.voiceState === 'idle' && <Mic size={22} className="text-white/60 drop-shadow" />}
                   </div>
-                </div>
+                </button>
 
-                {/* State label */}
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-white">
+                {/* State text + transcript */}
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${
+                    voice.voiceState === 'listening' ? 'text-red-400' :
+                    voice.voiceState === 'speaking' ? 'text-purple-400' :
+                    voice.voiceState === 'processing' ? 'text-blue-400' :
+                    voice.voiceState === 'ending' ? 'text-emerald-400' : 'text-slate-400'
+                  }`}>
                     {voice.voiceState === 'listening' && 'Listening...'}
                     {voice.voiceState === 'speaking' && 'Speaking...'}
                     {voice.voiceState === 'processing' && 'Thinking...'}
                     {voice.voiceState === 'ending' && 'Goodbye!'}
                     {voice.voiceState === 'idle' && 'Ready'}
                   </p>
-                  <p className="text-sm text-white/50 mt-1 max-w-xs text-center">
-                    {voice.voiceState === 'listening' && 'Speak naturally — I\'ll know when you\'re done'}
-                    {voice.voiceState === 'speaking' && 'Tap the orb to interrupt me'}
-                    {voice.voiceState === 'processing' && 'Processing your request...'}
-                    {voice.voiceState === 'ending' && 'It was great talking to you!'}
-                    {voice.voiceState === 'idle' && 'Starting...'}
-                  </p>
-                </div>
-
-                {/* Transcript preview */}
-                {voice.currentTranscript && (
-                  <div className="mt-2 px-5 py-3 bg-white/10 backdrop-blur-sm rounded-2xl max-w-sm">
-                    <p className="text-white/80 text-sm italic text-center">
+                  {voice.currentTranscript ? (
+                    <p className="text-xs text-white/50 mt-0.5 truncate italic">
                       "{voice.currentTranscript}"
                     </p>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-xs text-white/30 mt-0.5">
+                      {voice.voiceState === 'listening' && 'Speak naturally — I\'ll know when you\'re done'}
+                      {voice.voiceState === 'speaking' && 'Tap orb to interrupt'}
+                      {voice.voiceState === 'processing' && 'Processing your request...'}
+                      {voice.voiceState === 'ending' && 'See you!'}
+                      {voice.voiceState === 'idle' && 'Starting...'}
+                    </p>
+                  )}
+                </div>
               </div>
 
-              {/* Interrupt button (tap orb area while speaking) */}
-              {voice.voiceState === 'speaking' && (
-                <button
-                  onClick={() => voice.interruptAI()}
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full z-20 opacity-0 cursor-pointer"
-                  title="Tap to interrupt"
-                />
+              {/* Audio level bar */}
+              {(voice.voiceState === 'listening' || voice.voiceState === 'speaking') && (
+                <div className="relative z-10 px-4 pb-2">
+                  <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-150 ${
+                        voice.voiceState === 'listening' ? 'bg-red-400' : 'bg-purple-400'
+                      }`}
+                      style={{ width: `${Math.min(100, voice.audioLevel * 100)}%` }}
+                    />
+                  </div>
+                </div>
               )}
 
-              {/* End call button */}
-              <div className="absolute bottom-12 z-10">
+              {/* Footer — end button */}
+              <div className="relative z-10 px-4 pb-3 pt-1 flex items-center justify-between">
+                <p className="text-[10px] text-white/20">
+                  Say "goodbye" to end
+                </p>
                 <button
                   onClick={toggleVoiceMode}
-                  className="flex items-center gap-3 px-8 py-4 bg-red-500/90 hover:bg-red-600 text-white rounded-full text-base font-medium shadow-xl shadow-red-500/30 transition-all hover:scale-105 active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-full text-xs font-medium shadow-lg shadow-red-500/20 transition-all hover:scale-105 active:scale-95"
                 >
-                  <PhoneOff size={22} />
-                  End Conversation
+                  <PhoneOff size={12} />
+                  End
                 </button>
               </div>
-
-              {/* Tip */}
-              <p className="absolute bottom-4 text-white/30 text-xs">
-                Say "goodbye" or "thank you" to end the conversation naturally
-              </p>
             </div>
           )}
 
