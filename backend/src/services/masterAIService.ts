@@ -1994,19 +1994,22 @@ RULES:
       }
     }
 
-    // Build accurate summary — skip the extra LLM call for simple cases
+    // Build accurate summary — skip the extra LLM call for voice mode to reduce latency
     let finalMessage = plan.message;
-    const successResults = results.filter(r => r.success);
-    const needsSummarizer = successResults.length > 0 && (
-      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
-    );
-    if (needsSummarizer) {
-      try {
-        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
-      } catch { /* fallback */ }
-    } else if (results.length > 0) {
-      // Simple case: just use the tool summaries directly
-      finalMessage = results.map(r => r.summary).join('. ') + '.';
+    if (results.length > 0) {
+      // For voice mode, prioritize speed over perfect summaries
+      // Use tool summaries directly instead of making another AI call
+      const successSummaries = results.filter(r => r.success).map(r => r.summary);
+      const failedSummaries = results.filter(r => !r.success).map(r => r.summary);
+      
+      if (successSummaries.length > 0) {
+        finalMessage = successSummaries.join('. ') + '.';
+        if (failedSummaries.length > 0) {
+          finalMessage += ' However, ' + failedSummaries.join('. ') + '.';
+        }
+      } else if (failedSummaries.length > 0) {
+        finalMessage = "I couldn't complete that. " + failedSummaries.join('. ') + '.';
+      }
     }
 
     // Log usage (non-critical)

@@ -249,7 +249,7 @@ class AIService {
         'api-key': config.apiKey,
         'Content-Type': 'application/json',
       },
-      timeout: 120000,
+      timeout: 30000, // Reduced from 120s to 30s for faster failure detection
     });
 
     return {
