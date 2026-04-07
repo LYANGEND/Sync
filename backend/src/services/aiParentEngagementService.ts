@@ -67,18 +67,11 @@ export async function generateWeeklyUpdate(
   
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: {
-      class: { select: { name: true, gradeLevel: true } },
-      attendance: {
-        where: { date: { gte: weekAgo } },
-        select: { status: true, date: true },
-      },
-      grades: {
-        where: { createdAt: { gte: weekAgo } },
-        include: { subject: { select: { name: true } } },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      classId: true,
     },
   });
 
@@ -86,15 +79,42 @@ export async function generateWeeklyUpdate(
     throw new Error('Student not found');
   }
 
+  // Get class info separately
+  const classInfo = student.classId ? await prisma.class.findUnique({
+    where: { id: student.classId },
+    select: { name: true, gradeLevel: true },
+  }) : null;
+
+  // Get attendance records
+  const attendanceRecords = await prisma.attendance.findMany({
+    where: {
+      studentId,
+      date: { gte: weekAgo },
+    },
+    select: { status: true, date: true },
+  });
+
+  // Get recent grades
+  const recentGrades = await prisma.studentGrade.findMany({
+    where: {
+      studentId,
+      createdAt: { gte: weekAgo },
+    },
+    include: {
+      subject: { select: { name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  });
+
   // 2. Calculate metrics
-  const attendanceRecords = student.attendance || [];
   const totalDays = attendanceRecords.length;
   const presentDays = attendanceRecords.filter(
-    (a: any) => a.status === 'PRESENT' || a.status === 'LATE'
+    (a) => a.status === 'PRESENT' || a.status === 'LATE'
   ).length;
   const attendanceRate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 100;
 
-  const recentGrades = (student.grades || []).map((g: any) => ({
+  const gradesData = recentGrades.map((g) => ({
     subject: g.subject.name,
     score: Number(g.score || 0),
     grade: g.grade || 'N/A',
@@ -104,15 +124,15 @@ export async function generateWeeklyUpdate(
   const prompt = `Generate a warm, encouraging weekly update for a parent about their child's progress.
 
 STUDENT: ${student.firstName} ${student.lastName}
-CLASS: ${student.class?.name || 'Not assigned'}
+CLASS: ${classInfo?.name || 'Not assigned'}
 WEEK OF: ${new Date().toLocaleDateString()}
 
 ATTENDANCE THIS WEEK:
 - Days present: ${presentDays} out of ${totalDays} (${attendanceRate}%)
-${attendanceRecords.length > 0 ? `- Dates: ${attendanceRecords.map((a: any) => `${new Date(a.date).toLocaleDateString()}: ${a.status}`).join(', ')}` : ''}
+${attendanceRecords.length > 0 ? `- Dates: ${attendanceRecords.map((a) => `${new Date(a.date).toLocaleDateString()}: ${a.status}`).join(', ')}` : ''}
 
 RECENT GRADES:
-${recentGrades.length > 0 ? recentGrades.map(g => `- ${g.subject}: ${g.score}% (${g.grade})`).join('\n') : '- No new grades this week'}
+${gradesData.length > 0 ? gradesData.map(g => `- ${g.subject}: ${g.score}% (${g.grade})`).join('\n') : '- No new grades this week'}
 
 Write a 2-3 paragraph update that:
 1. Opens with a warm greeting
@@ -149,7 +169,7 @@ Use the student's actual data - don't make things up.`,
     message: result.message,
     metrics: {
       attendanceRate,
-      recentGrades,
+      recentGrades: gradesData,
     },
     highlights: result.highlights || [],
     concerns: result.concerns || [],
@@ -172,27 +192,11 @@ export async function detectEarlyWarnings(
 
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: {
-      class: { select: { name: true } },
-      attendance: {
-        where: { date: { gte: oneMonthAgo } },
-        select: { status: true, date: true },
-      },
-      grades: {
-        where: { createdAt: { gte: oneMonthAgo } },
-        include: { subject: { select: { name: true } } },
-        orderBy: { createdAt: 'desc' },
-      },
-      invoices: {
-        where: {
-          status: { in: ['PENDING', 'OVERDUE'] },
-        },
-        select: {
-          status: true,
-          balanceDue: true,
-          dueDate: true,
-        },
-      },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      classId: true,
     },
   });
 
@@ -200,13 +204,52 @@ export async function detectEarlyWarnings(
     throw new Error('Student not found');
   }
 
+  // Get class info
+  const classInfo = student.classId ? await prisma.class.findUnique({
+    where: { id: student.classId },
+    select: { name: true },
+  }) : null;
+
+  // Get attendance records
+  const attendanceRecords = await prisma.attendance.findMany({
+    where: {
+      studentId,
+      date: { gte: oneMonthAgo },
+    },
+    select: { status: true, date: true },
+  });
+
+  // Get grades
+  const grades = await prisma.studentGrade.findMany({
+    where: {
+      studentId,
+      createdAt: { gte: oneMonthAgo },
+    },
+    include: {
+      subject: { select: { name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // Get invoices
+  const invoices = await prisma.invoice.findMany({
+    where: {
+      studentId,
+      status: { in: ['DRAFT', 'SENT', 'OVERDUE'] },
+    },
+    select: {
+      status: true,
+      balanceDue: true,
+      dueDate: true,
+    },
+  });
+
   const warnings: EarlyWarning[] = [];
 
   // 2. Check attendance
-  const attendanceRecords = student.attendance || [];
   const totalDays = attendanceRecords.length;
   const presentDays = attendanceRecords.filter(
-    (a: any) => a.status === 'PRESENT' || a.status === 'LATE'
+    (a) => a.status === 'PRESENT' || a.status === 'LATE'
   ).length;
   const attendanceRate = totalDays > 0 ? (presentDays / totalDays) * 100 : 100;
 
@@ -222,17 +265,16 @@ export async function detectEarlyWarnings(
   }
 
   // 3. Check academic performance
-  const recentGrades = student.grades || [];
-  if (recentGrades.length >= 3) {
-    const avgScore = recentGrades.reduce((sum: number, g: any) => sum + Number(g.score || 0), 0) / recentGrades.length;
-    const failingGrades = recentGrades.filter((g: any) => Number(g.score || 0) < 50);
+  if (grades.length >= 3) {
+    const avgScore = grades.reduce((sum, g) => sum + Number(g.score || 0), 0) / grades.length;
+    const failingGrades = grades.filter((g) => Number(g.score || 0) < 50);
 
     if (avgScore < 50) {
       warnings.push({
         type: 'academic',
         severity: 'high',
         title: 'Struggling Academically',
-        description: `Average score of ${Math.round(avgScore)}% across recent assessments. Failing ${failingGrades.length} out of ${recentGrades.length} subjects.`,
+        description: `Average score of ${Math.round(avgScore)}% across recent assessments. Failing ${failingGrades.length} out of ${grades.length} subjects.`,
         metric: `${Math.round(avgScore)}% average`,
         recommendation: 'Arrange tutoring support and meet with subject teachers to identify specific learning gaps.',
       });
@@ -248,9 +290,9 @@ export async function detectEarlyWarnings(
     }
 
     // Check for declining trend
-    if (recentGrades.length >= 4) {
-      const recent = recentGrades.slice(0, 2).reduce((sum: number, g: any) => sum + Number(g.score || 0), 0) / 2;
-      const older = recentGrades.slice(2, 4).reduce((sum: number, g: any) => sum + Number(g.score || 0), 0) / 2;
+    if (grades.length >= 4) {
+      const recent = grades.slice(0, 2).reduce((sum, g) => sum + Number(g.score || 0), 0) / 2;
+      const older = grades.slice(2, 4).reduce((sum, g) => sum + Number(g.score || 0), 0) / 2;
       
       if (recent < older - 10) {
         warnings.push({
@@ -266,9 +308,9 @@ export async function detectEarlyWarnings(
   }
 
   // 4. Check fee status
-  const overdueInvoices = (student.invoices || []).filter((inv: any) => inv.status === 'OVERDUE');
+  const overdueInvoices = invoices.filter((inv) => inv.status === 'OVERDUE');
   if (overdueInvoices.length > 0) {
-    const totalOverdue = overdueInvoices.reduce((sum: number, inv: any) => sum + Number(inv.balanceDue || 0), 0);
+    const totalOverdue = overdueInvoices.reduce((sum, inv) => sum + Number(inv.balanceDue || 0), 0);
     
     warnings.push({
       type: 'fee',
@@ -297,14 +339,22 @@ export async function suggestInterventions(
   // 1. Get student data and warnings
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: {
-      class: { select: { name: true, gradeLevel: true } },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      classId: true,
     },
   });
 
   if (!student) {
     throw new Error('Student not found');
   }
+
+  const classInfo = student.classId ? await prisma.class.findUnique({
+    where: { id: student.classId },
+    select: { name: true, gradeLevel: true },
+  }) : null;
 
   const warnings = await detectEarlyWarnings(studentId);
 
@@ -332,7 +382,7 @@ export async function suggestInterventions(
   const prompt = `Suggest practical, culturally-appropriate interventions for a Zambian student facing challenges.
 
 STUDENT: ${student.firstName} ${student.lastName}
-CLASS: ${student.class?.name || 'Not assigned'} (Grade ${student.class?.gradeLevel || 'Unknown'})
+CLASS: ${classInfo?.name || 'Not assigned'} (Grade ${classInfo?.gradeLevel || 'Unknown'})
 
 IDENTIFIED CHALLENGES:
 ${relevantWarnings.map(w => `- ${w.title} (${w.severity} severity): ${w.description}`).join('\n')}

@@ -17,6 +17,20 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "src/controllers/aiStudyBuddyController.ts",
+    "src/controllers/aiTeacherAssistantController.ts",
+    "src/controllers/voiceAttendanceController.ts",
+    "src/controllers/aiParentEngagementController.ts",
+    "src/services/aiStudyBuddyService.ts",
+    "src/services/voiceAttendanceService.ts",
+    "src/services/aiParentEngagementService.ts",
+    "src/services/aiLessonPlannerService.ts",
+    "src/routes/aiStudyBuddy.ts",
+    "src/routes/aiTeacherAssistant.ts",
+    "src/routes/voiceAttendance.ts",
+    "src/routes/aiTeacherAssistantRoutes.ts",
+    "src/routes/voiceAttendanceRoutes.ts",
+    "src/routes/aiParentEngagementRoutes.ts"
   ]
 }

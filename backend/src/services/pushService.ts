@@ -2,14 +2,21 @@ import webpush from 'web-push';
 import { prisma } from '../utils/prisma';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 
-const publicVapidKey = process.env.VAPID_PUBLIC_KEY!;
-const privateVapidKey = process.env.VAPID_PRIVATE_KEY!;
+const publicVapidKey = process.env.VAPID_PUBLIC_KEY || '';
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY || '';
 const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@example.com';
 
-if (!publicVapidKey || !privateVapidKey) {
-  console.warn('VAPID keys not found. Push notifications will not work.');
+const vapidConfigured = publicVapidKey.length > 10 && privateVapidKey.length > 10
+  && publicVapidKey !== 'not-set' && privateVapidKey !== 'not-set';
+
+if (!vapidConfigured) {
+  console.warn('VAPID keys not configured. Push notifications will not work.');
 } else {
-  webpush.setVapidDetails(vapidEmail, publicVapidKey, privateVapidKey);
+  try {
+    webpush.setVapidDetails(vapidEmail, publicVapidKey, privateVapidKey);
+  } catch (err) {
+    console.warn('VAPID key setup failed (invalid keys). Push notifications disabled:', err);
+  }
 }
 
 export const sendPushNotification = async (subscription: any, payload: any) => {

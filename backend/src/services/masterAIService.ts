@@ -1,9 +1,6 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
 import { Prisma } from '@prisma/client';
-import * as aiTeacherAssistant from './aiTeacherAssistantService';
-import * as aiParentEngagement from './aiParentEngagementService';
-import * as voiceAttendance from './voiceAttendanceService';
 
 // ==========================================
 // MASTER AI OPS SERVICE
@@ -1506,121 +1503,6 @@ Requirements:
       };
     },
   },
-
-  // ===================== TEACHER ASSISTANT AI =====================
-  {
-    name: 'generate_lesson_plan',
-    description: 'Generate a comprehensive lesson plan for a topic. Creates detailed teaching plans with objectives, activities, timing, and resources.',
-    parameters: [
-      { name: 'topicId', type: 'string', description: 'ID of the topic to create lesson plan for', required: true },
-      { name: 'duration', type: 'number', description: 'Lesson duration in minutes (e.g., 40, 60, 80)', required: true },
-      { name: 'classLevel', type: 'string', description: 'Class level (e.g., "Grade 8", "Form 2", "Primary")' },
-      { name: 'teachingStyle', type: 'string', description: 'Teaching approach', enum: ['lecture', 'interactive', 'hands-on', 'mixed'] },
-      { name: 'includeAssessment', type: 'boolean', description: 'Include assessment methods (default: true)' },
-    ],
-    execute: async (params) => {
-      const plan = await aiTeacherAssistant.generateLessonPlan({
-        topicId: params.topicId,
-        duration: Number(params.duration),
-        classLevel: params.classLevel,
-        teachingStyle: params.teachingStyle,
-        includeAssessment: params.includeAssessment,
-      });
-      return plan;
-    },
-  },
-
-  {
-    name: 'recommend_teaching_resources',
-    description: 'Get AI-recommended teaching resources for a topic (textbooks, videos, worksheets, experiments).',
-    parameters: [
-      { name: 'topicId', type: 'string', description: 'ID of the topic', required: true },
-      { name: 'teachingStyle', type: 'string', description: 'Preferred teaching style to match resources' },
-    ],
-    execute: async (params) => {
-      const resources = await aiTeacherAssistant.recommendResources(
-        params.topicId,
-        params.teachingStyle
-      );
-      return resources;
-    },
-  },
-
-  {
-    name: 'generate_assessment_questions',
-    description: 'Generate assessment questions for a topic. Creates multiple choice, short answer, essay, or true/false questions.',
-    parameters: [
-      { name: 'topicId', type: 'string', description: 'ID of the topic', required: true },
-      { name: 'questionCount', type: 'number', description: 'Number of questions to generate (e.g., 5, 10, 20)', required: true },
-      { name: 'difficulty', type: 'string', description: 'Question difficulty level', enum: ['easy', 'medium', 'hard', 'mixed'] },
-      { name: 'questionTypes', type: 'array', description: 'Types of questions to include (e.g., ["multiple_choice", "short_answer"])' },
-    ],
-    execute: async (params) => {
-      const questions = await aiTeacherAssistant.generateAssessment({
-        topicId: params.topicId,
-        questionCount: Number(params.questionCount),
-        difficulty: params.difficulty,
-        questionTypes: params.questionTypes,
-      });
-      return questions;
-    },
-  },
-
-  // ===================== PARENT ENGAGEMENT AI =====================
-  {
-    name: 'generate_parent_weekly_update',
-    description: 'Generate a personalized weekly progress update for a student to send to their parent/guardian.',
-    parameters: [
-      { name: 'studentId', type: 'string', description: 'ID of the student', required: true },
-    ],
-    execute: async (params) => {
-      const update = await aiParentEngagement.generateWeeklyUpdate(params.studentId);
-      return update;
-    },
-  },
-
-  {
-    name: 'detect_student_early_warnings',
-    description: 'Analyze student data to detect early warning signs (attendance issues, grade drops, behavior concerns).',
-    parameters: [
-      { name: 'studentId', type: 'string', description: 'ID of the student', required: true },
-    ],
-    execute: async (params) => {
-      const warnings = await aiParentEngagement.detectEarlyWarnings(params.studentId);
-      return warnings;
-    },
-  },
-
-  {
-    name: 'suggest_student_interventions',
-    description: 'Get AI-recommended interventions for a student based on their challenges.',
-    parameters: [
-      { name: 'studentId', type: 'string', description: 'ID of the student', required: true },
-      { name: 'issueType', type: 'string', description: 'Type of issue', enum: ['attendance', 'academic', 'behavior', 'general'] },
-    ],
-    execute: async (params) => {
-      const interventions = await aiParentEngagement.suggestInterventions(
-        params.studentId,
-        params.issueType
-      );
-      return interventions;
-    },
-  },
-
-  // ===================== VOICE ATTENDANCE =====================
-  {
-    name: 'get_attendance_summary',
-    description: 'Get attendance summary for a class on a specific date. Shows who is present, absent, late, or not yet marked.',
-    parameters: [
-      { name: 'classId', type: 'string', description: 'ID of the class', required: true },
-      { name: 'date', type: 'string', description: 'Date in YYYY-MM-DD format (defaults to today)' },
-    ],
-    execute: async (params) => {
-      const date = params.date ? new Date(params.date) : new Date();
-      const summary = await voiceAttendance.getAttendanceSummary(params.classId, date);
-      return summary;
-    },
-  },
 ];
 
 // ==========================
@@ -2112,22 +1994,19 @@ RULES:
       }
     }
 
-    // Build accurate summary — skip the extra LLM call for voice mode to reduce latency
+    // Build accurate summary — skip the extra LLM call for simple cases
     let finalMessage = plan.message;
-    if (results.length > 0) {
-      // For voice mode, prioritize speed over perfect summaries
-      // Use tool summaries directly instead of making another AI call
-      const successSummaries = results.filter(r => r.success).map(r => r.summary);
-      const failedSummaries = results.filter(r => !r.success).map(r => r.summary);
-      
-      if (successSummaries.length > 0) {
-        finalMessage = successSummaries.join('. ') + '.';
-        if (failedSummaries.length > 0) {
-          finalMessage += ' However, ' + failedSummaries.join('. ') + '.';
-        }
-      } else if (failedSummaries.length > 0) {
-        finalMessage = "I couldn't complete that. " + failedSummaries.join('. ') + '.';
-      }
+    const successResults = results.filter(r => r.success);
+    const needsSummarizer = successResults.length > 0 && (
+      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
+    );
+    if (needsSummarizer) {
+      try {
+        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+      } catch { /* fallback */ }
+    } else if (results.length > 0) {
+      // Simple case: just use the tool summaries directly
+      finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
     // Log usage (non-critical)
