@@ -52,6 +52,10 @@ import masterAIRoutes from './routes/masterAIRoutes';
 import aiIntelligenceRoutes from './routes/aiIntelligenceRoutes';
 // SMS Gateway Routes
 import smsRoutes from './routes/smsRoutes';
+// New AI Enhancement Features
+import aiTeacherAssistantRoutes from './routes/aiTeacherAssistantRoutes';
+import aiParentEngagementRoutes from './routes/aiParentEngagementRoutes';
+import voiceAttendanceRoutes from './routes/voiceAttendanceRoutes';
 // Middleware
 import { generalLimiter } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -141,6 +145,11 @@ app.use('/api/v1/master-ai', masterAIRoutes);
 
 // New AI Intelligence Features (grade forecast, fee defaulters, timetable, exam scheduling, parent letters)
 app.use('/api/v1/ai', aiIntelligenceRoutes);
+
+// New AI Enhancement Features (teacher assistant, parent engagement, voice attendance)
+app.use('/api/v1/ai-teacher-assistant', aiTeacherAssistantRoutes);
+app.use('/api/v1/ai-parent-engagement', aiParentEngagementRoutes);
+app.use('/api/v1/voice-attendance', voiceAttendanceRoutes);
 
 // SMS Gateway
 app.use('/api/v1/sms', smsRoutes);
