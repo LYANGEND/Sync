@@ -1,0 +1,112 @@
+=====================================
+SYNC - AZURE DEPLOYMENT FLOW
+=====================================
+Subscription: Microsoft Azure Sponsorship (58433e7f-268f-4d83-b286-bd805174eec2)
+Resource Group: sync-rg
+Region: Central US
+Version: v2.4.0
+Last deployed: April 7, 2026
+
+=====================================
+INFRASTRUCTURE
+=====================================
+ACR:        syncprodacr.azurecr.io
+Backend:    sync-prod-backend  (Container App, internal)
+Frontend:   sync-prod-frontend (Container App, external)
+Database:   sync-prod-db       (PostgreSQL Flexible, v16, B1ms)
+Logs:       sync-prod-logs     (Log Analytics)
+Env:        sync-prod-env      (Container Apps Environment)
+
+=====================================
+DATABASE CREDENTIALS
+=====================================
+Host:       sync-prod-db.postgres.database.azure.com
+User:       syncadmin
+Password:   Sync@Prod2026!
+Database:   sync_db
+Port:       5432
+SSL:        required
+Connection: postgresql://syncadmin:Sync@Prod2026!@sync-prod-db.postgres.database.azure.com:5432/sync_db?schema=public&sslmode=require
+
+=====================================
+LIVE URLS
+=====================================
+Frontend:   https://sync-prod-frontend.delightfulmeadow-6ceb8dcf.centralus.azurecontainerapps.io
+Backend:    sync-prod-backend.internal.delightfulmeadow-6ceb8dcf.centralus.azurecontainerapps.io
+
+=====================================
+DEPLOYMENT STEPS (Run from D:\livingilabs\Sync)
+=====================================
+
+--- Step 1: Switch to correct subscription ---
+az account set --subscription "58433e7f-268f-4d83-b286-bd805174eec2"
+
+--- Step 2: Login to ACR ---
+az acr login --name syncprodacr
+
+--- Step 3: Build images ---
+docker build -t syncprodacr.azurecr.io/sync-backend:vX.X.X -t syncprodacr.azurecr.io/sync-backend:latest ./backend
+docker build -t syncprodacr.azurecr.io/sync-frontend:vX.X.X -t syncprodacr.azurecr.io/sync-frontend:latest ./frontend
+
+--- Step 4: Push images ---
+docker push syncprodacr.azurecr.io/sync-backend:vX.X.X
+docker push syncprodacr.azurecr.io/sync-backend:latest
+docker push syncprodacr.azurecr.io/sync-frontend:vX.X.X
+docker push syncprodacr.azurecr.io/sync-frontend:latest
+
+--- Step 5: Add firewall rule for migrations ---
+# Get your public IP first
+$myIp = (Invoke-RestMethod -Uri "https://api.ipify.org")
+az postgres flexible-server firewall-rule create --resource-group sync-rg --name sync-prod-db --rule-name AllowDeployMachine --start-ip-address $myIp --end-ip-address $myIp
+
+--- Step 6: Run database migrations ---
+cd backend
+$env:DATABASE_URL = "postgresql://syncadmin:Sync%40Prod2026!@sync-prod-db.postgres.database.azure.com:5432/sync_db?schema=public&sslmode=require"
+npx prisma migrate deploy
+cd ..
+
+--- Step 7: Update container apps ---
+az containerapp update --name sync-prod-backend --resource-group sync-rg --image syncprodacr.azurecr.io/sync-backend:vX.X.X
+az containerapp update --name sync-prod-frontend --resource-group sync-rg --image syncprodacr.azurecr.io/sync-frontend:vX.X.X
+
+--- Step 8: Health check (wait ~20 seconds first) ---
+# Frontend
+Invoke-WebRequest -Uri "https://sync-prod-frontend.delightfulmeadow-6ceb8dcf.centralus.azurecontainerapps.io" -UseBasicParsing -TimeoutSec 15
+
+# Backend logs
+az containerapp logs show --name sync-prod-backend --resource-group sync-rg --tail 10
+
+--- Step 9: Clean up firewall rule ---
+az postgres flexible-server firewall-rule delete --resource-group sync-rg --name sync-prod-db --rule-name AllowDeployMachine --yes
+
+=====================================
+IF YOU NEED TO RESET DB PASSWORD
+=====================================
+az postgres flexible-server update --resource-group sync-rg --name sync-prod-db --admin-password "NewPassword123!"
+
+# Then update the container app secret too:
+$dbUrl = 'postgresql://syncadmin:NewPassword123!@sync-prod-db.postgres.database.azure.com:5432/sync_db?schema=public&sslmode=require'
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "database-url=$dbUrl"
+
+# Then restart the container:
+az containerapp update --name sync-prod-backend --resource-group sync-rg --image syncprodacr.azurecr.io/sync-backend:latest
+
+=====================================
+IF YOU NEED TO UPDATE OTHER SECRETS
+=====================================
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "jwt-secret=YOUR_VALUE"
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "gemini-api-key=YOUR_VALUE"
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "azure-openai-key=YOUR_VALUE"
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "vapid-public-key=YOUR_VALUE"
+az containerapp secret set --name sync-prod-backend --resource-group sync-rg --secrets "vapid-private-key=YOUR_VALUE"
+
+=====================================
+NOTES
+=====================================
+- Replace vX.X.X with your version number (current: v2.4.0)
+- The @ in the password must be URL-encoded as %40 in the DATABASE_URL env var
+- Backend is internal-only (not exposed to internet), frontend proxies /api to it
+- Backend runs on PORT=4000 inside the container
+- Frontend is nginx serving static files on port 80
+- VAPID keys are optional - push notifications are disabled if not set
+- 15 AI feature files are excluded from build (schema not aligned yet)

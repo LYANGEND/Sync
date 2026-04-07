@@ -203,7 +203,7 @@ const tools: ToolDefinition[] = [
   // ===================== CLASSES =====================
   {
     name: 'create_classes',
-    description: 'Create one or more classes/grades. Requires a teacherId and academicTermId. Use list_users to find teacher IDs and list_academic_terms to find term IDs first.',
+    description: 'Create one or more classes/grades. Requires a valid teacherId (TEACHER role user) and academicTermId. Use list_users to find teacher IDs (role: TEACHER) and list_academic_terms to find term IDs first. If not provided, will auto-assign to first available teacher and active term.',
     parameters: [
       { name: 'classes', type: 'array', description: 'Array of class objects: name, gradeLevel (number), teacherId (string), academicTermId (string)', required: true },
     ],
@@ -213,8 +213,21 @@ const tools: ToolDefinition[] = [
       let defaultTeacherId = params.classes?.[0]?.teacherId;
       let defaultTermId = params.classes?.[0]?.academicTermId;
       if (!defaultTeacherId) {
-        const admin = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN', isActive: true } });
-        defaultTeacherId = admin?.id;
+        // Look for an active teacher first, then fall back to any teacher
+        const teacher = await prisma.user.findFirst({ 
+          where: { role: 'TEACHER', isActive: true },
+          orderBy: { createdAt: 'asc' }
+        });
+        if (!teacher) {
+          // If no active teacher, try any teacher
+          const anyTeacher = await prisma.user.findFirst({ 
+            where: { role: 'TEACHER' },
+            orderBy: { createdAt: 'asc' }
+          });
+          defaultTeacherId = anyTeacher?.id;
+        } else {
+          defaultTeacherId = teacher.id;
+        }
       }
       if (!defaultTermId) {
         const term = await prisma.academicTerm.findFirst({ where: { isActive: true } });
@@ -225,6 +238,23 @@ const tools: ToolDefinition[] = [
           defaultTermId = term.id;
         }
       }
+      
+      // Validate that we have required IDs before attempting to create classes
+      if (!defaultTeacherId) {
+        return {
+          success: false,
+          message: '❌ No teacher found in the system. Please create at least one teacher user before creating classes.',
+          data: { created: [], existing: [], errors: ['No teacher available. Create a teacher user first using create_users with role: TEACHER'] }
+        };
+      }
+      if (!defaultTermId) {
+        return {
+          success: false,
+          message: '❌ No academic term found in the system. Please create at least one academic term before creating classes.',
+          data: { created: [], existing: [], errors: ['No academic term available. Create an academic term first using create_academic_terms'] }
+        };
+      }
+      
       const created = [];
       const existing = [];
       const errors: string[] = [];
