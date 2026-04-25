@@ -19,6 +19,19 @@ interface Assessment {
     date: string;
 }
 
+interface ClassOption {
+    id: string;
+    name: string;
+    gradeLevel?: number;
+    subjects?: Array<{ id: string; name: string; code?: string }>;
+}
+
+interface SubjectOption {
+    id: string;
+    name: string;
+    code?: string;
+}
+
 interface GradebookData {
     students: Student[];
     assessments: Assessment[];
@@ -26,8 +39,8 @@ interface GradebookData {
 }
 
 const TeacherGradebook = () => {
-    const [classes, setClasses] = useState<any[]>([]);
-    const [subjects, setSubjects] = useState<any[]>([]);
+    const [classes, setClasses] = useState<ClassOption[]>([]);
+    const [subjects, setSubjects] = useState<SubjectOption[]>([]);
     const [terms, setTerms] = useState<any[]>([]);
 
     const [selectedClassId, setSelectedClassId] = useState('');
@@ -37,6 +50,11 @@ const TeacherGradebook = () => {
     const [data, setData] = useState<GradebookData | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    const selectedClass = classes.find((item) => item.id === selectedClassId);
+    const availableSubjects = selectedClassId
+        ? (selectedClass?.subjects?.length ? selectedClass.subjects : subjects)
+        : subjects;
 
     // Local edits: { [assessmentId_studentId]: score }
     const [edits, setEdits] = useState<Record<string, number>>({});
@@ -50,6 +68,22 @@ const TeacherGradebook = () => {
             fetchGradebook();
         }
     }, [selectedClassId, selectedSubjectId, selectedTermId]);
+
+    useEffect(() => {
+        if (!selectedClassId) {
+            return;
+        }
+
+        if (availableSubjects.length === 0) {
+            setSelectedSubjectId('');
+            return;
+        }
+
+        const subjectStillValid = availableSubjects.some((subject) => subject.id === selectedSubjectId);
+        if (!subjectStillValid) {
+            setSelectedSubjectId(availableSubjects[0].id);
+        }
+    }, [selectedClassId, selectedSubjectId, availableSubjects]);
 
     const fetchInitialData = async () => {
         try {
@@ -65,7 +99,10 @@ const TeacherGradebook = () => {
             const activeTerm = termRes.data.find((t: any) => t.isActive);
             if (activeTerm) setSelectedTermId(activeTerm.id);
             if (classRes.data.length > 0) setSelectedClassId(classRes.data[0].id);
-            if (subjectRes.data.length > 0) setSelectedSubjectId(subjectRes.data[0].id);
+            const firstClass = classRes.data[0];
+            const firstClassSubjects = firstClass?.subjects || [];
+            if (firstClassSubjects.length > 0) setSelectedSubjectId(firstClassSubjects[0].id);
+            else if (subjectRes.data.length > 0) setSelectedSubjectId(subjectRes.data[0].id);
 
         } catch (error) {
             console.error('Initial data fetch error:', error);
@@ -196,7 +233,7 @@ const TeacherGradebook = () => {
                         onChange={(e) => setSelectedSubjectId(e.target.value)}
                         className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
                     >
-                        {subjects.map(s => (
+                        {availableSubjects.map(s => (
                             <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                         ))}
                     </select>

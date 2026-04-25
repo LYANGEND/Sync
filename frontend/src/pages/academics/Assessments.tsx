@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, FileText, Calendar, BookOpen, Users, ChevronRight, ArrowLeft, Save, Edit3, Trash2 } from 'lucide-react';
+import { Plus, FileText, Calendar, BookOpen, Users, ChevronRight, ArrowLeft, Save, Edit3, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import api from '../../utils/api';
 import QuestionBuilder from '../../components/academics/QuestionBuilder';
 import SubjectGradebook from '../../components/academics/SubjectGradebook';
 import { BarChart2, TrendingUp, Award, Calculator, Download, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface Assessment {
   id: string;
@@ -17,6 +18,19 @@ interface Assessment {
   subject: { id: string; name: string };
   _count?: { results: number };
   isOnline?: boolean;
+}
+
+interface ClassOption {
+  id: string;
+  name: string;
+  gradeLevel?: number;
+  subjects?: Array<{ id: string; name: string; code?: string }>;
+}
+
+interface SubjectOption {
+  id: string;
+  name: string;
+  code?: string;
 }
 
 interface Student {
@@ -37,11 +51,12 @@ interface AssessmentsProps {
 }
 
 const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) => {
+  const { confirm } = useAppDialog();
   const [view, setView] = useState<'list' | 'create' | 'grade' | 'questions' | 'gradebook'>('list');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(false);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
+  const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
   const [terms, setTerms] = useState<any[]>([]);
 
   // Filters
@@ -55,6 +70,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   const [savingGrades, setSavingGrades] = useState(false);
   const [selectedAssessments, setSelectedAssessments] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
 
   // New Assessment Form
   const [newAssessment, setNewAssessment] = useState({
@@ -69,6 +85,15 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
     description: ''
   });
 
+  const selectedClassOption = classes.find(c => c.id === selectedClass);
+  const selectedCreateClassOption = classes.find(c => c.id === newAssessment.classId);
+  const filteredListSubjects = selectedClass
+    ? (selectedClassOption?.subjects?.length ? selectedClassOption.subjects : subjects)
+    : subjects;
+  const filteredCreateSubjects = newAssessment.classId
+    ? (selectedCreateClassOption?.subjects?.length ? selectedCreateClassOption.subjects : subjects)
+    : subjects;
+
   useEffect(() => {
     fetchInitialData();
   }, []);
@@ -76,6 +101,30 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   useEffect(() => {
     fetchAssessments();
   }, [selectedClass, selectedSubject]);
+
+  useEffect(() => {
+    if (!selectedClass) return;
+    if (filteredListSubjects.length === 0) {
+      setSelectedSubject('');
+      return;
+    }
+    if (selectedSubject && filteredListSubjects.some(subject => subject.id === selectedSubject)) {
+      return;
+    }
+    setSelectedSubject(filteredListSubjects[0].id);
+  }, [selectedClass, selectedSubject, filteredListSubjects]);
+
+  useEffect(() => {
+    if (!newAssessment.classId) return;
+    if (filteredCreateSubjects.length === 0) {
+      setNewAssessment(prev => ({ ...prev, subjectId: '' }));
+      return;
+    }
+    if (newAssessment.subjectId && filteredCreateSubjects.some(subject => subject.id === newAssessment.subjectId)) {
+      return;
+    }
+    setNewAssessment(prev => ({ ...prev, subjectId: filteredCreateSubjects[0].id }));
+  }, [newAssessment.classId, newAssessment.subjectId, filteredCreateSubjects]);
 
   useEffect(() => {
     if (propSubjectId) {
@@ -94,6 +143,20 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       setClasses(classesRes.data);
       setSubjects(subjectsRes.data);
       setTerms(termsRes.data);
+
+      if (classesRes.data.length > 0) {
+        const firstClass = classesRes.data[0];
+        const firstClassSubjects = firstClass.subjects || [];
+        setSelectedClass(firstClass.id);
+        if (!propSubjectId) {
+          setSelectedSubject(firstClassSubjects[0]?.id || '');
+        }
+        setNewAssessment(prev => ({
+          ...prev,
+          classId: prev.classId || firstClass.id,
+          subjectId: prev.subjectId || firstClassSubjects[0]?.id || prev.subjectId,
+        }));
+      }
     } catch (error) {
       console.error('Error fetching initial data:', error);
     }
@@ -112,6 +175,39 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       console.error('Error fetching assessments:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAIGenerateAssessment = async () => {
+    if (!selectedClass && !newAssessment.classId) {
+      alert('Please select a class first.');
+      return;
+    }
+    if (!selectedSubject && !newAssessment.subjectId) {
+      alert('Please select a subject first.');
+      return;
+    }
+    setGeneratingAI(true);
+    try {
+      const classId = newAssessment.classId || selectedClass;
+      const subjectId = newAssessment.subjectId || selectedSubject || propSubjectId;
+      const activeTerm = terms.find((t: any) => t.isActive);
+      const termId = newAssessment.termId || activeTerm?.id;
+      
+      const res = await api.post('/master-ai/chat', {
+        message: `Generate a ${newAssessment.type || 'QUIZ'} assessment with questions for the class and subject I selected. Include 10 varied questions.`,
+        context: { classId, subjectId, termId, assessmentType: newAssessment.type || 'QUIZ' }
+      });
+      
+      // Refresh the list to show the AI-created assessment
+      fetchAssessments();
+      setView('list');
+      alert('AI assessment generated! Check your assessments list.');
+    } catch (error: any) {
+      console.error('AI assessment generation failed:', error);
+      alert(error?.response?.data?.error || 'AI generation failed. Try again.');
+    } finally {
+      setGeneratingAI(false);
     }
   };
 
@@ -316,7 +412,11 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedAssessments.size} assessments?`)) return;
+    if (!(await confirm({
+      title: 'Delete assessments?',
+      message: `Are you sure you want to delete ${selectedAssessments.size} assessments?`,
+      confirmText: 'Delete assessments',
+    }))) return;
 
     setDeleting(true);
     try {
@@ -411,7 +511,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
                   className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="">Select Subject</option>
-                  {subjects.map(s => (
+                  {filteredCreateSubjects.map(s => (
                     <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                   ))}
                 </select>
@@ -643,7 +743,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
               className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
             >
               <option value="">All Subjects</option>
-              {subjects.map(s => (
+              {filteredListSubjects.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
@@ -681,6 +781,16 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
             <span className="hidden sm:inline">New Assessment</span>
             <span className="sm:hidden">Create</span>
           </button>
+          {(selectedClass || selectedSubject || propSubjectId) && (
+            <button
+              onClick={handleAIGenerateAssessment}
+              disabled={generatingAI}
+              className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              {generatingAI ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              <span className="hidden sm:inline">{generatingAI ? 'Generating...' : 'AI Generate'}</span>
+            </button>
+          )}
         </div>
       </div>
 

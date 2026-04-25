@@ -16,7 +16,7 @@ const router = Router();
 
 router.use(authenticateToken);
 
-router.get('/statement/:studentId', getStudentStatement);
+router.get('/statement/:studentId', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'PARENT']), getStudentStatement);
 
 router.get('/templates', getFeeTemplates);
 router.post('/templates', authorizeRole(['SUPER_ADMIN', 'BURSAR']), createFeeTemplate);

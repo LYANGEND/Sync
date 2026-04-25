@@ -12,8 +12,7 @@ export default defineConfig({
       filename: 'sw.js',
       registerType: 'prompt',
       devOptions: {
-        enabled: true,
-        type: 'module',
+        enabled: false,
       },
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],

@@ -143,6 +143,8 @@ export const getQuizForStudent = async (req: Request, res: Response) => {
   }
 };
 
+import { TeachingHubService } from '../services/teachingHubService';
+
 export const submitQuiz = async (req: Request, res: Response) => {
   try {
     const { assessmentId } = req.params;
@@ -223,6 +225,11 @@ export const submitQuiz = async (req: Request, res: Response) => {
 
       return { submissionId: submission.id, score: totalScore };
     });
+
+    // Fire the Teaching Intelligence Engine in the background (non-blocking)
+    TeachingHubService.processAssessmentMastery(assessmentId).catch(err =>
+      console.error('[TeachingHub] Background processing error:', err)
+    );
 
     res.json(result);
 

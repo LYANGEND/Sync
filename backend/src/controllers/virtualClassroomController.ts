@@ -12,6 +12,7 @@ import {
 } from '../services/lessonPlanRuntimeService';
 import { emitClassroomUpdated } from '../services/classroomRealtimeService';
 import crypto from 'crypto';
+import { AcademicScopeError, ensureAcademicClassAccess, ensureTopicMatchesClassGrade } from '../utils/academicScope';
 
 // ==========================================
 // HELPERS
@@ -97,6 +98,53 @@ async function buildClassroomLessonRuntime(classroom: any, subjectName?: string 
   } : null);
 }
 
+async function ensureClassroomAccess(
+  req: AuthRequest,
+  classroomId: string,
+  options?: { requireManage?: boolean }
+) {
+  const classroom = await prisma.virtualClassroom.findUnique({
+    where: { id: classroomId },
+    select: {
+      id: true,
+      classId: true,
+      subjectId: true,
+      teacherId: true,
+      createdById: true,
+    },
+  });
+
+  if (!classroom) {
+    throw new AcademicScopeError(404, 'Classroom not found');
+  }
+
+  const user = req.user;
+  if (!user) {
+    throw new AcademicScopeError(401, 'Unauthorized');
+  }
+
+  if (user.role === 'SUPER_ADMIN') {
+    return classroom;
+  }
+
+  if (classroom.classId) {
+    await ensureAcademicClassAccess(req, classroom.classId, classroom.subjectId ? { subjectId: classroom.subjectId } : undefined);
+  } else if (user.role === 'TEACHER') {
+    const isOwner = classroom.teacherId === user.userId || classroom.createdById === user.userId;
+    if (!isOwner) {
+      throw new AcademicScopeError(403, 'You do not have access to this classroom');
+    }
+  } else {
+    throw new AcademicScopeError(403, 'You do not have access to this classroom');
+  }
+
+  if (options?.requireManage && user.role !== 'SUPER_ADMIN' && user.role !== 'TEACHER') {
+    throw new AcademicScopeError(403, 'You are not allowed to manage this classroom');
+  }
+
+  return classroom;
+}
+
 // ==========================================
 // VIRTUAL CLASSROOM CONTROLLER
 // ==========================================
@@ -132,6 +180,14 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
 
     if (!title || !scheduledStart || !scheduledEnd) {
       return res.status(400).json({ error: 'Title, scheduledStart, and scheduledEnd are required' });
+    }
+
+    if (classId) {
+      await ensureAcademicClassAccess(req, classId, subjectId ? { subjectId } : undefined);
+    }
+
+    if (classId && topicId) {
+      await ensureTopicMatchesClassGrade(topicId, classId);
     }
 
     // If topic is selected, build a consistent lesson plan from the runtime segments
@@ -178,6 +234,9 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
 
     res.status(201).json(classroom);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Create error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -197,6 +256,10 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
     if (status) where.status = status;
     if (classId) where.classId = classId;
 
+    if (classId && typeof classId === 'string') {
+      await ensureAcademicClassAccess(req, classId);
+    }
+
     // If upcoming, get only future scheduled classes
     if (upcoming === 'true') {
       where.scheduledStart = { gte: new Date() };
@@ -205,10 +268,30 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
 
     // Teachers only see their own classrooms unless admin
     if (role === 'TEACHER') {
+      const myClasses = await prisma.class.findMany({
+        where: { teacherId: userId },
+        select: { id: true },
+      });
+      const myTeacherSubjects = await prisma.teacherSubject.findMany({
+        where: { teacherId: userId },
+        select: { classId: true },
+      });
+      const accessibleClassIds = [...new Set([
+        ...myClasses.map((item) => item.id),
+        ...myTeacherSubjects.map((item) => item.classId),
+      ])];
+
       where.OR = [
         { createdById: userId },
         { teacherId: userId },
+        ...(accessibleClassIds.length > 0 ? [{ classId: { in: accessibleClassIds } }] : []),
       ];
+    } else if (role === 'STUDENT') {
+      const student = await prisma.student.findFirst({ where: { userId }, select: { classId: true } });
+      where.classId = student?.classId || '__NO_CLASS__';
+    } else if (role === 'PARENT') {
+      const childClasses = await prisma.student.findMany({ where: { parentId: userId }, select: { classId: true } });
+      where.classId = { in: [...new Set(childClasses.map((item) => item.classId))] };
     }
 
     const classrooms = await prisma.virtualClassroom.findMany({
@@ -265,6 +348,9 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
 
     res.json(enriched);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] List error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -276,6 +362,7 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
 export const getClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    await ensureClassroomAccess(req, id);
 
     const classroom = await prisma.virtualClassroom.findUnique({
       where: { id },
@@ -338,6 +425,9 @@ export const getClassroom = async (req: AuthRequest, res: Response) => {
 
     res.json({ ...classroom, className, subjectName, teacherName, lessonRuntime });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Get error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -350,6 +440,7 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    const existingClassroom = await ensureClassroomAccess(req, id, { requireManage: true });
 
     // Don't allow updating certain fields
     delete updates.id;
@@ -360,6 +451,17 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
     if (updates.scheduledStart) updates.scheduledStart = new Date(updates.scheduledStart);
     if (updates.scheduledEnd) updates.scheduledEnd = new Date(updates.scheduledEnd);
 
+    const targetClassId = updates.classId ?? existingClassroom.classId;
+    const targetSubjectId = updates.subjectId ?? existingClassroom.subjectId;
+
+    if (targetClassId) {
+      await ensureAcademicClassAccess(req, targetClassId, targetSubjectId ? { subjectId: targetSubjectId } : undefined);
+    }
+
+    if (targetClassId && (updates.topicId || req.body.topicId)) {
+      await ensureTopicMatchesClassGrade(updates.topicId || req.body.topicId, targetClassId);
+    }
+
     const classroom = await prisma.virtualClassroom.update({
       where: { id },
       data: updates,
@@ -367,6 +469,9 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
 
     res.json(classroom);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Update error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -379,9 +484,14 @@ export const deleteClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
+    await ensureClassroomAccess(req, id, { requireManage: true });
+
     await prisma.virtualClassroom.delete({ where: { id } });
     res.json({ message: 'Classroom deleted' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Delete error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -393,6 +503,7 @@ export const deleteClassroom = async (req: AuthRequest, res: Response) => {
 export const startClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    await ensureClassroomAccess(req, id, { requireManage: true });
 
     const classroom = await prisma.virtualClassroom.update({
       where: { id },
@@ -429,6 +540,9 @@ export const startClassroom = async (req: AuthRequest, res: Response) => {
     emitClassroomUpdated(id, { reason: 'class_started' });
     res.json(classroom);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Start error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -440,6 +554,7 @@ export const startClassroom = async (req: AuthRequest, res: Response) => {
 export const endClassroom = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    await ensureClassroomAccess(req, id, { requireManage: true });
 
     const activeSessions = await prisma.aITutorSession.findMany({
       where: { classroomId: id, status: 'ACTIVE' },
@@ -466,6 +581,9 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
       attendanceSync,
     });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] End error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -482,6 +600,8 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { mode } = req.body; // 'LEAD_TEACHER' or 'CO_TEACHER'
+
+    await ensureClassroomAccess(req, id, { requireManage: true });
 
     const result = await aiTutorService.startSession(id, { mode: mode || 'CO_TEACHER' });
 
@@ -505,6 +625,9 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
     });
     emitClassroomUpdated(id, { reason: 'ai_tutor_started' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Start error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -518,6 +641,8 @@ export const stopAITutor = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { sessionId } = req.body;
 
+    await ensureClassroomAccess(req, id, { requireManage: true });
+
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
     }
@@ -526,6 +651,9 @@ export const stopAITutor = async (req: AuthRequest, res: Response) => {
     emitClassroomUpdated(id, { reason: 'ai_tutor_stopped' });
     res.json(result);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Stop error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -538,6 +666,8 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { sessionId, studentName, message } = req.body;
+
+    await ensureClassroomAccess(req, id);
 
     if (!sessionId || !message) {
       return res.status(400).json({ error: 'sessionId and message are required' });
@@ -565,6 +695,9 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
     });
     emitClassroomUpdated(id, { reason: 'ai_tutor_chat' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Chat error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -576,6 +709,8 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
 export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.body;
+
+    await ensureClassroomAccess(req, req.params.id, { requireManage: true });
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
@@ -598,6 +733,9 @@ export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_phase_advanced' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Advance phase error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -609,6 +747,8 @@ export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
 export const tutorSpeak = async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId, text } = req.body;
+
+    await ensureClassroomAccess(req, req.params.id, { requireManage: true });
 
     if (!sessionId || !text) {
       return res.status(400).json({ error: 'sessionId and text are required' });
@@ -630,6 +770,9 @@ export const tutorSpeak = async (req: AuthRequest, res: Response) => {
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_speak' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Speak error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -641,6 +784,8 @@ export const tutorSpeak = async (req: AuthRequest, res: Response) => {
 export const tutorQuiz = async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId, topic } = req.body;
+
+    await ensureClassroomAccess(req, req.params.id, { requireManage: true });
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
@@ -663,6 +808,9 @@ export const tutorQuiz = async (req: AuthRequest, res: Response) => {
     });
     emitClassroomUpdated(req.params.id, { reason: 'ai_tutor_quiz' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Quiz error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -674,6 +822,8 @@ export const tutorQuiz = async (req: AuthRequest, res: Response) => {
 export const getTutorStatus = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+
+    await ensureClassroomAccess(req, id);
 
     // Get the active session for this classroom
     const session = await prisma.aITutorSession.findFirst({
@@ -690,6 +840,9 @@ export const getTutorStatus = async (req: AuthRequest, res: Response) => {
     const state = await aiTutorService.getSessionState(session.id);
     res.json({ active: true, ...state });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[AITutor] Status error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -702,6 +855,7 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { action, displayName, userId, studentId, role } = req.body;
+    await ensureClassroomAccess(req, id);
     const resolvedRole = role
       || (req.user?.role === 'STUDENT'
         ? 'STUDENT'
@@ -746,6 +900,9 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
 
     res.status(400).json({ error: 'Invalid action. Use "join" or "leave"' });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Participant error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -759,6 +916,8 @@ export const getChatHistory = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { limit = '100' } = req.query;
 
+    await ensureClassroomAccess(req, id);
+
     const messages = await prisma.classroomChat.findMany({
       where: { classroomId: id },
       orderBy: { createdAt: 'asc' },
@@ -767,6 +926,9 @@ export const getChatHistory = async (req: AuthRequest, res: Response) => {
 
     res.json(messages);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Chat history error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -816,6 +978,8 @@ export const getSessionTranscript = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { sessionId } = req.query;
 
+    await ensureClassroomAccess(req, id);
+
     let session;
     if (sessionId) {
       session = await prisma.aITutorSession.findUnique({
@@ -845,6 +1009,9 @@ export const getSessionTranscript = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('[VirtualClassroom] Transcript error:', error);
     res.status(500).json({ error: error.message });
   }

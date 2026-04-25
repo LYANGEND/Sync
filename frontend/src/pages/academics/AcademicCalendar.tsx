@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, Edit3, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -31,6 +32,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const AcademicCalendar: React.FC = () => {
+  const { confirm } = useAppDialog();
   const { user } = useAuth();
   const isAdmin = user?.role === 'SUPER_ADMIN';
   const [events, setEvents] = useState<AcademicEvent[]>([]);
@@ -154,7 +156,11 @@ const AcademicCalendar: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this event?')) return;
+    if (!(await confirm({
+      title: 'Delete event?',
+      message: 'Delete this event?',
+      confirmText: 'Delete event',
+    }))) return;
     try {
       await api.delete(`/academic-calendar/${id}`);
       toast.success('Event deleted');

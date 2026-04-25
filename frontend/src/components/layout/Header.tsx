@@ -17,7 +17,7 @@ interface Notification {
 }
 
 const Header = () => {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { settings: themeSettings } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -28,10 +28,16 @@ const Header = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (isLoading || !isAuthenticated) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, isLoading]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -51,11 +57,19 @@ const Header = () => {
   }, [showSearch]);
 
   const fetchNotifications = async () => {
+    if (!isAuthenticated) return;
+
     try {
       const response = await api.get('/communication/notifications');
       setNotifications(response.data);
       setUnreadCount(response.data.filter((n: Notification) => !n.isRead).length);
-    } catch (error) {
+    } catch (error: any) {
+      const status = error.response?.status;
+      if (status === 401 || status === 403) {
+        setNotifications([]);
+        setUnreadCount(0);
+        return;
+      }
       console.error('Failed to fetch notifications', error);
     }
   };

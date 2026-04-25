@@ -4,6 +4,7 @@ import { studentRiskService } from '../services/studentRiskService';
 import { attendanceIntelligenceService } from '../services/attendanceIntelligenceService';
 import { smartFeeService } from '../services/smartFeeService';
 import { autoGradingService } from '../services/autoGradingService';
+import { AcademicScopeError, ensureStudentRecordAccess } from '../utils/academicScope';
 
 // ==========================================
 // Student Risk Engine
@@ -40,6 +41,8 @@ export const assessStudentRisk = async (req: AuthRequest, res: Response) => {
 
     if (!termId) return res.status(400).json({ error: 'termId is required' });
 
+    await ensureStudentRecordAccess(req, studentId);
+
     const assessment = await studentRiskService.assessStudent(
       studentId,
       termId as string
@@ -47,6 +50,9 @@ export const assessStudentRisk = async (req: AuthRequest, res: Response) => {
 
     res.json(assessment);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: error.message || 'Failed to assess student risk' });
   }
 };
@@ -73,6 +79,8 @@ export const getAIRecommendations = async (req: AuthRequest, res: Response) => {
     const { termId } = req.query;
     if (!termId) return res.status(400).json({ error: 'termId is required' });
 
+    await ensureStudentRecordAccess(req, studentId);
+
     const recommendations = await studentRiskService.getAIRecommendations(
       studentId,
       termId as string
@@ -80,6 +88,9 @@ export const getAIRecommendations = async (req: AuthRequest, res: Response) => {
 
     res.json({ recommendations });
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: error.message || 'Failed to get recommendations' });
   }
 };

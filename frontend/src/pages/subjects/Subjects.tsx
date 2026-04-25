@@ -3,7 +3,7 @@ import {
   BookOpen, Plus, Trash2, Edit2, Save, X, Search, Upload,
   ChevronRight, ChevronDown, Layers, ListTree, GraduationCap,
   ArrowLeft, Target, Clock, Loader2, AlertCircle, FileText,
-  Printer, BarChart3, ClipboardList, PenLine,
+  Printer, BarChart3, ClipboardList, PenLine, Sparkles,
 } from 'lucide-react';
 import api from '../../utils/api';
 import syllabusService, {
@@ -14,6 +14,7 @@ import LessonPlanner from '../academics/LessonPlanner';
 import Assessments from '../academics/Assessments';
 import HomeworkManagement from '../academics/HomeworkManagement';
 import toast from 'react-hot-toast';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 /* =========================================
    HELPERS
@@ -57,6 +58,7 @@ function subjectIcon(name: string): string {
    ========================================= */
 
 const Subjects = () => {
+  const { confirm } = useAppDialog();
   /* ---- Shared state ---- */
   const [overview, setOverview] = useState<SubjectSyllabusOverview[]>([]);
   const [loadingOverview, setLoadingOverview] = useState(true);
@@ -103,6 +105,7 @@ const Subjects = () => {
   const [editSubDuration, setEditSubDuration] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
 
   /* ========================================
      DATA FETCHING
@@ -192,7 +195,11 @@ const Subjects = () => {
 
   const handleDeleteSubject = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Delete "${name}" and all its topics/subtopics?`)) return;
+    if (!(await confirm({
+      title: 'Delete subject?',
+      message: `Delete "${name}" and all its topics/subtopics?`,
+      confirmText: 'Delete subject',
+    }))) return;
     try {
       await api.delete(`/subjects/${id}`);
       toast.success('Subject deleted');
@@ -247,6 +254,31 @@ const Subjects = () => {
   };
 
   /* ========================================
+     AI SYLLABUS GENERATION
+     ======================================== */
+
+  const handleAIGenerate = async () => {
+    if (!selectedSubject || selectedGrade === null) return;
+    if (topics.length > 0 && !(await confirm({
+      title: 'Generate AI topics?',
+      message: `This will add AI-generated topics to ${gradeLabel(selectedGrade)}. Existing topics won't be deleted. Continue?`,
+      confirmText: 'Generate topics',
+    }))) return;
+    setGeneratingAI(true);
+    try {
+      const res = await syllabusService.generateSyllabus({ subjectId: selectedSubject.id, gradeLevel: selectedGrade });
+      toast.success(`AI generated ${res.data.topics?.length || 0} topics for ${selectedSubject.name} ${gradeLabel(selectedGrade)}`);
+      fetchTopics();
+      fetchOverview();
+    } catch (err: any) {
+      console.error('AI generation failed:', err);
+      toast.error(err?.response?.data?.error || 'AI generation failed. Try again.');
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
+
+  /* ========================================
      TOPIC / SUBTOPIC CRUD
      ======================================== */
 
@@ -295,7 +327,11 @@ const Subjects = () => {
   };
 
   const handleDeleteTopic = async (id: string) => {
-    if (!confirm('Delete this topic and all its subtopics?')) return;
+    if (!(await confirm({
+      title: 'Delete topic?',
+      message: 'Delete this topic and all its subtopics?',
+      confirmText: 'Delete topic',
+    }))) return;
     try {
       await syllabusService.deleteTopic(id);
       fetchTopics();
@@ -355,7 +391,11 @@ const Subjects = () => {
   };
 
   const handleDeleteSubTopic = async (id: string) => {
-    if (!confirm('Delete this subtopic?')) return;
+    if (!(await confirm({
+      title: 'Delete subtopic?',
+      message: 'Delete this subtopic?',
+      confirmText: 'Delete subtopic',
+    }))) return;
     try {
       await syllabusService.deleteSubTopic(id);
       fetchTopics();
@@ -453,6 +493,14 @@ const Subjects = () => {
 
           {activeView === 'topics' && (
             <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={handleAIGenerate}
+                disabled={generatingAI || selectedGrade === null}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 transition shadow-sm"
+              >
+                {generatingAI ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {generatingAI ? 'Generating...' : 'AI Generate Syllabus'}
+              </button>
               <button onClick={expandAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition">Expand All</button>
               <button onClick={collapseAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition">Collapse All</button>
             </div>
@@ -523,7 +571,18 @@ const Subjects = () => {
               <div className="text-center py-12">
                 <AlertCircle size={40} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
                 <p className="text-gray-500 dark:text-gray-400 text-sm">No topics defined for {selectedGrade !== null ? gradeLabel(selectedGrade) : 'this grade'} yet.</p>
-                <button onClick={() => setAddingTopic(true)} className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium">+ Add the first topic</button>
+                <div className="flex items-center gap-3 mt-3 justify-center">
+                  <button onClick={() => setAddingTopic(true)} className="text-sm text-blue-600 hover:text-blue-700 font-medium">+ Add the first topic</button>
+                  <span className="text-gray-300">or</span>
+                  <button
+                    onClick={handleAIGenerate}
+                    disabled={generatingAI}
+                    className="flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 transition"
+                  >
+                    {generatingAI ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {generatingAI ? 'Generating...' : 'AI Generate Syllabus'}
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">

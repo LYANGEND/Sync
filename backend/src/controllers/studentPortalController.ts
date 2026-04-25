@@ -1,21 +1,12 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentRecordAccess } from '../utils/academicScope';
 // Get comprehensive academic dashboard for a student
 export const getStudentAcademicDashboard = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
-    const userId = (req as any).user?.userId;
-    const userRole = (req as any).user?.role;
-
-    // Authorization: parents can only see their children's data
-    if (userRole === 'PARENT') {
-      const student = await prisma.student.findFirst({
-        where: { id: studentId, parentId: userId }
-      });
-      if (!student) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-    }
+    await ensureStudentRecordAccess(req as AuthRequest, studentId);
 
     // Get student info
     const student = await prisma.student.findUnique({
@@ -146,6 +137,9 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
       totalStudents,
     });
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get student academic dashboard error:', error);
     res.status(500).json({ error: 'Failed to fetch academic dashboard' });
   }
@@ -155,18 +149,7 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
 export const getGradeTrends = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
-    const userId = (req as any).user?.userId;
-    const userRole = (req as any).user?.role;
-
-    // Authorization check
-    if (userRole === 'PARENT') {
-      const student = await prisma.student.findFirst({
-        where: { id: studentId, parentId: userId }
-      });
-      if (!student) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-    }
+    await ensureStudentRecordAccess(req as AuthRequest, studentId);
 
     const results = await prisma.termResult.findMany({
       where: { studentId },
@@ -198,6 +181,9 @@ export const getGradeTrends = async (req: Request, res: Response) => {
       subjects: [...new Set(results.map(r => r.subject.name))],
     });
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get grade trends error:', error);
     res.status(500).json({ error: 'Failed to fetch grade trends' });
   }
@@ -212,6 +198,8 @@ export const getClassAnalytics = async (req: Request, res: Response) => {
     if (!termId) {
       return res.status(400).json({ error: 'Term ID is required' });
     }
+
+    await ensureAcademicClassAccess(req as AuthRequest, classId);
 
     // Get all term results for this class and term
     const results = await prisma.termResult.findMany({
@@ -280,6 +268,9 @@ export const getClassAnalytics = async (req: Request, res: Response) => {
       totalStudents: studentRankings.length,
     });
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get class analytics error:', error);
     res.status(500).json({ error: 'Failed to fetch class analytics' });
   }

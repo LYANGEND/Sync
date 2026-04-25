@@ -3,6 +3,9 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { sendEmail } from '../services/emailService';
+import { syncStudentClassFees } from '../services/classFeeAssignmentService';
+import { AcademicScopeError, ensureStudentRecordAccess } from '../utils/academicScope';
+import { AuthRequest } from '../middleware/authMiddleware';
 
 const baseStudentSchema = z.object({
   firstName: z.string().min(2),
@@ -303,6 +306,8 @@ export const createStudent = async (req: Request, res: Response) => {
       },
     });
 
+    await syncStudentClassFees(student.id);
+
     res.status(201).json(student);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -444,6 +449,15 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
       skipDuplicates: true,
     });
 
+    const createdStudents = await prisma.student.findMany({
+      where: {
+        admissionNumber: { in: dataToCreate.map(student => student.admissionNumber) },
+      },
+      select: { id: true },
+    });
+
+    await Promise.all(createdStudents.map(student => syncStudentClassFees(student.id)));
+
     res.status(201).json({
       message: `Successfully imported ${result.count} students`,
       count: result.count,
@@ -482,6 +496,10 @@ export const bulkDeleteStudents = async (req: Request, res: Response) => {
 export const getStudentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const authReq = req as AuthRequest;
+
+    await ensureStudentRecordAccess(authReq, id);
+
     const student = await prisma.student.findUnique({
       where: { id },
       include: {
@@ -506,8 +524,21 @@ export const getStudentById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Student not found' });
     }
 
+    if (authReq.user?.role === 'TEACHER') {
+      return res.json({
+        ...student,
+        scholarshipId: null,
+        scholarship: null,
+        payments: [],
+        feeStructures: [],
+      });
+    }
+
     res.json(student);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to fetch student' });
   }
 };
@@ -548,6 +579,10 @@ export const updateStudent = async (req: Request, res: Response) => {
       where: { id },
       data,
     });
+
+    if (data.classId) {
+      await syncStudentClassFees(student.id);
+    }
 
     res.json(student);
   } catch (error) {

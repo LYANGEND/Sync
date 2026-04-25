@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Circle, Clock, FileText, Plus, Calendar } from 'lucide-react';
+import { CheckCircle, Circle, Clock, FileText, Plus, Calendar, Sparkles, Loader2, Lightbulb } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import api from '../../utils/api';
 
 interface Topic {
@@ -116,6 +117,43 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
     }
   };
 
+  /* ========================================
+     AI FEATURES
+     ======================================== */
+  const [suggestingNext, setSuggestingNext] = useState(false);
+  const [nextTopicSuggestion, setNextTopicSuggestion] = useState<{ topicTitle: string; reason: string } | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState<string | null>(null);
+
+  const handleSuggestNext = async () => {
+    setSuggestingNext(true);
+    setNextTopicSuggestion(null);
+    try {
+      const res = await api.get('/syllabus/next-topic', { params: { classId, subjectId } });
+      setNextTopicSuggestion(res.data);
+    } catch (error) {
+      console.error('Error suggesting next topic:', error);
+      alert('Could not suggest next topic. Make sure topics are defined.');
+    } finally {
+      setSuggestingNext(false);
+    }
+  };
+
+  const handleAIGeneratePlan = async (topicId: string) => {
+    setGeneratingPlan(topicId);
+    try {
+      const res = await api.post('/syllabus/generate-lesson-plan', { topicId, subjectId });
+      // The generated plan should be saved by the backend, just refresh
+      fetchPlans();
+      setActiveTab('plans');
+      alert(`AI lesson plan generated: "${res.data.title || 'New Plan'}"`);
+    } catch (error) {
+      console.error('Error generating AI plan:', error);
+      alert('AI plan generation failed. Try again.');
+    } finally {
+      setGeneratingPlan(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <div className="border-b border-gray-200 flex">
@@ -144,6 +182,29 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
       <div className="p-6">
         {activeTab === 'progress' ? (
           <div className="space-y-4">
+            {/* AI Suggest Next Topic */}
+            <div className="flex justify-end">
+              <button
+                onClick={handleSuggestNext}
+                disabled={suggestingNext}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 transition shadow-sm"
+              >
+                {suggestingNext ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
+                {suggestingNext ? 'Thinking...' : 'AI Suggest Next Topic'}
+              </button>
+            </div>
+
+            {/* AI Suggestion banner */}
+            {nextTopicSuggestion && (
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-start gap-2">
+                <Sparkles size={16} className="text-purple-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-purple-900">Suggested next: {nextTopicSuggestion.topicTitle}</p>
+                  <p className="text-xs text-purple-600 mt-0.5">{nextTopicSuggestion.reason}</p>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="text-center text-gray-500">Loading progress...</div>
             ) : topics.length === 0 ? (
@@ -158,6 +219,14 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleAIGeneratePlan(topic.id)}
+                      disabled={generatingPlan === topic.id}
+                      className="p-1.5 rounded-full text-purple-400 hover:bg-purple-100 hover:text-purple-600 transition-colors"
+                      title="AI Generate Lesson Plan"
+                    >
+                      {generatingPlan === topic.id ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                    </button>
                     <button
                       onClick={() => handleStatusUpdate(topic.id, 'PENDING')}
                       className={`p-1.5 rounded-full transition-colors ${
@@ -222,7 +291,9 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
                         {plan.teacher.fullName}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{plan.content}</p>
+                    <div className="text-sm text-gray-600 dark:text-gray-300 prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown>{plan.content}</ReactMarkdown>
+                    </div>
                   </div>
                 ))
               )}

@@ -5,6 +5,8 @@ import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
 import { PullToRefresh, DashboardSkeleton, SwipeableCards } from '../../components/mobile';
 
+import TeacherDashboard from './TeacherDashboard';
+
 // Admin Stats Interface
 interface AdminStats {
   role: 'ADMIN';
@@ -104,120 +106,10 @@ const Dashboard = () => {
 
   // --- TEACHER VIEW ---
   if (data?.role === 'TEACHER') {
-    const stats = (data as TeacherStats).stats;
-    const { todaySchedule = [], recentAssessments = [], myClasses = [] } = data as TeacherStats;
+      return <TeacherDashboard data={data as TeacherStats} user={user} onRefresh={handleRefresh} />;
+    }
 
-    return (
-      <PullToRefresh onRefresh={handleRefresh} className="min-h-screen">
-        <div className="p-4 md:p-6 max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="mb-6">
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">Teacher Dashboard</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Welcome back, {user?.fullName?.split(' ')[0]}. Here is your academic overview.</p>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-3 gap-3 md:gap-6 mb-6">
-            <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center mb-3">
-                <Users size={20} className="md:w-6 md:h-6" />
-              </div>
-              <p className="text-[11px] md:text-sm text-gray-500 dark:text-gray-400 font-medium">My Students</p>
-              <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{stats.totalStudents}</p>
-            </div>
-            <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center mb-3">
-                <GraduationCap size={20} className="md:w-6 md:h-6" />
-              </div>
-              <p className="text-[11px] md:text-sm text-gray-500 dark:text-gray-400 font-medium">My Classes</p>
-              <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{stats.totalClasses}</p>
-            </div>
-            <div className="bg-white dark:bg-slate-800 p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-xl flex items-center justify-center mb-3">
-                <Clock size={20} className="md:w-6 md:h-6" />
-              </div>
-              <p className="text-[11px] md:text-sm text-gray-500 dark:text-gray-400 font-medium">Today</p>
-              <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">{stats.todayScheduleCount}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Today's Schedule */}
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-              <div className="p-4 md:p-6 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center">
-                <h2 className="text-base md:text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                  <Calendar size={18} className="text-blue-500" />
-                  Today's Schedule
-                </h2>
-                <span className="text-[10px] md:text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded-full">
-                  {new Date().toLocaleDateString('en-US', { weekday: 'short' })}
-                </span>
-              </div>
-              <div className="divide-y divide-gray-50 dark:divide-slate-700">
-                {todaySchedule.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">No classes today.</div>
-                ) : (
-                  todaySchedule.map((period) => (
-                    <div key={period.id} className="p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-4 active:bg-gray-100 dark:active:bg-slate-700">
-                      <div className="text-center min-w-[60px]">
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">{period.startTime}</div>
-                        <div className="text-[10px] text-gray-400">{period.endTime}</div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-blue-900 dark:text-blue-400 truncate">{period.subject?.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{period.class?.name}</div>
-                      </div>
-                      <Link
-                        to="/academics/attendance"
-                        className="px-3 py-1.5 text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 active:bg-blue-200 transition-colors"
-                      >
-                        Mark
-                      </Link>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Recent Assessments */}
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-              <div className="p-4 md:p-6 border-b border-gray-100 dark:border-slate-700">
-                <h2 className="text-base md:text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                  <CheckSquare size={18} className="text-green-500" />
-                  Recent Assessments
-                </h2>
-              </div>
-              <div className="divide-y divide-gray-50 dark:divide-slate-700">
-                {recentAssessments.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">No recent assessments.</div>
-                ) : (
-                  recentAssessments.map((assessment) => (
-                    <div key={assessment.id} className="p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-4 active:bg-gray-100 dark:active:bg-slate-700">
-                      <div className="w-10 h-10 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <BookOpen size={18} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-gray-900 dark:text-white truncate">{assessment.title}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {assessment.class?.name} • {assessment.subject?.name}
-                        </div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="text-xs font-bold text-gray-900 dark:text-white">{assessment._count?.results ?? 0}</div>
-                        <Link to="/academics/gradebook" className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Grade</Link>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </PullToRefresh>
-    );
-  }
-
-  // --- ADMIN / BURSAR VIEW ---
+    // --- ADMIN / BURSAR VIEW ---
   const stats = data as AdminStats;
 
   return (

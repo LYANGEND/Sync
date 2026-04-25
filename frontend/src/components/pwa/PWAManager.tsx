@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react';
 import { useBadge, usePeriodicSync, useSWMessages } from '../../hooks/usePWA';
 import { toast } from 'react-hot-toast';
 import api from '../../utils/api';
+import { useAuth } from '../../context/AuthContext';
 
 /**
  * PWA Manager Component
@@ -9,20 +10,28 @@ import api from '../../utils/api';
  * Should be mounted once at the app root level
  */
 export const PWAManager: React.FC = () => {
+    const { isAuthenticated, isLoading } = useAuth();
     const { setBadge } = useBadge();
     const { registerPeriodicSync } = usePeriodicSync();
 
     // Fetch and set notification badge on mount
     const updateNotificationBadge = useCallback(async () => {
+        if (!isAuthenticated) {
+            await setBadge(0);
+            return;
+        }
+
         try {
             const response = await api.get('/communication/notifications/unread-count');
             const count = response.data?.count || 0;
             await setBadge(count);
-        } catch (error) {
-            // Silently fail - notifications might not be critical
-            console.log('Could not fetch notification count');
+        } catch (error: any) {
+            const status = error.response?.status;
+            if (status !== 401 && status !== 403) {
+                console.log('Could not fetch notification count');
+            }
         }
-    }, [setBadge]);
+    }, [isAuthenticated, setBadge]);
 
     // Register periodic sync for data refresh
     const setupPeriodicSync = useCallback(async () => {
@@ -63,6 +72,15 @@ export const PWAManager: React.FC = () => {
 
     // Initialize on mount
     useEffect(() => {
+        if (isLoading) {
+            return;
+        }
+
+        if (!isAuthenticated) {
+            setBadge(0);
+            return;
+        }
+
         // Update badge on load
         updateNotificationBadge();
 
@@ -77,7 +95,7 @@ export const PWAManager: React.FC = () => {
         return () => {
             clearInterval(badgeInterval);
         };
-    }, [updateNotificationBadge, setupPeriodicSync]);
+    }, [isAuthenticated, isLoading, setBadge, updateNotificationBadge, setupPeriodicSync]);
 
     // No UI - this is a manager component
     return null;

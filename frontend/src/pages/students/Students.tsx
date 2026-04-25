@@ -4,6 +4,7 @@ import api from '../../utils/api';
 import { Plus, Search, Filter, Edit2, Trash2, Eye, Upload, X, CheckSquare, Square, Users, UserCheck, GraduationCap, UserX } from 'lucide-react';
 import ExportDropdown from '../../components/ExportDropdown';
 import { useAuth } from '../../context/AuthContext';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface Student {
   id: string;
@@ -33,6 +34,7 @@ interface Class {
 }
 
 const Students = () => {
+  const { confirm } = useAppDialog();
   const navigate = useNavigate();
   const { user } = useAuth();
   const canManage = ['SUPER_ADMIN', 'SECRETARY', 'BURSAR'].includes(user?.role || '');
@@ -138,7 +140,11 @@ const Students = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this student?')) {
+    if (await confirm({
+      title: 'Delete student?',
+      message: 'Are you sure you want to delete this student?',
+      confirmText: 'Delete student',
+    })) {
       try {
         await api.delete(`/students/${id}`);
         fetchStudents();
@@ -205,7 +211,11 @@ const Students = () => {
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} students? This action cannot be undone.`)) return;
+    if (!(await confirm({
+      title: 'Delete selected students?',
+      message: `Are you sure you want to delete ${selectedIds.length} students? This action cannot be undone.`,
+      confirmText: 'Delete students',
+    }))) return;
 
     try {
       await api.post('/students/bulk-delete', { ids: selectedIds });

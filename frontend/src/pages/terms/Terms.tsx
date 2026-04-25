@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../utils/api';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { Plus, Search, Trash2, Edit2, Calendar } from 'lucide-react';
 
 interface AcademicTerm {
@@ -11,6 +12,7 @@ interface AcademicTerm {
 }
 
 const Terms = () => {
+  const { confirm } = useAppDialog();
   const [terms, setTerms] = useState<AcademicTerm[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,7 +65,11 @@ const Terms = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this term?')) {
+    if (await confirm({
+      title: 'Delete academic term?',
+      message: 'Are you sure you want to delete this term?',
+      confirmText: 'Delete term',
+    })) {
       try {
         await api.delete(`/academic-terms/${id}`);
         fetchTerms();

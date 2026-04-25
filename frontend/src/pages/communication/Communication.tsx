@@ -10,6 +10,7 @@ import ChatInterface from './ChatInterface';
 import SentItems from './SentItems';
 import AnnouncementHistory from './AnnouncementHistory';
 import { useAuth } from '../../context/AuthContext';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
 
@@ -17,6 +18,7 @@ type TabType = 'announcements' | 'messages' | 'sent' | 'history' | 'templates' |
 
 const Communication = () => {
   const { user } = useAuth();
+  const { confirm } = useAppDialog();
   const [activeTab, setActiveTab] = useState<TabType>('announcements');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -190,7 +192,11 @@ const Communication = () => {
   };
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!window.confirm('Delete this template?')) return;
+    if (!(await confirm({
+      title: 'Delete template?',
+      message: 'Delete this template?',
+      confirmText: 'Delete template',
+    }))) return;
     try {
       await api.delete(`/communication/templates/${id}`);
       fetchTemplates();
@@ -202,7 +208,11 @@ const Communication = () => {
   const handleEmergencyBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emergencySubject || !emergencyMessage) return;
-    if (!window.confirm('⚠️ This will send an emergency broadcast to ALL users via ALL channels (Email, SMS, WhatsApp, Push, In-App). Continue?')) return;
+    if (!(await confirm({
+      title: 'Send emergency broadcast?',
+      message: 'This will send an emergency broadcast to ALL users via ALL channels (Email, SMS, WhatsApp, Push, In-App). Continue?',
+      confirmText: 'Send broadcast',
+    }))) return;
 
     setEmergencySending(true);
     try {
@@ -584,7 +594,11 @@ const Communication = () => {
                     onClick={async () => {
                       const phones = smsBroadcastPhones.split(/[,\n]+/).map(p => p.trim()).filter(Boolean);
                       if (phones.length === 0) return;
-                      if (phones.length > 50 && !window.confirm(`You are about to send ${phones.length} SMS messages. Continue?`)) return;
+                      if (phones.length > 50 && !(await confirm({
+                        title: 'Large SMS broadcast',
+                        message: `You are about to send ${phones.length} SMS messages. Continue?`,
+                        confirmText: 'Send messages',
+                      }))) return;
                       setSmsSending(true);
                       setSmsStatus(null);
                       try {
@@ -669,7 +683,11 @@ const Communication = () => {
                     onClick={async () => {
                       const valid = smsBulkRecipients.filter(r => r.phone.trim() && r.message.trim());
                       if (valid.length === 0) return;
-                      if (valid.length > 20 && !window.confirm(`You are about to send ${valid.length} individual SMS messages. Continue?`)) return;
+                      if (valid.length > 20 && !(await confirm({
+                        title: 'Large individual SMS send',
+                        message: `You are about to send ${valid.length} individual SMS messages. Continue?`,
+                        confirmText: 'Send messages',
+                      }))) return;
                       setSmsSending(true);
                       setSmsStatus(null);
                       try {

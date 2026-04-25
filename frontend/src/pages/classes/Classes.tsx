@@ -3,6 +3,7 @@ import api from '../../utils/api';
 import { Plus, Search, Trash2, Edit2, BookOpen, Users, FileText, Upload } from 'lucide-react';
 import ClassSyllabus from '../../components/academics/ClassSyllabus';
 import BulkImportModal from '../../components/BulkImportModal';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface Subject {
   id: string;
@@ -79,6 +80,7 @@ const GRADE_OPTIONS = [
 ];
 
 const Classes = () => {
+  const { confirm } = useAppDialog();
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,7 +249,11 @@ const Classes = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this class?')) {
+    if (await confirm({
+      title: 'Delete class?',
+      message: 'Are you sure you want to delete this class?',
+      confirmText: 'Delete class',
+    })) {
       try {
         await api.delete(`/classes/${id}`);
         fetchClasses();

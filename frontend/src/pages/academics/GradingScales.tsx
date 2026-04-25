@@ -1,8 +1,10 @@
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, X } from 'lucide-react';
 import { reportCardService, GradingScale } from '../../services/reportCardService';
 
 const GradingScales: React.FC = () => {
+    const { confirm } = useAppDialog();
   const [scales, setScales] = useState<GradingScale[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +89,11 @@ const GradingScales: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this grading scale?')) {
+    if (await confirm({
+      title: 'Delete grading scale?',
+      message: 'Are you sure you want to delete this grading scale?',
+      confirmText: 'Delete scale',
+    })) {
       try {
         await reportCardService.deleteGradingScale(id);
         fetchScales();

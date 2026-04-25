@@ -65,7 +65,11 @@ export interface Invoice {
     firstName: string;
     lastName: string;
     admissionNumber: string;
+    guardianName?: string;
+    guardianEmail?: string;
+    guardianPhone?: string;
     class?: { name: string };
+    parent?: { id: string; email: string; fullName: string };
   };
   creditNotes?: CreditNote[];
 }
@@ -240,6 +244,45 @@ export interface FinancialAuditEntry {
   createdAt: string;
 }
 
+export interface ReconciliationPayment {
+  id: string;
+  transactionId?: string;
+  paymentDate: string;
+  amount: number;
+  method: string;
+  notes?: string;
+  isReconciled: boolean;
+  reconciledAt?: string;
+  reconciledByName?: string;
+  settlementDate?: string;
+  bankReference?: string;
+  reconciliationNote?: string;
+  allocatedAmount: number;
+  unallocatedAmount: number;
+  allocationCount: number;
+  allocationLabels: string[];
+  settlementReference?: string | null;
+  student: {
+    firstName: string;
+    lastName: string;
+    admissionNumber: string;
+    class?: { id: string; name: string };
+  };
+  recordedBy?: { fullName: string };
+}
+
+export interface ReconciliationSummary {
+  totalPayments: number;
+  totalAmount: number;
+  reconciledPayments: number;
+  reconciledAmount: number;
+  unreconciledPayments: number;
+  unreconciledAmount: number;
+  unallocatedPayments: number;
+  unallocatedAmount: number;
+  missingBankReference: number;
+}
+
 // ========================================
 // EXPENSE APIs
 // ========================================
@@ -346,4 +389,15 @@ export const financialApi = {
   processRefund: (id: string) => api.post(`/financial/refunds/${id}/process`),
   // Audit Log
   getAuditLog: (params?: any) => api.get('/financial/audit-log', { params }),
+};
+
+// ========================================
+// PAYMENT CONTROL APIs
+// ========================================
+
+export const paymentControlApi = {
+  getReconciliationDashboard: (params?: any) => api.get('/payments/reconciliation', { params }),
+  reconcilePayment: (id: string, data: any) => api.post(`/payments/${id}/reconcile`, data),
+  unreconcilePayment: (id: string) => api.post(`/payments/${id}/unreconcile`),
+  autoAllocatePayments: () => api.post('/financial/ai-advisor/allocate-payments'),
 };

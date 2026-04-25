@@ -553,7 +553,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
             for (const sentence of sentences) {
               masterAIService.generateSpeech(sentence)
                 .then(blob => {
-                  if (!isActiveRef.current) return;
+                  if (!blob || !isActiveRef.current) return;
                   const url = URL.createObjectURL(blob);
                   const audio = new Audio(url);
                   audio.preload = 'auto';
@@ -681,7 +681,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
         for (const sentence of sentences) {
           try {
             const blob = await masterAIService.generateSpeech(sentence);
-            if (!isActiveRef.current) break;
+            if (!blob || !isActiveRef.current) break;
             const url = URL.createObjectURL(blob);
             const audio = new Audio(url);
             audio.preload = 'auto';
@@ -743,7 +743,7 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
     if (!greetingPrefetchedRef.current) {
       greetingPrefetchedRef.current = true;
       masterAIService.generateSpeech(GREETING)
-        .then(blob => { greetingBlobRef.current = blob; })
+        .then(blob => { if (blob) greetingBlobRef.current = blob; })
         .catch(() => { /* Non-critical — will fetch on-demand */ });
     }
   }, []);
@@ -757,26 +757,34 @@ export function useVoiceConversation(options: VoiceConversationOptions): VoiceCo
     try {
       // Use cached greeting if available, otherwise fetch
       const blob = greetingBlobRef.current || await masterAIService.generateSpeech(GREETING);
-      if (!greetingBlobRef.current) greetingBlobRef.current = blob;
+      if (blob && !greetingBlobRef.current) greetingBlobRef.current = blob;
 
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.preload = 'auto';
-      currentAudioRef.current = audio;
-      isPlayingRef.current = true;
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        currentAudioRef.current = audio;
+        isPlayingRef.current = true;
 
-      audio.onended = () => {
-        currentAudioRef.current = null;
-        isPlayingRef.current = false;
-        URL.revokeObjectURL(url);
+        audio.onended = () => {
+          currentAudioRef.current = null;
+          isPlayingRef.current = false;
+          URL.revokeObjectURL(url);
+          if (isActiveRef.current) {
+            console.log('[Voice] Greeting done, starting to listen');
+            setVoiceState('listening');
+            startListeningRef.current?.();
+          }
+        };
+
+        await audio.play();
+      } else {
+        // TTS unavailable — skip greeting and start listening immediately
         if (isActiveRef.current) {
-          console.log('[Voice] Greeting done, starting to listen');
           setVoiceState('listening');
           startListeningRef.current?.();
         }
-      };
-
-      await audio.play();
+      }
     } catch (e) {
       console.error('[Voice] Greeting TTS failed:', e);
       // Skip greeting entirely — just start listening immediately

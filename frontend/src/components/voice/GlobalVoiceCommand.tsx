@@ -106,6 +106,7 @@ const GlobalVoiceCommand = () => {
   const [wakeWordActive, setWakeWordActive] = useState(false);
   const recognitionRef = useRef<any>(null);
   const wakeWordEnabledRef = useRef(true);
+  const wakeWordPermissionDeniedRef = useRef(false);
   const startGlobalVoiceRef = useRef(startGlobalVoice);
   useEffect(() => { startGlobalVoiceRef.current = startGlobalVoice; }, [startGlobalVoice]);
 
@@ -158,17 +159,22 @@ const GlobalVoiceCommand = () => {
     recognition.onstart = () => { setWakeWordActive(true); };
     recognition.onend = () => {
       setWakeWordActive(false);
-      if (wakeWordEnabledRef.current) {
+      if (wakeWordEnabledRef.current && !wakeWordPermissionDeniedRef.current) {
         setTimeout(() => { try { recognition.start(); } catch (_) {} }, 500);
       }
     };
     recognition.onerror = (event: any) => {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
-      console.log(`[WakeWord] Error: ${event.error}`);
       if (event.error === 'not-allowed') {
+        if (!wakeWordPermissionDeniedRef.current) {
+          console.info('[WakeWord] Microphone permission denied; wake word listening disabled.');
+        }
+        wakeWordPermissionDeniedRef.current = true;
         wakeWordEnabledRef.current = false;
         setWakeWordActive(false);
+        return;
       }
+      console.log(`[WakeWord] Error: ${event.error}`);
     };
 
     try { recognition.start(); } catch (_) {}
@@ -185,6 +191,7 @@ const GlobalVoiceCommand = () => {
       try { recognitionRef.current?.stop(); } catch (_) {}
     } else {
       const timer = setTimeout(() => {
+        if (wakeWordPermissionDeniedRef.current) return;
         wakeWordEnabledRef.current = true;
         try { recognitionRef.current?.start(); } catch (_) {}
       }, 1500);

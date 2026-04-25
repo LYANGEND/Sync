@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, User, Plus, Trash2, Users, Download, Printer } from 'lucide-react';
 import api from '../../utils/api';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -52,6 +53,7 @@ interface AcademicTerm {
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
 
 const Timetable = () => {
+    const { confirm } = useAppDialog();
   const { user } = useAuth();
   const { settings: themeSettings } = useTheme();
   const [viewMode, setViewMode] = useState<'CLASS' | 'TEACHER'>('CLASS');
@@ -205,7 +207,11 @@ const Timetable = () => {
   };
 
   const handleDeletePeriod = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this period?')) return;
+    if (!(await confirm({
+      title: 'Delete period?',
+      message: 'Are you sure you want to delete this period?',
+      confirmText: 'Delete period',
+    }))) return;
     try {
       await api.delete(`/timetables/${id}`);
       if (viewMode === 'CLASS') fetchClassTimetable();

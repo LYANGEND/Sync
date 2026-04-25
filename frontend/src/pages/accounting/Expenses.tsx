@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, DollarSign, CheckCircle, XCircle, Edit2, Trash2, X, Building2, Receipt, BarChart3 } from 'lucide-react';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { expenseApi, Expense, Vendor } from '../../services/accountingService';
 import toast from 'react-hot-toast';
 
@@ -20,6 +21,7 @@ const statusColors: Record<string, string> = {
 };
 
 const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
+    const { confirm, prompt } = useAppDialog();
   const [activeTab, setActiveTab] = useState<'expenses' | 'vendors' | 'summary'>('expenses');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -113,8 +115,13 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const handleReject = async (id: string) => {
-    const reason = prompt('Rejection reason:');
-    if (!reason) return;
+    const reason = await prompt({
+      title: 'Reject expense',
+      message: 'Provide a reason for rejecting this expense.',
+      placeholder: 'Rejection reason',
+      confirmText: 'Reject expense',
+    });
+    if (!reason?.trim()) return;
     try {
       await expenseApi.reject(id, reason);
       toast.success('Expense rejected');
@@ -135,7 +142,11 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (!confirm('Delete this expense?')) return;
+    if (!(await confirm({
+      title: 'Delete expense?',
+      message: 'Delete this expense?',
+      confirmText: 'Delete expense',
+    }))) return;
     try {
       await expenseApi.delete(id);
       toast.success('Expense deleted');
@@ -174,7 +185,11 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const handleDeleteVendor = async (id: string) => {
-    if (!confirm('Delete this vendor?')) return;
+    if (!(await confirm({
+      title: 'Delete vendor?',
+      message: 'Delete this vendor?',
+      confirmText: 'Delete vendor',
+    }))) return;
     try {
       await expenseApi.deleteVendor(id);
       toast.success('Vendor deleted');

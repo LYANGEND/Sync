@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import syllabusService, {
   StructuredLessonPlan,
   Topic,
@@ -56,6 +57,7 @@ interface SubjectOption {
 export default function VirtualClassrooms() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { confirm } = useAppDialog();
 
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +94,10 @@ export default function VirtualClassrooms() {
     lessonPlanContent: '',
     maxParticipants: 50,
   });
+  const selectedFormClass = classes.find(c => c.id === form.classId);
+  const availableFormSubjects = form.classId
+    ? (((selectedFormClass?.subjects?.length ? selectedFormClass.subjects : subjects) || []) as SubjectOption[])
+    : subjects;
 
   const isAdmin = user?.role === 'SUPER_ADMIN';
   const isTeacher = user?.role === 'TEACHER';
@@ -193,6 +199,25 @@ export default function VirtualClassrooms() {
     }
   }, [form.subjectId, form.classId, classes, fetchTopics]);
 
+  useEffect(() => {
+    if (!form.classId) {
+      return;
+    }
+
+    if (availableFormSubjects.length === 0) {
+      if (form.subjectId) {
+        setForm(prev => ({ ...prev, subjectId: '' }));
+      }
+      return;
+    }
+
+    if (form.subjectId && availableFormSubjects.some(subject => subject.id === form.subjectId)) {
+      return;
+    }
+
+    setForm(prev => ({ ...prev, subjectId: availableFormSubjects[0].id }));
+  }, [form.classId, form.subjectId, availableFormSubjects]);
+
   // Toggle subtopic selection
   const toggleSubTopic = (subTopicId: string) => {
     setSelectedSubTopicIds(prev =>
@@ -289,7 +314,11 @@ export default function VirtualClassrooms() {
   };
 
   const deleteClassroom = async (classroomId: string) => {
-    if (!confirm('Delete this virtual classroom?')) return;
+    if (!(await confirm({
+      title: 'Delete virtual classroom?',
+      message: 'Delete this virtual classroom?',
+      confirmText: 'Delete classroom',
+    }))) return;
     try {
       await api.delete(`/virtual-classroom/${classroomId}`);
       fetchClassrooms();
@@ -597,16 +626,9 @@ export default function VirtualClassrooms() {
                       className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
                     >
                       <option value="">Select subject...</option>
-                      {(() => {
-                        const cls = classes.find(c => c.id === form.classId);
-                        const classSubjectIds = new Set((cls?.subjects || []).map(s => s.id));
-                        const filtered = classSubjectIds.size > 0
-                          ? subjects.filter(s => classSubjectIds.has(s.id))
-                          : subjects;
-                        return filtered.map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ));
-                      })()}
+                      {availableFormSubjects.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect, useCallback } from 'react';
 import api from '../utils/api';
+import { useAuth } from './AuthContext';
 
 interface Branch {
     id: string;
@@ -27,11 +28,18 @@ interface BranchContextType {
 const BranchContext = createContext<BranchContextType | undefined>(undefined);
 
 export const BranchProvider = ({ children }: { children: ReactNode }) => {
+    const { isAuthenticated, isLoading: authLoading } = useAuth();
     const [branches, setBranches] = useState<Branch[]>([]);
     const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     const fetchBranches = useCallback(async () => {
+        if (authLoading || !isAuthenticated) {
+            setBranches([]);
+            setLoading(false);
+            return;
+        }
+
         try {
             setLoading(true);
             const response = await api.get('/branches');
@@ -42,16 +50,19 @@ export const BranchProvider = ({ children }: { children: ReactNode }) => {
                 const mainBranch = response.data.find((b: Branch) => b.isMain);
                 // Don't auto-select, keep as "All Branches" for admins
             }
-        } catch (error) {
-            console.error('Failed to fetch branches', error);
+        } catch (error: any) {
+            const status = error.response?.status;
+            if (status !== 401 && status !== 403) {
+                console.error('Failed to fetch branches', error);
+            }
         } finally {
             setLoading(false);
         }
-    }, [selectedBranchId]);
+    }, [authLoading, isAuthenticated, selectedBranchId]);
 
     useEffect(() => {
         fetchBranches();
-    }, []);
+    }, [fetchBranches]);
 
     const selectedBranch = branches.find(b => b.id === selectedBranchId) || null;
     const isAllBranchesSelected = selectedBranchId === null;

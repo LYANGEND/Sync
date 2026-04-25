@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentsBelongToClass } from '../utils/academicScope';
 
 // Prisma Client should be generated. If you see errors here, try reloading the window.
 const createAssessmentSchema = z.object({
@@ -27,6 +29,7 @@ const recordResultsSchema = z.object({
 export const createAssessment = async (req: Request, res: Response) => {
   try {
     const data = createAssessmentSchema.parse(req.body);
+    await ensureAcademicClassAccess(req as AuthRequest, data.classId, { subjectId: data.subjectId });
 
     const { date, ...restData } = data;
     const assessment = await prisma.assessment.create({
@@ -41,6 +44,9 @@ export const createAssessment = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Create assessment error:', error);
     res.status(500).json({ error: 'Failed to create assessment' });
   }
@@ -48,12 +54,51 @@ export const createAssessment = async (req: Request, res: Response) => {
 
 export const getAssessments = async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    const user = authReq.user;
     const { classId, subjectId, termId } = req.query;
 
     const where: any = {};
     if (classId) where.classId = String(classId);
     if (subjectId) where.subjectId = String(subjectId);
     if (termId) where.termId = String(termId);
+
+    if (user?.role === 'TEACHER') {
+      const teacherClasses = await prisma.class.findMany({
+        where: { teacherId: user.userId },
+        select: { id: true },
+      });
+      const teacherSubjects = await prisma.teacherSubject.findMany({
+        where: { teacherId: user.userId },
+        select: { classId: true, subjectId: true },
+      });
+
+      const allowedClassIds = [...new Set([
+        ...teacherClasses.map((item) => item.id),
+        ...teacherSubjects.map((item) => item.classId),
+      ])];
+
+      if (allowedClassIds.length === 0) {
+        return res.json([]);
+      }
+
+      if (classId && !allowedClassIds.includes(String(classId))) {
+        return res.status(403).json({ error: 'You are not assigned to this class' });
+      }
+
+      where.classId = classId
+        ? String(classId)
+        : { in: allowedClassIds };
+
+      if (subjectId) {
+        const allowed = teacherSubjects.some((item) => item.classId === String(classId) && item.subjectId === String(subjectId))
+          || teacherClasses.some((item) => item.id === String(classId));
+
+        if (classId && !allowed) {
+          return res.status(403).json({ error: 'You are not assigned to this class subject' });
+        }
+      }
+    }
 
     const assessments = await prisma.assessment.findMany({
       where,
@@ -90,8 +135,13 @@ export const getAssessmentById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Assessment not found' });
     }
 
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
+
     res.json(assessment);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to fetch assessment' });
   }
 };
@@ -100,6 +150,15 @@ export const updateAssessment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = createAssessmentSchema.partial().parse(req.body);
+
+    const existing = await prisma.assessment.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    const targetClassId = data.classId || existing.classId;
+    const targetSubjectId = data.subjectId || existing.subjectId;
+    await ensureAcademicClassAccess(req as AuthRequest, targetClassId, { subjectId: targetSubjectId });
 
     const updateData: any = { ...data };
     if (data.date) updateData.date = new Date(data.date);
@@ -115,6 +174,9 @@ export const updateAssessment = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Update assessment error:', error);
     res.status(500).json({ error: 'Failed to update assessment' });
   }
@@ -124,9 +186,17 @@ export const updateAssessment = async (req: Request, res: Response) => {
 export const deleteAssessment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const assessment = await prisma.assessment.findUnique({ where: { id } });
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
     await prisma.assessment.delete({ where: { id } });
     res.status(204).send();
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to delete assessment' });
   }
 };
@@ -134,6 +204,15 @@ export const deleteAssessment = async (req: Request, res: Response) => {
 export const bulkDeleteAssessments = async (req: Request, res: Response) => {
   try {
     const { ids } = z.object({ ids: z.array(z.string().uuid()) }).parse(req.body);
+
+    const assessments = await prisma.assessment.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, classId: true, subjectId: true },
+    });
+
+    for (const assessment of assessments) {
+      await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
+    }
 
     await prisma.assessment.deleteMany({
       where: { id: { in: ids } }
@@ -143,6 +222,9 @@ export const bulkDeleteAssessments = async (req: Request, res: Response) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
+    }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
     }
     res.status(500).json({ error: 'Failed to delete assessments' });
   }
@@ -165,6 +247,9 @@ export const recordResults = async (req: Request, res: Response) => {
     if (!assessment) {
       return res.status(404).json({ error: 'Assessment not found' });
     }
+
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
+    await ensureStudentsBelongToClass(assessment.classId, results.map((result) => result.studentId));
 
     // Use transaction to upsert results
     const operations = results.map(result =>
@@ -197,6 +282,9 @@ export const recordResults = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Record results error:', error);
     res.status(500).json({ error: 'Failed to record results' });
   }
@@ -205,6 +293,17 @@ export const recordResults = async (req: Request, res: Response) => {
 export const getAssessmentResults = async (req: Request, res: Response) => {
   try {
     const { id } = req.params; // assessmentId
+
+    const assessment = await prisma.assessment.findUnique({
+      where: { id },
+      select: { classId: true, subjectId: true },
+    });
+
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
 
     const results = await prisma.assessmentResult.findMany({
       where: { assessmentId: id },
@@ -225,6 +324,9 @@ export const getAssessmentResults = async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get results error:', error);
     res.status(500).json({ error: 'Failed to fetch results' });
   }
@@ -234,6 +336,17 @@ export const getStudentResults = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
     const { termId } = req.query;
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { classId: true },
+    });
+
+    if (!student?.classId) {
+      return res.status(404).json({ error: 'Student not found in a class' });
+    }
+
+    await ensureAcademicClassAccess(req as AuthRequest, student.classId);
 
     const where: any = { studentId };
     if (termId) {
@@ -256,6 +369,9 @@ export const getStudentResults = async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get student results error:', error);
     res.status(500).json({ error: 'Failed to fetch student results' });
   }
@@ -268,6 +384,8 @@ export const getGradebook = async (req: Request, res: Response) => {
     if (!classId || !subjectId || !termId) {
       return res.status(400).json({ error: 'Class, Subject and Term IDs are required' });
     }
+
+    await ensureAcademicClassAccess(req as AuthRequest, String(classId), { subjectId: String(subjectId) });
 
     // 1. Get Assessments
     const assessments = await prisma.assessment.findMany({
@@ -299,6 +417,9 @@ export const getGradebook = async (req: Request, res: Response) => {
 
     res.json({ assessments, students, results });
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get gradebook error:', error);
     res.status(500).json({ error: 'Failed to fetch gradebook data' });
   }

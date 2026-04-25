@@ -205,11 +205,20 @@ const masterAIService = {
     return data.text;
   },
 
-  async generateSpeech(text: string): Promise<Blob> {
-    const response = await api.post('/master-ai/speech', { text }, {
-      responseType: 'blob'
-    });
-    return response.data;
+  async generateSpeech(text: string): Promise<Blob | null> {
+    try {
+      const response = await api.post('/master-ai/speech', { text }, {
+        responseType: 'blob'
+      });
+      if (response.status === 204 || !response.data || response.data.size === 0) {
+        return null;
+      }
+      return response.data;
+    } catch (error: any) {
+      // TTS unavailable (e.g. Azure TTS deployment not configured) — fail silently
+      console.warn('[TTS] Speech generation unavailable:', error?.response?.data || error?.message);
+      return null;
+    }
   },
 
   // ---- Voice Conversation (SSE streaming) ----

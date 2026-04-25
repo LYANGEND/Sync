@@ -158,13 +158,50 @@ async function main() {
   // Create Subjects
   console.log('\n📚 Seeding subjects...');
   const subjectsData = [
+    // ECE learning areas
+    { name: 'Early Childhood Education', code: 'ECE' },
+    { name: 'Literacy (ECE)', code: 'LITERACY' },
+    { name: 'Pre-Mathematics & Science (ECE)', code: 'NUMERACY' },
+    { name: 'Social & Emotional (ECE)', code: 'SOCIAL' },
+    { name: 'Creative Arts (ECE)', code: 'CREATIVE' },
+    { name: 'Psychomotor (ECE)', code: 'PSYCH' },
+    { name: 'Environmental Studies (ECE)', code: 'ENVIRON' },
+    // Primary + Secondary core
     { name: 'Mathematics', code: 'MATH' },
     { name: 'English Language', code: 'ENG' },
     { name: 'Science', code: 'SCI' },
     { name: 'Social Studies', code: 'SST' },
-    { name: 'Creative Arts', code: 'CA' },
     { name: 'Physical Education', code: 'PE' },
-    { name: 'Computer Studies', code: 'COMP' },
+    { name: 'Religious Education', code: 'RE' },
+    { name: 'Zambian Languages', code: 'ZAM' },
+    // Primary specific
+    { name: 'Creative & Technology Studies', code: 'CTS' },
+    { name: 'Expressive Arts', code: 'EA' },
+    // Primary + Junior Secondary
+    { name: 'ICT', code: 'ICT' },
+    { name: 'Home Economics', code: 'HEC' },
+    // Secondary (Form 1-4)
+    { name: 'Integrated Science', code: 'ISCI' },
+    { name: 'Biology', code: 'BIO' },
+    { name: 'Chemistry', code: 'CHEM' },
+    { name: 'Physics', code: 'PHY' },
+    { name: 'Additional Mathematics', code: 'AMATH' },
+    { name: 'History', code: 'HIST' },
+    { name: 'Geography', code: 'GEO' },
+    { name: 'Civic Education', code: 'CIVIC' },
+    { name: 'Literature in English', code: 'LIT' },
+    { name: 'Art and Design', code: 'ART' },
+    { name: 'Musical Arts Education', code: 'MUSIC' },
+    { name: 'Design and Technology', code: 'DT' },
+    { name: 'Commerce', code: 'COM' },
+    { name: 'Principles of Accounts', code: 'ACCT' },
+    { name: 'Business Studies', code: 'BSTUD' },
+    { name: 'Agricultural Science', code: 'AGRI' },
+    { name: 'Food and Nutrition', code: 'FN' },
+    { name: 'Fashion and Fabrics', code: 'FF' },
+    { name: 'French Language', code: 'FRENCH' },
+    { name: 'Hospitality Management', code: 'HOSP' },
+    { name: 'Travel and Tourism', code: 'TOURISM' },
   ];
 
   const createdSubjects: any[] = [];
@@ -184,26 +221,46 @@ async function main() {
     createdSubjects.push(subject);
   }
 
-  // Assign Subjects to Classes (All subjects to all Grade 1+ classes)
-  console.log('  Linking subjects to classes...');
-  const gradeClasses = createdClasses.filter(c => c.gradeLevel >= 1);
-  for (const cls of gradeClasses) {
-    // Check if class already has subjects
+  // Grade ranges for each subject (matches CDC curriculum)
+  const GRADE_RANGES: Record<string, { min: number; max: number }> = {
+    ECE: { min: -3, max: 0 }, LITERACY: { min: -3, max: 0 }, NUMERACY: { min: -3, max: 0 },
+    SOCIAL: { min: -3, max: 0 }, CREATIVE: { min: -3, max: 0 }, PSYCH: { min: -3, max: 0 },
+    ENVIRON: { min: -3, max: 0 },
+    MATH: { min: 1, max: 12 }, ENG: { min: 1, max: 12 }, SCI: { min: 1, max: 7 },
+    SST: { min: 1, max: 9 }, PE: { min: 1, max: 12 }, RE: { min: 1, max: 12 },
+    ZAM: { min: 1, max: 12 }, CTS: { min: 1, max: 4 }, EA: { min: 5, max: 7 },
+    ICT: { min: 3, max: 12 }, HEC: { min: 5, max: 9 },
+    ISCI: { min: 8, max: 9 }, BIO: { min: 8, max: 12 }, CHEM: { min: 8, max: 12 },
+    PHY: { min: 8, max: 12 }, AMATH: { min: 10, max: 12 }, HIST: { min: 8, max: 12 },
+    GEO: { min: 8, max: 12 }, CIVIC: { min: 8, max: 12 }, LIT: { min: 8, max: 12 },
+    ART: { min: 8, max: 12 }, MUSIC: { min: 8, max: 12 }, DT: { min: 8, max: 12 },
+    COM: { min: 8, max: 12 }, ACCT: { min: 8, max: 12 }, BSTUD: { min: 8, max: 12 },
+    AGRI: { min: 8, max: 12 }, FN: { min: 8, max: 12 }, FF: { min: 8, max: 12 },
+    FRENCH: { min: 8, max: 12 }, HOSP: { min: 8, max: 12 }, TOURISM: { min: 8, max: 12 },
+  };
+
+  // Assign Subjects to Classes based on grade-level appropriateness
+  console.log('  Linking subjects to classes (grade-aware)...');
+  for (const cls of createdClasses) {
     const classWithSubjects = await prisma.class.findUnique({
       where: { id: cls.id },
       include: { subjects: true }
     });
 
     if (classWithSubjects && classWithSubjects.subjects.length === 0) {
+      const validSubjects = createdSubjects.filter(s => {
+        const range = GRADE_RANGES[s.code];
+        return range && cls.gradeLevel >= range.min && cls.gradeLevel <= range.max;
+      });
       await prisma.class.update({
         where: { id: cls.id },
         data: {
           subjects: {
-            connect: createdSubjects.map(s => ({ id: s.id }))
+            connect: validSubjects.map(s => ({ id: s.id }))
           }
         }
       });
-      console.log(`  Linked ${createdSubjects.length} subjects to ${cls.name}`);
+      console.log(`  Linked ${validSubjects.length} subjects to ${cls.name} (Grade ${cls.gradeLevel})`);
     }
   }
 

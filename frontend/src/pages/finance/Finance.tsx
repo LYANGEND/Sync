@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import FinanceReports from './FinanceReports';
 
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target, ShieldCheck } from 'lucide-react';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
 import BulkImportModal from '../../components/BulkImportModal';
 import ExportDropdown from '../../components/ExportDropdown';
 import StudentSelector from '../../components/StudentSelector';
 import MobileMoneyPayment from '../../components/MobileMoneyPayment';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
@@ -21,6 +22,8 @@ import PettyCash from '../accounting/PettyCash';
 import FinancialStatements from '../accounting/FinancialStatements';
 import AIFinancialAdvisor from '../accounting/AIFinancialAdvisor';
 import DebtCollection from '../accounting/DebtCollection';
+import BankReconciliation from '../accounting/BankReconciliation';
+import { financialApi, paymentControlApi, ReconciliationSummary } from '../../services/accountingService';
 
 interface Payment {
   id: string;
@@ -33,6 +36,15 @@ interface Payment {
   status?: 'COMPLETED' | 'VOIDED' | 'PENDING';
   voidedAt?: string;
   voidReason?: string;
+  isReconciled?: boolean;
+  reconciledAt?: string;
+  reconciledByName?: string;
+  settlementDate?: string;
+  bankReference?: string;
+  allocatedAmount?: number;
+  unallocatedAmount?: number;
+  allocationCount?: number;
+  allocationLabels?: string[];
   voidedBy?: {
     fullName: string;
   };
@@ -55,10 +67,23 @@ interface FeeTemplate {
   name: string;
   amount: number;
   academicTermId: string;
+  categoryId?: string | null;
   applicableGrade: number;
   academicTerm: {
     name: string;
   };
+  category?: {
+    id: string;
+    name: string;
+    code?: string;
+  } | null;
+}
+
+interface FeeCategory {
+  id: string;
+  name: string;
+  code: string;
+  description?: string | null;
 }
 
 interface AcademicTerm {
@@ -76,12 +101,15 @@ const getGradeLabel = (grade: number) => {
   return `Grade ${grade}`;
 };
 
+const fmt = (amount: number) => `ZMW ${Number(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const Finance = () => {
-  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'expenses' | 'invoices' | 'payroll' | 'budgets' | 'petty-cash' | 'financial-reports' | 'ai-advisor' | 'debt-collection'>('payments');
+  const { confirm, prompt, notify } = useAppDialog();
+  const [activeTab, setActiveTab] = useState<'payments' | 'mobile-money' | 'fees' | 'scholarships' | 'reminders' | 'reports' | 'expenses' | 'invoices' | 'payroll' | 'budgets' | 'petty-cash' | 'bank-reconciliation' | 'financial-reports' | 'ai-advisor' | 'debt-collection'>('payments');
 
   // Determine which section is active for visual grouping
   const revenueTabKeys = ['payments', 'mobile-money', 'fees', 'scholarships', 'reports', 'reminders'];
-  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'financial-reports', 'ai-advisor', 'debt-collection'];
+  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'bank-reconciliation', 'financial-reports', 'ai-advisor', 'debt-collection'];
   const [activeSection, setActiveSection] = useState<'revenue' | 'accounting'>('revenue');
 
   // Sync section with tab
@@ -98,6 +126,7 @@ const Finance = () => {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showCreateFeeModal, setShowCreateFeeModal] = useState(false);
+  const [showFeeCategoryModal, setShowFeeCategoryModal] = useState(false);
   const [showAssignFeeModal, setShowAssignFeeModal] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -110,10 +139,24 @@ const Finance = () => {
     pendingFees: 0,
     overdueStudentsCount: 0
   });
+  const [paymentControlSummary, setPaymentControlSummary] = useState<ReconciliationSummary>({
+    totalPayments: 0,
+    totalAmount: 0,
+    reconciledPayments: 0,
+    reconciledAmount: 0,
+    unreconciledPayments: 0,
+    unreconciledAmount: 0,
+    unallocatedPayments: 0,
+    unallocatedAmount: 0,
+    missingBankReference: 0,
+  });
+  const [paymentControlLoading, setPaymentControlLoading] = useState(false);
 
   // Form states
-  const [newFee, setNewFee] = useState({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
+  const [newFee, setNewFee] = useState({ name: '', amount: '', academicTermId: '', categoryId: '', applicableGrade: '' });
   const [editingTemplate, setEditingTemplate] = useState<FeeTemplate | null>(null);
+  const [feeCategories, setFeeCategories] = useState<FeeCategory[]>([]);
+  const [feeCategoryForm, setFeeCategoryForm] = useState({ name: '', code: '', description: '' });
   const [assignClassId, setAssignClassId] = useState('');
   const [assignDueDate, setAssignDueDate] = useState('');
   const [paymentForm, setPaymentForm] = useState({
@@ -125,6 +168,8 @@ const Finance = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [paymentTab, setPaymentTab] = useState<'completed' | 'voided'>('completed'); // 'completed' | 'voided'
+  const [resendingReceiptId, setResendingReceiptId] = useState<string | null>(null);
+  const [creatingFeeCategory, setCreatingFeeCategory] = useState(false);
 
   // Fee Reminders state
   const [debtors, setDebtors] = useState<any[]>([]);
@@ -135,11 +180,25 @@ const Finance = () => {
   useEffect(() => {
     fetchPayments();
     fetchFeeTemplates();
+    fetchFeeCategories();
     fetchAcademicTerms();
     fetchClasses();
     fetchStudents();
     fetchStats();
+    fetchPaymentControlSummary();
   }, []);
+
+  const fetchPaymentControlSummary = async () => {
+    setPaymentControlLoading(true);
+    try {
+      const response = await paymentControlApi.getReconciliationDashboard();
+      setPaymentControlSummary(response.data.summary);
+    } catch (error) {
+      console.error('Error fetching payment control summary:', error);
+    } finally {
+      setPaymentControlLoading(false);
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -161,6 +220,7 @@ const Finance = () => {
       } else {
         setPayments([]);
       }
+      fetchPaymentControlSummary();
     } catch (error) {
       console.error('Error fetching payments:', error);
     } finally {
@@ -195,6 +255,15 @@ const Finance = () => {
     }
   };
 
+  const fetchFeeCategories = async () => {
+    try {
+      const response = await financialApi.getFeeCategories();
+      setFeeCategories(response.data || []);
+    } catch (error) {
+      console.error('Error fetching fee categories:', error);
+    }
+  };
+
   const fetchAcademicTerms = async () => {
     try {
       const response = await api.get('/academic-terms');
@@ -214,6 +283,11 @@ const Finance = () => {
   };
 
   const handleSaveFee = async () => {
+    if (!newFee.name || !newFee.amount || !newFee.academicTermId || !newFee.categoryId || !newFee.applicableGrade) {
+      alert('Please complete all fee template fields, including fee category.');
+      return;
+    }
+
     try {
       if (editingTemplate) {
         await api.put(`/fees/templates/${editingTemplate.id}`, {
@@ -230,11 +304,41 @@ const Finance = () => {
       }
       setShowCreateFeeModal(false);
       setEditingTemplate(null);
-      setNewFee({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
+      setNewFee({ name: '', amount: '', academicTermId: '', categoryId: '', applicableGrade: '' });
       fetchFeeTemplates();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving fee template:', error);
-      alert('Failed to save fee template');
+      alert(error.response?.data?.error || 'Failed to save fee template');
+    }
+  };
+
+  const handleCreateFeeCategory = async () => {
+    if (!feeCategoryForm.name.trim() || !feeCategoryForm.code.trim()) {
+      notify('Category name and code are required', 'warning');
+      return;
+    }
+
+    setCreatingFeeCategory(true);
+    try {
+      const response = await financialApi.createFeeCategory({
+        name: feeCategoryForm.name.trim(),
+        code: feeCategoryForm.code.trim().toUpperCase(),
+        description: feeCategoryForm.description.trim() || undefined,
+      });
+
+      const createdCategory = response.data;
+      setFeeCategoryForm({ name: '', code: '', description: '' });
+      await fetchFeeCategories();
+      setNewFee((current) => ({
+        ...current,
+        categoryId: current.categoryId || createdCategory.id,
+      }));
+      notify('Fee category created', 'success');
+    } catch (error: any) {
+      console.error('Error creating fee category:', error);
+      notify(error.response?.data?.error || 'Failed to create fee category', 'error');
+    } finally {
+      setCreatingFeeCategory(false);
     }
   };
 
@@ -244,13 +348,18 @@ const Finance = () => {
       name: template.name,
       amount: template.amount.toString(),
       academicTermId: template.academicTermId,
+      categoryId: template.categoryId || '',
       applicableGrade: template.applicableGrade.toString(),
     });
     setShowCreateFeeModal(true);
   };
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this fee template?')) return;
+    if (!(await confirm({
+      title: 'Delete fee template?',
+      message: 'Are you sure you want to delete this fee template?',
+      confirmText: 'Delete template',
+    }))) return;
     try {
       await api.delete(`/fees/templates/${id}`);
       fetchFeeTemplates();
@@ -324,7 +433,12 @@ const Finance = () => {
           `${error.response.data.message}\n\n` +
           `Do you want to record this payment anyway?`;
 
-        if (window.confirm(confirmMessage)) {
+        if (await confirm({
+          title: 'Potential duplicate payment',
+          message: confirmMessage,
+          confirmText: 'Record anyway',
+          cancelText: 'Cancel',
+        })) {
           // User confirmed, retry with forceCreate
           try {
             await api.post('/payments', {
@@ -350,21 +464,57 @@ const Finance = () => {
 
   // Void a payment
   const handleVoidPayment = async (paymentId: string) => {
-    const reason = window.prompt('Please provide a reason for voiding this payment:');
-    if (!reason || reason.trim().length < 5) {
-      if (reason !== null) {
-        alert('Please provide a reason with at least 5 characters');
-      }
+    const reason = await prompt({
+      title: 'Void payment',
+      message: 'Please provide a reason for voiding this payment.',
+      placeholder: 'Enter reason for voiding',
+      confirmText: 'Void payment',
+    });
+    if (reason === null) return;
+    if (reason.trim().length < 5) {
+      notify('Please provide a reason with at least 5 characters', 'warning');
       return;
     }
 
     try {
-      await api.post(`/payments/${paymentId}/void`, { reason });
+      await api.post(`/payments/${paymentId}/void`, { reason: reason.trim() });
       alert('Payment voided successfully');
       fetchPayments();
+      fetchPaymentControlSummary();
     } catch (error: any) {
       console.error('Error voiding payment:', error);
       alert(error.response?.data?.message || 'Failed to void payment');
+    }
+  };
+
+  const handleResendReceipt = async (paymentId: string) => {
+    setResendingReceiptId(paymentId);
+    try {
+      const response = await api.post(`/fee-reminders/receipt/${paymentId}`);
+      const { emailSent, smsSent, message } = response.data || {};
+      const deliveryChannels = [emailSent ? 'email' : null, smsSent ? 'SMS' : null].filter(Boolean);
+      notify(
+        deliveryChannels.length > 0
+          ? `${message || 'Receipt sent'} via ${deliveryChannels.join(' and ')}`
+          : (message || 'Receipt request completed'),
+        deliveryChannels.length > 0 ? 'success' : 'info'
+      );
+    } catch (error: any) {
+      console.error('Error resending payment receipt:', error);
+      notify(error.response?.data?.error || 'Failed to resend receipt', 'error');
+    } finally {
+      setResendingReceiptId(null);
+    }
+  };
+
+  const handleAutoAllocatePayments = async () => {
+    try {
+      const response = await paymentControlApi.autoAllocatePayments();
+      notify(response.data.message || 'Payment allocation complete', response.data.allocated > 0 ? 'success' : 'info');
+      fetchPayments();
+      fetchPaymentControlSummary();
+    } catch (error: any) {
+      notify(error.response?.data?.error || 'Failed to auto-allocate payments', 'error');
     }
   };
 
@@ -405,18 +555,48 @@ const Finance = () => {
   };
 
   // Send fee reminders
+  const formatReminderResult = (data: any) => {
+    const results = data.results || {};
+    const lines = [
+      data.message || 'Reminder request completed.',
+      '',
+      `Students targeted: ${results.total ?? 0}`,
+      `Students delivered: ${results.delivered ?? 0}`,
+      `Emails sent: ${results.emailsSent ?? 0}`,
+      `SMS sent: ${results.smsSent ?? 0}`,
+      `Failed: ${results.failed ?? 0}`,
+    ];
+
+    if (results.noContact) {
+      lines.push(`No guardian contact: ${results.noContact}`);
+    }
+
+    return lines.join('\n');
+  };
+
   const sendFeeReminders = async (studentIds?: string[], isOverdue = false) => {
+    const targetIds = studentIds || selectedDebtors;
+    if (targetIds.length === 0) {
+      alert('Select at least one student to remind.');
+      return;
+    }
+
     setSendingReminders(true);
     try {
       const response = await api.post('/fee-reminders/send', {
-        studentIds: studentIds || selectedDebtors,
+        studentIds: targetIds,
         isOverdue
       });
-      alert(`${response.data.message}\n\nEmails sent: ${response.data.results.emailsSent}\nSMS sent: ${response.data.results.smsSent}`);
+      const message = formatReminderResult(response.data);
+      alert(message);
       setSelectedDebtors([]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending reminders:', error);
-      alert('Failed to send reminders');
+      const data = error.response?.data;
+      const message = data?.results
+        ? formatReminderResult(data)
+        : data?.error || data?.message || 'Failed to send reminders';
+      alert(message);
     } finally {
       setSendingReminders(false);
     }
@@ -659,6 +839,8 @@ const Finance = () => {
     }
   };
 
+  const overdueDebtors = debtors.filter(d => d.isOverdue);
+
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -670,6 +852,13 @@ const Finance = () => {
           {activeTab === 'fees' && (
             <>
               <button
+                onClick={() => setShowFeeCategoryModal(true)}
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <ClipboardList size={20} />
+                <span>Fee Categories</span>
+              </button>
+              <button
                 onClick={() => setShowImportModal(true)}
                 className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
               >
@@ -679,7 +868,7 @@ const Finance = () => {
               <button
                 onClick={() => {
                   setEditingTemplate(null);
-                  setNewFee({ name: '', amount: '', academicTermId: '', applicableGrade: '' });
+                  setNewFee({ name: '', amount: '', academicTermId: '', categoryId: '', applicableGrade: '' });
                   setShowCreateFeeModal(true);
                 }}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
@@ -808,6 +997,13 @@ const Finance = () => {
               <Wallet size={16} />
               Petty Cash
             </button>
+            <button onClick={() => setActiveTab('bank-reconciliation')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'bank-reconciliation'
+                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              <ShieldCheck size={16} />
+              Reconciliation
+            </button>
             <button onClick={() => setActiveTab('financial-reports')}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'financial-reports'
                 ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
@@ -863,12 +1059,12 @@ const Finance = () => {
                 </button>
               )}
               <button
-                onClick={() => sendFeeReminders(debtors.map(d => d.id), true)}
-                disabled={sendingReminders || debtors.length === 0}
+                onClick={() => sendFeeReminders(overdueDebtors.map(d => d.id), true)}
+                disabled={sendingReminders || overdueDebtors.length === 0}
                 className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
               >
                 <Bell size={18} />
-                Send to All Overdue
+                Send to All Overdue ({overdueDebtors.length})
               </button>
             </div>
           </div>
@@ -999,6 +1195,8 @@ const Finance = () => {
         <Budgets embedded />
       ) : activeTab === 'petty-cash' ? (
         <PettyCash embedded />
+      ) : activeTab === 'bank-reconciliation' ? (
+        <BankReconciliation embedded />
       ) : activeTab === 'financial-reports' ? (
         <FinancialStatements embedded />
       ) : activeTab === 'ai-advisor' ? (
@@ -1040,6 +1238,42 @@ const Finance = () => {
               </div>
               <h3 className="text-2xl font-bold text-slate-800 dark:text-white">ZMW {stats.pendingFees.toLocaleString()}</h3>
               <p className="text-sm text-red-500 mt-1">{stats.overdueStudentsCount} students overdue</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
+                <div className="rounded-lg bg-orange-50 dark:bg-orange-900/20 p-4">
+                  <p className="text-sm text-slate-500 dark:text-gray-400">Unreconciled receipts</p>
+                  <p className="text-xl font-bold text-orange-600">{paymentControlLoading ? '…' : paymentControlSummary.unreconciledPayments}</p>
+                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unreconciledAmount || 0)}</p>
+                </div>
+                <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-4">
+                  <p className="text-sm text-slate-500 dark:text-gray-400">Unallocated payments</p>
+                  <p className="text-xl font-bold text-purple-600">{paymentControlLoading ? '…' : paymentControlSummary.unallocatedPayments}</p>
+                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unallocatedAmount || 0)}</p>
+                </div>
+                <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+                  <p className="text-sm text-slate-500 dark:text-gray-400">Missing bank refs</p>
+                  <p className="text-xl font-bold text-red-600">{paymentControlLoading ? '…' : paymentControlSummary.missingBankReference}</p>
+                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">Bank deposits need statement evidence</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleAutoAllocatePayments}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  Auto-allocate open payments
+                </button>
+                <button
+                  onClick={() => setActiveTab('bank-reconciliation')}
+                  className="px-4 py-2 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  Open reconciliation queue
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1100,6 +1334,8 @@ const Finance = () => {
                     amount: Number(p.amount).toFixed(2),
                     method: p.method.replace('_', ' '),
                     transactionId: p.transactionId || '-',
+                    reconciliationStatus: p.isReconciled ? 'Reconciled' : 'Open',
+                    allocationStatus: (p.unallocatedAmount || 0) > 0 ? `Open ${Number(p.unallocatedAmount || 0).toFixed(2)}` : 'Allocated',
                     notes: p.notes || '-',
                     recordedBy: p.recordedBy.fullName
                   }))}
@@ -1111,6 +1347,8 @@ const Finance = () => {
                     { key: 'amount', header: 'Amount (ZMW)' },
                     { key: 'method', header: 'Method' },
                     { key: 'transactionId', header: 'Transaction ID' },
+                    { key: 'reconciliationStatus', header: 'Reconciliation' },
+                    { key: 'allocationStatus', header: 'Allocation' },
                     { key: 'notes', header: 'Notes' },
                     { key: 'recordedBy', header: 'Recorded By' }
                   ]}
@@ -1139,6 +1377,8 @@ const Finance = () => {
                       </>
                     ) : (
                       <>
+                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Allocation</th>
+                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Reconciliation</th>
                         <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Notes</th>
                         <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Recorded By</th>
                         <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300 text-right">Actions</th>
@@ -1197,6 +1437,26 @@ const Finance = () => {
                           </>
                         ) : (
                           <>
+                            <td className="px-6 py-4">
+                              <div className="text-sm">
+                                <span className={`font-medium ${(payment.unallocatedAmount || 0) > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                                  {(payment.unallocatedAmount || 0) > 0 ? `Open ZMW ${Number(payment.unallocatedAmount || 0).toLocaleString()}` : 'Allocated'}
+                                </span>
+                                <div className="text-xs text-slate-500 dark:text-gray-400">
+                                  {payment.allocationCount || 0} fee item(s)
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="text-sm">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${payment.isReconciled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'}`}>
+                                  {payment.isReconciled ? 'Reconciled' : 'Open'}
+                                </span>
+                                <div className="text-xs text-slate-500 dark:text-gray-400 mt-1">
+                                  {payment.bankReference || 'No bank ref'}
+                                </div>
+                              </div>
+                            </td>
                             <td className="px-6 py-4 text-slate-500 dark:text-gray-400 text-sm max-w-xs truncate">
                               {payment.notes || '-'}
                             </td>
@@ -1212,6 +1472,15 @@ const Finance = () => {
                                 >
                                   <FileText size={14} />
                                   Receipt
+                                </button>
+                                <button
+                                  onClick={() => handleResendReceipt(payment.id)}
+                                  disabled={resendingReceiptId === payment.id}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                  title="Resend receipt to parent"
+                                >
+                                  <Send size={14} />
+                                  {resendingReceiptId === payment.id ? 'Sending...' : 'Resend'}
                                 </button>
                                 <button
                                   onClick={() => handleVoidPayment(payment.id)}
@@ -1373,6 +1642,107 @@ const Finance = () => {
         )
       }
 
+      {/* Fee Category Modal */}
+      {
+        showFeeCategoryModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-bold dark:text-white">Fee Categories</h2>
+                  <p className="text-sm text-slate-500 dark:text-gray-400">Create categories once, then reuse them across fee templates.</p>
+                </div>
+                <button
+                  onClick={() => setShowFeeCategoryModal(false)}
+                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  <X size={20} className="text-slate-500" />
+                </button>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3">Existing Categories</h3>
+                  <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                    {feeCategories.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-sm text-slate-500 dark:text-gray-400">
+                        No fee categories yet.
+                      </div>
+                    ) : (
+                      feeCategories.map((category) => (
+                        <div key={category.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-medium text-slate-800 dark:text-white">{category.name}</p>
+                              <p className="text-xs text-slate-500 dark:text-gray-400">Code: {category.code}</p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setNewFee((current) => ({ ...current, categoryId: category.id }));
+                                setShowFeeCategoryModal(false);
+                              }}
+                              className="px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                            >
+                              Use in template
+                            </button>
+                          </div>
+                          {category.description && (
+                            <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">{category.description}</p>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 p-4 h-fit">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3">Create New Category</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Category Name</label>
+                      <input
+                        type="text"
+                        value={feeCategoryForm.name}
+                        onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, name: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        placeholder="e.g. Tuition"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Code</label>
+                      <input
+                        type="text"
+                        value={feeCategoryForm.code}
+                        onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, code: e.target.value.toUpperCase() })}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        placeholder="e.g. TUITION"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Description</label>
+                      <textarea
+                        rows={3}
+                        value={feeCategoryForm.description}
+                        onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, description: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        placeholder="Optional description"
+                      />
+                    </div>
+                    <button
+                      onClick={handleCreateFeeCategory}
+                      disabled={creatingFeeCategory}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {creatingFeeCategory ? 'Creating...' : 'Create Category'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
       {/* Add Payment Modal */}
       {
         showAddModal && (
@@ -1487,6 +1857,26 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Fee Category</label>
+                  <select
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    value={newFee.categoryId}
+                    onChange={(e) => setNewFee({ ...newFee, categoryId: e.target.value })}
+                  >
+                    <option value="">Select Category</option>
+                    {feeCategories.map(category => (
+                      <option key={category.id} value={category.id}>{category.name} ({category.code})</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowFeeCategoryModal(true)}
+                    className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    + Create or review fee categories
+                  </button>
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Applicable Grade</label>
                   <select
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
@@ -1527,7 +1917,7 @@ const Finance = () => {
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
               <h2 className="text-xl font-bold mb-4 dark:text-white">Assign Fee to Class</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400 mb-4">
-                This will assign the selected fee to all active students in the selected class.
+                This will assign the selected fee to all active students in the selected class and keep the class fee rule available for future student sync.
                 Scholarship discounts will be applied automatically.
               </p>
               <div className="space-y-4">

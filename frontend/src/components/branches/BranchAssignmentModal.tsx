@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAppDialog } from '../ui/AppDialogProvider';
 import { Building, Plus, Trash2, Star, X } from 'lucide-react';
 import api from '../../utils/api';
 
@@ -28,6 +29,7 @@ interface Props {
 }
 
 const BranchAssignmentModal = ({ entityType, entityId, entityName, onClose }: Props) => {
+    const { confirm } = useAppDialog();
     const [assignments, setAssignments] = useState<BranchAssignment[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [loading, setLoading] = useState(true);
@@ -89,7 +91,11 @@ const BranchAssignmentModal = ({ entityType, entityId, entityName, onClose }: Pr
     };
 
     const handleRemove = async (branchId: string) => {
-        if (!window.confirm('Remove this branch assignment?')) return;
+        if (!(await confirm({
+            title: 'Remove branch assignment?',
+            message: 'Remove this branch assignment?',
+            confirmText: 'Remove assignment',
+        }))) return;
 
         try {
             const endpoint = entityType === 'user'

@@ -5,6 +5,7 @@ import {
   Loader2, AlertCircle, Sparkles,
 } from 'lucide-react';
 import syllabusService, {
+  import { useAppDialog } from '../ui/AppDialogProvider';
   SubjectSyllabusOverview, Topic, SubTopic, parseLearningObjectives,
 } from '../../services/syllabusService';
 
@@ -50,6 +51,7 @@ function subjectIcon(name: string): string {
 // ==========================================
 
 const SyllabusDefinition: React.FC = () => {
+    const { confirm } = useAppDialog();
   // ---- State ----
   const [overview, setOverview] = useState<SubjectSyllabusOverview[]>([]);
   const [loadingOverview, setLoadingOverview] = useState(true);
@@ -196,7 +198,11 @@ const SyllabusDefinition: React.FC = () => {
   };
 
   const handleDeleteTopic = async (id: string) => {
-    if (!confirm('Delete this topic and all its subtopics?')) return;
+    if (!(await confirm({
+      title: 'Delete topic?',
+      message: 'Delete this topic and all its subtopics?',
+      confirmText: 'Delete topic',
+    }))) return;
     try {
       await syllabusService.deleteTopic(id);
       fetchTopics();
@@ -257,7 +263,11 @@ const SyllabusDefinition: React.FC = () => {
   };
 
   const handleDeleteSubTopic = async (id: string) => {
-    if (!confirm('Delete this subtopic?')) return;
+    if (!(await confirm({
+      title: 'Delete subtopic?',
+      message: 'Delete this subtopic?',
+      confirmText: 'Delete subtopic',
+    }))) return;
     try {
       await syllabusService.deleteSubTopic(id);
       fetchTopics();

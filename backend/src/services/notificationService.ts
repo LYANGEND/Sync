@@ -376,6 +376,138 @@ ${schoolName}
   return { subject, text, html };
 }
 
+export function generateInvoiceIssuedEmail(
+  guardianName: string,
+  studentName: string,
+  invoiceNumber: string,
+  totalAmount: number,
+  balanceDue: number,
+  dueDate: Date,
+  schoolName: string,
+  issueDate: Date,
+  notes?: string | null
+): { subject: string; text: string; html: string; sms: string } {
+  const formattedTotal = totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const formattedBalance = balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const formattedDueDate = dueDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formattedIssueDate = issueDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const shortGuardianName = guardianName.split(' ')[0] || 'Parent';
+
+  const subject = `📄 New Invoice ${invoiceNumber} - ${schoolName}`;
+  const sms = `Hi ${shortGuardianName}, invoice ${invoiceNumber} for ${studentName} is ready. Amount: ZMW ${formattedBalance}. Due ${formattedDueDate}.`;
+
+  const text = `
+Dear ${guardianName || 'Parent/Guardian'},
+
+A new invoice has been issued for ${studentName}.
+
+Invoice Details:
+- Invoice Number: ${invoiceNumber}
+- Issue Date: ${formattedIssueDate}
+- Due Date: ${formattedDueDate}
+- Total Amount: ZMW ${formattedTotal}
+- Balance Due: ZMW ${formattedBalance}
+
+${notes ? `Notes: ${notes}
+
+` : ''}Please contact the finance office if you need clarification or a payment arrangement.
+
+Best regards,
+${schoolName}
+  `.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice Notice</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f1f5f9; line-height: 1.6;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f1f5f9;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 40px 40px 30px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td>
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Invoice Notice</h1>
+                    <p style="margin: 8px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 16px;">${schoolName}</p>
+                  </td>
+                  <td style="text-align: right; vertical-align: top;">
+                    <span style="display: inline-block; background-color: rgba(255,255,255,0.18); color: #ffffff; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">${invoiceNumber}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #0f172a; padding: 25px; text-align: center;">
+              <p style="margin: 0; color: rgba(255, 255, 255, 0.75); font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Balance Due</p>
+              <p style="margin: 8px 0 0; color: #ffffff; font-size: 42px; font-weight: 700;">ZMW ${formattedBalance}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <p style="margin: 0 0 20px; color: #334155; font-size: 16px;">Dear ${guardianName || 'Parent/Guardian'},</p>
+              <p style="margin: 0 0 30px; color: #475569; font-size: 15px;">A new invoice has been issued for <strong style="color: #1e293b;">${studentName}</strong>. Please find the summary below.</p>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <h3 style="margin: 0 0 20px; color: #1e293b; font-size: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Invoice Summary</h3>
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Student</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #1e293b; font-size: 14px;">${studentName}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Issue Date</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #1e293b; font-size: 14px;">${formattedIssueDate}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Due Date</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #dc2626; font-size: 14px;">${formattedDueDate}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Total Amount</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #1e293b; font-size: 14px;">ZMW ${formattedTotal}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0;"><span style="color: #64748b; font-size: 14px;">Balance Due</span></td>
+                        <td style="padding: 12px 0; text-align: right;"><strong style="color: #2563eb; font-size: 15px;">ZMW ${formattedBalance}</strong></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              ${notes ? `<div style="margin-top: 24px; padding: 16px 18px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px;"><p style="margin: 0 0 6px; color: #1d4ed8; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Notes</p><p style="margin: 0; color: #334155; font-size: 14px;">${notes}</p></div>` : ''}
+
+              <p style="margin: 30px 0 0; color: #475569; font-size: 15px;">Please contact the finance office if you need clarification or support with payment arrangements.</p>
+              <p style="margin: 20px 0 0; color: #475569; font-size: 15px;">Best regards,<br><strong style="color: #1e293b;">${schoolName}</strong></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; color: #94a3b8; font-size: 12px;">This is an automated invoice notice.</p>
+              <p style="margin: 8px 0 0; color: #94a3b8; font-size: 12px;">© ${new Date().getFullYear()} ${schoolName}. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  return { subject, text, html, sms };
+}
+
 // Create a single notification in the database + auto-fire push
 export async function createNotification(
   userId: string,
@@ -440,4 +572,5 @@ export default {
   broadcastNotification,
   generatePaymentReceiptEmail,
   generateFeeReminderEmail,
+  generateInvoiceIssuedEmail,
 };

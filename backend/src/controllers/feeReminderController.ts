@@ -118,9 +118,12 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
 
         const results = {
             total: studentsWithFees.length,
+            delivered: 0,
             emailsSent: 0,
             smsSent: 0,
             failed: 0,
+            noContact: 0,
+            details: [] as { studentId: string; studentName: string; status: 'SENT' | 'FAILED' | 'NO_CONTACT'; reason?: string }[],
         };
 
         for (const student of studentsWithFees) {
@@ -147,6 +150,22 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
             );
 
             try {
+                const studentName = `${student.firstName} ${student.lastName}`;
+                const hasEmail = Boolean(student.guardianEmail);
+                const hasPhone = Boolean(student.guardianPhone);
+
+                if (!hasEmail && !hasPhone) {
+                    results.failed++;
+                    results.noContact++;
+                    results.details.push({
+                        studentId: student.id,
+                        studentName,
+                        status: 'NO_CONTACT',
+                        reason: 'Guardian contact information unavailable',
+                    });
+                    continue;
+                }
+
                 const result = await sendNotification(
                     student.guardianEmail ?? undefined,
                     student.guardianPhone ?? undefined,
@@ -157,16 +176,45 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
 
                 if (result.emailSent) results.emailsSent++;
                 if (result.smsSent) results.smsSent++;
-                if (!result.emailSent && !result.smsSent) results.failed++;
+                if (result.emailSent || result.smsSent) {
+                    results.delivered++;
+                    results.details.push({
+                        studentId: student.id,
+                        studentName,
+                        status: 'SENT',
+                    });
+                } else {
+                    results.failed++;
+                    results.details.push({
+                        studentId: student.id,
+                        studentName,
+                        status: 'FAILED',
+                        reason: 'Delivery unsuccessful. Please verify notification settings and communication logs.',
+                    });
+                }
             } catch (error) {
                 console.error(`Failed to send reminder to ${student.id}:`, error);
                 results.failed++;
+                results.details.push({
+                    studentId: student.id,
+                    studentName: `${student.firstName} ${student.lastName}`,
+                    status: 'FAILED',
+                    reason: error instanceof Error ? error.message : 'Delivery error occurred',
+                });
             }
         }
 
+        const message = results.total === 0
+            ? 'No students with outstanding fees matched the selected criteria.'
+            : results.delivered === 0
+                ? 'Fee reminders could not be delivered. Please verify SMTP/SMS configuration in Settings and ensure guardian contact information is complete.'
+                : results.failed > 0
+                    ? `Successfully delivered ${results.delivered} of ${results.total} fee reminders. ${results.failed} delivery attempt(s) failed.`
+                    : `Successfully delivered ${results.delivered} fee reminder(s).`;
+
         res.json({
-            success: true,
-            message: `Fee reminders sent to ${results.total} students`,
+            success: results.delivered > 0,
+            message,
             results,
         });
     } catch (error) {
@@ -246,22 +294,22 @@ export const testNotification = async (req: Request, res: Response) => {
             result = await sendNotification(
                 recipient,
                 undefined,
-                `Test Email from ${schoolName}`,
-                `This is a test email from ${schoolName} to verify your email notification settings are working correctly.`
+                `Test Email - ${schoolName}`,
+                `This is a test email from ${schoolName} to verify your email notification configuration.`
             );
         } else if (channel === 'sms') {
             result = await sendNotification(
                 undefined,
                 recipient,
                 '',
-                `Test SMS from ${schoolName}: Your SMS notification settings are working correctly.`
+                `Test SMS from ${schoolName}: Your SMS notification configuration is operational.`
             );
         }
 
         if (result.emailSent || result.smsSent) {
-            res.json({ success: true, message: `Test ${channel} sent successfully` });
+            res.json({ success: true, message: `Test ${channel} delivered successfully` });
         } else {
-            res.status(400).json({ success: false, message: `Failed to send test ${channel}. Check your settings.` });
+            res.status(400).json({ success: false, message: `Test ${channel} delivery failed. Please verify your configuration.` });
         }
     } catch (error) {
         console.error('Test notification error:', error);

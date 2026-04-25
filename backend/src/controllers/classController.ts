@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { syncStudentClassFees } from '../services/classFeeAssignmentService';
 
 const classSchema = z.object({
   name: z.string().min(2),
@@ -199,6 +200,8 @@ export const addStudentsToClass = async (req: Request, res: Response) => {
         classId: id,
       },
     });
+
+    await Promise.all(studentIds.map(studentId => syncStudentClassFees(studentId)));
 
     res.json({ message: 'Students added to class successfully' });
   } catch (error) {

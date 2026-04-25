@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, GraduationCap, Upload } from 'lucide-react';
 import api from '../../utils/api';
 import BulkImportModal from '../../components/BulkImportModal';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface Scholarship {
   id: string;
@@ -14,6 +15,7 @@ interface Scholarship {
 }
 
 const Scholarships = () => {
+  const { confirm } = useAppDialog();
   const [scholarships, setScholarships] = useState<Scholarship[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -75,7 +77,11 @@ const Scholarships = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this scholarship?')) return;
+    if (!(await confirm({
+      title: 'Delete scholarship?',
+      message: 'Are you sure you want to delete this scholarship?',
+      confirmText: 'Delete scholarship',
+    }))) return;
     try {
       await api.delete(`/scholarships/${id}`);
       fetchScholarships();

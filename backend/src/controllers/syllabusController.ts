@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { TopicStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess, ensureTopicMatchesClassGrade } from '../utils/academicScope';
 import { z } from 'zod';
 import aiService from '../services/aiService';
 import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
@@ -52,6 +54,9 @@ function handler(fn: (req: Request, res: Response) => Promise<any>) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ errors: error.errors });
       }
+      if (error instanceof AcademicScopeError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error(`[Syllabus] ${fn.name || 'handler'} error:`, error);
       res.status(500).json({ message: 'Internal server error' });
     }
@@ -73,7 +78,6 @@ export const getSyllabusOverview = handler(async (req, res) => {
   });
 
   const overview = subjects
-    .filter(s => s.topics.length > 0)
     .map(s => {
       const gradeLevels = [...new Set(s.topics.map(t => t.gradeLevel))].sort((a, b) => a - b);
       const totalTopics = s.topics.length;
@@ -207,8 +211,7 @@ export const getTopicAvailability = handler(async (req, res) => {
     return res.status(400).json({ message: 'Class ID is required' });
   }
 
-  const classInfo = await prisma.class.findUnique({ where: { id: classId as string } });
-  if (!classInfo) return res.status(404).json({ message: 'Class not found' });
+  const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId as string);
 
   // Group topics by subject for this grade level
   const grouped = await prisma.topic.groupBy({
@@ -242,8 +245,7 @@ export const getClassProgress = handler(async (req, res) => {
     return res.status(400).json({ message: 'Class ID and Subject ID are required' });
   }
 
-  const classInfo = await prisma.class.findUnique({ where: { id: classId as string } });
-  if (!classInfo) return res.status(404).json({ message: 'Class not found' });
+  const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId as string, { subjectId: subjectId as string });
 
   const topics = await prisma.topic.findMany({
     where: {
@@ -269,6 +271,9 @@ export const getClassProgress = handler(async (req, res) => {
 export const updateTopicProgress = handler(async (req, res) => {
   const { topicId, classId } = req.params;
   const { status } = updateTopicProgressSchema.parse(req.body);
+
+  await ensureAcademicClassAccess(req as AuthRequest, classId);
+  await ensureTopicMatchesClassGrade(topicId, classId);
 
   const progress = await prisma.topicProgress.upsert({
     where: { topicId_classId: { topicId, classId } },
@@ -298,6 +303,8 @@ export const getLessonPlans = handler(async (req, res) => {
     return res.status(400).json({ message: 'Class ID and Subject ID are required' });
   }
 
+  await ensureAcademicClassAccess(req as AuthRequest, classId as string, { subjectId: subjectId as string });
+
   const plans = await prisma.lessonPlan.findMany({
     where: { classId: classId as string, subjectId: subjectId as string },
     orderBy: { weekStartDate: 'desc' },
@@ -315,6 +322,8 @@ export const createLessonPlan = handler(async (req, res) => {
   const data = createLessonPlanSchema.parse(req.body);
   const userId = (req as any).user?.userId;
 
+  await ensureAcademicClassAccess(req as AuthRequest, data.classId, { subjectId: data.subjectId });
+
   const plan = await prisma.lessonPlan.create({
     data: {
       ...data,
@@ -329,6 +338,11 @@ export const createLessonPlan = handler(async (req, res) => {
 export const updateLessonPlan = handler(async (req, res) => {
   const { id } = req.params;
   const data = createLessonPlanSchema.partial().parse(req.body);
+  const existing = await prisma.lessonPlan.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Lesson plan not found' });
+
+  await ensureAcademicClassAccess(req as AuthRequest, data.classId || existing.classId, { subjectId: data.subjectId || existing.subjectId });
+
   const updateData: any = { ...data };
   if (data.weekStartDate) updateData.weekStartDate = new Date(data.weekStartDate);
   const plan = await prisma.lessonPlan.update({ where: { id }, data: updateData });
@@ -337,6 +351,9 @@ export const updateLessonPlan = handler(async (req, res) => {
 
 export const deleteLessonPlan = handler(async (req, res) => {
   const { id } = req.params;
+  const existing = await prisma.lessonPlan.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ message: 'Lesson plan not found' });
+  await ensureAcademicClassAccess(req as AuthRequest, existing.classId, { subjectId: existing.subjectId });
   await prisma.lessonPlan.delete({ where: { id } });
   res.status(204).send();
 });

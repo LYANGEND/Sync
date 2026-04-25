@@ -29,7 +29,7 @@ interface NavItem {
 
 const BottomNav = ({ onMenuClick }: BottomNavProps) => {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [badges, setBadges] = useState<Record<string, number>>({
     notifications: 0,
     messages: 0,
@@ -37,6 +37,11 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
 
   // Fetch badge counts
   useEffect(() => {
+    if (isLoading || !isAuthenticated) {
+      setBadges({ notifications: 0, messages: 0 });
+      return;
+    }
+
     const fetchBadges = async () => {
       try {
         const [notifResponse] = await Promise.all([
@@ -54,7 +59,7 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
     fetchBadges();
     const interval = setInterval(fetchBadges, 60000); // Update every minute
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, isLoading]);
 
   // Role-based navigation items
   const getNavItems = (): NavItem[] => {

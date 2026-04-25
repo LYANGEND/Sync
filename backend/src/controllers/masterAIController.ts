@@ -13,6 +13,16 @@ import { streamVoiceResponse, quickSpeak, detectFarewell, detectAIFarewell } fro
 
 const CTX: convoService.ConversationContextType = 'master-ai-ops';
 
+const isSpeechUnavailableError = (error: any) => {
+  const message = String(error?.message || '');
+  return (
+    message.includes('Failed to generate speech') ||
+    message.includes('Azure TTS API error') ||
+    message.includes('TTS API error') ||
+    message.includes('AI is not configured')
+  );
+};
+
 // ---- Conversations (delegated to conversationService) ----
 
 export const createConversation = async (req: AuthRequest, res: Response) => {
@@ -205,6 +215,11 @@ export const generateSpeech = async (req: AuthRequest, res: Response) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audioBuffer);
   } catch (error: any) {
+    if (isSpeechUnavailableError(error)) {
+      console.warn('TTS unavailable:', error.message);
+      res.setHeader('X-Sync-TTS-Status', 'unavailable');
+      return res.status(204).end();
+    }
     console.error('TTS error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate speech' });
   }

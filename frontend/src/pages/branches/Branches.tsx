@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Edit2, Trash2, MapPin, Phone, Mail, Building, Eye, Users, GraduationCap, BookOpen } from 'lucide-react';
 import api from '../../utils/api';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { useAuth } from '../../context/AuthContext';
 
 interface Branch {
@@ -23,7 +24,9 @@ interface Branch {
 }
 
 const Branches = () => {
+        const { confirm } = useAppDialog();
     const navigate = useNavigate();
+    const { id: editBranchId } = useParams<{ id: string }>();
     const { user } = useAuth();
     const canManage = ['SUPER_ADMIN', 'BRANCH_MANAGER'].includes(user?.role || '');
     const canCreate = user?.role === 'SUPER_ADMIN';
@@ -47,6 +50,14 @@ const Branches = () => {
     useEffect(() => {
         fetchBranches();
     }, []);
+
+    useEffect(() => {
+        if (!editBranchId || !canManage || branches.length === 0 || editingBranch?.id === editBranchId) return;
+        const branch = branches.find((item) => item.id === editBranchId);
+        if (branch) {
+            openEditModal(branch);
+        }
+    }, [branches, canManage, editBranchId, editingBranch?.id]);
 
     const fetchBranches = async () => {
         try {
@@ -73,6 +84,9 @@ const Branches = () => {
             }
             fetchBranches();
             setShowModal(false);
+            if (editBranchId && editingBranch) {
+                navigate(`/branches/${editingBranch.id}`);
+            }
             resetForm();
         } catch (error: any) {
             console.error('Failed to save branch', error);
@@ -81,7 +95,11 @@ const Branches = () => {
     };
 
     const handleDelete = async (id: string) => {
-        if (!window.confirm('Are you sure you want to delete this branch?')) return;
+        if (!(await confirm({
+            title: 'Delete branch?',
+            message: 'Are you sure you want to delete this branch?',
+            confirmText: 'Delete branch',
+        }))) return;
 
         try {
             await api.delete(`/branches/${id}`);
@@ -110,6 +128,15 @@ const Branches = () => {
     const openAddModal = () => {
         resetForm();
         setShowModal(true);
+    };
+
+    const closeModal = () => {
+        const returnToBranchId = editBranchId && editingBranch?.id;
+        setShowModal(false);
+        resetForm();
+        if (returnToBranchId) {
+            navigate(`/branches/${returnToBranchId}`);
+        }
     };
 
     const resetForm = () => {
@@ -381,7 +408,7 @@ const Branches = () => {
                             <div className="flex justify-end space-x-3 pt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setShowModal(false)}
+                                    onClick={closeModal}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                                 >
                                     Cancel

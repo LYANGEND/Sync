@@ -12,12 +12,46 @@ const createUserSchema = z.object({
   branchId: z.string().optional().nullable(),
 });
 
+const roleSchema = z.preprocess(
+  (value) => typeof value === 'string' ? value.trim().toUpperCase().replace(/\s+/g, '_') : value,
+  z.nativeEnum(Role)
+);
+
+const booleanFromCsvSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['true', 'yes', '1', 'active'].includes(normalized)) return true;
+  if (['false', 'no', '0', 'inactive'].includes(normalized)) return false;
+  return value;
+}, z.boolean().optional());
+
 const updateUserSchema = z.object({
   email: z.string().email().optional(),
   fullName: z.string().min(2).optional(),
-  role: z.nativeEnum(Role).optional(),
+  role: roleSchema.optional(),
   password: z.string().min(6).optional(),
   branchId: z.string().optional().nullable(),
+});
+
+const bulkUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+  fullName: z.string().min(2),
+  role: roleSchema,
+  branchId: z.string().optional().nullable(),
+  branchCode: z.string().optional().nullable(),
+  branchName: z.string().optional().nullable(),
+  isActive: booleanFromCsvSchema,
+});
+
+const bulkUserAccessSchema = z.object({
+  ids: z.array(z.string()).min(1),
+  role: roleSchema.optional(),
+  branchId: z.string().optional().nullable(),
+  isActive: z.boolean().optional(),
+}).refine((data) => data.role !== undefined || data.branchId !== undefined || data.isActive !== undefined, {
+  message: 'Provide at least one bulk change.',
 });
 
 export const getUsers = async (req: Request, res: Response) => {
@@ -38,6 +72,7 @@ export const getUsers = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         createdAt: true,
+        branchId: true,
         branch: {
           select: {
             id: true,
@@ -81,9 +116,134 @@ export const getTeachers = async (req: Request, res: Response) => {
   }
 };
 
+export const bulkCreateUsers = async (req: Request, res: Response) => {
+  try {
+    const usersData = z.array(bulkUserSchema).min(1).max(500).parse(req.body);
+
+    const emails = usersData.map(user => user.email.trim().toLowerCase());
+    const duplicateEmails = emails.filter((email, index) => emails.indexOf(email) !== index);
+    if (duplicateEmails.length > 0) {
+      return res.status(400).json({
+        error: `Duplicate emails in import: ${[...new Set(duplicateEmails)].join(', ')}`,
+      });
+    }
+
+    const existingUsers = await prisma.user.findMany({
+      where: { email: { in: emails } },
+      select: { email: true },
+    });
+
+    if (existingUsers.length > 0) {
+      return res.status(400).json({
+        error: `Users already exist: ${existingUsers.map(user => user.email).join(', ')}`,
+      });
+    }
+
+    const branches = await prisma.branch.findMany({
+      select: { id: true, code: true, name: true },
+    });
+    const branchById = new Map(branches.map(branch => [branch.id, branch.id]));
+    const branchByCode = new Map(branches.map(branch => [branch.code.toLowerCase(), branch.id]));
+    const branchByName = new Map(branches.map(branch => [branch.name.toLowerCase(), branch.id]));
+
+    const dataToCreate = await Promise.all(usersData.map(async (user, index) => {
+      let branchId = user.branchId?.trim() || null;
+      const branchCode = user.branchCode?.trim();
+      const branchName = user.branchName?.trim();
+
+      if (branchId && !branchById.has(branchId)) {
+        throw new Error(`Row ${index + 2}: branchId "${branchId}" was not found.`);
+      }
+
+      if (!branchId && branchCode) {
+        branchId = branchByCode.get(branchCode.toLowerCase()) || null;
+        if (!branchId) {
+          throw new Error(`Row ${index + 2}: branchCode "${branchCode}" was not found.`);
+        }
+      }
+
+      if (!branchId && branchName) {
+        branchId = branchByName.get(branchName.toLowerCase()) || null;
+        if (!branchId) {
+          throw new Error(`Row ${index + 2}: branchName "${branchName}" was not found.`);
+        }
+      }
+
+      return {
+        email: user.email.trim().toLowerCase(),
+        passwordHash: await hashPassword(user.password),
+        fullName: user.fullName.trim(),
+        role: user.role,
+        branchId,
+        isActive: user.isActive ?? true,
+      };
+    }));
+
+    const result = await prisma.user.createMany({
+      data: dataToCreate,
+    });
+
+    res.status(201).json({
+      message: `Successfully imported ${result.count} users`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    if (error instanceof Error && error.message.startsWith('Row ')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Bulk create users error:', error);
+    res.status(500).json({
+      error: 'Failed to import users',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+};
+
+export const bulkUpdateUserAccess = async (req: Request, res: Response) => {
+  try {
+    const { ids, role, branchId, isActive } = bulkUserAccessSchema.parse(req.body);
+    const currentUserId = (req as any).user?.userId;
+
+    if (currentUserId && ids.includes(currentUserId)) {
+      return res.status(400).json({ error: 'Remove your own account from the selection before applying bulk access changes.' });
+    }
+
+    if (branchId) {
+      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+      if (!branch) {
+        return res.status(400).json({ error: 'Selected branch was not found.' });
+      }
+    }
+
+    const data: any = {};
+    if (role !== undefined) data.role = role;
+    if (branchId !== undefined) data.branchId = branchId || null;
+    if (isActive !== undefined) data.isActive = isActive;
+
+    const result = await prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data,
+    });
+
+    res.json({
+      message: `Updated ${result.count} users`,
+      count: result.count,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Bulk update users error:', error);
+    res.status(500).json({ error: 'Failed to update selected users' });
+  }
+};
+
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { email, password, fullName, role, branchId } = createUserSchema.parse(req.body);
+    const { email, password, fullName, role, branchId } = createUserSchema.extend({ role: roleSchema }).parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {

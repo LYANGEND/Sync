@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
-import { Plus, Search, Edit2, Power, Shield, User, Mail, Lock, GitBranch } from 'lucide-react';
+import BulkImportModal from '../../components/BulkImportModal';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { Plus, Search, Edit2, Power, Shield, User, Mail, Lock, GitBranch, Upload } from 'lucide-react';
 
 interface UserData {
   id: string;
@@ -23,15 +25,23 @@ interface Branch {
   code: string;
 }
 
-const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
+const ROLES = ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
+const KEEP_BRANCH = '__KEEP_BRANCH__';
+const CLEAR_BRANCH = '__CLEAR_BRANCH__';
 
 const Users = () => {
+  const { confirm } = useAppDialog();
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkRole, setBulkRole] = useState('');
+  const [bulkBranchId, setBulkBranchId] = useState(KEEP_BRANCH);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -107,12 +117,16 @@ const Users = () => {
       resetForm();
     } catch (error: any) {
       console.error('Failed to save user', error);
-      alert(error.response?.data?.error || 'Failed to save user');
+      alert(getErrorMessage(error, 'Failed to save user'));
     }
   };
 
   const handleToggleStatus = async (id: string) => {
-    if (!window.confirm('Are you sure you want to change this user\'s status?')) return;
+    if (!(await confirm({
+      title: 'Change user status?',
+      message: 'Are you sure you want to change this user\'s status?',
+      confirmText: 'Change status',
+    }))) return;
 
     try {
       await api.patch(`/users/${id}/status`);
@@ -120,6 +134,66 @@ const Users = () => {
     } catch (error) {
       console.error('Failed to toggle status', error);
     }
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(selectedId => selectedId !== id) : [...prev, id]
+    );
+  };
+
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(prev => prev.filter(id => !filteredUserIds.includes(id)));
+    } else {
+      setSelectedIds(prev => [...new Set([...prev, ...filteredUserIds])]);
+    }
+  };
+
+  const getErrorMessage = (error: any, fallback: string) => {
+    const apiError = error.response?.data?.error;
+    if (Array.isArray(apiError)) {
+      return apiError.map((item: any) => item.message || item.path?.join('.') || 'Invalid value').join('\n');
+    }
+    return apiError || error.response?.data?.details || fallback;
+  };
+
+  const handleBulkUpdate = async (updates: { role?: string; branchId?: string | null; isActive?: boolean }, actionLabel: string) => {
+    if (selectedIds.length === 0) return;
+    if (!(await confirm({
+      title: 'Apply bulk update?',
+      message: `Apply ${actionLabel} to ${selectedIds.length} selected users?`,
+      confirmText: 'Apply changes',
+    }))) return;
+
+    setBulkSaving(true);
+    try {
+      await api.patch('/users/bulk', { ids: selectedIds, ...updates });
+      setSelectedIds([]);
+      setBulkRole('');
+      setBulkBranchId(KEEP_BRANCH);
+      fetchUsers();
+    } catch (error: any) {
+      console.error('Failed to update selected users', error);
+      alert(getErrorMessage(error, 'Failed to update selected users'));
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  const handleApplyBulkAccess = () => {
+    const updates: { role?: string; branchId?: string | null } = {};
+    if (bulkRole) updates.role = bulkRole;
+    if (bulkBranchId !== KEEP_BRANCH) {
+      updates.branchId = bulkBranchId === CLEAR_BRANCH ? null : bulkBranchId;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      alert('Choose a role or branch change first.');
+      return;
+    }
+
+    handleBulkUpdate(updates, 'bulk access changes');
   };
 
   const resetForm = () => {
@@ -155,6 +229,10 @@ const Users = () => {
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const filteredUserIds = filteredUsers.map(user => user.id);
+  const filteredSelectedCount = filteredUserIds.filter(id => selectedIds.includes(id)).length;
+  const allFilteredSelected = filteredUsers.length > 0 && filteredSelectedCount === filteredUsers.length;
+
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
@@ -162,13 +240,22 @@ const Users = () => {
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">User Management</h1>
           <p className="text-gray-500 dark:text-gray-400">Manage system access and roles</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={20} />
-          <span>Add User</span>
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+          >
+            <Upload size={20} />
+            <span>Import Users</span>
+          </button>
+          <button
+            onClick={openAddModal}
+            className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={20} />
+            <span>Add User</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
@@ -195,6 +282,62 @@ const Users = () => {
           </select>
         </div>
 
+        {selectedIds.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-slate-700 bg-blue-50 dark:bg-blue-900/20 flex flex-col lg:flex-row lg:items-center gap-3">
+            <div className="text-sm font-medium text-blue-900 dark:text-blue-100">
+              {selectedIds.length} selected
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 flex-1">
+              <select
+                value={bulkRole}
+                onChange={(e) => setBulkRole(e.target.value)}
+                className="px-3 py-2 border border-blue-200 dark:border-blue-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white text-sm"
+                disabled={bulkSaving}
+              >
+                <option value="">Keep role</option>
+                {ROLES.map(role => (
+                  <option key={role} value={role}>{role.replace('_', ' ')}</option>
+                ))}
+              </select>
+              <select
+                value={bulkBranchId}
+                onChange={(e) => setBulkBranchId(e.target.value)}
+                className="px-3 py-2 border border-blue-200 dark:border-blue-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white text-sm"
+                disabled={bulkSaving}
+              >
+                <option value={KEEP_BRANCH}>Keep branch</option>
+                <option value={CLEAR_BRANCH}>Global access</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name} ({branch.code})</option>
+                ))}
+              </select>
+              <button
+                onClick={handleApplyBulkAccess}
+                disabled={bulkSaving}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors text-sm"
+              >
+                Apply
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleBulkUpdate({ isActive: true }, 'activation')}
+                disabled={bulkSaving}
+                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-green-300 transition-colors text-sm"
+              >
+                Activate
+              </button>
+              <button
+                onClick={() => handleBulkUpdate({ isActive: false }, 'deactivation')}
+                disabled={bulkSaving}
+                className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-red-300 transition-colors text-sm"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading users...</div>
         ) : (
@@ -202,6 +345,15 @@ const Users = () => {
             <table className="w-full text-left">
               <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-100 dark:border-slate-600">
                 <tr>
+                  <th className="px-6 py-3 w-12">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all users"
+                      className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                  </th>
                   <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">User</th>
                   <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Role</th>
                   <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Status</th>
@@ -212,6 +364,15 @@ const Users = () => {
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                 {filteredUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                    <td className="px-6 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(user.id)}
+                        onChange={() => toggleSelection(user.id)}
+                        aria-label={`Select ${user.fullName}`}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center">
                         <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold mr-3">
@@ -379,6 +540,23 @@ const Users = () => {
           </div>
         </div>
       )}
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        entityName="Users"
+        apiEndpoint="/users/bulk"
+        templateFields={['fullName', 'email', 'role', 'password', 'branchCode', 'isActive']}
+        onSuccess={fetchUsers}
+        instructions={[
+          'Upload a CSV file with user access details.',
+          'Required columns: fullName, email, role, password.',
+          `Roles: ${ROLES.join(', ')}.`,
+          'Optional columns: branchCode, branchId, branchName, isActive.',
+          'Use branchCode from Branches to limit access; leave branch fields blank for global access.',
+          'isActive accepts true/false, yes/no, active/inactive, or 1/0 and defaults to true.',
+        ]}
+      />
     </div>
   );
 };

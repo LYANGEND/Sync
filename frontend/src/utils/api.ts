@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+const AUTH_ERROR_MESSAGES = new Set(['Access token required', 'Invalid or expired token']);
+
 const api = axios.create({
   baseURL: '/api/v1',
   headers: {
@@ -17,6 +19,22 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status;
+    const message = error.response?.data?.error || error.response?.data?.message;
+
+    if (status === 401 || (status === 403 && AUTH_ERROR_MESSAGES.has(message))) {
+      window.dispatchEvent(new CustomEvent('app:auth-invalid', {
+        detail: { status, message },
+      }));
+    }
+
     return Promise.reject(error);
   }
 );

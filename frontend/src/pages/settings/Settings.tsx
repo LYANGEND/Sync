@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain } from 'lucide-react';
 
 interface SettingsData {
@@ -67,6 +68,7 @@ interface Term {
 }
 
 const Settings = () => {
+  const { confirm } = useAppDialog();
   const { refreshSettings } = useTheme();
   const [settings, setSettings] = useState<SettingsData>({
     schoolName: '',
@@ -236,7 +238,11 @@ const Settings = () => {
   };
 
   const handleDeleteLogo = async () => {
-    if (!confirm('Are you sure you want to delete the school logo?')) return;
+    if (!(await confirm({
+      title: 'Delete school logo?',
+      message: 'Are you sure you want to delete the school logo?',
+      confirmText: 'Delete logo',
+    }))) return;
 
     try {
       await api.delete('/settings/logo');

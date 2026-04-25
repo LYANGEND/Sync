@@ -1,11 +1,24 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentRecordAccess } from '../utils/academicScope';
 
 // Get homework submissions for an assessment
 export const getSubmissions = async (req: Request, res: Response) => {
   try {
     const { assessmentId } = req.params;
+
+    const assessment = await prisma.assessment.findUnique({
+      where: { id: assessmentId },
+      select: { classId: true, subjectId: true },
+    });
+
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
 
     const submissions = await prisma.homeworkSubmission.findMany({
       where: { assessmentId },
@@ -19,6 +32,9 @@ export const getSubmissions = async (req: Request, res: Response) => {
 
     res.json(submissions);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get submissions error:', error);
     res.status(500).json({ error: 'Failed to fetch submissions' });
   }
@@ -41,6 +57,10 @@ export const submitHomework = async (req: Request, res: Response) => {
     const assessment = await prisma.assessment.findUnique({ where: { id: assessmentId } });
     if (!assessment) {
       return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    if (student.classId !== assessment.classId) {
+      return res.status(403).json({ error: 'You can only submit homework for your own class' });
     }
 
     const now = new Date();
@@ -70,6 +90,9 @@ export const submitHomework = async (req: Request, res: Response) => {
 
     res.status(201).json(submission);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Submit homework error:', error);
     res.status(500).json({ error: 'Failed to submit homework' });
   }
@@ -84,6 +107,21 @@ export const gradeSubmission = async (req: Request, res: Response) => {
       score: z.number().min(0),
       feedback: z.string().optional(),
     }).parse(req.body);
+
+    const existing = await prisma.homeworkSubmission.findUnique({
+      where: { id },
+      include: { assessment: { select: { classId: true, subjectId: true, totalMarks: true } } },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    await ensureAcademicClassAccess(req as AuthRequest, existing.assessment.classId, { subjectId: existing.assessment.subjectId });
+
+    if (score > Number(existing.assessment.totalMarks)) {
+      return res.status(400).json({ error: `Score cannot exceed ${Number(existing.assessment.totalMarks)} marks` });
+    }
 
     const submission = await prisma.homeworkSubmission.update({
       where: { id },
@@ -101,6 +139,9 @@ export const gradeSubmission = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Grade submission error:', error);
     res.status(500).json({ error: 'Failed to grade submission' });
   }
@@ -115,6 +156,8 @@ export const getMySubmissions = async (req: Request, res: Response) => {
     if (!student) {
       return res.status(404).json({ error: 'Student profile not found' });
     }
+
+    await ensureStudentRecordAccess(req as AuthRequest, student.id);
 
     const submissions = await prisma.homeworkSubmission.findMany({
       where: { studentId: student.id },
@@ -131,6 +174,9 @@ export const getMySubmissions = async (req: Request, res: Response) => {
 
     res.json(submissions);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Get my submissions error:', error);
     res.status(500).json({ error: 'Failed to fetch submissions' });
   }

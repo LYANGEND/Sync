@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   BookOpen, CheckCircle, Circle, Plus, FileText, Calendar,
   ChevronRight, ChevronDown, Target, Clock, Layers, ListTree,
-  PlayCircle, Loader2, BarChart3, ArrowUpRight, Sparkles, X,
+  PlayCircle, Loader2, BarChart3, ArrowUpRight, Sparkles, X, Eye, Edit3,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import syllabusService, { parseLearningObjectives } from '../../services/syllabusService';
@@ -130,6 +131,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
   const [aiSelectedTopicId, setAISelectedTopicId] = useState('');
   const [aiDuration, setAIDuration] = useState(45);
   const [generatedPlan, setGeneratedPlan] = useState<{ title: string; content: string } | null>(null);
+  const [previewMode, setPreviewMode] = useState(true);
   const [aiTopics, setAITopics] = useState<Topic[]>([]);
   const [aiTopicsLoading, setAITopicsLoading] = useState(false);
   // Modal-specific class/subject (independent from main page selectors)
@@ -366,6 +368,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
         title: `${data.subjectName} — ${data.topic.title} (${data.duration}min)`,
         content: data.lessonPlan,
       });
+      setPreviewMode(true);
     } catch (error) {
       console.error('AI generation failed:', error);
       alert('Failed to generate lesson plan. Please check your AI configuration in settings.');
@@ -777,7 +780,9 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                     )}
                   </div>
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">{plan.title}</h3>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3">{plan.content}</p>
+                  <div className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3 prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown>{plan.content}</ReactMarkdown>
+                  </div>
                   <div className="flex justify-between items-center pt-4 border-t border-gray-100 dark:border-slate-700">
                     <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                       <FileText size={16} />
@@ -1073,13 +1078,28 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Lesson Plan Content</label>
-                  <textarea
-                    value={generatedPlan.content}
-                    onChange={(e) => setGeneratedPlan({ ...generatedPlan, content: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
-                    rows={16}
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Lesson Plan Content</label>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewMode(!previewMode)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                    >
+                      {previewMode ? <><Edit3 size={12} /> Edit</> : <><Eye size={12} /> Preview</>}
+                    </button>
+                  </div>
+                  {previewMode ? (
+                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white text-sm max-h-[500px] overflow-y-auto prose prose-sm dark:prose-invert prose-headings:text-gray-800 dark:prose-headings:text-white prose-p:text-gray-700 dark:prose-p:text-gray-300 max-w-none">
+                      <ReactMarkdown>{generatedPlan.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <textarea
+                      value={generatedPlan.content}
+                      onChange={(e) => setGeneratedPlan({ ...generatedPlan, content: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
+                      rows={16}
+                    />
+                  )}
                 </div>
 
                 <div className="flex justify-between gap-3 pt-2">

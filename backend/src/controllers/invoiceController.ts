@@ -1,13 +1,30 @@
 import { Request, Response } from 'express';
+import { InvoiceStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateSequenceNumber, logFinancialAction } from '../services/accountingService';
 import { onInvoiceSent } from '../services/accountingBridge';
+import { createNotification, generateInvoiceIssuedEmail, sendNotification } from '../services/notificationService';
 
 // ========================================
 // INVOICE MANAGEMENT
 // ========================================
+
+const getEffectiveInvoiceStatus = (invoice: { status: string; dueDate: Date | string; balanceDue: unknown }) => {
+  const dueDate = new Date(invoice.dueDate);
+  const balanceDue = Number(invoice.balanceDue || 0);
+
+  if (
+    ['SENT', 'PARTIALLY_PAID'].includes(invoice.status) &&
+    balanceDue > 0 &&
+    dueDate.getTime() < Date.now()
+  ) {
+    return 'OVERDUE';
+  }
+
+  return invoice.status;
+};
 
 const createInvoiceSchema = z.object({
   studentId: z.string().uuid(),
@@ -52,7 +69,12 @@ export const getInvoices = async (req: Request, res: Response) => {
       prisma.invoice.count({ where }),
     ]);
 
-    res.json({ invoices, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+    const normalizedInvoices = invoices.map(invoice => ({
+      ...invoice,
+      status: getEffectiveInvoiceStatus(invoice),
+    }));
+
+    res.json({ invoices: normalizedInvoices, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch invoices' });
   }
@@ -75,7 +97,10 @@ export const getInvoiceById = async (req: Request, res: Response) => {
       },
     });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-    res.json(invoice);
+    res.json({
+      ...invoice,
+      status: getEffectiveInvoiceStatus(invoice),
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch invoice' });
   }
@@ -150,7 +175,24 @@ export const sendInvoice = async (req: Request, res: Response) => {
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: req.params.id },
-      include: { student: true },
+      include: {
+        student: {
+          include: {
+            parent: {
+              select: {
+                id: true,
+                email: true,
+                fullName: true,
+              },
+            },
+            class: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
     });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
 
@@ -171,6 +213,48 @@ export const sendInvoice = async (req: Request, res: Response) => {
       amount: Number(invoice.totalAmount),
       branchId: user.branchId,
     });
+
+    try {
+      const settings = await prisma.schoolSettings.findFirst();
+      const schoolName = settings?.schoolName || 'School';
+      const guardianName = invoice.student.parent?.fullName || invoice.student.guardianName || 'Parent/Guardian';
+      const parentEmail = invoice.student.parent?.email || invoice.student.guardianEmail;
+      const parentPhone = invoice.student.guardianPhone;
+
+      if (parentEmail || parentPhone) {
+        const { subject, text, html, sms } = generateInvoiceIssuedEmail(
+          guardianName,
+          `${invoice.student.firstName} ${invoice.student.lastName}`,
+          invoice.invoiceNumber,
+          Number(invoice.totalAmount),
+          Number(invoice.balanceDue),
+          new Date(invoice.dueDate),
+          schoolName,
+          new Date(invoice.issueDate),
+          invoice.notes
+        );
+
+        sendNotification(
+          parentEmail || undefined,
+          parentPhone || undefined,
+          subject,
+          text,
+          html,
+          sms
+        ).catch(err => console.error('Background invoice notification failed:', err));
+      }
+
+      if (invoice.student.parent?.id) {
+        createNotification(
+          invoice.student.parent.id,
+          '📄 New Invoice Available',
+          `${invoice.invoiceNumber} for ${invoice.student.firstName} ${invoice.student.lastName} is now available. Balance due: ZMW ${Number(invoice.balanceDue).toLocaleString('en-US', { minimumFractionDigits: 2 })}.`,
+          'INFO'
+        ).catch(err => console.error('Invoice in-app notification failed:', err));
+      }
+    } catch (notifyError) {
+      console.error('Failed to process invoice notifications:', notifyError);
+    }
 
     // Create accounting journal entry (Accounts Receivable)
     onInvoiceSent(invoice.id, user.userId).catch(err =>
@@ -380,23 +464,43 @@ export const getInvoiceSummary = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     const branchFilter = user?.role === 'SUPER_ADMIN' ? {} : { branchId: user?.branchId };
+    const openInvoiceFilter = {
+      ...branchFilter,
+      status: { notIn: [InvoiceStatus.PAID, InvoiceStatus.CANCELLED, InvoiceStatus.CREDITED] },
+      balanceDue: { gt: 0 },
+    };
+    const overdueFilter = {
+      ...branchFilter,
+      status: { in: [InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID] },
+      balanceDue: { gt: 0 },
+      dueDate: { lt: new Date() },
+    };
 
-    const [total, paid, overdue, draft, partiallyPaid] = await Promise.all([
+    const [total, paidCount, collected, overdue, draft, partiallyPaid, outstanding] = await Promise.all([
       prisma.invoice.aggregate({ where: { ...branchFilter, status: { notIn: ['CANCELLED'] } }, _sum: { totalAmount: true }, _count: true }),
-      prisma.invoice.aggregate({ where: { ...branchFilter, status: 'PAID' }, _sum: { totalAmount: true }, _count: true }),
-      prisma.invoice.aggregate({ where: { ...branchFilter, status: 'OVERDUE' }, _sum: { balanceDue: true }, _count: true }),
+      prisma.invoice.aggregate({ where: { ...branchFilter, status: 'PAID' }, _count: true }),
+      prisma.invoice.aggregate({ where: { ...branchFilter, status: { notIn: ['CANCELLED'] } }, _sum: { amountPaid: true } }),
+      prisma.invoice.aggregate({ where: overdueFilter, _sum: { balanceDue: true }, _count: true }),
       prisma.invoice.count({ where: { ...branchFilter, status: 'DRAFT' } }),
       prisma.invoice.aggregate({ where: { ...branchFilter, status: 'PARTIALLY_PAID' }, _sum: { balanceDue: true }, _count: true }),
+      prisma.invoice.aggregate({ where: openInvoiceFilter, _sum: { balanceDue: true } }),
     ]);
+
+    const totalPaid = Number(collected._sum.amountPaid || 0);
+    const overdueAmount = Number(overdue._sum?.balanceDue || 0);
+    const totalOutstanding = Number(outstanding._sum?.balanceDue || 0);
 
     res.json({
       totalInvoiced: Number(total._sum.totalAmount || 0),
       totalInvoices: total._count,
-      totalPaid: Number(paid._sum.totalAmount || 0),
-      paidCount: paid._count,
-      overdueAmount: Number(overdue._sum.balanceDue || 0),
+      totalPaid,
+      totalCollected: totalPaid,
+      paidCount: paidCount._count,
+      overdueAmount,
+      totalOverdue: overdueAmount,
       overdueCount: overdue._count,
       draftCount: draft,
+      totalOutstanding,
       partiallyPaidAmount: Number(partiallyPaid._sum.balanceDue || 0),
       partiallyPaidCount: partiallyPaid._count,
     });

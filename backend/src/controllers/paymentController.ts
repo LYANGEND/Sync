@@ -3,7 +3,7 @@ import { PaymentStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { sendNotification, generatePaymentReceiptEmail } from '../services/notificationService';
+import { sendNotification, generatePaymentReceiptEmail, createNotification } from '../services/notificationService';
 import {
   initiateMobileMoneyCollection,
   getCollectionStatus,
@@ -108,6 +108,7 @@ export const createPayment = async (req: Request, res: Response) => {
             guardianPhone: true,
             parent: {
               select: {
+                id: true,
                 email: true,
                 fullName: true
               }
@@ -163,6 +164,17 @@ export const createPayment = async (req: Request, res: Response) => {
           html,
           sms
         ).catch(err => console.error('Background notification failed:', err));
+
+        // Create in-app notification for parent
+        if (payment.student.parent?.id) {
+          const formattedAmount = Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
+          createNotification(
+            payment.student.parent.id,
+            `✅ Payment Received`,
+            `ZMW ${formattedAmount} received for ${payment.student.firstName} ${payment.student.lastName}. Ref: ${transactionId}.`,
+            'SUCCESS'
+          ).catch(err => console.error('In-app notification failed:', err));
+        }
 
         console.log(`Notification queued for parent of student ${studentId}`);
       }
@@ -245,6 +257,23 @@ export const getPayments = async (req: Request, res: Response) => {
           voidedBy: { // Include voidedBy info
             select: {
               fullName: true
+            }
+          },
+          allocations: {
+            select: {
+              amount: true,
+              studentFee: {
+                select: {
+                  feeTemplate: { select: { name: true } },
+                },
+              },
+            },
+          },
+          mobileMoneyCollection: {
+            select: {
+              reference: true,
+              operatorTransactionId: true,
+              status: true,
             }
           }
         },
@@ -419,6 +448,129 @@ export const getFinanceStats = async (req: Request, res: Response) => {
   }
 };
 
+export const getReconciliationDashboard = async (req: Request, res: Response) => {
+  try {
+    const { status = 'all', method = 'ALL', startDate, endDate, branchId } = req.query;
+    const user = (req as any).user;
+
+    const where: any = {
+      status: 'COMPLETED',
+    };
+
+    const effectiveBranchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : (branchId as string);
+    if (effectiveBranchId) {
+      where.branchId = effectiveBranchId;
+    }
+
+    if (method && method !== 'ALL') {
+      where.method = method;
+    }
+
+    if (status === 'reconciled') {
+      where.isReconciled = true;
+    } else if (status === 'unreconciled') {
+      where.isReconciled = false;
+    }
+
+    if (startDate || endDate) {
+      where.paymentDate = {};
+      if (startDate) where.paymentDate.gte = new Date(startDate as string);
+      if (endDate) where.paymentDate.lte = new Date(endDate as string);
+    }
+
+    const payments = await prisma.payment.findMany({
+      where,
+      include: {
+        student: {
+          select: {
+            firstName: true,
+            lastName: true,
+            admissionNumber: true,
+            class: { select: { id: true, name: true } },
+          },
+        },
+        recordedBy: { select: { fullName: true } },
+        allocations: {
+          select: {
+            amount: true,
+            studentFee: {
+              select: {
+                dueDate: true,
+                feeTemplate: { select: { name: true } },
+              },
+            },
+          },
+        },
+        mobileMoneyCollection: {
+          select: {
+            reference: true,
+            operatorTransactionId: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: [
+        { isReconciled: 'asc' },
+        { paymentDate: 'desc' },
+      ],
+    });
+
+    const normalizedPayments = payments.map(payment => {
+      const allocatedAmount = payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
+      const unallocatedAmount = Math.max(0, Number(payment.amount) - allocatedAmount);
+
+      return {
+        ...payment,
+        amount: Number(payment.amount),
+        allocatedAmount,
+        unallocatedAmount,
+        allocationCount: payment.allocations.length,
+        allocationLabels: payment.allocations.map(allocation => allocation.studentFee.feeTemplate.name),
+        settlementReference: payment.bankReference || payment.mobileMoneyCollection?.operatorTransactionId || payment.mobileMoneyCollection?.reference || null,
+      };
+    });
+
+    const summary = normalizedPayments.reduce((acc, payment) => {
+      acc.totalPayments += 1;
+      acc.totalAmount += payment.amount;
+
+      if (payment.isReconciled) {
+        acc.reconciledPayments += 1;
+        acc.reconciledAmount += payment.amount;
+      } else {
+        acc.unreconciledPayments += 1;
+        acc.unreconciledAmount += payment.amount;
+      }
+
+      if (payment.unallocatedAmount > 0.009) {
+        acc.unallocatedPayments += 1;
+        acc.unallocatedAmount += payment.unallocatedAmount;
+      }
+
+      if (payment.method === 'BANK_DEPOSIT' && !payment.bankReference) {
+        acc.missingBankReference += 1;
+      }
+
+      return acc;
+    }, {
+      totalPayments: 0,
+      totalAmount: 0,
+      reconciledPayments: 0,
+      reconciledAmount: 0,
+      unreconciledPayments: 0,
+      unreconciledAmount: 0,
+      unallocatedPayments: 0,
+      unallocatedAmount: 0,
+      missingBankReference: 0,
+    });
+
+    res.json({ summary, payments: normalizedPayments });
+  } catch (error) {
+    console.error('Reconciliation dashboard error:', error);
+    res.status(500).json({ message: 'Failed to load reconciliation dashboard' });
+  }
+};
+
 export const getFinancialReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, branchId } = req.query;
@@ -518,6 +670,92 @@ export const getFinancialReport = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Financial report error:', error);
     res.status(500).json({ message: 'Failed to generate financial report' });
+  }
+};
+
+const reconcilePaymentSchema = z.object({
+  bankReference: z.string().trim().max(100).optional(),
+  settlementDate: z.string().optional(),
+  reconciliationNote: z.string().trim().max(500).optional(),
+});
+
+export const reconcilePayment = async (req: Request, res: Response) => {
+  try {
+    const { paymentId } = req.params;
+    const parseResult = reconcilePaymentSchema.safeParse(req.body);
+
+    if (!parseResult.success) {
+      return res.status(400).json({ error: parseResult.error.errors });
+    }
+
+    const userId = (req as any).user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+
+    if (payment.status !== 'COMPLETED') {
+      return res.status(400).json({ message: 'Only completed payments can be reconciled' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
+    const { bankReference, settlementDate, reconciliationNote } = parseResult.data;
+
+    const updated = await prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        isReconciled: true,
+        reconciledAt: new Date(),
+        reconciledByUserId: userId,
+        reconciledByName: user?.fullName || 'Unknown User',
+        settlementDate: settlementDate ? new Date(settlementDate) : (payment.settlementDate || new Date()),
+        bankReference: bankReference || payment.bankReference,
+        reconciliationNote: reconciliationNote || payment.reconciliationNote,
+      },
+    });
+
+    res.json({
+      message: 'Payment reconciled successfully',
+      payment: { ...updated, amount: Number(updated.amount) },
+    });
+  } catch (error) {
+    console.error('Reconcile payment error:', error);
+    res.status(500).json({ message: 'Failed to reconcile payment' });
+  }
+};
+
+export const unreconcilePayment = async (req: Request, res: Response) => {
+  try {
+    const { paymentId } = req.params;
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+
+    const updated = await prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        isReconciled: false,
+        reconciledAt: null,
+        reconciledByUserId: null,
+        reconciledByName: null,
+        settlementDate: null,
+        bankReference: null,
+      },
+    });
+
+    res.json({
+      message: 'Payment moved back to unreconciled state',
+      payment: { ...updated, amount: Number(updated.amount) },
+    });
+  } catch (error) {
+    console.error('Unreconcile payment error:', error);
+    res.status(500).json({ message: 'Failed to unreconcile payment' });
   }
 };
 

@@ -5,6 +5,9 @@ import {
     getStudentPayments,
     getFinanceStats,
     getFinancialReport,
+    getReconciliationDashboard,
+    reconcilePayment,
+    unreconcilePayment,
     voidPayment,
     getPaymentById,
     checkDuplicatePayment,
@@ -41,6 +44,7 @@ router.use(authenticateToken);
 // Stats and reports
 router.get('/stats', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getFinanceStats);
 router.get('/reports', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getFinancialReport);
+router.get('/reconciliation', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getReconciliationDashboard);
 
 // Check for duplicate payments before creating
 router.get('/check-duplicate', authorizeRole(['SUPER_ADMIN', 'BURSAR']), checkDuplicatePayment);
@@ -68,9 +72,11 @@ router.get('/mobile-money/:collectionId', authorizeRole(['SUPER_ADMIN', 'BURSAR'
 // CRUD operations
 router.post('/', authorizeRole(['SUPER_ADMIN', 'BURSAR']), createPayment);
 router.get('/', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getPayments);
-router.get('/student/:studentId', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'PARENT']), getStudentPayments);
+router.get('/student/:studentId', authorizeRole(['SUPER_ADMIN', 'BURSAR', 'PARENT']), getStudentPayments);
 
 // Single payment operations
+router.post('/:paymentId/reconcile', authorizeRole(['SUPER_ADMIN', 'BURSAR']), reconcilePayment);
+router.post('/:paymentId/unreconcile', authorizeRole(['SUPER_ADMIN', 'BURSAR']), unreconcilePayment);
 router.get('/:paymentId', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getPaymentById);
 router.post('/:paymentId/void', authorizeRole(['SUPER_ADMIN', 'BURSAR']), voidPayment);
 

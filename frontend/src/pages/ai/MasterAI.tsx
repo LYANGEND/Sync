@@ -196,6 +196,7 @@ const MasterAI = () => {
     try {
       setIsAISpeaking(true);
       const blob = await masterAIService.generateSpeech(text);
+      if (!blob) { setIsAISpeaking(false); return; }
       const url = URL.createObjectURL(blob);
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();

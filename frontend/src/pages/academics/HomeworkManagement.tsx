@@ -3,8 +3,9 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import {
   FileText, CheckCircle, Clock, AlertTriangle,
-  ChevronRight, BookOpen, Star, MessageSquare, Sparkles, X, Loader2, Plus
+  ChevronRight, BookOpen, Star, MessageSquare, Sparkles, X, Loader2, Plus, Eye, Edit3
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import toast from 'react-hot-toast';
 
 interface Submission {
@@ -59,8 +60,57 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
   const [terms, setTerms] = useState<any[]>([]);
   const [aiSubjectId, setAISubjectId] = useState('');
   const [aiTopicName, setAITopicName] = useState('');
+  const [aiSelectedTopicId, setAISelectedTopicId] = useState('');
+  const [aiTopics, setAITopics] = useState<any[]>([]);
+  const [aiLoadingTopics, setAILoadingTopics] = useState(false);
   const [aiHomeworkType, setAIHomeworkType] = useState<'HOMEWORK' | 'PROJECT'>('HOMEWORK');
   const [aiGeneratedContent, setAIGeneratedContent] = useState<{ title: string; content: string; totalMarks: number } | null>(null);
+  const [previewMode, setPreviewMode] = useState(true);
+  const selectedClassObj = classes.find((c: any) => c.id === selectedClass);
+  const availableAISubjects = selectedClass
+    ? ((selectedClassObj?.subjects?.length ? selectedClassObj.subjects : subjects) || [])
+    : subjects;
+
+  // Fetch topics when subject changes in AI modal
+  useEffect(() => {
+    if (!aiSubjectId || !selectedClass) {
+      setAITopics([]);
+      setAISelectedTopicId('');
+      return;
+    }
+    if (!selectedClassObj?.gradeLevel && selectedClassObj?.gradeLevel !== 0) return;
+    const fetchTopics = async () => {
+      setAILoadingTopics(true);
+      try {
+        const res = await api.get(`/syllabus/topics?subjectId=${aiSubjectId}&gradeLevel=${selectedClassObj.gradeLevel}`);
+        setAITopics(res.data || []);
+      } catch (err) {
+        console.error('Failed to fetch topics for AI modal:', err);
+        setAITopics([]);
+      } finally {
+        setAILoadingTopics(false);
+      }
+    };
+    fetchTopics();
+  }, [aiSubjectId, selectedClass, selectedClassObj]);
+
+  useEffect(() => {
+    if (!selectedClass) {
+      setAISubjectId('');
+      return;
+    }
+
+    if (availableAISubjects.length === 0) {
+      setAISubjectId('');
+      return;
+    }
+
+    if (aiSubjectId && availableAISubjects.some((subject: any) => subject.id === aiSubjectId)) {
+      return;
+    }
+
+    setAISubjectId(availableAISubjects[0].id);
+  }, [selectedClass, aiSubjectId, availableAISubjects]);
 
   useEffect(() => {
     fetchClasses();
@@ -161,7 +211,8 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
       const selectedClassObj = classes.find((c: any) => c.id === selectedClass);
       const response = await api.post('/syllabus/generate-homework', {
         subjectId: aiSubjectId,
-        topicName: aiTopicName || undefined,
+        topicId: aiSelectedTopicId || undefined,
+        topicName: !aiSelectedTopicId && aiTopicName ? aiTopicName : undefined,
         gradeLevel: selectedClassObj?.gradeLevel,
         homeworkType: aiHomeworkType,
       });
@@ -177,6 +228,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
         content,
         totalMarks,
       });
+      setPreviewMode(true);
     } catch (error) {
       console.error('AI homework generation failed:', error);
       toast.error('Failed to generate homework. Please check your AI configuration.');
@@ -208,6 +260,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
       setShowAIModal(false);
       setAIGeneratedContent(null);
       setAITopicName('');
+      setAISelectedTopicId('');
       fetchAssessments();
     } catch (error) {
       console.error('Failed to save homework:', error);
@@ -305,8 +358,8 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                     </div>
 
                     {sub.content && (
-                      <div className="mt-2 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg text-sm text-gray-700 dark:text-gray-300">
-                        {sub.content}
+                      <div className="mt-2 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg text-sm text-gray-700 dark:text-gray-300 prose prose-sm dark:prose-invert max-w-none">
+                        <ReactMarkdown>{sub.content}</ReactMarkdown>
                       </div>
                     )}
 
@@ -395,28 +448,67 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                     className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">Choose subject...</option>
-                    {(() => {
-                      const cls = classes.find((c: any) => c.id === selectedClass);
-                      const classSubjectIds = new Set((cls?.subjects || []).map((s: any) => s.id));
-                      const filtered = classSubjectIds.size > 0
-                        ? subjects.filter((s: any) => classSubjectIds.has(s.id))
-                        : subjects;
-                      return filtered.map((s: any) => (
+                    {availableAISubjects.length === 0 ? (
+                      <option disabled>No subjects assigned to this class</option>
+                    ) : (
+                      availableAISubjects.map((s: any) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
-                      ));
-                    })()}
+                      ))
+                    )}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic (optional)</label>
-                  <input
-                    type="text"
-                    value={aiTopicName}
-                    onChange={e => setAITopicName(e.target.value)}
-                    placeholder="e.g., Fractions, Photosynthesis..."
-                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic</label>
+                  {aiLoadingTopics ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                      <Loader2 size={14} className="animate-spin" /> Loading topics...
+                    </div>
+                  ) : aiTopics.length > 0 ? (
+                    <>
+                      <select
+                        value={aiSelectedTopicId}
+                        onChange={e => { setAISelectedTopicId(e.target.value); setAITopicName(''); }}
+                        className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                      >
+                        <option value="">All topics (generate for any)</option>
+                        {aiTopics.map((t: any) => (
+                          <option key={t.id} value={t.id}>{t.title} ({t.subtopics?.length || 0} subtopics)</option>
+                        ))}
+                      </select>
+
+                      {/* Show subtopics for selected topic */}
+                      {aiSelectedTopicId && (() => {
+                        const topic = aiTopics.find((t: any) => t.id === aiSelectedTopicId);
+                        if (!topic?.subtopics?.length) return null;
+                        return (
+                          <div className="mt-2 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                            <p className="text-xs font-medium text-purple-700 dark:text-purple-300 mb-1.5">Subtopics covered:</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {topic.subtopics.map((st: any) => (
+                                <span key={st.id} className="text-xs px-2 py-0.5 bg-white dark:bg-slate-700 border border-purple-200 dark:border-purple-700 rounded-full text-purple-700 dark:text-purple-300">
+                                  {st.title}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={aiTopicName}
+                        onChange={e => setAITopicName(e.target.value)}
+                        placeholder={aiSubjectId ? 'No syllabus topics found — type a topic name' : 'Select a subject first'}
+                        className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                      />
+                      {aiSubjectId && !aiLoadingTopics && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">💡 No syllabus topics found for this subject/grade. Generate a syllabus first, or type a topic manually.</p>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 <div>
@@ -512,13 +604,28 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Content</label>
-                  <textarea
-                    value={aiGeneratedContent.content}
-                    onChange={e => setAIGeneratedContent({ ...aiGeneratedContent, content: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
-                    rows={12}
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Content</label>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewMode(!previewMode)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                    >
+                      {previewMode ? <><Edit3 size={12} /> Edit</> : <><Eye size={12} /> Preview</>}
+                    </button>
+                  </div>
+                  {previewMode ? (
+                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white text-sm max-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert prose-headings:text-gray-800 dark:prose-headings:text-white prose-p:text-gray-700 dark:prose-p:text-gray-300 max-w-none">
+                      <ReactMarkdown>{aiGeneratedContent.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <textarea
+                      value={aiGeneratedContent.content}
+                      onChange={e => setAIGeneratedContent({ ...aiGeneratedContent, content: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
+                      rows={12}
+                    />
+                  )}
                 </div>
 
                 <div className="flex justify-between gap-3 pt-2">

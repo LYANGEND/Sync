@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import api from '../../utils/api';
 import { ArrowRight, CheckCircle, XCircle, AlertTriangle, Save } from 'lucide-react';
 
 interface Class {
   id: string;
   name: string;
+  gradeLevel?: number;
 }
 
 interface AcademicTerm {
@@ -30,6 +32,7 @@ interface PromotionDecision {
 }
 
 const Promotions = () => {
+    const { confirm } = useAppDialog();
   const [classes, setClasses] = useState<Class[]>([]);
   const [terms, setTerms] = useState<AcademicTerm[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -39,6 +42,18 @@ const Promotions = () => {
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [nextClassId, setNextClassId] = useState<string>('');
+  const selectedClass = classes.find(c => c.id === selectedClassId);
+  const eligibleNextClasses = classes.filter(c => {
+    if (!selectedClass || c.id === selectedClassId) {
+      return false;
+    }
+
+    if (selectedClass.gradeLevel === undefined || c.gradeLevel === undefined) {
+      return true;
+    }
+
+    return c.gradeLevel === selectedClass.gradeLevel + 1;
+  });
 
   useEffect(() => {
     fetchClasses();
@@ -76,7 +91,7 @@ const Promotions = () => {
       const response = await api.get('/promotions/candidates', {
         params: {
           classId: selectedClassId,
-          academicTermId: selectedTermId
+          termId: selectedTermId
         }
       });
       setCandidates(response.data);
@@ -115,7 +130,11 @@ const Promotions = () => {
       return;
     }
 
-    if (!window.confirm('Are you sure you want to process these promotions? This action will update student records.')) {
+    if (!(await confirm({
+      title: 'Process promotions?',
+      message: 'Are you sure you want to process these promotions? This action will update student records.',
+      confirmText: 'Process promotions',
+    }))) {
       return;
     }
 
@@ -198,11 +217,9 @@ const Promotions = () => {
                   className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 dark:text-white"
                 >
                   <option value="">Select Next Class</option>
-                  {classes
-                    .filter(c => c.id !== selectedClassId)
-                    .map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                  {eligibleNextClasses.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
                 </select>
               </div>
               <button

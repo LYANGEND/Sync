@@ -216,7 +216,7 @@ async function syncStudentData() {
 
 async function syncNotifications() {
   try {
-    const response = await fetch('/api/notifications/unread-count')
+    const response = await fetch('/api/v1/communication/notifications/unread-count')
     if (response.ok) {
       const data = await response.json()
 
@@ -286,7 +286,7 @@ self.addEventListener('push', (event) => {
       (async () => {
         if ('setAppBadge' in navigator) {
           try {
-            const response = await fetch('/api/notifications/unread-count')
+            const response = await fetch('/api/v1/communication/notifications/unread-count')
             if (response.ok) {
               const countData = await response.json()
               navigator.setAppBadge(countData.count || 1)

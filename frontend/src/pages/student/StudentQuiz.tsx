@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface QuestionOption {
   id: string;
@@ -25,6 +26,7 @@ interface QuizData {
 }
 
 const StudentQuiz = () => {
+  const { confirm } = useAppDialog();
   const { assessmentId } = useParams<{ assessmentId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -64,7 +66,11 @@ const StudentQuiz = () => {
   const handleSubmit = async () => {
     if (!quiz || !user) return;
     
-    if (!window.confirm('Are you sure you want to submit your answers?')) {
+    if (!(await confirm({
+      title: 'Submit quiz?',
+      message: 'Are you sure you want to submit your answers?',
+      confirmText: 'Submit answers',
+    }))) {
       return;
     }
 

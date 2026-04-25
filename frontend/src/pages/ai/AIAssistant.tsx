@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import aiAssistantService, { Conversation, Message, FavoritePrompt, Artifact, SystemSubject, SubjectTopic } from '../../services/aiAssistantService';
 import toast from 'react-hot-toast';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface TeachingClass {
   id: string;
@@ -38,6 +39,7 @@ const SLASH_COMMANDS = [
 ];
 
 const AIAssistant = () => {
+    const { confirm, prompt } = useAppDialog();
   // Core state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
@@ -122,7 +124,11 @@ const AIAssistant = () => {
 
   const deleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this conversation?')) return;
+    if (!(await confirm({
+      title: 'Delete conversation?',
+      message: 'Delete this conversation?',
+      confirmText: 'Delete conversation',
+    }))) return;
     try {
       await aiAssistantService.deleteConversation(id);
       setConversations(prev => prev.filter(c => c.id !== id));
@@ -258,8 +264,14 @@ const AIAssistant = () => {
   };
 
   const saveAsArtifact = async (content: string) => {
-    const title = window.prompt('Give this artifact a name:', 'AI Generated Content');
-    if (!title) return;
+    const title = await prompt({
+      title: 'Save artifact',
+      message: 'Give this artifact a name.',
+      defaultValue: 'AI Generated Content',
+      placeholder: 'Artifact name',
+      confirmText: 'Save artifact',
+    });
+    if (!title?.trim()) return;
     try {
       const data = await aiAssistantService.saveArtifact({
         conversationId: activeConversation || undefined, type: 'OTHER', title, content,
@@ -270,7 +282,11 @@ const AIAssistant = () => {
   };
 
   const deleteArtifactItem = async (id: string) => {
-    if (!confirm('Delete this artifact?')) return;
+    if (!(await confirm({
+      title: 'Delete artifact?',
+      message: 'Delete this artifact?',
+      confirmText: 'Delete artifact',
+    }))) return;
     try {
       await aiAssistantService.deleteArtifact(id);
       setArtifacts(prev => prev.filter(a => a.id !== id));

@@ -27,13 +27,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const clearSession = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  };
+
   const refreshUser = async () => {
+    if (!localStorage.getItem('token')) {
+      clearSession();
+      return;
+    }
+
     try {
       const response = await api.get('/profile');
       const updatedUser = response.data;
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
-    } catch (error) {
+    } catch (error: any) {
+      const status = error.response?.status;
+      if (status === 401 || status === 403) {
+        clearSession();
+        return;
+      }
       console.error('Failed to refresh user', error);
     }
   };
@@ -46,7 +63,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (storedToken) {
         setToken(storedToken);
         if (storedUser) {
-          setUser(JSON.parse(storedUser));
+          try {
+            setUser(JSON.parse(storedUser));
+          } catch {
+            localStorage.removeItem('user');
+          }
         }
 
         // Fetch fresh user data
@@ -54,14 +75,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const response = await api.get('/profile');
           setUser(response.data);
           localStorage.setItem('user', JSON.stringify(response.data));
-        } catch (error) {
-          console.error('Failed to fetch user profile', error);
+        } catch (error: any) {
+          const status = error.response?.status;
+          if (status === 401 || status === 403) {
+            clearSession();
+          } else {
+            console.error('Failed to fetch user profile', error);
+          }
         }
       }
       setIsLoading(false);
     };
 
     initAuth();
+  }, []);
+
+  useEffect(() => {
+    const handleInvalidAuth = () => {
+      clearSession();
+      setIsLoading(false);
+    };
+
+    window.addEventListener('app:auth-invalid', handleInvalidAuth);
+    return () => window.removeEventListener('app:auth-invalid', handleInvalidAuth);
   }, []);
 
   const login = (newToken: string, newUser: User) => {
@@ -72,10 +108,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
+    clearSession();
   };
 
   return (
@@ -86,7 +119,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         logout,
         refreshUser,
-        isAuthenticated: !!token,
+        isAuthenticated: !!token && !!user,
         isLoading,
       }}
     >

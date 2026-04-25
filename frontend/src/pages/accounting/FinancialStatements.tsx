@@ -5,6 +5,80 @@ import toast from 'react-hot-toast';
 
 type Tab = 'trial-balance' | 'income' | 'balance-sheet' | 'cash-flow' | 'receivables' | 'accounts' | 'refunds' | 'audit';
 
+const toInputDate = (date: Date) => date.toISOString().split('T')[0];
+
+const normalizeTrialBalance = (raw: any) => {
+  const entries = raw.entries || raw.accounts || [];
+  const totalDebits = entries.reduce((sum: number, entry: any) => sum + (entry.debit || 0), 0);
+  const totalCredits = entries.reduce((sum: number, entry: any) => sum + (entry.credit || 0), 0);
+
+  return {
+    period: raw.period ? `${new Date(raw.period.startDate).toLocaleDateString()} — ${new Date(raw.period.endDate).toLocaleDateString()}` : '',
+    accounts: entries.map((entry: any) => ({
+      name: entry.accountName || entry.name || entry.accountCode,
+      debit: entry.debit || 0,
+      credit: entry.credit || 0,
+    })),
+    totalDebits,
+    totalCredits,
+    isBalanced: Math.abs(totalDebits - totalCredits) < 0.01,
+  };
+};
+
+const normalizeIncomeStatement = (raw: any) => ({
+  income: raw.income || [],
+  totalIncome: raw.totalIncome || 0,
+  expenses: raw.expenses || [],
+  totalExpenses: raw.totalExpenses || 0,
+  netIncome: raw.netIncome || 0,
+});
+
+const normalizeBalanceSheet = (raw: any) => ({
+  assets: (raw.assets || []).map((item: any) => ({ name: item.name, amount: item.balance || item.amount || 0 })),
+  totalAssets: raw.totalAssets || 0,
+  liabilities: (raw.liabilities || []).map((item: any) => ({ name: item.name, amount: item.balance || item.amount || 0 })),
+  totalLiabilities: raw.totalLiabilities || 0,
+  equity: (raw.equity || []).map((item: any) => ({ name: item.name, amount: item.balance || item.amount || 0 })),
+  totalEquity: raw.totalEquity || 0,
+});
+
+const normalizeCashFlow = (raw: any) => ({
+  totalInflows: raw.inflows?.totalInflow ?? raw.totalInflows ?? 0,
+  totalOutflows: raw.outflows?.totalOutflow ?? raw.totalOutflows ?? 0,
+  netCashFlow: raw.netCashFlow ?? 0,
+  details: {
+    feeCollections: raw.inflows?.feeCollections ?? 0,
+    expenseOutflows: raw.outflows?.expenses ?? 0,
+    payrollOutflows: raw.outflows?.payroll ?? 0,
+  },
+});
+
+const buildComparisonWindow = (startDate: string, endDate: string) => {
+  if (!startDate || !endDate) return null;
+
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
+
+  const rangeMs = end.getTime() - start.getTime();
+  const previousEnd = new Date(start);
+  previousEnd.setDate(previousEnd.getDate() - 1);
+  const previousStart = new Date(previousEnd.getTime() - rangeMs);
+
+  return {
+    params: {
+      startDate: toInputDate(previousStart),
+      endDate: toInputDate(previousEnd),
+    },
+    label: `${previousStart.toLocaleDateString()} — ${previousEnd.toLocaleDateString()}`,
+  };
+};
+
+const calculateChange = (current: number, previous: number) => {
+  if (!previous) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+};
+
 const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
   const [activeTab, setActiveTab] = useState<Tab>('trial-balance');
   const [loading, setLoading] = useState(false);
@@ -28,10 +102,43 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
   // Date filters
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [comparisonLabel, setComparisonLabel] = useState('');
+  const [comparisonIncome, setComparisonIncome] = useState<any>(null);
+  const [comparisonBalanceSheet, setComparisonBalanceSheet] = useState<any>(null);
+  const [comparisonCashFlow, setComparisonCashFlow] = useState<any>(null);
 
   useEffect(() => {
     loadTabData(activeTab);
   }, [activeTab]);
+
+  const applyDatePreset = (preset: 'this-month' | 'last-month' | 'ytd' | 'clear') => {
+    const today = new Date();
+
+    if (preset === 'clear') {
+      setDateFrom('');
+      setDateTo('');
+      return;
+    }
+
+    if (preset === 'this-month') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      setDateFrom(toInputDate(start));
+      setDateTo(toInputDate(today));
+      return;
+    }
+
+    if (preset === 'last-month') {
+      const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const end = new Date(today.getFullYear(), today.getMonth(), 0);
+      setDateFrom(toInputDate(start));
+      setDateTo(toInputDate(end));
+      return;
+    }
+
+    const start = new Date(today.getFullYear(), 0, 1);
+    setDateFrom(toInputDate(start));
+    setDateTo(toInputDate(today));
+  };
 
   const loadTabData = async (tab: Tab) => {
     setLoading(true);
@@ -39,65 +146,73 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
       const params: any = {};
       if (dateFrom) params.startDate = dateFrom;
       if (dateTo) params.endDate = dateTo;
+      const comparisonWindow = buildComparisonWindow(dateFrom, dateTo);
 
       switch (tab) {
         case 'trial-balance': {
           const tb = await financialApi.getTrialBalance(params);
-          const raw = tb.data;
-          // Backend returns { period, entries: [...] }
-          const entries = raw.entries || raw.accounts || [];
-          const totalDebits = entries.reduce((s: number, e: any) => s + (e.debit || 0), 0);
-          const totalCredits = entries.reduce((s: number, e: any) => s + (e.credit || 0), 0);
-          setTrialBalance({
-            period: raw.period ? `${new Date(raw.period.startDate).toLocaleDateString()} — ${new Date(raw.period.endDate).toLocaleDateString()}` : '',
-            accounts: entries.map((e: any) => ({ name: e.accountName || e.name || e.accountCode, debit: e.debit || 0, credit: e.credit || 0 })),
-            totalDebits,
-            totalCredits,
-            isBalanced: Math.abs(totalDebits - totalCredits) < 0.01,
-          });
+          setTrialBalance(normalizeTrialBalance(tb.data));
+          setComparisonLabel('');
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'income': {
-          const inc = await financialApi.getIncomeStatement(params);
-          const raw = inc.data;
-          // Backend returns { period, income, totalIncome, expenses, totalExpenses, netIncome }
-          setIncomeStatement({
-            income: raw.income || [],
-            totalIncome: raw.totalIncome || 0,
-            expenses: raw.expenses || [],
-            totalExpenses: raw.totalExpenses || 0,
-            netIncome: raw.netIncome || 0,
-          });
+          if (comparisonWindow) {
+            const [inc, prev] = await Promise.all([
+              financialApi.getIncomeStatement(params),
+              financialApi.getIncomeStatement(comparisonWindow.params),
+            ]);
+            setIncomeStatement(normalizeIncomeStatement(inc.data));
+            setComparisonIncome(normalizeIncomeStatement(prev.data));
+            setComparisonLabel(comparisonWindow.label);
+          } else {
+            const inc = await financialApi.getIncomeStatement(params);
+            setIncomeStatement(normalizeIncomeStatement(inc.data));
+            setComparisonIncome(null);
+            setComparisonLabel('');
+          }
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'balance-sheet': {
-          const bs = await financialApi.getBalanceSheet(params);
-          const raw = bs.data;
-          // Backend returns { asOfDate, assets, totalAssets, liabilities, totalLiabilities, equity, totalEquity }
-          setBalanceSheet({
-            assets: (raw.assets || []).map((a: any) => ({ name: a.name, amount: a.balance || a.amount || 0 })),
-            totalAssets: raw.totalAssets || 0,
-            liabilities: (raw.liabilities || []).map((l: any) => ({ name: l.name, amount: l.balance || l.amount || 0 })),
-            totalLiabilities: raw.totalLiabilities || 0,
-            equity: (raw.equity || []).map((e: any) => ({ name: e.name, amount: e.balance || e.amount || 0 })),
-            totalEquity: raw.totalEquity || 0,
-          });
+          if (comparisonWindow) {
+            const [bs, prev] = await Promise.all([
+              financialApi.getBalanceSheet(params),
+              financialApi.getBalanceSheet(comparisonWindow.params),
+            ]);
+            setBalanceSheet(normalizeBalanceSheet(bs.data));
+            setComparisonBalanceSheet(normalizeBalanceSheet(prev.data));
+            setComparisonLabel(comparisonWindow.label);
+          } else {
+            const bs = await financialApi.getBalanceSheet(params);
+            setBalanceSheet(normalizeBalanceSheet(bs.data));
+            setComparisonBalanceSheet(null);
+            setComparisonLabel('');
+          }
+          setComparisonIncome(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'cash-flow': {
-          const cf = await financialApi.getCashFlow(params);
-          const raw = cf.data;
-          // Backend returns { inflows: { feeCollections, totalInflow }, outflows: { expenses, payroll, totalOutflow }, netCashFlow }
-          setCashFlow({
-            totalInflows: raw.inflows?.totalInflow ?? raw.totalInflows ?? 0,
-            totalOutflows: raw.outflows?.totalOutflow ?? raw.totalOutflows ?? 0,
-            netCashFlow: raw.netCashFlow ?? 0,
-            details: {
-              feeCollections: raw.inflows?.feeCollections ?? 0,
-              expenseOutflows: raw.outflows?.expenses ?? 0,
-              payrollOutflows: raw.outflows?.payroll ?? 0,
-            },
-          });
+          if (comparisonWindow) {
+            const [cf, prev] = await Promise.all([
+              financialApi.getCashFlow(params),
+              financialApi.getCashFlow(comparisonWindow.params),
+            ]);
+            setCashFlow(normalizeCashFlow(cf.data));
+            setComparisonCashFlow(normalizeCashFlow(prev.data));
+            setComparisonLabel(comparisonWindow.label);
+          } else {
+            const cf = await financialApi.getCashFlow(params);
+            setCashFlow(normalizeCashFlow(cf.data));
+            setComparisonCashFlow(null);
+            setComparisonLabel('');
+          }
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
           break;
         }
         case 'receivables': {
@@ -105,6 +220,10 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           const raw = rec.data;
           // Backend returns { receivables: [...], summary, studentCount }
           setReceivables(raw.receivables || raw || []);
+          setComparisonLabel('');
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'accounts': {
@@ -112,6 +231,10 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           // Backend returns array directly
           const raw = accs.data;
           setAccounts(Array.isArray(raw) ? raw : (raw.accounts || []));
+          setComparisonLabel('');
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'refunds': {
@@ -119,6 +242,10 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           // Backend returns array directly
           const raw = ref.data;
           setRefunds(Array.isArray(raw) ? raw : (raw.refunds || []));
+          setComparisonLabel('');
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
         case 'audit': {
@@ -126,6 +253,10 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           const raw = aud.data;
           // Backend returns { logs, total, page, totalPages }
           setAuditLog(raw.logs || (Array.isArray(raw) ? raw : []));
+          setComparisonLabel('');
+          setComparisonIncome(null);
+          setComparisonBalanceSheet(null);
+          setComparisonCashFlow(null);
           break;
         }
       }
@@ -214,6 +345,137 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const fmt = (n: number) => `K${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  const pct = (n: number | null) => n === null || !Number.isFinite(n) ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+
+  const receivablesSummary = receivables.reduce((summary: any, item: any) => {
+    summary.totalBalance += item.balance || 0;
+    summary.totalDue += item.totalDue || 0;
+    summary.totalPaid += item.totalPaid || 0;
+    summary[item.bucket] = (summary[item.bucket] || 0) + (item.balance || 0);
+    return summary;
+  }, { totalBalance: 0, totalDue: 0, totalPaid: 0, '0-30': 0, '30-60': 0, '60-90': 0, '90+': 0 });
+
+  const refundSummary = refunds.reduce((summary: any, refund) => {
+    const amount = Number(refund.amount || 0);
+    summary.total += amount;
+    summary[refund.status] = (summary[refund.status] || 0) + amount;
+    summary.counts[refund.status] = (summary.counts[refund.status] || 0) + 1;
+    return summary;
+  }, { total: 0, PENDING: 0, APPROVED: 0, PROCESSED: 0, counts: {} as Record<string, number> });
+
+  const auditAmount = auditLog.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  const balanceSheetDelta = balanceSheet ? Math.abs((balanceSheet.totalAssets || 0) - ((balanceSheet.totalLiabilities || 0) + (balanceSheet.totalEquity || 0))) : 0;
+  const trialBalanceDelta = trialBalance ? Math.abs((trialBalance.totalDebits || 0) - (trialBalance.totalCredits || 0)) : 0;
+
+  const controlHighlights = [] as Array<{ label: string; value: string; detail: string; tone: string; bg: string }>;
+
+  if (activeTab === 'trial-balance' && trialBalance) {
+    controlHighlights.push(
+      {
+        label: 'Trial Balance Status',
+        value: trialBalance.isBalanced ? 'Balanced' : 'Mismatch',
+        detail: `Variance ${fmt(trialBalanceDelta)}`,
+        tone: trialBalance.isBalanced ? 'text-green-600' : 'text-red-600',
+        bg: trialBalance.isBalanced ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20',
+      },
+      {
+        label: 'Accounts Reported',
+        value: `${trialBalance.accounts?.length || 0}`,
+        detail: `${fmt(trialBalance.totalDebits || 0)} debits posted`,
+        tone: 'text-blue-600',
+        bg: 'bg-blue-50 dark:bg-blue-900/20',
+      },
+    );
+  }
+
+  if (activeTab === 'balance-sheet' && balanceSheet) {
+    controlHighlights.push(
+      {
+        label: 'Accounting Equation',
+        value: balanceSheetDelta < 0.01 ? 'In Balance' : 'Review Needed',
+        detail: `Delta ${fmt(balanceSheetDelta)}`,
+        tone: balanceSheetDelta < 0.01 ? 'text-green-600' : 'text-red-600',
+        bg: balanceSheetDelta < 0.01 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20',
+      },
+      {
+        label: 'Net Assets',
+        value: fmt((balanceSheet.totalAssets || 0) - (balanceSheet.totalLiabilities || 0)),
+        detail: `Equity reported ${fmt(balanceSheet.totalEquity || 0)}`,
+        tone: 'text-blue-600',
+        bg: 'bg-blue-50 dark:bg-blue-900/20',
+      },
+    );
+  }
+
+  if (activeTab === 'cash-flow' && cashFlow) {
+    const cashCoverage = cashFlow.totalOutflows > 0 ? (cashFlow.totalInflows / cashFlow.totalOutflows) * 100 : null;
+    controlHighlights.push(
+      {
+        label: 'Cash Coverage',
+        value: cashCoverage === null ? '—' : `${cashCoverage.toFixed(1)}%`,
+        detail: 'Inflows as a share of outflows',
+        tone: cashCoverage !== null && cashCoverage >= 100 ? 'text-green-600' : 'text-orange-600',
+        bg: cashCoverage !== null && cashCoverage >= 100 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-orange-50 dark:bg-orange-900/20',
+      },
+    );
+  }
+
+  if (activeTab === 'receivables' && receivables.length > 0) {
+    controlHighlights.push(
+      {
+        label: 'Outstanding Balance',
+        value: fmt(receivablesSummary.totalBalance),
+        detail: `${receivables.length} debtor account(s)`,
+        tone: 'text-red-600',
+        bg: 'bg-red-50 dark:bg-red-900/20',
+      },
+      {
+        label: '90+ Day Exposure',
+        value: fmt(receivablesSummary['90+'] || 0),
+        detail: 'High-risk overdue balances',
+        tone: 'text-orange-600',
+        bg: 'bg-orange-50 dark:bg-orange-900/20',
+      },
+    );
+  }
+
+  if (activeTab === 'refunds' && refunds.length > 0) {
+    controlHighlights.push(
+      {
+        label: 'Pending Refunds',
+        value: `${refundSummary.counts.PENDING || 0}`,
+        detail: fmt(refundSummary.PENDING || 0),
+        tone: 'text-yellow-600',
+        bg: 'bg-yellow-50 dark:bg-yellow-900/20',
+      },
+      {
+        label: 'Processed Refunds',
+        value: `${refundSummary.counts.PROCESSED || 0}`,
+        detail: fmt(refundSummary.PROCESSED || 0),
+        tone: 'text-green-600',
+        bg: 'bg-green-50 dark:bg-green-900/20',
+      },
+    );
+  }
+
+  if (activeTab === 'audit' && auditLog.length > 0) {
+    controlHighlights.push(
+      {
+        label: 'Audit Entries',
+        value: `${auditLog.length}`,
+        detail: 'Recent financial events loaded',
+        tone: 'text-blue-600',
+        bg: 'bg-blue-50 dark:bg-blue-900/20',
+      },
+      {
+        label: 'Value Touched',
+        value: fmt(auditAmount),
+        detail: 'Entries with monetary amount',
+        tone: 'text-purple-600',
+        bg: 'bg-purple-50 dark:bg-purple-900/20',
+      },
+    );
+  }
 
   const tabs = [
     { key: 'trial-balance', label: 'Trial Balance', icon: BarChart3 },
@@ -253,8 +515,25 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* Date Filter (for financial statements) */}
       {['trial-balance', 'income', 'balance-sheet', 'cash-flow'].includes(activeTab) && (
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { key: 'this-month', label: 'This Month' },
+              { key: 'last-month', label: 'Last Month' },
+              { key: 'ytd', label: 'YTD' },
+              { key: 'clear', label: 'Clear' },
+            ].map(preset => (
+              <button
+                key={preset.key}
+                onClick={() => applyDatePreset(preset.key as 'this-month' | 'last-month' | 'ytd' | 'clear')}
+                className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 text-sm">
             <label className="text-gray-500">From:</label>
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="px-3 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white" />
@@ -266,6 +545,22 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           </div>
           <button onClick={() => loadTabData(activeTab)}
             className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Apply</button>
+          {comparisonLabel && (
+            <span className="text-xs text-gray-500 dark:text-gray-400">Comparing current period against {comparisonLabel}</span>
+          )}
+          </div>
+        </div>
+      )}
+
+      {controlHighlights.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {controlHighlights.map(card => (
+            <div key={card.label} className={`p-4 rounded-lg ${card.bg}`}>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{card.label}</p>
+              <p className={`text-xl font-bold mt-1 ${card.tone}`}>{card.value}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{card.detail}</p>
+            </div>
+          ))}
         </div>
       )}
 
@@ -328,6 +623,36 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
             <div className="space-y-4">
               {incomeStatement ? (
                 <>
+                  {comparisonIncome && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {[
+                        {
+                          label: 'Income vs Previous',
+                          current: incomeStatement.totalIncome,
+                          previous: comparisonIncome.totalIncome,
+                          tone: 'text-green-600',
+                        },
+                        {
+                          label: 'Expenses vs Previous',
+                          current: incomeStatement.totalExpenses,
+                          previous: comparisonIncome.totalExpenses,
+                          tone: 'text-red-600',
+                        },
+                        {
+                          label: 'Net Result vs Previous',
+                          current: incomeStatement.netIncome,
+                          previous: comparisonIncome.netIncome,
+                          tone: incomeStatement.netIncome >= comparisonIncome.netIncome ? 'text-blue-600' : 'text-orange-600',
+                        },
+                      ].map(metric => (
+                        <div key={metric.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
+                          <p className="text-sm text-gray-500">{metric.label}</p>
+                          <p className={`text-xl font-bold mt-1 ${metric.tone}`}>{fmt(metric.current)}</p>
+                          <p className="text-xs text-gray-400 mt-1">Previous {fmt(metric.previous)} • {pct(calculateChange(metric.current, metric.previous))}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                       <p className="text-sm text-gray-500">Total Income</p>
@@ -386,8 +711,39 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           {/* ======== BALANCE SHEET ======== */}
           {activeTab === 'balance-sheet' && (
             balanceSheet ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
+              <div className="space-y-4">
+                {comparisonBalanceSheet && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {[
+                      {
+                        label: 'Assets vs Previous',
+                        current: balanceSheet.totalAssets,
+                        previous: comparisonBalanceSheet.totalAssets,
+                        tone: 'text-blue-600',
+                      },
+                      {
+                        label: 'Liabilities vs Previous',
+                        current: balanceSheet.totalLiabilities,
+                        previous: comparisonBalanceSheet.totalLiabilities,
+                        tone: 'text-red-600',
+                      },
+                      {
+                        label: 'Equity vs Previous',
+                        current: balanceSheet.totalEquity,
+                        previous: comparisonBalanceSheet.totalEquity,
+                        tone: 'text-green-600',
+                      },
+                    ].map(metric => (
+                      <div key={metric.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
+                        <p className="text-sm text-gray-500">{metric.label}</p>
+                        <p className={`text-xl font-bold mt-1 ${metric.tone}`}>{fmt(metric.current)}</p>
+                        <p className="text-xs text-gray-400 mt-1">Previous {fmt(metric.previous)} • {pct(calculateChange(metric.current, metric.previous))}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
                   <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
                     <h4 className="font-semibold text-blue-600 mb-3">Assets</h4>
                     {(balanceSheet.assets || []).length > 0 ? (
@@ -444,6 +800,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
             ) : (
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center text-gray-500 dark:text-gray-400">
@@ -457,6 +814,36 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           {/* ======== CASH FLOW ======== */}
           {activeTab === 'cash-flow' && cashFlow && (
             <div className="space-y-4">
+              {comparisonCashFlow && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    {
+                      label: 'Inflows vs Previous',
+                      current: cashFlow.totalInflows,
+                      previous: comparisonCashFlow.totalInflows,
+                      tone: 'text-green-600',
+                    },
+                    {
+                      label: 'Outflows vs Previous',
+                      current: cashFlow.totalOutflows,
+                      previous: comparisonCashFlow.totalOutflows,
+                      tone: 'text-red-600',
+                    },
+                    {
+                      label: 'Net Cash vs Previous',
+                      current: cashFlow.netCashFlow,
+                      previous: comparisonCashFlow.netCashFlow,
+                      tone: cashFlow.netCashFlow >= comparisonCashFlow.netCashFlow ? 'text-blue-600' : 'text-orange-600',
+                    },
+                  ].map(metric => (
+                    <div key={metric.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
+                      <p className="text-sm text-gray-500">{metric.label}</p>
+                      <p className={`text-xl font-bold mt-1 ${metric.tone}`}>{fmt(metric.current)}</p>
+                      <p className="text-xs text-gray-400 mt-1">Previous {fmt(metric.previous)} • {pct(calculateChange(metric.current, metric.previous))}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                   <p className="text-sm text-gray-500">Cash Inflows</p>
@@ -520,7 +907,21 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
 
           {/* ======== AGED RECEIVABLES ======== */}
           {activeTab === 'receivables' && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Outstanding', value: fmt(receivablesSummary.totalBalance), tone: 'text-red-600', bg: 'bg-red-50 dark:bg-red-900/20' },
+                  { label: '0-30 Days', value: fmt(receivablesSummary['0-30']), tone: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20' },
+                  { label: '30-60 Days', value: fmt(receivablesSummary['30-60']), tone: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+                  { label: '90+ Days', value: fmt(receivablesSummary['90+']), tone: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' },
+                ].map(card => (
+                  <div key={card.label} className={`p-4 rounded-lg ${card.bg}`}>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{card.label}</p>
+                    <p className={`text-2xl font-bold ${card.tone}`}>{card.value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
@@ -531,11 +932,12 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                     <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">Balance</th>
                     <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">Age</th>
                     <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">Bucket</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Contact</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y dark:divide-gray-700">
                   {receivables.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No outstanding receivables</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No outstanding receivables</td></tr>
                   ) : receivables.map((r: any, i) => (
                     <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-4 py-2">
@@ -555,10 +957,15 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                           'bg-green-100 text-green-700'
                         }`}>{r.bucket} days</span>
                       </td>
+                      <td className="px-4 py-2 text-xs text-gray-500">
+                        <p>{r.guardianPhone || 'No phone'}</p>
+                        <p>{r.guardianEmail || 'No email'}</p>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
 
@@ -616,6 +1023,19 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           {/* ======== REFUNDS ======== */}
           {activeTab === 'refunds' && (
             <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Refund Value', value: fmt(refundSummary.total), tone: 'text-slate-700', bg: 'bg-slate-100 dark:bg-slate-800' },
+                  { label: 'Pending Approval', value: fmt(refundSummary.PENDING || 0), tone: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+                  { label: 'Approved', value: fmt(refundSummary.APPROVED || 0), tone: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+                  { label: 'Processed', value: fmt(refundSummary.PROCESSED || 0), tone: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20' },
+                ].map(card => (
+                  <div key={card.label} className={`p-4 rounded-lg ${card.bg}`}>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{card.label}</p>
+                    <p className={`text-2xl font-bold ${card.tone}`}>{card.value}</p>
+                  </div>
+                ))}
+              </div>
               <div className="flex justify-end">
                 <button onClick={() => setShowRefundModal(true)}
                   className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
@@ -674,7 +1094,22 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
 
           {/* ======== AUDIT LOG ======== */}
           {activeTab === 'audit' && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Audit Entries</p>
+                  <p className="text-2xl font-bold text-blue-600">{auditLog.length}</p>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Amount Touched</p>
+                  <p className="text-2xl font-bold text-purple-600">{fmt(auditAmount)}</p>
+                </div>
+                <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Latest Event</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white mt-1">{auditLog[0]?.action || 'No entries'}</p>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
@@ -701,6 +1136,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
         </>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import { useAuth } from '../../context/AuthContext';
 import {
   User,
   CreditCard,
@@ -14,7 +15,15 @@ import {
   Edit2,
   History,
   GraduationCap,
-  Download
+  Download,
+  Award,
+  BookOpen,
+  CheckCircle,
+  AlertTriangle,
+  Brain,
+  TrendingUp,
+  BarChart2,
+  Users
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -35,6 +44,15 @@ interface ClassMovement {
   reason: string;
   changedBy: { fullName: string } | null;
   createdAt: string;
+}
+
+interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: 'PRESENT' | 'ABSENT' | 'LATE';
+  reason?: string | null;
+  lateMinutes?: number | null;
+  notes?: string | null;
 }
 
 interface FeeStructure {
@@ -71,12 +89,55 @@ interface Student {
   scholarship?: Scholarship;
   payments: Payment[];
   feeStructures: FeeStructure[];
+  attendance: AttendanceRecord[];
   classMovements: ClassMovement[];
+}
+
+interface AcademicDashboardData {
+  activeTerm?: { id: string; name: string } | null;
+  currentGrades: Array<{
+    id: string;
+    totalScore: number | string;
+    subject: { name: string; code?: string };
+  }>;
+  attendanceSummary: { present: number; absent: number; late: number; total: number; percentage: number };
+  upcomingAssessments: Array<{
+    id: string;
+    title: string;
+    date: string;
+    subject?: { name: string; code?: string };
+    totalMarks?: number | string;
+  }>;
+  recentResults: Array<{
+    id: string;
+    score?: number | string;
+    percentage?: number | string;
+    createdAt: string;
+    assessment: {
+      title: string;
+      totalMarks?: number | string;
+      subject?: { name: string; code?: string };
+    };
+  }>;
+  position: number | null;
+  totalStudents: number;
+}
+
+interface StudentRiskData {
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  riskScore: number;
+  details?: {
+    averageScore?: number;
+    attendanceRate?: number;
+    failingSubjects?: string[];
+    consecutiveAbsences?: number;
+  };
 }
 
 const StudentProfile = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -89,6 +150,12 @@ const StudentProfile = () => {
     notes: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const canViewFinance = user?.role !== 'TEACHER';
+  const isTeacherView = user?.role === 'TEACHER';
+  const [academicDashboard, setAcademicDashboard] = useState<AcademicDashboardData | null>(null);
+  const [riskData, setRiskData] = useState<StudentRiskData | null>(null);
+  const [recommendations, setRecommendations] = useState<string[]>([]);
+  const [academicLoading, setAcademicLoading] = useState(false);
 
   const fetchStudent = async () => {
     try {
@@ -110,12 +177,57 @@ const StudentProfile = () => {
     }
   };
 
+  const fetchTeacherAcademicProfile = async (studentId: string) => {
+    setAcademicLoading(true);
+    try {
+      const dashboardResponse = await api.get(`/student-portal/student/${studentId}/dashboard`);
+      const dashboard = dashboardResponse.data as AcademicDashboardData;
+      setAcademicDashboard(dashboard);
+
+      const activeTermId = dashboard.activeTerm?.id;
+      if (!activeTermId) {
+        setRiskData(null);
+        setRecommendations([]);
+        return;
+      }
+
+      const [riskResponse, recommendationResponse] = await Promise.allSettled([
+        api.get(`/intelligence/risk/student/${studentId}`, { params: { termId: activeTermId } }),
+        api.get(`/intelligence/risk/student/${studentId}/recommendations`, { params: { termId: activeTermId } }),
+      ]);
+
+      if (riskResponse.status === 'fulfilled') {
+        setRiskData(riskResponse.value.data);
+      } else {
+        setRiskData(null);
+      }
+
+      if (recommendationResponse.status === 'fulfilled') {
+        setRecommendations(recommendationResponse.value.data.recommendations || []);
+      } else {
+        setRecommendations([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch teacher academic profile', error);
+      setAcademicDashboard(null);
+      setRiskData(null);
+      setRecommendations([]);
+    } finally {
+      setAcademicLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (id) {
       fetchStudent();
-      fetchScholarships();
+      if (canViewFinance) {
+        fetchScholarships();
+      }
+      if (isTeacherView) {
+        fetchTeacherAcademicProfile(id);
+      }
     }
-  }, [id]);
+  }, [id, canViewFinance, isTeacherView]);
 
   const handleScholarshipUpdate = async (scholarshipId: string | null) => {
     if (!student) return;
@@ -310,6 +422,38 @@ const StudentProfile = () => {
   const totalPaid = student.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const balance = totalBilled - totalPaid;
   const isCredit = balance < 0;
+  const overallAverage = academicDashboard?.currentGrades.length
+    ? Math.round(academicDashboard.currentGrades.reduce((sum, grade) => sum + Number(grade.totalScore || 0), 0) / academicDashboard.currentGrades.length * 10) / 10
+    : 0;
+  const topSubjects = (academicDashboard?.currentGrades || [])
+    .slice()
+    .sort((a, b) => Number(b.totalScore || 0) - Number(a.totalScore || 0))
+    .slice(0, 3);
+  const supportSubjects = (academicDashboard?.currentGrades || [])
+    .filter(grade => Number(grade.totalScore || 0) < 60)
+    .sort((a, b) => Number(a.totalScore || 0) - Number(b.totalScore || 0));
+
+  const getGradeColor = (score: number) => {
+    if (score >= 80) return 'text-green-600 dark:text-green-400';
+    if (score >= 60) return 'text-blue-600 dark:text-blue-400';
+    if (score >= 40) return 'text-yellow-600 dark:text-yellow-400';
+    return 'text-red-600 dark:text-red-400';
+  };
+
+  const getRiskTone = (riskLevel?: string) => {
+    switch (riskLevel) {
+      case 'LOW':
+        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      case 'MEDIUM':
+        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
+      case 'HIGH':
+        return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+      case 'CRITICAL':
+        return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      default:
+        return 'bg-gray-100 text-gray-700 dark:bg-slate-700 dark:text-gray-300';
+    }
+  };
 
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
@@ -351,22 +495,24 @@ const StudentProfile = () => {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
-            <button
-              onClick={handleDownloadStatement}
-              className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
-            >
-              <Download size={18} />
-              Statement
-            </button>
-            <button
-              onClick={() => setShowPaymentModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-            >
-              <CreditCard size={18} />
-              Record Payment
-            </button>
-          </div>
+          {canViewFinance && (
+            <div className="flex gap-3">
+              <button
+                onClick={handleDownloadStatement}
+                className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
+              >
+                <Download size={18} />
+                Statement
+              </button>
+              <button
+                onClick={() => setShowPaymentModal(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              >
+                <CreditCard size={18} />
+                Record Payment
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -408,149 +554,371 @@ const StudentProfile = () => {
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 dark:border-slate-700">
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Scholarship</label>
-                  <button
-                    onClick={() => setShowScholarshipModal(true)}
-                    className="text-blue-600 hover:text-blue-700 text-xs font-medium"
-                  >
-                    {student.scholarship ? 'Change' : 'Add'}
-                  </button>
-                </div>
-                {student.scholarship ? (
-                  <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-100 dark:border-purple-900/30 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 font-medium mb-1">
-                      <GraduationCap size={16} />
-                      {student.scholarship.name}
-                    </div>
-                    <p className="text-sm text-purple-600 dark:text-purple-400">{student.scholarship.percentage}% Discount</p>
+              {canViewFinance && (
+                <div className="pt-4 border-t border-gray-100 dark:border-slate-700">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Scholarship</label>
+                    <button
+                      onClick={() => setShowScholarshipModal(true)}
+                      className="text-blue-600 hover:text-blue-700 text-xs font-medium"
+                    >
+                      {student.scholarship ? 'Change' : 'Add'}
+                    </button>
                   </div>
-                ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">No scholarship assigned</p>
-                )}
-              </div>
+                  {student.scholarship ? (
+                    <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-100 dark:border-purple-900/30 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 font-medium mb-1">
+                        <GraduationCap size={16} />
+                        {student.scholarship.name}
+                      </div>
+                      <p className="text-sm text-purple-600 dark:text-purple-400">{student.scholarship.percentage}% Discount</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">No scholarship assigned</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Right Column: Financials & History */}
+        {/* Right Column: Student History */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Financial Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-2">
-                <FileText size={18} />
-                <span className="text-sm font-medium">Total Billed</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">ZMW {totalBilled.toLocaleString()}</p>
-            </div>
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-2">
-                <DollarSign size={18} />
-                <span className="text-sm font-medium">Total Paid</span>
-              </div>
-              <p className="text-2xl font-bold text-green-700 dark:text-green-400">ZMW {totalPaid.toLocaleString()}</p>
-            </div>
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <div className={`flex items-center gap-2 ${isCredit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'} mb-2`}>
-                <Clock size={18} />
-                <span className="text-sm font-medium">{isCredit ? 'Credit Balance' : 'Balance Due'}</span>
-              </div>
-              <p className={`text-2xl font-bold ${isCredit ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
-                ZMW {Math.abs(balance).toLocaleString()}
-              </p>
-            </div>
-          </div>
-
-          {/* Fee Breakdown */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
-              <FileText size={20} className="text-gray-400" />
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Fee Breakdown</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
-                  <tr>
-                    <th className="px-6 py-3 font-medium">Fee Name</th>
-                    <th className="px-6 py-3 font-medium text-right">Amount Due</th>
-                    <th className="px-6 py-3 font-medium text-right">Amount Paid</th>
-                    <th className="px-6 py-3 font-medium text-right">Balance</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
-                  {student.feeStructures.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No fees assigned</td>
-                    </tr>
-                  ) : (
-                    student.feeStructures.map((fee) => (
-                      <tr key={fee.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                        <td className="px-6 py-4 text-gray-900 dark:text-white font-medium">
-                          {fee.feeTemplate.name}
-                        </td>
-                        <td className="px-6 py-4 text-right text-gray-900 dark:text-white">
-                          ZMW {Number(fee.amountDue).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 text-right text-green-600 dark:text-green-400">
-                          ZMW {Number(fee.amountPaid).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 text-right font-bold text-gray-900 dark:text-white">
-                          ZMW {(Number(fee.amountDue) - Number(fee.amountPaid)).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))
+          {isTeacherView && (
+            <>
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <BookOpen size={20} className="text-blue-500" />
+                      Academic Overview
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      {academicDashboard?.activeTerm?.name || 'Current term'}
+                    </p>
+                  </div>
+                  {riskData && (
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getRiskTone(riskData.riskLevel)}`}>
+                      {riskData.riskLevel} RISK • {riskData.riskScore}%
+                    </span>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </div>
 
-          {/* Payment History */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Payment History</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
-                  <tr>
-                    <th className="px-6 py-3 font-medium">Date</th>
-                    <th className="px-6 py-3 font-medium">Method</th>
-                    <th className="px-6 py-3 font-medium">Status</th>
-                    <th className="px-6 py-3 font-medium text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
-                  {student.payments.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No payments recorded</td>
-                    </tr>
-                  ) : (
-                    student.payments.map((payment) => (
-                      <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                        <td className="px-6 py-4 text-gray-900 dark:text-white">
-                          {new Date(payment.paymentDate).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 text-gray-600 dark:text-gray-400 capitalize">
-                          {payment.method.replace('_', ' ').toLowerCase()}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${payment.status === 'COMPLETED' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'}`}>
-                            {payment.status || 'COMPLETED'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right font-medium text-gray-900 dark:text-white">
-                          ZMW {Number(payment.amount).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))
+                {academicLoading ? (
+                  <div className="py-8 text-center text-gray-500 dark:text-gray-400">Loading academic profile...</div>
+                ) : (
+                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div className="rounded-xl border border-gray-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Average</span>
+                        <Award className="w-5 h-5 text-yellow-500" />
+                      </div>
+                      <div className={`text-2xl font-bold ${getGradeColor(overallAverage)}`}>{overallAverage}%</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Attendance</span>
+                        <CheckCircle className="w-5 h-5 text-green-500" />
+                      </div>
+                      <div className={`text-2xl font-bold ${(academicDashboard?.attendanceSummary.percentage || 0) >= 90 ? 'text-green-600 dark:text-green-400' : (academicDashboard?.attendanceSummary.percentage || 0) >= 75 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {academicDashboard?.attendanceSummary.percentage || 0}%
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Rank</span>
+                        <Users className="w-5 h-5 text-blue-500" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {academicDashboard?.position ? `#${academicDashboard.position}` : '—'}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {academicDashboard?.position ? `of ${academicDashboard.totalStudents}` : 'Not ranked yet'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Assessments</span>
+                        <BarChart2 className="w-5 h-5 text-purple-500" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 dark:text-white">{academicDashboard?.recentResults.length || 0}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">recent graded tasks</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-4">
+                    <TrendingUp size={20} className="text-emerald-500" />
+                    Performance Snapshot
+                  </h2>
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs uppercase font-medium text-gray-500 dark:text-gray-400 mb-2">Strongest Subjects</p>
+                      {topSubjects.length > 0 ? (
+                        <div className="space-y-2">
+                          {topSubjects.map(subject => (
+                            <div key={subject.id} className="flex items-center justify-between rounded-lg bg-green-50 dark:bg-green-900/20 px-3 py-2">
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{subject.subject.name}</span>
+                              <span className="text-sm font-bold text-green-700 dark:text-green-400">{Number(subject.totalScore).toFixed(1)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No current subject grades yet.</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase font-medium text-gray-500 dark:text-gray-400 mb-2">Subjects Needing Support</p>
+                      {supportSubjects.length > 0 ? (
+                        <div className="space-y-2">
+                          {supportSubjects.map(subject => (
+                            <div key={subject.id} className="flex items-center justify-between rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{subject.subject.name}</span>
+                              <span className="text-sm font-bold text-amber-700 dark:text-amber-400">{Number(subject.totalScore).toFixed(1)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No immediate support subjects flagged.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-4">
+                    <Brain size={20} className="text-purple-500" />
+                    Teaching Insights
+                  </h2>
+                  <div className="space-y-4">
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900/40 p-4">
+                      <p className="text-xs uppercase font-medium text-gray-500 dark:text-gray-400 mb-2">Key Signals</p>
+                      <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                        <li>Attendance rate: <span className="font-semibold">{academicDashboard?.attendanceSummary.percentage || 0}%</span></li>
+                        <li>Recent assessments graded: <span className="font-semibold">{academicDashboard?.recentResults.length || 0}</span></li>
+                        <li>Upcoming assessments: <span className="font-semibold">{academicDashboard?.upcomingAssessments.length || 0}</span></li>
+                        {riskData?.details?.failingSubjects?.length ? (
+                          <li>Failing subjects: <span className="font-semibold">{riskData.details.failingSubjects.join(', ')}</span></li>
+                        ) : null}
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="text-xs uppercase font-medium text-gray-500 dark:text-gray-400 mb-2">Suggested Actions</p>
+                      {recommendations.length > 0 ? (
+                        <ul className="space-y-2">
+                          {recommendations.slice(0, 4).map((recommendation, index) => (
+                            <li key={`${recommendation}-${index}`} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+                              <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">{index + 1}</span>
+                              <span>{recommendation}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No AI teaching recommendations available yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+                  <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
+                    <Calendar size={20} className="text-gray-400" />
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Attendance</h2>
+                  </div>
+                  <div className="divide-y divide-gray-100 dark:divide-slate-700">
+                    {student.attendance?.length ? student.attendance.map((record) => (
+                      <div key={record.id} className="px-6 py-4 flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">{new Date(record.date).toLocaleDateString()}</p>
+                          {(record.reason || record.notes) && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{record.reason || record.notes}</p>
+                          )}
+                        </div>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${record.status === 'PRESENT' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : record.status === 'LATE' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
+                          {record.status === 'LATE' && record.lateMinutes ? `LATE • ${record.lateMinutes}m` : record.status}
+                        </span>
+                      </div>
+                    )) : (
+                      <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No attendance history available.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+                  <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
+                    <Award size={20} className="text-gray-400" />
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Assessments</h2>
+                  </div>
+                  <div className="divide-y divide-gray-100 dark:divide-slate-700">
+                    {academicDashboard?.recentResults.length ? academicDashboard.recentResults.slice(0, 6).map((result) => {
+                      const totalMarks = Number(result.assessment.totalMarks || 0);
+                      const rawScore = Number(result.score ?? result.percentage ?? 0);
+                      const percentage = totalMarks > 0 && result.score !== undefined
+                        ? Math.round((rawScore / totalMarks) * 1000) / 10
+                        : Math.round(rawScore * 10) / 10;
+
+                      return (
+                        <div key={result.id} className="px-6 py-4 flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">{result.assessment.title}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{result.assessment.subject?.name || 'General'} • {new Date(result.createdAt).toLocaleDateString()}</p>
+                          </div>
+                          <span className={`text-sm font-bold ${getGradeColor(percentage)}`}>{percentage}%</span>
+                        </div>
+                      );
+                    }) : (
+                      <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No recent assessment results yet.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
+                  <AlertTriangle size={20} className="text-gray-400" />
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">Upcoming Assessments</h2>
+                </div>
+                <div className="divide-y divide-gray-100 dark:divide-slate-700">
+                  {academicDashboard?.upcomingAssessments.length ? academicDashboard.upcomingAssessments.slice(0, 5).map((assessment) => (
+                    <div key={assessment.id} className="px-6 py-4 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{assessment.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{assessment.subject?.name || 'General'} • {new Date(assessment.date).toLocaleDateString()}</p>
+                      </div>
+                      <span className="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded-full">
+                        {assessment.totalMarks ? `${Number(assessment.totalMarks)} marks` : 'Scheduled'}
+                      </span>
+                    </div>
+                  )) : (
+                    <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No upcoming assessments scheduled.</div>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {canViewFinance && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-2">
+                    <FileText size={18} />
+                    <span className="text-sm font-medium">Total Billed</span>
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">ZMW {totalBilled.toLocaleString()}</p>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
+                  <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-2">
+                    <DollarSign size={18} />
+                    <span className="text-sm font-medium">Total Paid</span>
+                  </div>
+                  <p className="text-2xl font-bold text-green-700 dark:text-green-400">ZMW {totalPaid.toLocaleString()}</p>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
+                  <div className={`flex items-center gap-2 ${isCredit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'} mb-2`}>
+                    <Clock size={18} />
+                    <span className="text-sm font-medium">{isCredit ? 'Credit Balance' : 'Balance Due'}</span>
+                  </div>
+                  <p className={`text-2xl font-bold ${isCredit ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                    ZMW {Math.abs(balance).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center gap-2">
+                  <FileText size={20} className="text-gray-400" />
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">Fee Breakdown</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
+                      <tr>
+                        <th className="px-6 py-3 font-medium">Fee Name</th>
+                        <th className="px-6 py-3 font-medium text-right">Amount Due</th>
+                        <th className="px-6 py-3 font-medium text-right">Amount Paid</th>
+                        <th className="px-6 py-3 font-medium text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                      {student.feeStructures.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No fees assigned</td>
+                        </tr>
+                      ) : (
+                        student.feeStructures.map((fee) => (
+                          <tr key={fee.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-6 py-4 text-gray-900 dark:text-white font-medium">
+                              {fee.feeTemplate.name}
+                            </td>
+                            <td className="px-6 py-4 text-right text-gray-900 dark:text-white">
+                              ZMW {Number(fee.amountDue).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 text-right text-green-600 dark:text-green-400">
+                              ZMW {Number(fee.amountPaid).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 text-right font-bold text-gray-900 dark:text-white">
+                              ZMW {(Number(fee.amountDue) - Number(fee.amountPaid)).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 dark:border-slate-700">
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">Payment History</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300">
+                      <tr>
+                        <th className="px-6 py-3 font-medium">Date</th>
+                        <th className="px-6 py-3 font-medium">Method</th>
+                        <th className="px-6 py-3 font-medium">Status</th>
+                        <th className="px-6 py-3 font-medium text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                      {student.payments.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">No payments recorded</td>
+                        </tr>
+                      ) : (
+                        student.payments.map((payment) => (
+                          <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-6 py-4 text-gray-900 dark:text-white">
+                              {new Date(payment.paymentDate).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4 text-gray-600 dark:text-gray-400 capitalize">
+                              {payment.method.replace('_', ' ').toLowerCase()}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${payment.status === 'COMPLETED' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'}`}>
+                                {payment.status || 'COMPLETED'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right font-medium text-gray-900 dark:text-white">
+                              ZMW {Number(payment.amount).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Class History */}
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
@@ -630,7 +998,7 @@ const StudentProfile = () => {
         </div>
       )}
 
-      {showScholarshipModal && (
+      {canViewFinance && showScholarshipModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-sm">
             <h2 className="text-xl font-bold dark:text-white mb-4">Assign Scholarship</h2>
@@ -670,7 +1038,7 @@ const StudentProfile = () => {
         </div>
       )}
 
-      {showPaymentModal && (
+      {canViewFinance && showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">Record Payment</h2>

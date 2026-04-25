@@ -1,11 +1,13 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { syncClassFeesToStudents } from '../services/classFeeAssignmentService';
 
 const feeTemplateSchema = z.object({
   name: z.string().min(2),
   amount: z.number().positive(),
   academicTermId: z.string().uuid(),
+  categoryId: z.string().uuid(),
   applicableGrade: z.number().int().min(0).max(12), // 0: Nursery, 1-12: Grades
 });
 
@@ -19,6 +21,7 @@ export const getFeeTemplates = async (req: Request, res: Response) => {
     const templates = await prisma.feeTemplate.findMany({
       include: {
         academicTerm: true,
+        category: true,
       },
       orderBy: {
         academicTerm: {
@@ -34,13 +37,14 @@ export const getFeeTemplates = async (req: Request, res: Response) => {
 
 export const createFeeTemplate = async (req: Request, res: Response) => {
   try {
-    const { name, amount, academicTermId, applicableGrade } = feeTemplateSchema.parse(req.body);
+    const { name, amount, academicTermId, categoryId, applicableGrade } = feeTemplateSchema.parse(req.body);
 
     const template = await prisma.feeTemplate.create({
       data: {
         name,
         amount,
         academicTermId,
+        categoryId,
         applicableGrade,
       },
     });
@@ -59,87 +63,103 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
     const { feeTemplateId, classId } = assignFeeSchema.parse(req.body);
     const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
 
-    // 1. Get the fee template to know the amount
-    const feeTemplate = await prisma.feeTemplate.findUnique({
+    const [feeTemplate, classRecord] = await Promise.all([
+      prisma.feeTemplate.findUnique({
       where: { id: feeTemplateId },
-      include: { academicTerm: true },
-    });
+      include: { academicTerm: true, category: true },
+      }),
+      prisma.class.findUnique({
+        where: { id: classId },
+        select: { id: true, name: true, academicTermId: true },
+      }),
+    ]);
 
     if (!feeTemplate) {
       return res.status(404).json({ error: 'Fee template not found' });
     }
 
-    // 2. Get all students in the class with their scholarship info
-    const students = await prisma.student.findMany({
-      where: { classId: classId, status: 'ACTIVE' },
-      include: {
-        scholarship: true,
-        feeStructures: {
-          where: { feeTemplateId: feeTemplateId }
-        }
-      },
-    });
-
-    if (students.length === 0) {
-      return res.status(404).json({ error: 'No active students found in this class' });
+    if (!classRecord) {
+      return res.status(404).json({ error: 'Class not found' });
     }
 
-    // 3. Filter out students who already have this fee assigned
-    const studentsToAssign = students.filter(student => student.feeStructures.length === 0);
-
-    if (studentsToAssign.length === 0) {
+    if (!feeTemplate.categoryId || !feeTemplate.category) {
       return res.status(400).json({
-        error: 'All students in this class already have this fee assigned',
-        alreadyAssigned: students.length
+        error: 'Fee template must belong to a fee category before it can be assigned to a class',
       });
     }
 
-    // 4. Create StudentFeeStructure records for students who don't have it yet
-    const createdRecords = [];
-    const errors = [];
-
-    for (const student of studentsToAssign) {
-      try {
-        let amountDue = Number(feeTemplate.amount);
-
-        // Apply scholarship if exists
-        if (student.scholarship) {
-          const discountPercentage = Number(student.scholarship.percentage);
-          const discountAmount = (amountDue * discountPercentage) / 100;
-          amountDue = Math.max(0, amountDue - discountAmount);
-        }
-
-        const record = await prisma.studentFeeStructure.create({
-          data: {
-            studentId: student.id,
-            feeTemplateId: feeTemplate.id,
-            amountDue: amountDue,
-            amountPaid: 0,
-            dueDate: dueDate,
-          },
-        });
-
-        createdRecords.push(record);
-      } catch (error) {
-        errors.push({
-          studentId: student.id,
-          studentName: `${student.firstName} ${student.lastName}`,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
+    if (classRecord.academicTermId !== feeTemplate.academicTermId) {
+      return res.status(400).json({
+        error: 'Fee template term does not match the selected class term',
+      });
     }
 
+    const conflictingAssignment = await prisma.classFeeAssignment.findFirst({
+      where: {
+        classId,
+        academicTermId: feeTemplate.academicTermId,
+        categoryId: feeTemplate.categoryId,
+        feeTemplateId: { not: feeTemplateId },
+      },
+      include: {
+        feeTemplate: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (conflictingAssignment) {
+      return res.status(400).json({
+        error: `Only one fee category can be assigned to a class per term. ${classRecord.name} already has ${conflictingAssignment.feeTemplate.name} assigned for the ${feeTemplate.category.name} category in ${feeTemplate.academicTerm.name}.`,
+        existingAssignment: {
+          feeTemplateId: conflictingAssignment.feeTemplate.id,
+          feeTemplateName: conflictingAssignment.feeTemplate.name,
+          categoryId: feeTemplate.categoryId,
+          categoryName: feeTemplate.category.name,
+          academicTermId: feeTemplate.academicTermId,
+          academicTermName: feeTemplate.academicTerm.name,
+        },
+      });
+    }
+
+    await prisma.classFeeAssignment.upsert({
+      where: {
+        classId_feeTemplateId: {
+          classId,
+          feeTemplateId,
+        },
+      },
+      update: {
+        dueDate,
+        academicTermId: feeTemplate.academicTermId,
+        categoryId: feeTemplate.categoryId,
+      },
+      create: {
+        classId,
+        feeTemplateId,
+        academicTermId: feeTemplate.academicTermId,
+        categoryId: feeTemplate.categoryId,
+        dueDate,
+      },
+    });
+
+    const syncResult = await syncClassFeesToStudents(classId);
+
     res.status(200).json({
-      message: `Successfully assigned fee to ${createdRecords.length} students`,
+      message: `Fee assignment saved for class ${classRecord.name}`,
       feeTemplate: {
         name: feeTemplate.name,
         amount: feeTemplate.amount,
-        term: feeTemplate.academicTerm.name
+        term: feeTemplate.academicTerm.name,
+        category: feeTemplate.category.name,
       },
-      assigned: createdRecords.length,
-      alreadyAssigned: students.length - studentsToAssign.length,
-      failed: errors.length,
-      errors: errors.length > 0 ? errors : undefined,
+      assigned: syncResult.created,
+      alreadyAssigned: Math.max(0, syncResult.studentCount - syncResult.created),
+      failed: 0,
+      autoAssignmentEnabled: true,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -157,6 +177,7 @@ export const getFeeTemplateById = async (req: Request, res: Response) => {
       where: { id },
       include: {
         academicTerm: true,
+        category: true,
       }
     });
 
@@ -178,6 +199,10 @@ export const updateFeeTemplate = async (req: Request, res: Response) => {
     const template = await prisma.feeTemplate.update({
       where: { id },
       data,
+      include: {
+        academicTerm: true,
+        category: true,
+      },
     });
 
     res.json(template);
@@ -193,12 +218,16 @@ export const deleteFeeTemplate = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Check if it's in use
-    const usageCount = await prisma.studentFeeStructure.count({
-      where: { feeTemplateId: id }
-    });
+    const [usageCount, classAssignmentCount] = await Promise.all([
+      prisma.studentFeeStructure.count({
+        where: { feeTemplateId: id }
+      }),
+      prisma.classFeeAssignment.count({
+        where: { feeTemplateId: id }
+      }),
+    ]);
 
-    if (usageCount > 0) {
+    if (usageCount > 0 || classAssignmentCount > 0) {
       return res.status(400).json({
         error: 'Cannot delete fee template as it has already been assigned to students. Consider archiving or modifying it instead.'
       });
@@ -287,7 +316,7 @@ export const getStudentStatement = async (req: Request, res: Response) => {
     }
 
     // Restrict other roles if necessary (e.g. STUDENT shouldn't see this)
-    if (!['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'PARENT'].includes(user.role)) {
+    if (!['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'PARENT'].includes(user.role)) {
       return res.status(403).json({ error: 'Unauthorized access' });
     }
 

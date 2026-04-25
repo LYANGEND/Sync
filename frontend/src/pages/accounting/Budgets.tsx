@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, BarChart3, TrendingUp } from 'lucide-react';
+import { Plus, X, BarChart3, TrendingUp, Edit2 } from 'lucide-react';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { budgetApi, Budget } from '../../services/accountingService';
 import toast from 'react-hot-toast';
 
@@ -16,20 +17,30 @@ const statusColors: Record<string, string> = {
   CLOSED: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
 };
 
+const defaultForm = () => ({
+  name: '', period: 'term', year: new Date().getFullYear(),
+  startDate: '', endDate: '', notes: '',
+  items: [{ category: 'SUPPLIES', description: '', allocated: '' }],
+});
+
+const normalizePeriod = (period?: string) => (period || 'term').toLowerCase();
+const formatPeriodLabel = (period?: string) => {
+  const normalized = normalizePeriod(period);
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
 const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
+    const { confirm } = useAppDialog();
   const [activeTab, setActiveTab] = useState<'budgets' | 'comparison'>('budgets');
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [comparison, setComparison] = useState<any>(null);
 
-  const [form, setForm] = useState({
-    name: '', period: 'TERM', year: new Date().getFullYear(),
-    startDate: '', endDate: '', notes: '',
-    items: [{ category: 'SUPPLIES', description: '', allocated: '' }],
-  });
+  const [form, setForm] = useState(defaultForm);
 
   useEffect(() => {
     loadData();
@@ -51,23 +62,36 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
     }
   };
 
-  const handleCreate = async () => {
+  const buildPayload = () => ({
+    ...form,
+    period: normalizePeriod(form.period),
+    items: form.items.map(i => ({
+      category: i.category,
+      description: i.description || undefined,
+      allocated: parseFloat(i.allocated as string),
+    })),
+  });
+
+  const closeFormModal = () => {
+    setShowCreateModal(false);
+    setEditingBudgetId(null);
+    resetForm();
+  };
+
+  const handleSubmit = async () => {
     try {
-      const payload = {
-        ...form,
-        items: form.items.map(i => ({
-          category: i.category,
-          description: i.description || undefined,
-          allocated: parseFloat(i.allocated as string),
-        })),
-      };
-      await budgetApi.create(payload);
-      toast.success('Budget created');
-      setShowCreateModal(false);
-      resetForm();
+      const payload = buildPayload();
+      if (editingBudgetId) {
+        await budgetApi.update(editingBudgetId, payload);
+        toast.success('Budget updated');
+      } else {
+        await budgetApi.create(payload);
+        toast.success('Budget created');
+      }
+      closeFormModal();
       loadData();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to create budget');
+      toast.error(err.response?.data?.error || `Failed to ${editingBudgetId ? 'update' : 'create'} budget`);
     }
   };
 
@@ -91,6 +115,32 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
     }
   };
 
+  const handleEdit = async (id: string) => {
+    try {
+      const res = await budgetApi.getById(id);
+      const budget = res.data;
+      setEditingBudgetId(id);
+      setForm({
+        name: budget.name || '',
+        period: normalizePeriod(budget.period),
+        year: budget.year || new Date().getFullYear(),
+        startDate: budget.startDate ? budget.startDate.split('T')[0] : '',
+        endDate: budget.endDate ? budget.endDate.split('T')[0] : '',
+        notes: budget.notes || '',
+        items: (budget.items || []).length > 0
+          ? budget.items.map((item: any) => ({
+              category: item.category,
+              description: item.description || '',
+              allocated: String(item.allocated ?? ''),
+            }))
+          : [{ category: 'SUPPLIES', description: '', allocated: '' }],
+      });
+      setShowCreateModal(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load budget for editing');
+    }
+  };
+
   const handleClose = async (id: string) => {
     try {
       await budgetApi.close(id);
@@ -102,7 +152,11 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this budget?')) return;
+    if (!(await confirm({
+      title: 'Delete budget?',
+      message: 'Delete this budget?',
+      confirmText: 'Delete budget',
+    }))) return;
     try {
       await budgetApi.delete(id);
       toast.success('Budget deleted');
@@ -113,11 +167,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   const resetForm = () => {
-    setForm({
-      name: '', period: 'TERM', year: new Date().getFullYear(),
-      startDate: '', endDate: '', notes: '',
-      items: [{ category: 'SUPPLIES', description: '', allocated: '' }],
-    });
+    setForm(defaultForm());
   };
 
   const addItem = () => {
@@ -174,7 +224,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
       {activeTab === 'budgets' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <button onClick={() => { resetForm(); setShowCreateModal(true); }}
+            <button onClick={() => { setEditingBudgetId(null); resetForm(); setShowCreateModal(true); }}
               className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
               <Plus size={16} /><span>New Budget</span>
             </button>
@@ -190,7 +240,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-semibold text-gray-900 dark:text-white">{b.name}</h3>
-                      <p className="text-sm text-gray-500">{b.period} {b.year}</p>
+                      <p className="text-sm text-gray-500">{formatPeriodLabel(b.period)} {b.year}</p>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[b.status] || ''}`}>{b.status}</span>
                   </div>
@@ -215,6 +265,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
                     <button onClick={() => handleViewDetail(b.id)} className="text-sm text-blue-600 hover:underline">View</button>
                     {b.status === 'DRAFT' && (
                       <>
+                        <button onClick={() => handleEdit(b.id)} className="text-sm text-slate-600 hover:underline inline-flex items-center gap-1"><Edit2 size={14} />Edit</button>
                         <button onClick={() => handleActivate(b.id)} className="text-sm text-green-600 hover:underline">Activate</button>
                         <button onClick={() => handleDelete(b.id)} className="text-sm text-red-500 hover:underline">Delete</button>
                       </>
@@ -337,8 +388,8 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Create Budget</h2>
-              <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              <h2 className="text-lg font-semibold dark:text-white">{editingBudgetId ? 'Edit Budget' : 'Create Budget'}</h2>
+              <button onClick={closeFormModal} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -351,10 +402,9 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Period</label>
                   <select value={form.period} onChange={e => setForm({ ...form, period: e.target.value })}
                     className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                    <option value="TERM">Term</option>
-                    <option value="ANNUAL">Annual</option>
-                    <option value="QUARTERLY">Quarterly</option>
-                    <option value="MONTHLY">Monthly</option>
+                    <option value="term">Term</option>
+                    <option value="annual">Annual</option>
+                    <option value="quarterly">Quarterly</option>
                   </select>
                 </div>
                 <div>
@@ -401,10 +451,10 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
               </div>
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
-              <button onClick={() => setShowCreateModal(false)}
+              <button onClick={closeFormModal}
                 className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleCreate}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Budget</button>
+              <button onClick={handleSubmit}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">{editingBudgetId ? 'Save Changes' : 'Create Budget'}</button>
             </div>
           </div>
         </div>

@@ -1,6 +1,8 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
+import curriculumService from './curriculumService';
 
 // ==========================================
 // MASTER AI OPS SERVICE
@@ -40,6 +42,278 @@ interface MasterAIResponse {
   message: string;
   actions: ExecutionResult[];
   suggestions?: string[];
+}
+
+// ==========================
+// CONSTANTS & GUARDS
+// ==========================
+const MAX_ACTIONS_PER_REQUEST = 12;
+const TOOL_TIMEOUT_MS = 60_000; // 60s per tool
+const TOOL_TIMEOUT_LONG_MS = 120_000; // 120s for AI-generation tools
+const LONG_RUNNING_TOOLS = new Set(['generate_syllabus']);
+
+// ==========================
+// BACKGROUND JOB: Bulk syllabus generation progress tracker
+// ==========================
+interface BulkSyllabusJob {
+  status: 'running' | 'completed' | 'failed';
+  startedAt: Date;
+  completedAt?: Date;
+  total: number;
+  completed: number;
+  skipped: number;
+  failed: number;
+  totalTopics: number;
+  totalSubtopics: number;
+  current?: string; // e.g. "Mathematics Grade 3"
+  errors: string[];
+  successes: string[];
+}
+const bulkSyllabusJobs: Map<string, BulkSyllabusJob> = new Map();
+// Keep only last 5 jobs
+function cleanOldJobs() {
+  if (bulkSyllabusJobs.size > 5) {
+    const keys = [...bulkSyllabusJobs.keys()];
+    for (let i = 0; i < keys.length - 5; i++) bulkSyllabusJobs.delete(keys[i]);
+  }
+}
+
+// ==========================
+// ZAMBIAN CURRICULUM: Subject ↔ Grade Level Mapping
+// ==========================
+// Defines which subjects are appropriate for which grade ranges.
+// Based on the Zambian CDC (Curriculum Development Centre) framework.
+// Code keys are matched case-insensitively against subject.code.
+// If a subject code is not in this map, it's allowed at all grades (fallback).
+const SUBJECT_GRADE_RANGES: Record<string, { min: number; max: number }> = {
+  // ECE learning areas (Baby Class → Reception): -3 to 0
+  ECE:       { min: -3, max: 0 },
+  LITERACY:  { min: -3, max: 0 },
+  NUMERACY:  { min: -3, max: 0 },
+  ENVIRON:   { min: -3, max: 0 },
+  SOCIAL:    { min: -3, max: 0 },
+  CREATIVE:  { min: -3, max: 0 },
+  PSYCH:     { min: -3, max: 0 },
+
+  // Primary + Secondary core
+  MATH:  { min: 1, max: 12 },
+  ENG:   { min: 1, max: 12 },
+  SCI:   { min: 1, max: 7 },   // General Science (primary only)
+  SST:   { min: 1, max: 9 },   // Social Studies (primary + junior secondary)
+  PE:    { min: 1, max: 12 },
+  RE:    { min: 1, max: 12 },  // Religious Education
+  ZAM:   { min: 1, max: 12 },  // Zambian Languages
+
+  // Primary specific
+  CTS:   { min: 1, max: 4 },   // Creative & Technology Studies (lower primary)
+  EA:    { min: 5, max: 7 },   // Expressive Arts (upper primary)
+
+  // Primary + Junior Secondary
+  ICT:   { min: 3, max: 12 },  // ICT / Computer Science
+  HEC:   { min: 5, max: 9 },   // Home Economics (upper primary + junior sec)
+
+  // Secondary (Form 1-4 / Grade 8-12)
+  ISCI:    { min: 8, max: 9 },   // Integrated Science (junior secondary)
+  BIO:     { min: 8, max: 12 },
+  CHEM:    { min: 8, max: 12 },
+  PHY:     { min: 8, max: 12 },
+  AMATH:   { min: 10, max: 12 }, // Additional Mathematics
+  HIST:    { min: 8, max: 12 },
+  GEO:     { min: 8, max: 12 },
+  CIVIC:   { min: 8, max: 12 },  // Civic Education
+  LIT:     { min: 8, max: 12 },  // Literature in English
+  ART:     { min: 8, max: 12 },  // Art and Design
+  MUSIC:   { min: 8, max: 12 },  // Musical Arts Education
+  DT:      { min: 8, max: 12 },  // Design and Technology
+  COM:     { min: 8, max: 12 },  // Commerce
+  ACCT:    { min: 8, max: 12 },  // Principles of Accounts
+  BSTUD:   { min: 8, max: 12 },  // Business Studies
+  AGRI:    { min: 8, max: 12 },  // Agricultural Science
+  FN:      { min: 8, max: 12 },  // Food and Nutrition
+  FF:      { min: 8, max: 12 },  // Fashion and Fabrics
+  FRENCH:  { min: 8, max: 12 },  // French Language
+  HOSP:    { min: 8, max: 12 },  // Hospitality Management
+  TOURISM: { min: 8, max: 12 },  // Travel and Tourism
+};
+
+/**
+ * Check if a subject (by code) is appropriate for a given grade level.
+ * Returns true if allowed, false if the subject shouldn't exist at that grade.
+ * Unknown subject codes are allowed at all levels (permissive fallback).
+ */
+function isSubjectValidForGrade(subjectCode: string, gradeLevel: number): boolean {
+  const range = SUBJECT_GRADE_RANGES[subjectCode.toUpperCase()];
+  if (!range) return true; // Unknown code → allow (permissive)
+  return gradeLevel >= range.min && gradeLevel <= range.max;
+}
+
+/**
+ * Get the valid grade range for a subject code.
+ * Returns null if unknown (meaning all grades are allowed).
+ */
+function getSubjectGradeRange(subjectCode: string): { min: number; max: number } | null {
+  return SUBJECT_GRADE_RANGES[subjectCode.toUpperCase()] || null;
+}
+
+// ==========================
+// UTILITY: Timeout wrapper
+// ==========================
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Tool "${label}" timed out after ${Math.round(ms / 1000)}s`)), ms)
+    ),
+  ]);
+}
+
+// ==========================
+// UTILITY: Validate tool params with Zod
+// ==========================
+const toolParamSchemas: Record<string, z.ZodSchema> = {
+  add_calendar_events: z.object({
+    events: z.array(z.object({
+      title: z.string().min(1).max(200),
+      description: z.string().max(1000).optional(),
+      eventType: z.enum(['HOLIDAY', 'EXAM_PERIOD', 'PARENT_MEETING', 'SPORTS_DAY', 'CULTURAL_EVENT', 'DEADLINE', 'STAFF_DEVELOPMENT', 'SCHOOL_CLOSURE', 'OTHER']).optional(),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      color: z.string().max(20).optional(),
+    })).min(1).max(100),
+  }),
+  create_students: z.object({
+    students: z.array(z.object({
+      firstName: z.string().min(1).max(100),
+      lastName: z.string().min(1).max(100),
+      admissionNumber: z.string().min(1).max(50),
+      gender: z.enum(['MALE', 'FEMALE']).optional(),
+      dateOfBirth: z.string().optional(),
+      classId: z.string().optional(),
+      guardianName: z.string().max(200).optional(),
+      guardianPhone: z.string().max(30).optional(),
+      address: z.string().max(500).optional(),
+    })).min(1).max(200),
+  }),
+  create_classes: z.object({
+    classes: z.array(z.object({
+      name: z.string().min(1).max(100),
+      gradeLevel: z.number().int().min(-3).max(12).optional(),
+      teacherId: z.string().optional(),
+      academicTermId: z.string().optional(),
+    })).min(1).max(50),
+  }),
+  create_subjects: z.object({
+    subjects: z.array(z.object({
+      name: z.string().min(1).max(100),
+      code: z.string().min(1).max(20),
+    })).min(1).max(50),
+  }),
+  generate_syllabus: z.object({
+    subjectId: z.string().optional(),
+    subjectCode: z.string().max(20).optional(),
+    gradeLevel: z.number().int().min(-3).max(12),
+  }),
+  populate_all_syllabi: z.object({
+    gradeLevels: z.array(z.number().int().min(-3).max(12)).max(16).optional(),
+    subjectCodes: z.array(z.string().max(20)).max(30).optional(),
+  }),
+  create_topics: z.object({
+    subjectId: z.string().optional(),
+    subjectCode: z.string().max(20).optional(),
+    gradeLevel: z.number().int().min(-3).max(12),
+    topics: z.array(z.object({
+      title: z.string().min(1),
+      description: z.string().optional(),
+      orderIndex: z.number().optional(),
+      subtopics: z.array(z.any()).optional(),
+    })).min(1).max(50),
+  }),
+  delete_topics: z.object({
+    subjectId: z.string().optional(),
+    subjectCode: z.string().max(20).optional(),
+    gradeLevel: z.number().int().min(-3).max(12),
+  }),
+  create_fee_templates: z.object({
+    templates: z.array(z.object({
+      name: z.string().min(1).max(200),
+      amount: z.number().positive(),
+      academicTermId: z.string().optional(),
+      applicableGrade: z.number().optional(),
+    })).min(1).max(50),
+  }),
+  create_academic_terms: z.object({
+    terms: z.array(z.object({
+      name: z.string().min(1).max(200),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      isActive: z.boolean().optional(),
+    })).min(1).max(10),
+  }),
+  create_announcements: z.object({
+    announcements: z.array(z.object({
+      subject: z.string().min(1).max(200).optional(),
+      title: z.string().min(1).max(200).optional(),
+      message: z.string().min(1).max(5000).optional(),
+      content: z.string().min(1).max(5000).optional(),
+      targetRoles: z.array(z.string()).optional(),
+    })).min(1).max(20),
+  }),
+  create_expenses: z.object({
+    expenses: z.array(z.object({
+      description: z.string().min(1).max(500),
+      amount: z.number().positive(),
+      category: z.enum(['SUPPLIES', 'MAINTENANCE', 'UTILITIES', 'TRANSPORT', 'SALARIES', 'OTHER']).optional(),
+      date: z.string().optional(),
+    })).min(1).max(100),
+  }),
+};
+
+function validateToolParams(toolName: string, params: Record<string, any>): { valid: boolean; error?: string; sanitized: Record<string, any> } {
+  const schema = toolParamSchemas[toolName];
+  if (!schema) {
+    // No schema defined — allow passthrough (read-only tools are safe)
+    return { valid: true, sanitized: params };
+  }
+  try {
+    const sanitized = schema.parse(params);
+    return { valid: true, sanitized };
+  } catch (err: any) {
+    const issues = err.issues?.map((i: any) => `${i.path.join('.')}: ${i.message}`).join('; ') || err.message;
+    return { valid: false, error: `Invalid parameters: ${issues}`, sanitized: params };
+  }
+}
+
+// ==========================
+// UTILITY: Sanitize conversation history (strip PII/data from assistant messages)
+// ==========================
+function sanitizeConversationHistory(history: { role: string; content: string }[], maxMessages = 8): { role: string; content: string }[] {
+  return history.slice(-maxMessages).map(msg => {
+    if (msg.role === 'assistant') {
+      // Truncate long assistant messages — they may contain tool output data with PII
+      const content = msg.content.length > 300 ? msg.content.substring(0, 300) + '...' : msg.content;
+      return { role: msg.role, content };
+    }
+    return msg;
+  });
+}
+
+// ==========================
+// UTILITY: Cached system prompt (avoid rebuilding every request)
+// ==========================
+let _cachedSystemPrompt: string | null = null;
+let _cachedToolDescriptions: string | null = null;
+let _cacheBuiltAt = 0;
+const PROMPT_CACHE_TTL = 60_000; // 1 minute
+
+function getCachedSystemPrompt(): string {
+  const now = Date.now();
+  if (_cachedSystemPrompt && now - _cacheBuiltAt < PROMPT_CACHE_TTL) {
+    return _cachedSystemPrompt;
+  }
+  _cachedToolDescriptions = buildToolDescriptions();
+  _cachedSystemPrompt = buildSystemPrompt();
+  _cacheBuiltAt = now;
+  return _cachedSystemPrompt;
 }
 
 // ==========================
@@ -340,15 +614,36 @@ const tools: ToolDefinition[] = [
   // ===================== SUBJECT–CLASS ASSIGNMENTS =====================
   {
     name: 'assign_subjects_to_classes',
-    description: 'Assign (connect) one or more subjects to one or more classes. Use list_classes and list_subjects first to get IDs or names. You can match by className or classId, and subjectCode or subjectId.',
+    description: 'Assign (connect) subjects to classes following the Zambian 2023 curriculum. Automatically filters subjects appropriate for each class grade level (e.g. Biology only for Grade 8+, ECE subjects only for ECE classes). Supports: (1) assignAll=true to auto-assign curriculum-appropriate subjects to ALL classes, (2) specific className + subjectCodes assignments. Do NOT call list_classes or list_subjects first.',
     parameters: [
-      { name: 'assignments', type: 'array', description: 'Array of { className (string, optional), classId (string, optional), subjectCodes (string[], optional), subjectIds (string[], optional) }. Each entry connects the specified subjects to the class.', required: true },
+      { name: 'assignAll', type: 'string', description: 'Set to "true" to assign curriculum-appropriate subjects to ALL classes automatically. No other params needed.', enum: ['true', 'false'] },
+      { name: 'assignments', type: 'array', description: 'Array of { className (string, optional), classId (string, optional), subjectCodes (string[], optional), subjectIds (string[], optional) }. Each entry connects the specified subjects to the class. Ignored if assignAll=true.' },
     ],
     execute: async (params) => {
-      const assignments = params.assignments as any[];
       const connected: string[] = [];
       const alreadyLinked: string[] = [];
+      const skippedCurriculum: string[] = [];
       const errors: string[] = [];
+
+      let assignments: any[] = params.assignments || [];
+
+      // Auto-resolve mode: assign curriculum-appropriate subjects to all classes
+      if (params.assignAll === 'true' || assignments.length === 0) {
+        const allClasses = await prisma.class.findMany({ select: { id: true, name: true, gradeLevel: true }, orderBy: { gradeLevel: 'asc' } });
+        const allSubjects = await prisma.subject.findMany({ select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
+        if (allClasses.length === 0) return { error: 'No classes found. Create classes first.' };
+        if (allSubjects.length === 0) return { error: 'No subjects found. Create subjects first.' };
+
+        // Filter subjects per class based on Zambian curriculum grade ranges
+        assignments = allClasses.map(c => {
+          const validSubjects = allSubjects.filter(s => isSubjectValidForGrade(s.code, c.gradeLevel));
+          const invalidSubjects = allSubjects.filter(s => !isSubjectValidForGrade(s.code, c.gradeLevel));
+          if (invalidSubjects.length > 0) {
+            skippedCurriculum.push(`${c.name} (Gr${c.gradeLevel}): skipped ${invalidSubjects.map(s => s.code).join(', ')}`);
+          }
+          return { classId: c.id, className: c.name, subjectIds: validSubjects.map(s => s.id) };
+        });
+      }
 
       for (const a of assignments) {
         try {
@@ -369,8 +664,13 @@ const tools: ToolDefinition[] = [
           if (a.subjectCodes?.length) {
             for (const code of a.subjectCodes) {
               const sub = await prisma.subject.findFirst({ where: { code: { equals: code, mode: 'insensitive' } } });
-              if (sub) subjectIds.push(sub.id);
-              else errors.push(`Subject code "${code}" not found`);
+              if (!sub) { errors.push(`Subject code "${code}" not found`); continue; }
+              // Validate against Zambian curriculum
+              if (!isSubjectValidForGrade(sub.code, cls.gradeLevel)) {
+                skippedCurriculum.push(`${cls.name}: ${sub.code} not in curriculum for Grade ${cls.gradeLevel}`);
+                continue;
+              }
+              subjectIds.push(sub.id);
             }
           }
 
@@ -395,7 +695,53 @@ const tools: ToolDefinition[] = [
           errors.push(`Assignment error: ${err.message?.split('\n').pop()}`);
         }
       }
-      return { connected, alreadyLinked, errors, summary: `${connected.length} class(es) updated, ${alreadyLinked.length} already linked, ${errors.length} issues` };
+      return { connected, alreadyLinked, skippedCurriculum, errors, summary: `${connected.length} class(es) updated, ${alreadyLinked.length} already linked, ${skippedCurriculum.length} skipped (wrong grade for curriculum), ${errors.length} issues` };
+    },
+  },
+
+  {
+    name: 'cleanup_class_subjects',
+    description: 'Remove subjects from classes where the subject does not belong per the Zambian 2023 curriculum (e.g. Biology assigned to Grade 2, ECE subjects on Grade 10). Use dryRun=true to preview, dryRun=false to actually remove.',
+    parameters: [
+      { name: 'dryRun', type: 'string', description: 'Set to "true" to preview only, "false" to remove. Default: true.', enum: ['true', 'false'] },
+    ],
+    execute: async (params) => {
+      const dryRun = params.dryRun !== 'false';
+      const allClasses = await prisma.class.findMany({
+        select: { id: true, name: true, gradeLevel: true, subjects: { select: { id: true, name: true, code: true } } },
+        orderBy: { gradeLevel: 'asc' },
+      });
+
+      const invalidAssignments: string[] = [];
+      const removed: string[] = [];
+
+      for (const cls of allClasses) {
+        const invalidSubjects = cls.subjects.filter(s => !isSubjectValidForGrade(s.code, cls.gradeLevel));
+        if (invalidSubjects.length === 0) continue;
+
+        invalidAssignments.push(`${cls.name} (Gr${cls.gradeLevel}): ${invalidSubjects.map(s => s.code).join(', ')}`);
+
+        if (!dryRun) {
+          await prisma.class.update({
+            where: { id: cls.id },
+            data: { subjects: { disconnect: invalidSubjects.map(s => ({ id: s.id })) } },
+          });
+          removed.push(`${cls.name}: removed ${invalidSubjects.length} subject(s)`);
+        }
+      }
+
+      if (invalidAssignments.length === 0) {
+        return { summary: 'All class-subject assignments are correct per the Zambian curriculum. No changes needed.' };
+      }
+
+      return {
+        dryRun,
+        invalidAssignments,
+        removed,
+        summary: dryRun
+          ? `Found ${invalidAssignments.length} classes with incorrect subjects. Run with dryRun=false to fix.`
+          : `Fixed ${removed.length} classes — removed subjects that don't belong at their grade level.`,
+      };
     },
   },
 
@@ -464,6 +810,12 @@ const tools: ToolDefinition[] = [
 
       const gl = Number(params.gradeLevel);
 
+      // Validate subject is appropriate for this grade level
+      if (!isSubjectValidForGrade(subjectInfo.code, gl)) {
+        const range = getSubjectGradeRange(subjectInfo.code);
+        return { error: `${subjectInfo.name} (${subjectInfo.code}) is not part of the Zambian curriculum for grade ${gl}. It's taught from grade ${range?.min} to ${range?.max}.` };
+      }
+
       // Check if topics already exist
       const existingCount = await prisma.topic.count({ where: { subjectId, gradeLevel: gl } });
       if (existingCount > 0) {
@@ -478,13 +830,25 @@ const tools: ToolDefinition[] = [
       else if (gl <= 7) levelDesc = `Upper Primary, Grade ${gl} (age ${gl + 5}-${gl + 6} years)`;
       else levelDesc = `Secondary, Form ${gl - 7} / Grade ${gl} (age ${gl + 5}-${gl + 6} years)`;
 
+      // Fetch official CDC curriculum content if available
+      let curriculumRef = '';
+      try {
+        curriculumRef = await curriculumService.getCurriculumContext(subjectInfo.code, gl);
+      } catch (e) { /* ignore – proceed without */ }
+
       const prompt = `You are a Zambian curriculum expert. Generate a comprehensive syllabus for:
 
 SUBJECT: ${subjectInfo.name} (${subjectInfo.code})
 LEVEL: ${levelDesc}
 COUNTRY: Zambia
 
-Generate topics and subtopics following the official Zambian curriculum framework (CDC — Curriculum Development Centre).
+${curriculumRef ? `=== OFFICIAL CDC CURRICULUM REFERENCE ===
+Use the following OFFICIAL Zambian CDC (Curriculum Development Centre) document as your PRIMARY source of truth. Extract topics, subtopics, learning objectives and durations directly from this content. Do NOT invent topics that are not in this document.
+
+${curriculumRef}
+=== END OFFICIAL REFERENCE ===
+
+` : ''}Generate topics and subtopics following the official Zambian curriculum framework (CDC — Curriculum Development Centre).
 ${gl <= 0 ? 'For ECE, focus on age-appropriate learning activities, play-based learning, and developmental milestones.' : ''}
 ${gl <= 4 ? 'For lower primary, focus on foundational skills with concrete, hands-on activities.' : ''}
 
@@ -571,6 +935,284 @@ Requirements:
         subject: subjectInfo.name,
         gradeLevel: gl,
         summary: `Generated ${createdTopics.length} topics with ${totalSubtopics} subtopics for ${subjectInfo.name} (Grade ${gl})`,
+      };
+    },
+  },
+
+  // ===================== BULK SYLLABUS POPULATION (BACKGROUND JOB) =====================
+  {
+    name: 'populate_all_syllabi',
+    description: 'Start a BACKGROUND JOB to populate syllabus for all subjects across grade levels. Returns immediately — the job runs in the background. Use check_syllabus_progress to monitor. Use this when the user asks to "populate everything", "setup the whole curriculum", "add syllabus for all subjects".',
+    parameters: [
+      { name: 'gradeLevels', type: 'array', description: 'Array of grade level numbers. Defaults to [-3,-2,-1,0,1,2,3,4,5,6,7]. ECE: -3 to 0, Primary: 1-7, Secondary: 8-12.' },
+      { name: 'subjectCodes', type: 'array', description: 'Optional: only populate these subject codes. If omitted, populates ALL subjects.' },
+    ],
+    execute: async (params) => {
+      // Check if a job is already running
+      for (const [, job] of bulkSyllabusJobs) {
+        if (job.status === 'running') {
+          return {
+            summary: `A bulk syllabus job is already running (${job.completed}/${job.total} done, currently: ${job.current || '?'}). Use check_syllabus_progress to monitor.`,
+          };
+        }
+      }
+
+      // Resolve subjects
+      let subjects: { id: string; name: string; code: string }[];
+      if (params.subjectCodes?.length) {
+        subjects = [];
+        for (const code of params.subjectCodes) {
+          const sub = await prisma.subject.findFirst({ where: { code: { equals: code, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
+          if (sub) subjects.push(sub);
+        }
+      } else {
+        subjects = await prisma.subject.findMany({ select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
+      }
+
+      if (subjects.length === 0) {
+        return { error: 'No subjects found. Create subjects first.' };
+      }
+
+      const gradeLevels: number[] = params.gradeLevels?.length
+        ? params.gradeLevels.map(Number)
+        : [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
+
+      // Check existing
+      const existingCounts = await prisma.topic.groupBy({
+        by: ['subjectId', 'gradeLevel'],
+        where: { subjectId: { in: subjects.map(s => s.id) }, gradeLevel: { in: gradeLevels } },
+        _count: { id: true },
+      });
+      const existingSet = new Set(existingCounts.map(e => `${e.subjectId}_${e.gradeLevel}`));
+
+      const workQueue: { subject: typeof subjects[0]; gradeLevel: number }[] = [];
+      const inappropriateSkips: string[] = [];
+      for (const subject of subjects) {
+        for (const gl of gradeLevels) {
+          if (existingSet.has(`${subject.id}_${gl}`)) continue;
+          // Skip subjects that don't belong at this grade level per Zambian curriculum
+          if (!isSubjectValidForGrade(subject.code, gl)) {
+            inappropriateSkips.push(`${subject.code} Gr${gl}`);
+            continue;
+          }
+          workQueue.push({ subject, gradeLevel: gl });
+        }
+      }
+
+      const skippedExisting = existingCounts.length;
+      const skippedCount = skippedExisting + inappropriateSkips.length;
+
+      if (workQueue.length === 0) {
+        return { summary: `All ${subjects.length} subjects already have topics for the requested grades. Nothing to generate.`, skipped: skippedCount };
+      }
+
+      // Create job tracker
+      const jobId = `job_${Date.now()}`;
+      const job: BulkSyllabusJob = {
+        status: 'running',
+        startedAt: new Date(),
+        total: workQueue.length,
+        completed: 0,
+        skipped: skippedCount,
+        failed: 0,
+        totalTopics: 0,
+        totalSubtopics: 0,
+        errors: [],
+        successes: [],
+      };
+      bulkSyllabusJobs.set(jobId, job);
+      cleanOldJobs();
+
+      // Launch background processing (fire-and-forget)
+      const processInBackground = async () => {
+        for (const item of workQueue) {
+          const { subject, gradeLevel: gl } = item;
+          job.current = `${subject.name} Grade ${gl}`;
+          try {
+            let levelDesc = '';
+            if (gl <= -1) levelDesc = `ECE, age ${gl + 6} years`;
+            else if (gl === 0) levelDesc = `ECE Reception, age 5-6 years`;
+            else if (gl <= 4) levelDesc = `Lower Primary Grade ${gl}`;
+            else if (gl <= 7) levelDesc = `Upper Primary Grade ${gl}`;
+            else levelDesc = `Secondary Grade ${gl}`;
+
+            // Fetch official CDC curriculum content
+            let curriculumRef = '';
+            try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+
+            const prompt = `You are a Zambian curriculum expert. Generate a syllabus for:
+SUBJECT: ${subject.name} (${subject.code}), LEVEL: ${levelDesc}, COUNTRY: Zambia
+${gl <= 0 ? 'ECE: play-based learning, developmental milestones.' : ''}
+${gl >= 1 && gl <= 4 ? 'Lower primary: foundational skills, hands-on activities.' : ''}
+${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nUse this as PRIMARY source of truth:\n${curriculumRef}\n=== END REFERENCE ===\n` : ''}
+Return ONLY valid JSON: {"topics":[{"title":"...","description":"...","orderIndex":1,"subtopics":[{"title":"...","description":"...","learningObjectives":["..."],"duration":40,"orderIndex":1}]}]}
+Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration ${gl <= 0 ? '20-30' : '30-80'} min, cover 3 terms. ONLY JSON.`;
+
+            const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.4, maxTokens: 4000 });
+            const content = aiResponse.content;
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            const syllabusData = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
+
+            if (!syllabusData?.topics || !Array.isArray(syllabusData.topics)) throw new Error('Invalid AI structure');
+
+            let topicCount = 0, subtopicCount = 0;
+            for (const td of syllabusData.topics) {
+              const topic = await prisma.topic.create({
+                data: { title: td.title, description: td.description || null, subjectId: subject.id, gradeLevel: gl, orderIndex: td.orderIndex || (topicCount + 1) },
+              });
+              topicCount++;
+              if (Array.isArray(td.subtopics)) {
+                for (const st of td.subtopics) {
+                  await prisma.subTopic.create({
+                    data: {
+                      title: st.title, description: st.description || null,
+                      learningObjectives: st.learningObjectives ? JSON.stringify(st.learningObjectives) : null,
+                      topicId: topic.id, orderIndex: st.orderIndex || (subtopicCount + 1), duration: st.duration || null,
+                    },
+                  });
+                  subtopicCount++;
+                }
+              }
+            }
+            job.totalTopics += topicCount;
+            job.totalSubtopics += subtopicCount;
+            job.completed++;
+            job.successes.push(`${subject.name} Gr${gl}: ${topicCount}t/${subtopicCount}st`);
+          } catch (err: any) {
+            job.failed++;
+            job.completed++;
+            job.errors.push(`${subject.name} Gr${gl}: ${(err.message || 'unknown').substring(0, 80)}`);
+          }
+        }
+        job.status = job.errors.length === job.total ? 'failed' : 'completed';
+        job.completedAt = new Date();
+        job.current = undefined;
+      };
+
+      // Fire and forget — don't await
+      processInBackground().catch(err => {
+        job.status = 'failed';
+        job.completedAt = new Date();
+        job.errors.push(`Fatal: ${err.message}`);
+      });
+
+      return {
+        summary: `Background job started: ${workQueue.length} subject-grade combos to generate (${skippedExisting} already existed, ${inappropriateSkips.length} skipped as not in curriculum for those grades). Ask "check syllabus progress" to monitor.`,
+        jobId,
+        total: workQueue.length,
+        skipped: skippedCount,
+        curriculumSkipped: inappropriateSkips.length > 20 ? inappropriateSkips.slice(0, 20).concat([`...and ${inappropriateSkips.length - 20} more`]) : inappropriateSkips,
+        subjects: subjects.map(s => s.name),
+        gradeLevels,
+      };
+    },
+  },
+
+  {
+    name: 'check_syllabus_progress',
+    description: 'Check the progress of a running bulk syllabus generation job. Use this when the user asks "how is the syllabus going", "check progress", "syllabus status", etc.',
+    parameters: [],
+    execute: async () => {
+      // Find the most recent job
+      const jobs = [...bulkSyllabusJobs.entries()];
+      if (jobs.length === 0) {
+        return { summary: 'No bulk syllabus jobs have been started. Use populate_all_syllabi to start one.' };
+      }
+      const [jobId, job] = jobs[jobs.length - 1];
+      const elapsed = Math.round((Date.now() - job.startedAt.getTime()) / 1000);
+      const elapsedStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+
+      return {
+        jobId,
+        status: job.status,
+        progress: `${job.completed}/${job.total}`,
+        percentComplete: job.total > 0 ? `${Math.round((job.completed / job.total) * 100)}%` : '0%',
+        current: job.current || null,
+        elapsed: elapsedStr,
+        totalTopics: job.totalTopics,
+        totalSubtopics: job.totalSubtopics,
+        skipped: job.skipped,
+        failedCount: job.failed,
+        recentSuccesses: job.successes.slice(-5),
+        recentErrors: job.errors.slice(-5),
+        summary: job.status === 'running'
+          ? `Running: ${job.completed}/${job.total} done (${Math.round((job.completed / job.total) * 100)}%), currently generating ${job.current || '...'} — ${elapsedStr} elapsed. ${job.totalTopics} topics, ${job.totalSubtopics} subtopics so far.`
+          : `${job.status === 'completed' ? 'Completed' : 'Failed'}: ${job.completed}/${job.total} processed in ${elapsedStr}. ${job.totalTopics} topics, ${job.totalSubtopics} subtopics generated. ${job.failed > 0 ? `${job.failed} failed.` : ''}`,
+      };
+    },
+  },
+
+  {
+    name: 'cleanup_invalid_syllabi',
+    description: 'Find and delete syllabus topics that were incorrectly generated for grade levels where the subject doesn\'t belong (e.g. Additional Mathematics at ECE). Uses the Zambian curriculum mapping. Use dryRun=true to preview what would be deleted without actually deleting.',
+    parameters: [
+      { name: 'dryRun', type: 'string', description: 'Set to "true" to preview only, "false" to actually delete. Default: true (preview).', enum: ['true', 'false'] },
+    ],
+    execute: async (params) => {
+      const dryRun = params.dryRun !== 'false';
+      const subjects = await prisma.subject.findMany({ select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
+
+      const invalidEntries: { subjectName: string; subjectCode: string; gradeLevel: number; topicCount: number; subtopicCount: number }[] = [];
+
+      for (const subject of subjects) {
+        const range = getSubjectGradeRange(subject.code);
+        if (!range) continue; // Unknown code — skip
+
+        // Find topics at invalid grade levels
+        const invalidTopics = await prisma.topic.findMany({
+          where: {
+            subjectId: subject.id,
+            OR: [
+              { gradeLevel: { lt: range.min } },
+              { gradeLevel: { gt: range.max } },
+            ],
+          },
+          select: { id: true, gradeLevel: true, _count: { select: { subtopics: true } } },
+        });
+
+        if (invalidTopics.length === 0) continue;
+
+        // Group by grade
+        const byGrade: Record<number, typeof invalidTopics> = {};
+        for (const t of invalidTopics) {
+          if (!byGrade[t.gradeLevel]) byGrade[t.gradeLevel] = [];
+          byGrade[t.gradeLevel].push(t);
+        }
+
+        for (const [gl, topics] of Object.entries(byGrade)) {
+          const subtopicCount = topics.reduce((s, t) => s + t._count.subtopics, 0);
+          invalidEntries.push({
+            subjectName: subject.name,
+            subjectCode: subject.code,
+            gradeLevel: Number(gl),
+            topicCount: topics.length,
+            subtopicCount,
+          });
+
+          if (!dryRun) {
+            const topicIds = topics.map(t => t.id);
+            await prisma.subTopic.deleteMany({ where: { topicId: { in: topicIds } } });
+            await prisma.topicProgress.deleteMany({ where: { topicId: { in: topicIds } } }).catch(() => {});
+            await prisma.topic.deleteMany({ where: { id: { in: topicIds } } });
+          }
+        }
+      }
+
+      if (invalidEntries.length === 0) {
+        return { summary: 'No invalid syllabus entries found. All subjects are correctly mapped to appropriate grade levels.' };
+      }
+
+      const totalTopics = invalidEntries.reduce((s, e) => s + e.topicCount, 0);
+      const totalSubtopics = invalidEntries.reduce((s, e) => s + e.subtopicCount, 0);
+
+      return {
+        summary: dryRun
+          ? `Found ${totalTopics} topics and ${totalSubtopics} subtopics that don't belong at their grade levels. Run with dryRun=false to delete them.`
+          : `Deleted ${totalTopics} invalid topics and ${totalSubtopics} subtopics across ${invalidEntries.length} subject-grade combos.`,
+        dryRun,
+        invalidEntries: invalidEntries.map(e => `${e.subjectName} (${e.subjectCode}) at Grade ${e.gradeLevel}: ${e.topicCount} topics, ${e.subtopicCount} subtopics`),
+        totalTopics,
+        totalSubtopics,
       };
     },
   },
@@ -668,6 +1310,377 @@ Requirements:
       const result = await prisma.topic.deleteMany({ where: { subjectId, gradeLevel: gl } });
 
       return { deleted: result.count, subtopicsDeleted: subResult.count, summary: `Deleted ${result.count} topics and ${subResult.count} subtopics` };
+    },
+  },
+
+  // ===================== AI LESSON PLAN GENERATION =====================
+  {
+    name: 'generate_lesson_plans',
+    description: 'AI-generate and SAVE lesson plans for a subject\'s topics. Creates one lesson plan per topic, covering all subtopics. Requires a class (to link the plan) — auto-resolves class from gradeLevel if not provided. Great for bulk-populating lesson plans after syllabus is seeded.',
+    parameters: [
+      { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
+      { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
+      { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds a class at the given grade level.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics to generate plans for (default 5). Use to limit for speed.' },
+    ],
+    execute: async (params, userId) => {
+      // Resolve subject
+      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
+      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+
+      const gl = Number(params.gradeLevel);
+
+      // Resolve class
+      let classId = params.classId;
+      let classInfo: any = null;
+      if (classId) {
+        classInfo = await prisma.class.findUnique({ where: { id: classId }, select: { id: true, name: true } });
+      }
+      if (!classInfo) {
+        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+      }
+      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
+      classId = classInfo.id;
+
+      // Resolve term
+      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
+      if (!term) return { error: 'No academic term found. Create one first.' };
+
+      // Get topics with subtopics
+      const topics = await prisma.topic.findMany({
+        where: { subjectId: subject.id, gradeLevel: gl },
+        include: { subtopics: { orderBy: { orderIndex: 'asc' } } },
+        orderBy: { orderIndex: 'asc' },
+        take: params.maxTopics || 5,
+      });
+
+      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
+
+      // Fetch official CDC curriculum content
+      let curriculumRef = '';
+      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+
+      const created: string[] = [];
+      const errors: string[] = [];
+
+      for (const topic of topics) {
+        try {
+          // Check if lesson plan already exists for this topic
+          const existing = await prisma.lessonPlan.findFirst({
+            where: { subjectId: subject.id, classId, title: { contains: topic.title } },
+          });
+          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const subtopicList = topic.subtopics.map((st, i) => {
+            let objs: string[] = [];
+            try { objs = st.learningObjectives ? JSON.parse(st.learningObjectives) : []; } catch {}
+            return `${i + 1}. ${st.title}${st.description ? ` — ${st.description}` : ''}${objs.length ? `\n   Objectives: ${objs.join('; ')}` : ''}`;
+          }).join('\n');
+
+          const duration = gl <= 0 ? 25 : gl <= 4 ? 35 : 45;
+          const prompt = `Generate a structured lesson plan for a Zambian classroom.
+SUBJECT: ${subject.name}, GRADE: ${gl <= 0 ? `ECE (${gl})` : gl}, TOPIC: ${topic.title}${topic.description ? ` — ${topic.description}` : ''}
+DURATION: ${duration} minutes
+${subtopicList ? `SUBTOPICS:\n${subtopicList}` : ''}
+${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nUse this official content to ensure lesson aligns with the Zambian CDC syllabus:\n${curriculumRef.substring(0, 6000)}\n=== END REFERENCE ===\n` : ''}
+
+Create a lesson plan with these sections:
+1. **Introduction** (5 min) — Hook, recap, today's objectives
+2. **Teaching** — Main content with examples relevant to Zambian context
+3. **Activity** — Hands-on exercise or group activity
+4. **Assessment** — 3-5 quick check questions
+5. **Wrap-up** — Summary, homework if applicable
+
+Write in clear, teacher-friendly language. Include specific examples and teaching tips.`;
+
+          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.5, maxTokens: 1500 });
+
+          await prisma.lessonPlan.create({
+            data: {
+              title: `${subject.name}: ${topic.title}`,
+              content: aiResponse.content,
+              teacherId: userId,
+              classId,
+              subjectId: subject.id,
+              termId: term.id,
+              weekStartDate: new Date(),
+            },
+          });
+          created.push(topic.title);
+        } catch (err: any) {
+          errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
+        }
+      }
+
+      return {
+        created,
+        errors,
+        subject: subject.name,
+        class: classInfo.name,
+        summary: `Generated ${created.length} lesson plans for ${subject.name} (${classInfo.name}). ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+      };
+    },
+  },
+
+  // ===================== AI ASSESSMENT GENERATION =====================
+  {
+    name: 'generate_assessments',
+    description: 'AI-generate assessments (tests with questions) for a subject\'s topics at a grade level. Creates one assessment per topic with AI-generated questions. Auto-resolves class and term.',
+    parameters: [
+      { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
+      { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
+      { name: 'assessmentType', type: 'string', description: 'Type of assessment', enum: ['EXAM', 'TEST', 'QUIZ'], },
+      { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics to generate assessments for (default 5).' },
+    ],
+    execute: async (params) => {
+      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
+      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+
+      const gl = Number(params.gradeLevel);
+      const assessmentType = params.assessmentType || 'TEST';
+
+      let classInfo: any = params.classId
+        ? await prisma.class.findUnique({ where: { id: params.classId }, select: { id: true, name: true } })
+        : null;
+      if (!classInfo) {
+        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+      }
+      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
+
+      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
+      if (!term) return { error: 'No academic term found. Create one first.' };
+
+      const topics = await prisma.topic.findMany({
+        where: { subjectId: subject.id, gradeLevel: gl },
+        include: { subtopics: { orderBy: { orderIndex: 'asc' }, take: 5 } },
+        orderBy: { orderIndex: 'asc' },
+        take: params.maxTopics || 5,
+      });
+
+      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
+
+      // Fetch official CDC curriculum content
+      let curriculumRef = '';
+      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+
+      const created: string[] = [];
+      const errors: string[] = [];
+
+      for (const topic of topics) {
+        try {
+          const existing = await prisma.assessment.findFirst({
+            where: { subjectId: subject.id, classId: classInfo.id, title: { contains: topic.title } },
+          });
+          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const subtopicNames = topic.subtopics.map(st => st.title).join(', ');
+          const questionCount = assessmentType === 'QUIZ' ? 5 : assessmentType === 'EXAM' ? 15 : 10;
+          const totalMarks = assessmentType === 'QUIZ' ? 20 : assessmentType === 'EXAM' ? 100 : 50;
+
+          const prompt = `Generate ${questionCount} assessment questions for Zambian students.
+SUBJECT: ${subject.name}, GRADE: ${gl}, TOPIC: ${topic.title}
+SUBTOPICS: ${subtopicNames || 'N/A'}
+TYPE: ${assessmentType}
+${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nAlign questions with the official Zambian CDC syllabus:\n${curriculumRef.substring(0, 4000)}\n=== END REFERENCE ===\n` : ''}
+
+Return ONLY valid JSON array:
+[{"question":"...","type":"MULTIPLE_CHOICE","options":["A)...","B)...","C)...","D)..."],"correctAnswer":"A","marks":${Math.round(totalMarks / questionCount)},"explanation":"Why this is correct"}]
+
+Requirements:
+- Mix question types: multiple choice, short answer, true/false
+- For short answer, omit "options" field and set type to "SHORT_ANSWER"
+- Age-appropriate for grade ${gl}, Zambian context
+- Cover the subtopics evenly
+- Return ONLY JSON array.`;
+
+          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.4, maxTokens: 2000 });
+
+          // Parse questions
+          let questions: any[] = [];
+          try {
+            const content = aiResponse.content;
+            const jsonMatch = content.match(/\[[\s\S]*\]/);
+            questions = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
+          } catch {
+            questions = [];
+          }
+
+          const assessment = await prisma.assessment.create({
+            data: {
+              title: `${assessmentType === 'QUIZ' ? 'Quiz' : assessmentType === 'EXAM' ? 'Exam' : 'Test'}: ${topic.title}`,
+              type: assessmentType as any,
+              classId: classInfo.id,
+              subjectId: subject.id,
+              termId: term.id,
+              totalMarks,
+              weight: assessmentType === 'QUIZ' ? 10 : assessmentType === 'EXAM' ? 40 : 25,
+              date: new Date(),
+              description: `AI-generated ${assessmentType.toLowerCase()} covering: ${topic.title}`,
+            },
+          });
+
+          // Save questions if parsed successfully
+          if (questions.length > 0) {
+            for (let i = 0; i < questions.length; i++) {
+              const q = questions[i];
+              const qType = q.type === 'SHORT_ANSWER' ? 'SHORT_ANSWER' : q.type === 'TRUE_FALSE' ? 'TRUE_FALSE' : q.type === 'ESSAY' ? 'ESSAY' : 'MULTIPLE_CHOICE';
+              const points = q.marks || q.points || Math.round(totalMarks / questionCount);
+
+              const question = await prisma.question.create({
+                data: {
+                  assessmentId: assessment.id,
+                  text: q.question || q.questionText || `Question ${i + 1}`,
+                  type: qType as any,
+                  points,
+                  correctAnswer: q.correctAnswer || null,
+                },
+              });
+
+              // Create options for multiple choice / true-false
+              if (Array.isArray(q.options) && q.options.length > 0) {
+                for (const opt of q.options) {
+                  const optText = typeof opt === 'string' ? opt : opt.text || String(opt);
+                  const isCorrect = q.correctAnswer ? optText.startsWith(q.correctAnswer) || optText === q.correctAnswer : false;
+                  await prisma.questionOption.create({
+                    data: {
+                      questionId: question.id,
+                      text: optText,
+                      isCorrect,
+                    },
+                  });
+                }
+              }
+            }
+          }
+
+          created.push(`${topic.title} (${questions.length} questions)`);
+        } catch (err: any) {
+          errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
+        }
+      }
+
+      return {
+        created,
+        errors,
+        subject: subject.name,
+        class: classInfo.name,
+        assessmentType,
+        summary: `Generated ${created.length} ${assessmentType.toLowerCase()}s for ${subject.name} (${classInfo.name}). ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+      };
+    },
+  },
+
+  // ===================== AI HOMEWORK GENERATION =====================
+  {
+    name: 'generate_homework',
+    description: 'AI-generate homework assignments for a subject\'s topics at a grade level. Creates one homework assessment per topic with structured tasks. Auto-resolves class and term.',
+    parameters: [
+      { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
+      { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
+      { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics to generate homework for (default 5).' },
+    ],
+    execute: async (params) => {
+      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
+      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+
+      const gl = Number(params.gradeLevel);
+
+      let classInfo: any = params.classId
+        ? await prisma.class.findUnique({ where: { id: params.classId }, select: { id: true, name: true } })
+        : null;
+      if (!classInfo) {
+        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+      }
+      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
+
+      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
+      if (!term) return { error: 'No academic term found. Create one first.' };
+
+      const topics = await prisma.topic.findMany({
+        where: { subjectId: subject.id, gradeLevel: gl },
+        include: { subtopics: { orderBy: { orderIndex: 'asc' }, take: 5 } },
+        orderBy: { orderIndex: 'asc' },
+        take: params.maxTopics || 5,
+      });
+
+      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
+
+      // Fetch official CDC curriculum content
+      let curriculumRef = '';
+      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+
+      // Build topics & subtopics listing for the response
+      const topicsListing = topics.map(t => ({
+        topic: t.title,
+        subtopics: t.subtopics.map(st => st.title),
+      }));
+
+      const created: string[] = [];
+      const errors: string[] = [];
+
+      for (const topic of topics) {
+        try {
+          const existing = await prisma.assessment.findFirst({
+            where: { subjectId: subject.id, classId: classInfo.id, type: 'HOMEWORK', title: { contains: topic.title } },
+          });
+          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const subtopicNames = topic.subtopics.map(st => st.title).join(', ');
+
+          const prompt = `Generate a homework assignment for Zambian students.
+SUBJECT: ${subject.name}, GRADE: ${gl}, TOPIC: ${topic.title}
+SUBTOPICS: ${subtopicNames || 'N/A'}
+${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nAlign homework with the official Zambian CDC syllabus:\n${curriculumRef.substring(0, 4000)}\n=== END REFERENCE ===\n` : ''}
+
+Create a structured homework with:
+1. A clear title
+2. Instructions (2-3 sentences)
+3. 3-5 tasks/questions appropriate for grade ${gl}
+4. Total marks allocation
+
+Write in clear simple English. Use Zambian context where relevant.
+${gl <= 0 ? 'For ECE: use drawing, coloring, matching, and simple counting activities.' : ''}
+${gl <= 4 ? 'For lower primary: keep tasks simple, concrete, and fun.' : ''}
+Return the homework as structured text.`;
+
+          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.5, maxTokens: 1000 });
+
+          // Create as a HOMEWORK assessment
+          const dueDate = new Date();
+          dueDate.setDate(dueDate.getDate() + 7); // Due in 1 week
+
+          await prisma.assessment.create({
+            data: {
+              title: `Homework: ${topic.title}`,
+              type: 'HOMEWORK',
+              classId: classInfo.id,
+              subjectId: subject.id,
+              termId: term.id,
+              totalMarks: 20,
+              weight: 5,
+              date: new Date(),
+              dueDate,
+              description: aiResponse.content,
+            },
+          });
+
+          created.push(topic.title);
+        } catch (err: any) {
+          errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
+        }
+      }
+
+      return {
+        created,
+        errors,
+        subject: subject.name,
+        gradeLevel: gl,
+        class: classInfo.name,
+        topicsAndSubtopics: topicsListing,
+        summary: `Generated ${created.length} homework assignments for ${subject.name} Grade ${gl} (${classInfo.name}). Topics: ${topicsListing.map(t => `${t.topic} [${t.subtopics.length} subtopics]`).join(', ')}. ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+      };
     },
   },
 
@@ -1577,8 +2590,15 @@ const toolFriendlyNames: Record<string, string> = {
   create_scholarships: 'Scholarships',
   create_expenses: 'Expenses',
   assign_subjects_to_classes: 'Subject Assignments',
+  cleanup_class_subjects: 'Subject Assignment Cleanup',
   list_topics: 'Syllabus Topics',
   generate_syllabus: 'AI Syllabus Generator',
+  generate_lesson_plans: 'AI Lesson Plan Generator',
+  generate_assessments: 'AI Assessment Generator',
+  generate_homework: 'AI Homework Generator',
+  populate_all_syllabi: 'Bulk Syllabus Generator',
+  check_syllabus_progress: 'Syllabus Progress',
+  cleanup_invalid_syllabi: 'Syllabus Cleanup',
   create_topics: 'Syllabus Topics',
   delete_topics: 'Syllabus Topics',
   search_payments: 'Payment Transactions',
@@ -1608,19 +2628,22 @@ CURRENT YEAR: ${currentYear}
 - Be empathetic with errors: "Hmm, I couldn't find that class."
 
 ## YOUR CAPABILITIES (TOOLS):
-${buildToolDescriptions()}
+${_cachedToolDescriptions || buildToolDescriptions()}
 
 ## RULES:
 1. When the user asks you to DO something (create, add, delete, etc.), you MUST respond with a JSON action plan.
 2. For data that requires knowledge (like holidays by country), use your training data to generate accurate information.
 3. Always use the correct eventType, date formats (YYYY-MM-DD), and enum values.
 4. When creating bulk items, generate all items in a single tool call.
-5. If you need IDs (classId, subjectId, etc.) that you don't have, first call the relevant list tool to find them.
+5. If you need IDs (classId, subjectId, etc.) that you don't have, prefer using name/code parameters (subjectCode, subjectName, className) which most tools support. Only call list tools if no name/code alternative exists.
 6. Be helpful and proactive — suggest related actions after completing a task.
 7. **CRITICAL — PRECISION**: Only call the tools that directly answer what the user asked. Do NOT call extra tools. If the user asks "how many students", ONLY call get_school_statistics — do NOT list all classes or subjects unless they asked.
 8. Only use the MINIMUM set of tools needed to answer the user's exact question.
-9. **SYLLABUS WORKFLOW**: When asked to seed/generate topics or syllabus for a subject, use generate_syllabus (AI-powered). When asked to assign subjects to classes, use assign_subjects_to_classes. Always list_subjects and list_classes first if you need IDs.
+9. **SYLLABUS WORKFLOW**: When asked to populate/generate syllabus for ALL subjects or "everything", use populate_all_syllabi — it starts a background job and returns immediately. Then suggest the user ask "check syllabus progress" to monitor. When asked for a SPECIFIC subject, call generate_syllabus with subjectCode and gradeLevel (one per grade level). When asked "how is the syllabus going" or "check progress", use check_syllabus_progress. The system automatically validates that subjects are appropriate for each grade level (e.g. Additional Mathematics is only for Grade 10-12, not ECE). If the user reports wrong subjects at wrong grades, use cleanup_invalid_syllabi to find and fix them. Do NOT call list_subjects first — tools resolve codes internally. When asked to assign subjects to classes, use assign_subjects_to_classes with assignAll="true" to assign all subjects to all classes, or provide className + subjectCodes for specific assignments. NEVER call list_classes or list_subjects before assign_subjects_to_classes — it resolves everything internally.
 10. **GRADE LEVELS**: ECE grades are -3 (Baby Class), -2 (Middle Class), -1 (Top Class), 0 (Reception). Primary is 1-7. Secondary is 8-12.
+11. **NO LAZY RESPONSES**: NEVER respond with just a list tool and a suggestion to "do more later". If the user asked you to CREATE or GENERATE something, actually call the creation/generation tool. Do not defer work to follow-up messages.
+12. **USE CODES NOT IDS**: When you know the subject name (e.g. "Mathematics"), use subjectCode (e.g. "MATH") or subjectName directly. Do NOT call list_subjects just to get an ID — the tools resolve codes internally.
+13. **CURRICULUM CONTENT**: After syllabus is populated, use generate_lesson_plans, generate_assessments, and generate_homework to create teaching content. These tools work per subject+grade — they auto-resolve class and term. When asked to "add everything" or "populate all content" for a subject, call all three. Example: for "Add lesson plans, tests, and homework for Math Grade 3", call generate_lesson_plans, generate_assessments, and generate_homework each with subjectCode=MATH gradeLevel=3.
 
 ## RESPONSE FORMAT:
 Always respond with ONLY this JSON — nothing else:
@@ -1700,14 +2723,14 @@ class MasterAIService {
    * Process a natural language command and execute the resulting actions
    */
   async processCommand(userMessage: string, userId: string, conversationHistory?: { role: string; content: string }[], imageBase64?: string): Promise<MasterAIResponse> {
-    // Build messages
+    // Build messages with cached system prompt & sanitized history
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
-      { role: 'system', content: buildSystemPrompt() },
+      { role: 'system', content: getCachedSystemPrompt() },
     ];
 
-    // Add conversation history if provided
+    // Add sanitized conversation history (truncates assistant msgs, strips PII)
     if (conversationHistory?.length) {
-      for (const msg of conversationHistory.slice(-10)) {
+      for (const msg of sanitizeConversationHistory(conversationHistory)) {
         messages.push({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
@@ -1727,83 +2750,43 @@ class MasterAIService {
     let plan: { message: string; actions: { tool: string; params: Record<string, any> }[]; suggestions?: string[] };
 
     try {
-      // Clean up response — remove markdown code fences if present
       let cleaned = aiResponse.content.trim();
       if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
       if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
       if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
       cleaned = cleaned.trim();
-
       plan = JSON.parse(cleaned);
     } catch (parseError) {
-      // If AI didn't return valid JSON, wrap its response
+      return { message: aiResponse.content, actions: [], suggestions: [] };
+    }
+
+    // ---- GUARD: Rate-limit actions per request ----
+    if ((plan.actions || []).length > MAX_ACTIONS_PER_REQUEST) {
       return {
-        message: aiResponse.content,
+        message: `That request would trigger ${plan.actions.length} operations, which exceeds the limit of ${MAX_ACTIONS_PER_REQUEST}. Please break it into smaller requests.`,
         actions: [],
-        suggestions: [],
+        suggestions: ['Try one subject at a time', 'Split by grade level'],
       };
     }
 
-    // Execute each action
-    const results: ExecutionResult[] = [];
+    // ---- Execute actions in parallel with validation & timeout ----
+    const results = await this.executeToolActions(plan.actions || [], userId);
 
-    for (const action of (plan.actions || [])) {
-      const toolDef = tools.find(t => t.name === action.tool);
-
-      if (!toolDef) {
-        results.push({
-          tool: action.tool,
-          success: false,
-          error: `Unknown tool: ${action.tool}`,
-          summary: `Failed: unknown tool "${action.tool}"`,
-        });
-        continue;
-      }
-
-      try {
-        const data = await toolDef.execute(action.params || {}, userId);
-        // Handle new return format with summary, or legacy array format
-        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
-        let summaryText: string;
-        if (data?.summary && typeof data.summary === 'string') {
-          // New resilient format: { created: [], updated?: [], existing?: [], errors: [], summary: string }
-          const hasErrors = data.errors?.length > 0;
-          summaryText = `${friendlyName} — ${data.summary}`;
-          if (hasErrors) {
-            summaryText += ` (${data.errors.length} issue${data.errors.length > 1 ? 's' : ''} encountered)`;
-          }
-        } else if (Array.isArray(data)) {
-          summaryText = `${friendlyName} — ${data.length} item${data.length !== 1 ? 's' : ''} found`;
-        } else {
-          const count = data?.deleted ?? 1;
-          summaryText = `${friendlyName} — ${count} item${count !== 1 ? 's' : ''} processed`;
-        }
-        results.push({
-          tool: action.tool,
-          success: true,
-          data,
-          summary: summaryText,
-        });
-      } catch (execError: any) {
-        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
-        results.push({
-          tool: action.tool,
-          success: false,
-          error: execError.message,
-          summary: `${friendlyName} — Could not complete this action`,
-        });
-      }
-    }
-
-    // ---- POST-EXECUTION: Build accurate, data-driven response ----
+    // ---- POST-EXECUTION: Smart summarizer (skip extra AI call when possible) ----
     let finalMessage = plan.message;
-    try {
-      finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
-    } catch {
-      // Fall back to AI's pre-execution message
+    const successResults = results.filter(r => r.success);
+    const needsSummarizer = successResults.length > 0 && (
+      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
+    );
+    if (needsSummarizer) {
+      try {
+        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+      } catch { /* fallback */ }
+    } else if (results.length > 0) {
+      finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
-    // Log usage
+    // Log usage (non-critical)
     try {
       await prisma.aIUsageLog.create({
         data: {
@@ -1814,20 +2797,65 @@ class MasterAIService {
           metadata: {
             userMessage,
             toolsCalled: results.map(r => r.tool),
-            successCount: results.filter(r => r.success).length,
+            successCount: successResults.length,
             failureCount: results.filter(r => !r.success).length,
           } as any,
         },
       });
-    } catch {
-      // Non-critical
-    }
+    } catch { /* non-critical */ }
 
     return {
       message: cleanFinalMessage(finalMessage),
       actions: results,
       suggestions: plan.suggestions,
     };
+  }
+
+  /**
+   * Shared tool execution engine — validates params, runs in parallel with timeouts.
+   */
+  private async executeToolActions(actions: { tool: string; params: Record<string, any> }[], userId: string): Promise<ExecutionResult[]> {
+    const executeOne = async (action: { tool: string; params: Record<string, any> }): Promise<ExecutionResult> => {
+      const toolDef = tools.find(t => t.name === action.tool);
+      if (!toolDef) {
+        return { tool: action.tool, success: false, error: `Unknown tool: ${action.tool}`, summary: `Failed: unknown tool "${action.tool}"` };
+      }
+
+      // Validate params with Zod
+      const validation = validateToolParams(action.tool, action.params || {});
+      if (!validation.valid) {
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        return { tool: action.tool, success: false, error: validation.error, summary: `${friendlyName} — ${validation.error}` };
+      }
+
+      try {
+        const timeoutMs = LONG_RUNNING_TOOLS.has(action.tool) ? TOOL_TIMEOUT_LONG_MS : TOOL_TIMEOUT_MS;
+        const data = await withTimeout(toolDef.execute(validation.sanitized, userId), timeoutMs, action.tool);
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        let summaryText: string;
+        if (data?.summary && typeof data.summary === 'string') {
+          const hasErrors = data.errors?.length > 0;
+          summaryText = `${friendlyName} — ${data.summary}`;
+          if (hasErrors) summaryText += ` (${data.errors.length} issue${data.errors.length > 1 ? 's' : ''} encountered)`;
+        } else if (Array.isArray(data)) {
+          summaryText = `${friendlyName} — ${data.length} item${data.length !== 1 ? 's' : ''} found`;
+        } else {
+          const count = data?.deleted ?? 1;
+          summaryText = `${friendlyName} — ${count} item${count !== 1 ? 's' : ''} processed`;
+        }
+        return { tool: action.tool, success: true, data, summary: summaryText };
+      } catch (execError: any) {
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        return { tool: action.tool, success: false, error: execError.message, summary: `${friendlyName} — Could not complete this action` };
+      }
+    };
+
+    // Run all actions in parallel (independent of each other)
+    const settled = await Promise.allSettled(actions.map(a => executeOne(a)));
+    return settled.map((result, i) => {
+      if (result.status === 'fulfilled') return result.value;
+      return { tool: actions[i].tool, success: false, error: result.reason?.message || 'Unknown error', summary: `Failed: ${result.reason?.message}` };
+    });
   }
 
   /**
@@ -1943,13 +2971,13 @@ RULES:
     conversationHistory?: { role: string; content: string }[],
     imageBase64?: string,
   ): Promise<MasterAIResponse> {
-    // Build messages
+    // Build messages with cached prompt & sanitized history
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
-      { role: 'system', content: buildSystemPrompt() },
+      { role: 'system', content: getCachedSystemPrompt() },
     ];
 
     if (conversationHistory?.length) {
-      for (const msg of conversationHistory.slice(-6)) {
+      for (const msg of sanitizeConversationHistory(conversationHistory, 6)) {
         messages.push({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
@@ -1960,7 +2988,6 @@ RULES:
     messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
 
     // ---- Phase 1: AI planning call ----
-    // Voice commands are short — keep maxTokens low for speed
     const aiResponse = await aiService.chat(messages, {
       temperature: 0.3,
       maxTokens: 800,
@@ -1976,53 +3003,31 @@ RULES:
       cleaned = cleaned.trim();
       plan = JSON.parse(cleaned);
     } catch {
-      const result: MasterAIResponse = {
-        message: aiResponse.content,
-        actions: [],
-        suggestions: [],
-      };
+      const result: MasterAIResponse = { message: aiResponse.content, actions: [], suggestions: [] };
       onPhase('result', result);
       return result;
     }
 
     const hasActions = (plan.actions || []).length > 0;
 
-    // If there ARE tool actions, send the plan.message immediately as a
-    // spoken filler ("Let me check...") so the user hears something while
-    // tools execute. For no-tool responses, skip straight to result.
+    // Rate-limit guard
+    if ((plan.actions || []).length > MAX_ACTIONS_PER_REQUEST) {
+      const result: MasterAIResponse = {
+        message: `That request would trigger ${plan.actions.length} operations (limit: ${MAX_ACTIONS_PER_REQUEST}). Please break it into smaller requests.`,
+        actions: [],
+        suggestions: ['Try one subject at a time'],
+      };
+      onPhase('result', result);
+      return result;
+    }
+
+    // Send spoken filler immediately while tools execute
     if (hasActions && plan.message) {
       onPhase('quick', { message: cleanFinalMessage(plan.message) });
     }
 
-    // ---- Phase 2: Execute tools + summarize ----
-    const results: ExecutionResult[] = [];
-
-    for (const action of (plan.actions || [])) {
-      const toolDef = tools.find(t => t.name === action.tool);
-      if (!toolDef) {
-        results.push({ tool: action.tool, success: false, error: `Unknown tool: ${action.tool}`, summary: `Failed: unknown tool "${action.tool}"` });
-        continue;
-      }
-      try {
-        const data = await toolDef.execute(action.params || {}, userId);
-        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
-        let summaryText: string;
-        if (data?.summary && typeof data.summary === 'string') {
-          const hasErrors = data.errors?.length > 0;
-          summaryText = `${friendlyName} — ${data.summary}`;
-          if (hasErrors) summaryText += ` (${data.errors.length} issue${data.errors.length > 1 ? 's' : ''} encountered)`;
-        } else if (Array.isArray(data)) {
-          summaryText = `${friendlyName} — ${data.length} item${data.length !== 1 ? 's' : ''} found`;
-        } else {
-          const count = data?.deleted ?? 1;
-          summaryText = `${friendlyName} — ${count} item${count !== 1 ? 's' : ''} processed`;
-        }
-        results.push({ tool: action.tool, success: true, data, summary: summaryText });
-      } catch (execError: any) {
-        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
-        results.push({ tool: action.tool, success: false, error: execError.message, summary: `${friendlyName} — Could not complete this action` });
-      }
-    }
+    // ---- Phase 2: Execute tools (parallel, validated, with timeout) ----
+    const results = await this.executeToolActions(plan.actions || [], userId);
 
     // Build accurate summary — skip the extra LLM call for simple cases
     let finalMessage = plan.message;
@@ -2035,7 +3040,6 @@ RULES:
         finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
       } catch { /* fallback */ }
     } else if (results.length > 0) {
-      // Simple case: just use the tool summaries directly
       finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
@@ -2050,7 +3054,7 @@ RULES:
           metadata: {
             userMessage,
             toolsCalled: results.map(r => r.tool),
-            successCount: results.filter(r => r.success).length,
+            successCount: successResults.length,
             failureCount: results.filter(r => !r.success).length,
           } as any,
         },

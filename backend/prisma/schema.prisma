@@ -108,16 +108,19 @@ model User {
   subjectAssignments       TeacherSubject[]
 
   // Communication tracking
-  sentCommunications CommunicationLog[] @relation("SentCommunications")
-  createdAnnouncements Announcement[]   @relation("CreatedAnnouncements")
-  createdCampaigns DebtCollectionCampaign[] @relation("CreatedCampaigns")
+  sentCommunications   CommunicationLog[]       @relation("SentCommunications")
+  createdAnnouncements Announcement[]           @relation("CreatedAnnouncements")
+  createdCampaigns     DebtCollectionCampaign[] @relation("CreatedCampaigns")
 
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
-  
+
   // Multi-branch assignments (for staff working at multiple locations)
-  branchAssignments UserBranch[]
-  financialReports  FinancialReport[]
+  branchAssignments    UserBranch[]
+  financialReports     FinancialReport[]
+  PendingTeacherAction PendingTeacherAction[]
+  InterventionRecord   InterventionRecord[]
+  AdaptedLesson        AdaptedLesson[]
 
   @@map("users")
 }
@@ -176,9 +179,10 @@ model Student {
 
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
-  
+
   // Multi-branch enrollments (for students attending multiple campuses)
-  branchEnrollments StudentBranch[]
+  branchEnrollments        StudentBranch[]
+  LearningObjectiveMastery LearningObjectiveMastery[]
 
   @@map("students")
 }
@@ -207,8 +211,13 @@ model Class {
   lessonPlans        LessonPlan[]
   teacherAssignments TeacherSubject[]
 
-  branchId String?
-  branch   Branch? @relation(fields: [branchId], references: [id])
+  branchId                 String?
+  branch                   Branch?                    @relation(fields: [branchId], references: [id])
+  classFeeAssignments      ClassFeeAssignment[]
+  LearningObjectiveMastery LearningObjectiveMastery[]
+  PendingTeacherAction     PendingTeacherAction[]
+  InterventionRecord       InterventionRecord[]
+  AdaptedLesson            AdaptedLesson[]
 
   @@map("classes")
 }
@@ -246,6 +255,7 @@ model AcademicTerm {
   timetablePeriods TimetablePeriod[]
   lessonPlans      LessonPlan[]
   financialReports FinancialReport[]
+  classFeeAssignments ClassFeeAssignment[]
 
   activeInSettings SchoolSettings?
 
@@ -281,17 +291,17 @@ model SchoolSettings {
   overdueReminderFrequency Int     @default(7) // Days between overdue reminders
 
   // Debt Collection Escalation Settings
-  debtCollectionEnabled    Boolean @default(false)
-  escalationDay1Channel    String  @default("EMAIL")     // Day 7: gentle reminder
-  escalationDay2Channel    String  @default("SMS")        // Day 14: firm reminder
-  escalationDay3Channel    String  @default("WHATSAPP")   // Day 21: urgent + payment plan
-  escalationDay4Channel    String  @default("ALL")        // Day 30: formal final notice
-  escalationDay1Days       Int     @default(7)
-  escalationDay2Days       Int     @default(14)
-  escalationDay3Days       Int     @default(21)
-  escalationDay4Days       Int     @default(30)
-  debtCollectionMinAmount  Decimal @default(0) @db.Decimal(10, 2) // Minimum amount to trigger collection
-  aiPersonalizedMessages   Boolean @default(true) // Use AI to personalize messages
+  debtCollectionEnabled   Boolean @default(false)
+  escalationDay1Channel   String  @default("EMAIL") // Day 7: gentle reminder
+  escalationDay2Channel   String  @default("SMS") // Day 14: firm reminder
+  escalationDay3Channel   String  @default("WHATSAPP") // Day 21: urgent + payment plan
+  escalationDay4Channel   String  @default("ALL") // Day 30: formal final notice
+  escalationDay1Days      Int     @default(7)
+  escalationDay2Days      Int     @default(14)
+  escalationDay3Days      Int     @default(21)
+  escalationDay4Days      Int     @default(30)
+  debtCollectionMinAmount Decimal @default(0) @db.Decimal(10, 2) // Minimum amount to trigger collection
+  aiPersonalizedMessages  Boolean @default(true) // Use AI to personalize messages
 
   // Communication Settings (SMTP)
   smtpHost      String?
@@ -314,16 +324,16 @@ model SchoolSettings {
   lencoDefaultBearer String? @default("merchant") // 'merchant' or 'customer' - who pays fees
 
   // AI Configuration
-  aiProvider    String? @default("openai") // 'openai', 'anthropic', 'gemini', 'azure'
-  aiApiKey      String? // API key for AI provider
-  aiModel       String? @default("gpt-4o-mini") // Model to use
-  aiEnabled     Boolean @default(false) // Master toggle for AI features
+  aiProvider String? @default("openai") // 'openai', 'anthropic', 'gemini', 'azure'
+  aiApiKey   String? // API key for AI provider
+  aiModel    String? @default("gpt-4o-mini") // Model to use
+  aiEnabled  Boolean @default(false) // Master toggle for AI features
 
   // WhatsApp Configuration
-  whatsappProvider  String? // 'META', 'TWILIO_WHATSAPP'
-  whatsappApiKey    String?
-  whatsappPhoneId   String? // Meta Business phone number ID
-  whatsappEnabled   Boolean @default(false)
+  whatsappProvider String? // 'META', 'TWILIO_WHATSAPP'
+  whatsappApiKey   String?
+  whatsappPhoneId  String? // Meta Business phone number ID
+  whatsappEnabled  Boolean @default(false)
 
   updatedAt DateTime @updatedAt
 
@@ -362,8 +372,32 @@ model FeeTemplate {
   category   FeeCategory? @relation(fields: [categoryId], references: [id])
 
   studentFeeStructures StudentFeeStructure[]
+  classFeeAssignments  ClassFeeAssignment[]
 
   @@map("fee_templates")
+}
+
+model ClassFeeAssignment {
+  id            String      @id @default(uuid())
+  classId       String
+  class         Class       @relation(fields: [classId], references: [id], onDelete: Cascade)
+  feeTemplateId String
+  feeTemplate   FeeTemplate @relation(fields: [feeTemplateId], references: [id], onDelete: Cascade)
+  academicTermId String
+  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
+  categoryId    String?
+  category      FeeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  dueDate       DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([classId, feeTemplateId])
+  @@unique([classId, academicTermId, categoryId])
+  @@index([classId])
+  @@index([feeTemplateId])
+  @@index([academicTermId])
+  @@index([categoryId])
+  @@map("class_fee_assignments")
 }
 
 model StudentFeeStructure {
@@ -378,7 +412,7 @@ model StudentFeeStructure {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  allocations   PaymentAllocation[]
+  allocations PaymentAllocation[]
 
   @@unique([studentId, feeTemplateId])
   @@map("student_fee_structures")
@@ -464,6 +498,15 @@ model Payment {
   voidedBy       User?         @relation("VoidedPayments", fields: [voidedByUserId], references: [id])
   voidReason     String? // Why the payment was voided
 
+  // Reconciliation controls
+  isReconciled       Boolean   @default(false)
+  reconciledAt       DateTime?
+  reconciledByUserId String?
+  reconciledByName   String?
+  settlementDate     DateTime?
+  bankReference      String?
+  reconciliationNote String?
+
   // Mobile money collection link (if paid via Lenco)
   mobileMoneyCollection MobileMoneyCollection?
 
@@ -481,6 +524,7 @@ model Payment {
   @@index([transactionId])
   @@index([studentId, status]) // For student payment history
   @@index([paymentDate, status]) // For reports filtering by status
+  @@index([isReconciled, paymentDate])
   @@map("payments")
 }
 
@@ -492,9 +536,16 @@ model Attendance {
   class            Class            @relation(fields: [classId], references: [id])
   date             DateTime
   status           AttendanceStatus
+  reason           String?          // Absence/late reason (e.g. "Sick", "Doctor appointment")
+  lateMinutes      Int?             // How many minutes late (null if not LATE)
+  notes            String?          // Additional teacher notes
   recordedByUserId String
   recordedBy       User             @relation(fields: [recordedByUserId], references: [id])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
+  @@index([classId, date])
+  @@index([studentId, date])
   @@map("attendance")
 }
 
@@ -527,10 +578,10 @@ model Assessment {
   termId    String
   term      AcademicTerm @relation(fields: [termId], references: [id])
 
-  totalMarks Decimal  @db.Decimal(5, 2)
-  weight     Decimal  @db.Decimal(5, 2) // Percentage weight (e.g., 30 for 30%)
+  totalMarks Decimal   @db.Decimal(5, 2)
+  weight     Decimal   @db.Decimal(5, 2) // Percentage weight (e.g., 30 for 30%)
   date       DateTime
-  dueDate    DateTime?  // Deadline for homework/project submissions
+  dueDate    DateTime? // Deadline for homework/project submissions
 
   results AssessmentResult[]
 
@@ -539,12 +590,13 @@ model Assessment {
   startTime       DateTime?
   endTime         DateTime?
 
-  questions   Question[]
-  submissions AssessmentSubmission[]
+  questions           Question[]
+  submissions         AssessmentSubmission[]
   homeworkSubmissions HomeworkSubmission[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  MisconceptionPattern MisconceptionPattern[]
 
   @@map("assessments")
 }
@@ -770,17 +822,21 @@ model Topic {
 }
 
 model SubTopic {
-  id               String  @id @default(uuid())
-  title            String
-  description      String?
+  id                 String  @id @default(uuid())
+  title              String
+  description        String?
   learningObjectives String? @db.Text // JSON array of objectives
-  topicId          String
-  topic            Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  orderIndex       Int     @default(0)
-  duration         Int?    // Suggested duration in minutes
+  topicId            String
+  topic              Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  orderIndex         Int     @default(0)
+  duration           Int? // Suggested duration in minutes
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  LearningObjectiveMastery LearningObjectiveMastery[]
+  MisconceptionPattern     MisconceptionPattern[]
+  InterventionRecord       InterventionRecord[]
+  AdaptedLesson            AdaptedLesson[]
 
   @@map("sub_topics")
 }
@@ -789,21 +845,21 @@ model SubTopic {
 // (PDFs, textbooks, teaching modules). Used to ground the AI Tutor
 // so it teaches ONLY from verified educational materials.
 model TeachingContent {
-  id          String   @id @default(uuid())
-  subjectId   String
-  gradeLevel  Int      // 1-12, matches Topic.gradeLevel
-  topicId     String?  // Optional link to a specific Topic
-  subTopicId  String?  // Optional link to a specific SubTopic
+  id         String  @id @default(uuid())
+  subjectId  String
+  gradeLevel Int // 1-12, matches Topic.gradeLevel
+  topicId    String? // Optional link to a specific Topic
+  subTopicId String? // Optional link to a specific SubTopic
 
   title       String
-  content     String   @db.Text  // The actual teaching notes / extracted text
-  source      String   // e.g. "Zambia CDC Syllabus", "Form 1 Teaching Module"
-  sourceFile  String?  // Original filename (e.g. "Chemistry Form 1.pdf")
-  contentType String   @default("NOTES") // NOTES, SYLLABUS, MODULE, TEXTBOOK
-  approved    Boolean  @default(true)     // Only approved content is used
+  content     String  @db.Text // The actual teaching notes / extracted text
+  source      String // e.g. "Zambia CDC Syllabus", "Form 1 Teaching Module"
+  sourceFile  String? // Original filename (e.g. "Chemistry Form 1.pdf")
+  contentType String  @default("NOTES") // NOTES, SYLLABUS, MODULE, TEXTBOOK
+  approved    Boolean @default(true) // Only approved content is used
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([subjectId, gradeLevel])
   @@index([topicId])
@@ -868,7 +924,7 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   content        String
   isRead         Boolean      @default(false)
-  readAt         DateTime?    // When the message was read
+  readAt         DateTime? // When the message was read
   createdAt      DateTime     @default(now())
 
   @@map("messages")
@@ -877,7 +933,7 @@ model Message {
 model Conversation {
   id        String   @id @default(uuid())
   isGroup   Boolean  @default(false)
-  name      String?  // Group chat name
+  name      String? // Group chat name
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -928,24 +984,24 @@ model Branch {
   mobileMoneyCollections MobileMoneyCollection[]
   outgoingTransfers      BranchTransfer[]        @relation("FromBranch")
   incomingTransfers      BranchTransfer[]        @relation("ToBranch")
-  
+
   // Multi-branch assignments
   userAssignments    UserBranch[]
   studentEnrollments StudentBranch[]
 
   // Accounting relations
-  chartOfAccounts    ChartOfAccount[]
-  journalEntries     JournalEntry[]
-  vendors            Vendor[]
-  expenses           Expense[]
-  invoices           Invoice[]
-  refunds            Refund[]
-  staffPayrolls      StaffPayroll[]
-  payrollRuns        PayrollRun[]
-  budgets            Budget[]
-  pettyCashAccounts  PettyCashAccount[]
-  receiptSequences   ReceiptSequence[]
-  financialReports   FinancialReport[]
+  chartOfAccounts   ChartOfAccount[]
+  journalEntries    JournalEntry[]
+  vendors           Vendor[]
+  expenses          Expense[]
+  invoices          Invoice[]
+  refunds           Refund[]
+  staffPayrolls     StaffPayroll[]
+  payrollRuns       PayrollRun[]
+  budgets           Budget[]
+  pettyCashAccounts PettyCashAccount[]
+  receiptSequences  ReceiptSequence[]
+  financialReports  FinancialReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -978,18 +1034,18 @@ model BranchTransfer {
 
 // Junction table for users working at multiple branches
 model UserBranch {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  branchId  String
-  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  
-  isPrimary Boolean  @default(false) // Is this their main branch?
-  role      String?  // Optional: specific role at this branch
-  
-  startDate DateTime @default(now())
+  id       String @id @default(uuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false) // Is this their main branch?
+  role      String? // Optional: specific role at this branch
+
+  startDate DateTime  @default(now())
   endDate   DateTime? // Null means currently active
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1001,20 +1057,20 @@ model UserBranch {
 
 // Junction table for students enrolled at multiple branches
 model StudentBranch {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
   branchId  String
-  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  
-  isPrimary  Boolean  @default(false) // Is this their main branch?
-  enrollType String?  // e.g., "full-time", "part-time", "exchange"
-  
-  startDate  DateTime @default(now())
-  endDate    DateTime? // Null means currently active
-  
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  branch    Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  isPrimary  Boolean @default(false) // Is this their main branch?
+  enrollType String? // e.g., "full-time", "part-time", "exchange"
+
+  startDate DateTime  @default(now())
+  endDate   DateTime? // Null means currently active
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([studentId, branchId])
   @@index([studentId])
@@ -1028,11 +1084,11 @@ model StudentBranch {
 model AuditLog {
   id         String   @id @default(uuid())
   userId     String?
-  action     String   // CREATE, UPDATE, DELETE, LOGIN, VOID, etc.
-  entityType String   // Student, Payment, User, Settings, etc.
+  action     String // CREATE, UPDATE, DELETE, LOGIN, VOID, etc.
+  entityType String // Student, Payment, User, Settings, etc.
   entityId   String?
-  oldValue   Json?    // Previous state (for updates)
-  newValue   Json?    // New state (for creates/updates)
+  oldValue   Json? // Previous state (for updates)
+  newValue   Json? // New state (for creates/updates)
   ipAddress  String?
   userAgent  String?
   createdAt  DateTime @default(now())
@@ -1055,14 +1111,14 @@ enum PaymentPlanStatus {
 }
 
 model PaymentPlan {
-  id        String            @id @default(uuid())
-  studentId String
-  totalAmount   Decimal       @db.Decimal(10, 2)
-  installments  Int           // Number of installments
-  frequency     String        @default("monthly") // weekly, monthly, termly
-  startDate     DateTime
-  status        PaymentPlanStatus @default(ACTIVE)
-  notes         String?
+  id           String            @id @default(uuid())
+  studentId    String
+  totalAmount  Decimal           @db.Decimal(10, 2)
+  installments Int // Number of installments
+  frequency    String            @default("monthly") // weekly, monthly, termly
+  startDate    DateTime
+  status       PaymentPlanStatus @default(ACTIVE)
+  notes        String?
 
   schedules PaymentPlanSchedule[]
 
@@ -1074,15 +1130,15 @@ model PaymentPlan {
 }
 
 model PaymentPlanSchedule {
-  id            String      @id @default(uuid())
-  planId        String
-  plan          PaymentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  dueDate       DateTime
-  amountDue     Decimal     @db.Decimal(10, 2)
-  amountPaid    Decimal     @default(0) @db.Decimal(10, 2)
-  isPaid        Boolean     @default(false)
-  paidAt        DateTime?
-  paymentId     String?     // Link to actual Payment record
+  id         String      @id @default(uuid())
+  planId     String
+  plan       PaymentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  dueDate    DateTime
+  amountDue  Decimal     @db.Decimal(10, 2)
+  amountPaid Decimal     @default(0) @db.Decimal(10, 2)
+  isPaid     Boolean     @default(false)
+  paidAt     DateTime?
+  paymentId  String? // Link to actual Payment record
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1169,21 +1225,21 @@ enum RefundStatus {
 
 // Chart of Accounts for proper double-entry
 model ChartOfAccount {
-  id          String      @id @default(uuid())
-  code        String      @unique // e.g., "1000", "2000", "4000"
-  name        String      // e.g., "Cash at Bank", "Tuition Revenue"
+  id          String           @id @default(uuid())
+  code        String           @unique // e.g., "1000", "2000", "4000"
+  name        String // e.g., "Cash at Bank", "Tuition Revenue"
   type        AccountType
   parentId    String?
   parent      ChartOfAccount?  @relation("AccountHierarchy", fields: [parentId], references: [id])
   children    ChartOfAccount[] @relation("AccountHierarchy")
   description String?
-  isActive    Boolean     @default(true)
-  isSystem    Boolean     @default(false) // System accounts can't be deleted
+  isActive    Boolean          @default(true)
+  isSystem    Boolean          @default(false) // System accounts can't be deleted
 
   journalEntryLines JournalEntryLine[]
 
-  branchId  String?
-  branch    Branch? @relation(fields: [branchId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1195,21 +1251,21 @@ model ChartOfAccount {
 
 // Journal Entries for double-entry bookkeeping
 model JournalEntry {
-  id          String   @id @default(uuid())
-  entryNumber String   @unique // JE-2026-00001
-  date        DateTime
-  description String
-  reference   String?  // Link to source document (invoice, payment, expense)
+  id            String    @id @default(uuid())
+  entryNumber   String    @unique // JE-2026-00001
+  date          DateTime
+  description   String
+  reference     String? // Link to source document (invoice, payment, expense)
   referenceType String? // PAYMENT, EXPENSE, INVOICE, PAYROLL, PETTY_CASH
-  referenceId String?
-  isPosted    Boolean  @default(false)
-  postedAt    DateTime?
-  postedBy    String?
+  referenceId   String?
+  isPosted      Boolean   @default(false)
+  postedAt      DateTime?
+  postedBy      String?
 
   lines JournalEntryLine[]
 
-  branchId  String?
-  branch    Branch? @relation(fields: [branchId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1221,14 +1277,14 @@ model JournalEntry {
 }
 
 model JournalEntryLine {
-  id           String         @id @default(uuid())
-  journalId    String
-  journal      JournalEntry   @relation(fields: [journalId], references: [id], onDelete: Cascade)
-  accountId    String
-  account      ChartOfAccount @relation(fields: [accountId], references: [id])
-  debit        Decimal        @default(0) @db.Decimal(12, 2)
-  credit       Decimal        @default(0) @db.Decimal(12, 2)
-  description  String?
+  id          String         @id @default(uuid())
+  journalId   String
+  journal     JournalEntry   @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     ChartOfAccount @relation(fields: [accountId], references: [id])
+  debit       Decimal        @default(0) @db.Decimal(12, 2)
+  credit      Decimal        @default(0) @db.Decimal(12, 2)
+  description String?
 
   createdAt DateTime @default(now())
 
@@ -1239,12 +1295,12 @@ model JournalEntryLine {
 
 // Payment Allocation — links payments to specific fee items
 model PaymentAllocation {
-  id              String @id @default(uuid())
-  paymentId       String
-  payment         Payment @relation(fields: [paymentId], references: [id])
-  studentFeeId    String
-  studentFee      StudentFeeStructure @relation(fields: [studentFeeId], references: [id])
-  amount          Decimal @db.Decimal(10, 2)
+  id           String              @id @default(uuid())
+  paymentId    String
+  payment      Payment             @relation(fields: [paymentId], references: [id])
+  studentFeeId String
+  studentFee   StudentFeeStructure @relation(fields: [studentFeeId], references: [id])
+  amount       Decimal             @db.Decimal(10, 2)
 
   createdAt DateTime @default(now())
 
@@ -1270,8 +1326,8 @@ model Vendor {
 
   expenses Expense[]
 
-  branchId  String?
-  branch    Branch? @relation(fields: [branchId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1281,43 +1337,43 @@ model Vendor {
 
 // Expense Management
 model Expense {
-  id          String          @id @default(uuid())
-  expenseNumber String        @unique // EXP-2026-00001
-  date        DateTime
-  category    ExpenseCategory
-  description String
-  amount      Decimal         @db.Decimal(12, 2)
-  taxAmount   Decimal         @default(0) @db.Decimal(12, 2)
-  totalAmount Decimal         @db.Decimal(12, 2)
+  id            String          @id @default(uuid())
+  expenseNumber String          @unique // EXP-2026-00001
+  date          DateTime
+  category      ExpenseCategory
+  description   String
+  amount        Decimal         @db.Decimal(12, 2)
+  taxAmount     Decimal         @default(0) @db.Decimal(12, 2)
+  totalAmount   Decimal         @db.Decimal(12, 2)
 
-  vendorId    String?
-  vendor      Vendor?         @relation(fields: [vendorId], references: [id])
+  vendorId String?
+  vendor   Vendor? @relation(fields: [vendorId], references: [id])
 
-  status      ExpenseStatus   @default(DRAFT)
+  status        ExpenseStatus  @default(DRAFT)
   paymentMethod PaymentMethod?
-  paymentRef  String?         // Cheque no, transfer ref, etc.
-  receiptUrl  String?         // Uploaded receipt file
+  paymentRef    String? // Cheque no, transfer ref, etc.
+  receiptUrl    String? // Uploaded receipt file
 
   // Approval workflow
-  requestedBy String
-  approvedBy  String?
-  approvedAt  DateTime?
-  rejectedBy  String?
-  rejectedAt  DateTime?
+  requestedBy     String
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
   rejectionReason String?
 
   // Recurrence
-  isRecurring Boolean @default(false)
+  isRecurring        Boolean   @default(false)
   recurringFrequency String? // monthly, quarterly, annual
   nextRecurrenceDate DateTime?
 
-  notes       String?
+  notes String?
 
-  branchId    String?
-  branch      Branch?  @relation(fields: [branchId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([category])
@@ -1328,16 +1384,17 @@ model Expense {
 
 // Fee Categories for hierarchical fee types
 model FeeCategory {
-  id          String  @id @default(uuid())
-  name        String  // Tuition, Transport, Boarding, Lab, Uniform
-  code        String  @unique
+  id          String        @id @default(uuid())
+  name        String // Tuition, Transport, Boarding, Lab, Uniform
+  code        String        @unique
   description String?
   parentId    String?
   parent      FeeCategory?  @relation("FeeCategoryHierarchy", fields: [parentId], references: [id])
   children    FeeCategory[] @relation("FeeCategoryHierarchy")
-  isActive    Boolean @default(true)
+  isActive    Boolean       @default(true)
 
   feeTemplates FeeTemplate[]
+  classFeeAssignments ClassFeeAssignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1347,34 +1404,34 @@ model FeeCategory {
 
 // Invoice Generation
 model Invoice {
-  id            String        @id @default(uuid())
-  invoiceNumber String        @unique // INV-2026-00001
+  id            String   @id @default(uuid())
+  invoiceNumber String   @unique // INV-2026-00001
   studentId     String
-  student       Student       @relation(fields: [studentId], references: [id])
+  student       Student  @relation(fields: [studentId], references: [id])
   termId        String
-  issueDate     DateTime      @default(now())
+  issueDate     DateTime @default(now())
   dueDate       DateTime
-  
-  subtotal      Decimal       @db.Decimal(12, 2)
-  discount      Decimal       @default(0) @db.Decimal(12, 2)
-  taxAmount     Decimal       @default(0) @db.Decimal(12, 2)
-  totalAmount   Decimal       @db.Decimal(12, 2)
-  amountPaid    Decimal       @default(0) @db.Decimal(12, 2)
-  balanceDue    Decimal       @db.Decimal(12, 2)
 
-  status        InvoiceStatus @default(DRAFT)
-  notes         String?
-  sentAt        DateTime?
-  paidAt        DateTime?
+  subtotal    Decimal @db.Decimal(12, 2)
+  discount    Decimal @default(0) @db.Decimal(12, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(12, 2)
+  totalAmount Decimal @db.Decimal(12, 2)
+  amountPaid  Decimal @default(0) @db.Decimal(12, 2)
+  balanceDue  Decimal @db.Decimal(12, 2)
 
-  items         InvoiceItem[]
-  creditNotes   CreditNote[]
+  status InvoiceStatus @default(DRAFT)
+  notes  String?
+  sentAt DateTime?
+  paidAt DateTime?
 
-  branchId      String?
-  branch        Branch?       @relation(fields: [branchId], references: [id])
+  items       InvoiceItem[]
+  creditNotes CreditNote[]
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([studentId])
   @@index([status])
@@ -1383,13 +1440,13 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id          String  @id @default(uuid())
-  invoiceId   String
-  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  description String
-  quantity    Int     @default(1)
-  unitPrice   Decimal @db.Decimal(10, 2)
-  amount      Decimal @db.Decimal(10, 2)
+  id            String  @id @default(uuid())
+  invoiceId     String
+  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description   String
+  quantity      Int     @default(1)
+  unitPrice     Decimal @db.Decimal(10, 2)
+  amount        Decimal @db.Decimal(10, 2)
   feeTemplateId String? // Link to fee template if applicable
 
   createdAt DateTime @default(now())
@@ -1400,14 +1457,14 @@ model InvoiceItem {
 
 // Credit Notes for adjustments
 model CreditNote {
-  id          String  @id @default(uuid())
-  creditNoteNumber String @unique // CN-2026-00001
-  invoiceId   String
-  invoice     Invoice @relation(fields: [invoiceId], references: [id])
-  amount      Decimal @db.Decimal(12, 2)
-  reason      String
-  issuedBy    String
-  issuedAt    DateTime @default(now())
+  id               String   @id @default(uuid())
+  creditNoteNumber String   @unique // CN-2026-00001
+  invoiceId        String
+  invoice          Invoice  @relation(fields: [invoiceId], references: [id])
+  amount           Decimal  @db.Decimal(12, 2)
+  reason           String
+  issuedBy         String
+  issuedAt         DateTime @default(now())
 
   createdAt DateTime @default(now())
 
@@ -1424,26 +1481,26 @@ model Refund {
   studentId    String
   amount       Decimal      @db.Decimal(10, 2)
   reason       String
-  method       String       // cash_back, credit_next_term, bank_transfer
+  method       String // cash_back, credit_next_term, bank_transfer
   status       RefundStatus @default(REQUESTED)
 
-  requestedBy  String
-  requestedAt  DateTime     @default(now())
-  approvedBy   String?
-  approvedAt   DateTime?
-  processedBy  String?
-  processedAt  DateTime?
-  rejectedBy   String?
-  rejectedAt   DateTime?
+  requestedBy     String
+  requestedAt     DateTime  @default(now())
+  approvedBy      String?
+  approvedAt      DateTime?
+  processedBy     String?
+  processedAt     DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
   rejectionReason String?
 
-  notes        String?
+  notes String?
 
-  branchId     String?
-  branch       Branch?      @relation(fields: [branchId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([paymentId])
   @@index([studentId])
@@ -1453,102 +1510,102 @@ model Refund {
 
 // Payroll
 model StaffPayroll {
-  id          String  @id @default(uuid())
-  userId      String
-  
+  id     String @id @default(uuid())
+  userId String
+
   // Salary structure
-  basicSalary   Decimal @db.Decimal(12, 2)
-  housingAllowance Decimal @default(0) @db.Decimal(12, 2)
+  basicSalary        Decimal @db.Decimal(12, 2)
+  housingAllowance   Decimal @default(0) @db.Decimal(12, 2)
   transportAllowance Decimal @default(0) @db.Decimal(12, 2)
-  otherAllowances Decimal @default(0) @db.Decimal(12, 2)
-  
+  otherAllowances    Decimal @default(0) @db.Decimal(12, 2)
+
   // Deductions
   taxDeduction    Decimal @default(0) @db.Decimal(12, 2) // PAYE
   napsaDeduction  Decimal @default(0) @db.Decimal(12, 2) // NAPSA (Zambia)
   nhimaDeduction  Decimal @default(0) @db.Decimal(12, 2) // NHIMA (Zambia)
   otherDeductions Decimal @default(0) @db.Decimal(12, 2)
-  
-  netSalary     Decimal @db.Decimal(12, 2)
-  
-  bankName      String?
-  bankAccount   String?
-  bankBranch    String?
-  
-  isActive      Boolean @default(true)
-  
-  payslips      Payslip[]
-  
-  branchId      String?
-  branch        Branch? @relation(fields: [branchId], references: [id])
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+
+  netSalary Decimal @db.Decimal(12, 2)
+
+  bankName    String?
+  bankAccount String?
+  bankBranch  String?
+
+  isActive Boolean @default(true)
+
+  payslips Payslip[]
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([userId])
   @@map("staff_payrolls")
 }
 
 model PayrollRun {
-  id          String        @id @default(uuid())
-  runNumber   String        @unique // PAY-2026-03
-  month       Int           // 1-12
+  id          String  @id @default(uuid())
+  runNumber   String  @unique // PAY-2026-03
+  month       Int // 1-12
   year        Int
   description String?
-  
-  totalGross  Decimal       @db.Decimal(14, 2)
-  totalDeductions Decimal   @db.Decimal(14, 2)
-  totalNet    Decimal       @db.Decimal(14, 2)
-  
-  status      PayrollStatus @default(DRAFT)
-  preparedBy  String
-  approvedBy  String?
-  approvedAt  DateTime?
-  paidAt      DateTime?
-  
-  payslips    Payslip[]
-  
-  branchId    String?
-  branch      Branch? @relation(fields: [branchId], references: [id])
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+
+  totalGross      Decimal @db.Decimal(14, 2)
+  totalDeductions Decimal @db.Decimal(14, 2)
+  totalNet        Decimal @db.Decimal(14, 2)
+
+  status     PayrollStatus @default(DRAFT)
+  preparedBy String
+  approvedBy String?
+  approvedAt DateTime?
+  paidAt     DateTime?
+
+  payslips Payslip[]
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([month, year, branchId])
   @@index([month, year])
   @@map("payroll_runs")
 }
 
 model Payslip {
-  id           String     @id @default(uuid())
-  payslipNumber String    @unique // PS-2026-03-00001
-  payrollRunId String
-  payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid())
+  payslipNumber  String       @unique // PS-2026-03-00001
+  payrollRunId   String
+  payrollRun     PayrollRun   @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   staffPayrollId String
-  staffPayroll StaffPayroll @relation(fields: [staffPayrollId], references: [id])
-  userId       String
-  
+  staffPayroll   StaffPayroll @relation(fields: [staffPayrollId], references: [id])
+  userId         String
+
   // Earnings
-  basicSalary      Decimal @db.Decimal(12, 2)
-  housingAllowance Decimal @default(0) @db.Decimal(12, 2)
+  basicSalary        Decimal @db.Decimal(12, 2)
+  housingAllowance   Decimal @default(0) @db.Decimal(12, 2)
   transportAllowance Decimal @default(0) @db.Decimal(12, 2)
-  otherAllowances  Decimal @default(0) @db.Decimal(12, 2)
-  grossSalary      Decimal @db.Decimal(12, 2)
-  
+  otherAllowances    Decimal @default(0) @db.Decimal(12, 2)
+  grossSalary        Decimal @db.Decimal(12, 2)
+
   // Deductions
-  payeTax          Decimal @default(0) @db.Decimal(12, 2)
+  payeTax           Decimal @default(0) @db.Decimal(12, 2)
   napsaContribution Decimal @default(0) @db.Decimal(12, 2)
   nhimaContribution Decimal @default(0) @db.Decimal(12, 2)
-  otherDeductions  Decimal @default(0) @db.Decimal(12, 2)
-  totalDeductions  Decimal @db.Decimal(12, 2)
-  
-  netSalary        Decimal @db.Decimal(12, 2)
-  
-  isPaid    Boolean  @default(false)
-  paidAt    DateTime?
-  
+  otherDeductions   Decimal @default(0) @db.Decimal(12, 2)
+  totalDeductions   Decimal @db.Decimal(12, 2)
+
+  netSalary Decimal @db.Decimal(12, 2)
+
+  isPaid Boolean   @default(false)
+  paidAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@index([payrollRunId])
   @@index([userId])
   @@map("payslips")
@@ -1556,32 +1613,32 @@ model Payslip {
 
 // Budget Management
 model Budget {
-  id          String       @id @default(uuid())
-  name        String       // "Term 1 2026 Budget", "Annual Budget 2026"
-  period      String       // "term", "annual", "quarterly"
-  year        Int
-  termId      String?      // Link to academic term if term-based
-  startDate   DateTime
-  endDate     DateTime
-  
-  totalBudget Decimal      @db.Decimal(14, 2)
-  totalSpent  Decimal      @default(0) @db.Decimal(14, 2)
-  
-  status      BudgetStatus @default(DRAFT)
-  notes       String?
-  
-  items       BudgetItem[]
-  
-  createdBy   String
-  approvedBy  String?
-  approvedAt  DateTime?
-  
-  branchId    String?
-  branch      Branch? @relation(fields: [branchId], references: [id])
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  id        String   @id @default(uuid())
+  name      String // "Term 1 2026 Budget", "Annual Budget 2026"
+  period    String // "term", "annual", "quarterly"
+  year      Int
+  termId    String? // Link to academic term if term-based
+  startDate DateTime
+  endDate   DateTime
+
+  totalBudget Decimal @db.Decimal(14, 2)
+  totalSpent  Decimal @default(0) @db.Decimal(14, 2)
+
+  status BudgetStatus @default(DRAFT)
+  notes  String?
+
+  items BudgetItem[]
+
+  createdBy  String
+  approvedBy String?
+  approvedAt DateTime?
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([year])
   @@index([status])
   @@map("budgets")
@@ -1593,56 +1650,56 @@ model BudgetItem {
   budget      Budget          @relation(fields: [budgetId], references: [id], onDelete: Cascade)
   category    ExpenseCategory
   description String?
-  
-  allocated   Decimal         @db.Decimal(12, 2)
-  spent       Decimal         @default(0) @db.Decimal(12, 2)
-  remaining   Decimal         @db.Decimal(12, 2) // Computed: allocated - spent
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+
+  allocated Decimal @db.Decimal(12, 2)
+  spent     Decimal @default(0) @db.Decimal(12, 2)
+  remaining Decimal @db.Decimal(12, 2) // Computed: allocated - spent
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([budgetId])
   @@map("budget_items")
 }
 
 // Petty Cash Management
 model PettyCashAccount {
-  id           String  @id @default(uuid())
-  name         String  @default("Main Petty Cash")
-  floatAmount  Decimal @db.Decimal(10, 2) // Authorized float
-  balance      Decimal @db.Decimal(10, 2)
-  custodianId  String  // User responsible
-  isActive     Boolean @default(true)
-  
+  id          String  @id @default(uuid())
+  name        String  @default("Main Petty Cash")
+  floatAmount Decimal @db.Decimal(10, 2) // Authorized float
+  balance     Decimal @db.Decimal(10, 2)
+  custodianId String // User responsible
+  isActive    Boolean @default(true)
+
   transactions PettyCashTransaction[]
-  
-  branchId     String?
-  branch       Branch? @relation(fields: [branchId], references: [id])
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@map("petty_cash_accounts")
 }
 
 model PettyCashTransaction {
-  id          String                    @id @default(uuid())
+  id          String                   @id @default(uuid())
   accountId   String
-  account     PettyCashAccount          @relation(fields: [accountId], references: [id])
+  account     PettyCashAccount         @relation(fields: [accountId], references: [id])
   type        PettyCashTransactionType
-  amount      Decimal                   @db.Decimal(10, 2)
+  amount      Decimal                  @db.Decimal(10, 2)
   description String
   category    ExpenseCategory?
   receiptUrl  String?
-  
-  recordedBy  String
-  approvedBy  String?
-  approvedAt  DateTime?
-  
-  date        DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+
+  recordedBy String
+  approvedBy String?
+  approvedAt DateTime?
+
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([accountId])
   @@index([date])
   @@map("petty_cash_transactions")
@@ -1650,14 +1707,14 @@ model PettyCashTransaction {
 
 // Receipt Sequence for proper numbering
 model ReceiptSequence {
-  id       String @id @default(uuid())
-  prefix   String @default("REC")
-  year     Int
-  lastNumber Int  @default(0)
-  
+  id         String @id @default(uuid())
+  prefix     String @default("REC")
+  year       Int
+  lastNumber Int    @default(0)
+
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
-  
+
   @@unique([prefix, year, branchId])
   @@map("receipt_sequences")
 }
@@ -1666,19 +1723,19 @@ model ReceiptSequence {
 model FinancialAuditLog {
   id          String   @id @default(uuid())
   userId      String
-  action      String   // PAYMENT_RECORDED, EXPENSE_APPROVED, INVOICE_SENT, PAYROLL_PROCESSED, etc.
-  entityType  String   // Payment, Expense, Invoice, Payroll, PettyCash, Budget
+  action      String // PAYMENT_RECORDED, EXPENSE_APPROVED, INVOICE_SENT, PAYROLL_PROCESSED, etc.
+  entityType  String // Payment, Expense, Invoice, Payroll, PettyCash, Budget
   entityId    String
   description String
   amount      Decimal? @db.Decimal(12, 2)
   oldValue    Json?
   newValue    Json?
   ipAddress   String?
-  
-  branchId    String?
-  
-  createdAt   DateTime @default(now())
-  
+
+  branchId String?
+
+  createdAt DateTime @default(now())
+
   @@index([userId])
   @@index([entityType, entityId])
   @@index([action])
@@ -1709,11 +1766,11 @@ model AcademicEvent {
   startDate   DateTime
   endDate     DateTime
   isAllDay    Boolean           @default(true)
-  color       String?           // Custom color for calendar display
+  color       String? // Custom color for calendar display
   createdBy   String
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([startDate, endDate])
   @@index([eventType])
@@ -1732,27 +1789,27 @@ enum HomeworkStatus {
 }
 
 model HomeworkSubmission {
-  id            String         @id @default(uuid())
-  assessmentId  String
-  assessment    Assessment     @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  studentId     String
-  student       Student        @relation(fields: [studentId], references: [id])
-  
-  content       String?        @db.Text   // Text response
-  fileUrl       String?                    // Uploaded file
-  status        HomeworkStatus @default(ASSIGNED)
-  submittedAt   DateTime?
-  
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id])
+
+  content     String?        @db.Text // Text response
+  fileUrl     String? // Uploaded file
+  status      HomeworkStatus @default(ASSIGNED)
+  submittedAt DateTime?
+
   // Grading
-  score         Decimal?       @db.Decimal(5, 2)
-  feedback      String?        @db.Text
-  gradedAt      DateTime?
-  gradedBy      String?
-  
-  isLate        Boolean        @default(false)
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  score    Decimal?  @db.Decimal(5, 2)
+  feedback String?   @db.Text
+  gradedAt DateTime?
+  gradedBy String?
+
+  isLate Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([assessmentId, studentId])
   @@index([studentId])
@@ -1775,11 +1832,11 @@ enum ArtifactType {
 }
 
 model AIConversation {
-  id        String   @id @default(uuid())
-  userId    String   // Teacher who owns this conversation
-  title     String   @default("New Conversation")
-  model     String   @default("gpt-4") // AI model used
-  context   Json?    // Class/subject context for the conversation
+  id      String @id @default(uuid())
+  userId  String // Teacher who owns this conversation
+  title   String @default("New Conversation")
+  model   String @default("gpt-4") // AI model used
+  context Json? // Class/subject context for the conversation
 
   messages  AIMessage[]
   artifacts AIArtifact[]
@@ -1795,7 +1852,7 @@ model AIMessage {
   id             String         @id @default(uuid())
   conversationId String
   conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role           String         // 'user' | 'assistant' | 'system'
+  role           String // 'user' | 'assistant' | 'system'
   content        String         @db.Text
   tokenCount     Int?
 
@@ -1813,7 +1870,7 @@ model AIArtifact {
   type           ArtifactType
   title          String
   content        String         @db.Text
-  metadata       Json?          // Grade level, subject, etc.
+  metadata       Json? // Grade level, subject, etc.
   isPublished    Boolean        @default(false) // Published to homework/resources
 
   createdAt DateTime @default(now())
@@ -1843,23 +1900,23 @@ model AIFavoritePrompt {
 // ========================================
 
 model AIUsageLog {
-  id        String   @id @default(uuid())
-  userId    String
-  branchId  String?
-  
-  feature     String   // 'teaching-assistant', 'financial-advisor', 'auto-grading', 'risk-analysis', 'report-remarks', 'quick-insights'
-  action      String   // 'chat', 'slash-command', 'quick-insights', 'auto-grade', 'risk-assess', 'generate-remarks'
-  
-  tokensUsed    Int?
-  responseTimeMs Int?     // How long the AI took to respond
-  provider      String?  // 'azure', 'openai', 'gemini', 'anthropic'
-  model         String?  // 'gpt-5.2-chat', 'gemini-2.0-flash', etc.
-  
-  success     Boolean  @default(true)
+  id       String  @id @default(uuid())
+  userId   String
+  branchId String?
+
+  feature String // 'teaching-assistant', 'financial-advisor', 'auto-grading', 'risk-analysis', 'report-remarks', 'quick-insights'
+  action  String // 'chat', 'slash-command', 'quick-insights', 'auto-grade', 'risk-assess', 'generate-remarks'
+
+  tokensUsed     Int?
+  responseTimeMs Int? // How long the AI took to respond
+  provider       String? // 'azure', 'openai', 'gemini', 'anthropic'
+  model          String? // 'gpt-5.2-chat', 'gemini-2.0-flash', etc.
+
+  success      Boolean @default(true)
   errorMessage String?
-  
-  metadata    Json?    // Extra context: slash command type, question category, etc.
-  
+
+  metadata Json? // Extra context: slash command type, question category, etc.
+
   createdAt DateTime @default(now())
 
   @@index([userId])
@@ -1870,35 +1927,35 @@ model AIUsageLog {
 }
 
 model AIProactiveAlert {
-  id        String   @id @default(uuid())
-  branchId  String?
-  
-  category    String   // 'academic', 'financial', 'attendance', 'operational'
-  severity    String   // 'critical', 'warning', 'info', 'opportunity'
+  id       String  @id @default(uuid())
+  branchId String?
+
+  category    String // 'academic', 'financial', 'attendance', 'operational'
+  severity    String // 'critical', 'warning', 'info', 'opportunity'
   title       String
-  description String   @db.Text
-  
+  description String @db.Text
+
   // What entity this alert is about
-  entityType  String?  // 'student', 'class', 'budget', 'fee-collection'
-  entityId    String?
-  
+  entityType String? // 'student', 'class', 'budget', 'fee-collection'
+  entityId   String?
+
   // Actionable recommendation
-  actionType  String?  // 'send-reminder', 'schedule-meeting', 'adjust-budget', 'flag-student', 'notify-parent'
-  actionLabel String?  // Human-readable: "Send fee reminder to 23 parents"
-  actionPayload Json?  // Data needed to execute the action
-  
+  actionType    String? // 'send-reminder', 'schedule-meeting', 'adjust-budget', 'flag-student', 'notify-parent'
+  actionLabel   String? // Human-readable: "Send fee reminder to 23 parents"
+  actionPayload Json? // Data needed to execute the action
+
   // State tracking
-  isRead       Boolean  @default(false)
-  isActioned   Boolean  @default(false)
-  actionedBy   String?
-  actionedAt   DateTime?
-  isDismissed  Boolean  @default(false)
-  dismissedBy  String?
-  
-  expiresAt   DateTime? // Some alerts are time-sensitive
-  
-  generatedBy String   @default("system") // 'system', 'ai-analysis', 'rule-engine'
-  
+  isRead      Boolean   @default(false)
+  isActioned  Boolean   @default(false)
+  actionedBy  String?
+  actionedAt  DateTime?
+  isDismissed Boolean   @default(false)
+  dismissedBy String?
+
+  expiresAt DateTime? // Some alerts are time-sensitive
+
+  generatedBy String @default("system") // 'system', 'ai-analysis', 'rule-engine'
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1912,14 +1969,14 @@ model AIProactiveAlert {
 }
 
 model AIInsightsCache {
-  id        String   @id @default(uuid())
-  branchId  String?
-  
-  cacheKey   String   @unique // 'financial-health', 'academic-overview', 'weekly-digest'
-  data       Json     // The cached insight data
+  id       String  @id @default(uuid())
+  branchId String?
+
+  cacheKey    String   @unique // 'financial-health', 'academic-overview', 'weekly-digest'
+  data        Json // The cached insight data
   generatedAt DateTime @default(now())
   expiresAt   DateTime
-  
+
   @@index([cacheKey])
   @@map("ai_insights_cache")
 }
@@ -1935,25 +1992,25 @@ enum RiskLevel {
 }
 
 model StudentRiskAssessment {
-  id        String    @id @default(uuid())
+  id        String @id @default(uuid())
   studentId String
   termId    String
-  
-  riskLevel       RiskLevel
-  riskScore       Decimal   @db.Decimal(5, 2) // 0-100
-  
+
+  riskLevel RiskLevel
+  riskScore Decimal   @db.Decimal(5, 2) // 0-100
+
   // Factor scores
-  academicScore     Decimal? @db.Decimal(5, 2)
-  attendanceScore   Decimal? @db.Decimal(5, 2)
-  financialScore    Decimal? @db.Decimal(5, 2)
-  trendScore        Decimal? @db.Decimal(5, 2)
-  
-  factors         Json      // Detailed breakdown of risk factors
-  recommendations Json?     // AI-generated recommendations
-  
-  isReviewed    Boolean  @default(false)
-  reviewedBy    String?
-  reviewNotes   String?
+  academicScore   Decimal? @db.Decimal(5, 2)
+  attendanceScore Decimal? @db.Decimal(5, 2)
+  financialScore  Decimal? @db.Decimal(5, 2)
+  trendScore      Decimal? @db.Decimal(5, 2)
+
+  factors         Json // Detailed breakdown of risk factors
+  recommendations Json? // AI-generated recommendations
+
+  isReviewed  Boolean @default(false)
+  reviewedBy  String?
+  reviewNotes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1967,18 +2024,18 @@ model StudentRiskAssessment {
 // ATTENDANCE ALERTS
 // ========================================
 model AttendanceAlert {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   studentId String
-  type      String   // CONSECUTIVE_ABSENCE, CHRONIC_ABSENTEEISM, PATTERN_DETECTED
+  type      String // CONSECUTIVE_ABSENCE, CHRONIC_ABSENTEEISM, PATTERN_DETECTED
   message   String
-  details   Json?    // Pattern details, dates, etc.
-  
-  isResolved    Boolean  @default(false)
+  details   Json? // Pattern details, dates, etc.
+
+  isResolved    Boolean   @default(false)
   resolvedBy    String?
   resolvedAt    DateTime?
   resolvedNotes String?
-  
-  parentNotified Boolean @default(false)
+
+  parentNotified Boolean   @default(false)
   notifiedAt     DateTime?
 
   createdAt DateTime @default(now())
@@ -2005,20 +2062,20 @@ enum CommunicationStatus {
 }
 
 model CommunicationLog {
-  id        String               @id @default(uuid())
-  channel   CommunicationChannel
-  status    CommunicationStatus  @default(PENDING)
+  id      String               @id @default(uuid())
+  channel CommunicationChannel
+  status  CommunicationStatus  @default(PENDING)
 
   recipientEmail String?
   recipientPhone String?
   recipientName  String?
 
-  subject String?
-  message String  @db.Text
+  subject  String?
+  message  String  @db.Text
   htmlBody String? @db.Text
 
   // What triggered this? e.g. "announcement", "fee_reminder", "payment_receipt", "attendance_alert", "manual"
-  source  String  @default("manual")
+  source   String  @default("manual")
   // Optional link to the user who triggered it
   sentById String?
   sentBy   User?   @relation("SentCommunications", fields: [sentById], references: [id])
@@ -2039,16 +2096,16 @@ model CommunicationLog {
 // ANNOUNCEMENT — Persisted announcement history
 // ========================================
 model Announcement {
-  id          String   @id @default(uuid())
-  subject     String
-  message     String   @db.Text
-  targetRoles String[] // Which roles received this
-  sentViaEmail       Boolean @default(false)
-  sentViaSms         Boolean @default(false)
-  sentViaWhatsApp    Boolean @default(false)
-  sentViaNotification Boolean @default(true)
-  recipientCount     Int     @default(0)
-  priority           String  @default("NORMAL") // NORMAL, URGENT, EMERGENCY
+  id                  String   @id @default(uuid())
+  subject             String
+  message             String   @db.Text
+  targetRoles         String[] // Which roles received this
+  sentViaEmail        Boolean  @default(false)
+  sentViaSms          Boolean  @default(false)
+  sentViaWhatsApp     Boolean  @default(false)
+  sentViaNotification Boolean  @default(true)
+  recipientCount      Int      @default(0)
+  priority            String   @default("NORMAL") // NORMAL, URGENT, EMERGENCY
 
   // Scheduling
   scheduledAt DateTime? // If set, announcement is scheduled for the future
@@ -2071,11 +2128,11 @@ model Announcement {
 // ANNOUNCEMENT ACKNOWLEDGMENTS
 // ========================================
 model AnnouncementAcknowledgment {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   announcementId String
   announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
   userId         String
-  acknowledgedAt DateTime @default(now())
+  acknowledgedAt DateTime     @default(now())
 
   @@unique([announcementId, userId])
   @@map("announcement_acknowledgments")
@@ -2085,12 +2142,12 @@ model AnnouncementAcknowledgment {
 // MESSAGE TEMPLATES
 // ========================================
 model MessageTemplate {
-  id       String @id @default(uuid())
+  id       String  @id @default(uuid())
   name     String
   subject  String?
-  body     String @db.Text
-  channel  String @default("ALL") // EMAIL, SMS, WHATSAPP, ALL
-  category String @default("general") // general, fee_reminder, attendance, report, custom
+  body     String  @db.Text
+  channel  String  @default("ALL") // EMAIL, SMS, WHATSAPP, ALL
+  category String  @default("general") // general, fee_reminder, attendance, report, custom
 
   createdById String?
   createdAt   DateTime @default(now())
@@ -2132,10 +2189,10 @@ enum CampaignStatus {
 }
 
 enum DebtorSegment {
-  WILL_PAY      // Consistent payer, just late
-  NEEDS_NUDGE   // Irregular, responds to reminders
-  AT_RISK       // Very low payment rate
-  HARDSHIP      // Zero payments, possibly struggling
+  WILL_PAY // Consistent payer, just late
+  NEEDS_NUDGE // Irregular, responds to reminders
+  AT_RISK // Very low payment rate
+  HARDSHIP // Zero payments, possibly struggling
 }
 
 model DebtCollectionCampaign {
@@ -2145,15 +2202,15 @@ model DebtCollectionCampaign {
   status      CampaignStatus @default(DRAFT)
 
   // Targeting criteria
-  minAmountOwed    Decimal? @db.Decimal(10, 2)
-  minDaysOverdue   Int?
-  targetSegments   String[] // DebtorSegment values
+  minAmountOwed     Decimal? @db.Decimal(10, 2)
+  minDaysOverdue    Int?
+  targetSegments    String[] // DebtorSegment values
   targetGradeLevels Int[]
 
   // Results
-  totalTargeted   Int @default(0)
-  totalContacted  Int @default(0)
-  totalResponded  Int @default(0) // Paid after contact
+  totalTargeted   Int     @default(0)
+  totalContacted  Int     @default(0)
+  totalResponded  Int     @default(0) // Paid after contact
   amountCollected Decimal @default(0) @db.Decimal(10, 2)
 
   createdById String
@@ -2172,34 +2229,34 @@ model DebtCollectionCampaign {
 }
 
 model CampaignMessage {
-  id         String @id @default(uuid())
+  id         String                 @id @default(uuid())
   campaignId String
   campaign   DebtCollectionCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
-  studentId     String
-  studentName   String
-  parentName    String?
-  parentEmail   String?
-  parentPhone   String?
+  studentId   String
+  studentName String
+  parentName  String?
+  parentEmail String?
+  parentPhone String?
 
   // What was sent
-  channel       String   // EMAIL, SMS, WHATSAPP
-  escalationLevel Int    @default(1) // 1=gentle, 2=firm, 3=urgent, 4=final
-  subject       String?
-  messageContent String  @db.Text
-  aiGenerated   Boolean  @default(false)
+  channel         String // EMAIL, SMS, WHATSAPP
+  escalationLevel Int     @default(1) // 1=gentle, 2=firm, 3=urgent, 4=final
+  subject         String?
+  messageContent  String  @db.Text
+  aiGenerated     Boolean @default(false)
 
   // Debtor info at time of send
-  amountOwed    Decimal  @db.Decimal(10, 2)
-  daysOverdue   Int
-  segment       String   // DebtorSegment value
+  amountOwed        Decimal @db.Decimal(10, 2)
+  daysOverdue       Int
+  segment           String // DebtorSegment value
   paymentLikelihood String? // HIGH, MEDIUM, LOW
 
   // Outcome
-  status        String   @default("SENT") // SENT, FAILED, PAID, NO_RESPONSE
-  paidAmount    Decimal? @db.Decimal(10, 2)
-  paidAt        DateTime?
-  errorMessage  String?
+  status       String    @default("SENT") // SENT, FAILED, PAID, NO_RESPONSE
+  paidAmount   Decimal?  @db.Decimal(10, 2)
+  paidAt       DateTime?
+  errorMessage String?
 
   sentAt    DateTime @default(now())
   createdAt DateTime @default(now())
@@ -2216,17 +2273,17 @@ model CampaignMessage {
 // ==========================================
 
 model VirtualClassroom {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   title       String
-  description String?  @db.Text
+  description String? @db.Text
 
   // Academic context (IDs stored without FK to avoid modifying existing models)
-  classId     String?
-  subjectId   String?
-  teacherId   String?  // The human teacher who owns this classroom
+  classId   String?
+  subjectId String?
+  teacherId String? // The human teacher who owns this classroom
 
   // Jitsi configuration
-  roomName    String   @unique  // Jitsi room identifier
+  roomName     String  @unique // Jitsi room identifier
   roomPassword String?
   jitsiDomain  String  @default("meet.jit.si") // Jitsi server domain
 
@@ -2237,22 +2294,22 @@ model VirtualClassroom {
   actualEnd      DateTime?
 
   // Status: SCHEDULED, LIVE, ENDED, CANCELLED
-  status      String   @default("SCHEDULED")
+  status String @default("SCHEDULED")
 
   // Syllabus linking — which topic/subtopics to teach in this session
-  topicId              String?  // Topic to cover in this class
-  selectedSubTopicIds  Json?    // Array of SubTopic IDs to cover
+  topicId             String? // Topic to cover in this class
+  selectedSubTopicIds Json? // Array of SubTopic IDs to cover
 
   // AI Tutor settings
-  aiTutorEnabled     Boolean  @default(false)
-  aiTutorVoiceId     String?  // ElevenLabs voice ID
-  aiTutorName        String   @default("AI Teacher")
-  aiTutorPersona     String?  @db.Text  // Custom personality/instructions
-  lessonPlanContent  String?  @db.Text  // Lesson plan for AI to follow (auto-generated from syllabus or manual)
-  aiTutorLanguage    String   @default("en") // Teaching language
+  aiTutorEnabled    Boolean @default(false)
+  aiTutorVoiceId    String? // ElevenLabs voice ID
+  aiTutorName       String  @default("AI Teacher")
+  aiTutorPersona    String? @db.Text // Custom personality/instructions
+  lessonPlanContent String? @db.Text // Lesson plan for AI to follow (auto-generated from syllabus or manual)
+  aiTutorLanguage   String  @default("en") // Teaching language
 
-  maxParticipants    Int      @default(50)
-  isRecordingEnabled Boolean  @default(false)
+  maxParticipants    Int     @default(50)
+  isRecordingEnabled Boolean @default(false)
 
   createdById String
 
@@ -2274,22 +2331,22 @@ model VirtualClassroom {
 }
 
 model AITutorSession {
-  id           String   @id @default(uuid())
-  classroomId  String
-  classroom    VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  id          String           @id @default(uuid())
+  classroomId String
+  classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
 
   // Status: PENDING, ACTIVE, PAUSED, ENDED, ERROR
-  status       String   @default("PENDING")
+  status String @default("PENDING")
 
   // AI Configuration used
-  voiceId      String?
-  modelUsed    String?  // gpt-4o, etc.
-  personaUsed  String?  @db.Text
+  voiceId     String?
+  modelUsed   String? // gpt-4o, etc.
+  personaUsed String? @db.Text
 
   // Lesson tracking
-  lessonPhase  String   @default("GREETING") // GREETING, ATTENDANCE, RECAP, TEACHING, Q_AND_A, ACTIVITY, WRAP_UP
+  lessonPhase  String  @default("GREETING") // GREETING, ATTENDANCE, RECAP, TEACHING, Q_AND_A, ACTIVITY, WRAP_UP
   currentTopic String?
-  topicIndex   Int      @default(0)
+  topicIndex   Int     @default(0)
 
   // Metrics
   totalTokensUsed    Int   @default(0)
@@ -2301,10 +2358,10 @@ model AITutorSession {
   // Conversation log stored as JSON array
   conversationLog Json?
 
-  startedAt   DateTime?
-  endedAt     DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([classroomId])
   @@index([status])
@@ -2312,22 +2369,22 @@ model AITutorSession {
 }
 
 model ClassroomParticipant {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   classroomId String
   classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
 
   userId      String?
   studentId   String?
   displayName String
-  role        String   @default("STUDENT") // STUDENT, TEACHER, OBSERVER
+  role        String  @default("STUDENT") // STUDENT, TEACHER, OBSERVER
 
-  joinedAt    DateTime @default(now())
-  leftAt      DateTime?
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
 
   // Engagement metrics
-  handRaiseCount   Int   @default(0)
-  chatMessageCount Int   @default(0)
-  speakingDuration Float @default(0) // in seconds
+  handRaiseCount   Int    @default(0)
+  chatMessageCount Int    @default(0)
+  speakingDuration Float  @default(0) // in seconds
   attentionScore   Float? // 0-100 AI-estimated engagement
 
   @@index([classroomId])
@@ -2336,19 +2393,19 @@ model ClassroomParticipant {
 }
 
 model ClassroomChat {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   classroomId String
   classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
 
-  senderName  String
-  senderId    String?
-  isAI        Boolean  @default(false)
-  message     String   @db.Text
+  senderName String
+  senderId   String?
+  isAI       Boolean @default(false)
+  message    String  @db.Text
 
   // If AI response, optional audio URL
-  audioUrl    String?
+  audioUrl String?
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([classroomId])
   @@index([createdAt])
@@ -2356,20 +2413,20 @@ model ClassroomChat {
 }
 
 model ClassRecording {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   classroomId String
   classroom   VirtualClassroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
 
   recordingUrl String?
-  duration     Float?   // in seconds
-  fileSize     BigInt?  // in bytes
+  duration     Float? // in seconds
+  fileSize     BigInt? // in bytes
 
   // AI-generated summary
-  summary      String?  @db.Text
-  keyTopics    Json?    // Array of key topics covered
-  transcript   String?  @db.Text
+  summary    String? @db.Text
+  keyTopics  Json? // Array of key topics covered
+  transcript String? @db.Text
 
-  createdAt    DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([classroomId])
   @@map("class_recordings")
@@ -2395,7 +2452,7 @@ model FinancialReport {
   termId      String?
   term        AcademicTerm?       @relation(fields: [termId], references: [id])
   reportDate  DateTime            @default(now())
-  data        Json                // Full snapshot JSON
+  data        Json // Full snapshot JSON
   summary     String?             @db.Text
   generatedBy String
   user        User                @relation(fields: [generatedBy], references: [id])
@@ -2406,4 +2463,154 @@ model FinancialReport {
   @@index([branchId, reportDate])
   @@index([termId])
   @@map("financial_reports")
+}
+
+// ========================================
+// ACTIVE AI - TEACHER INTELLIGENCE ENGINE
+// ========================================
+
+// 1. Learning Objective Mastery (Deterministic Math)
+// Tracks how well a student or class is doing on a specific SubTopic.
+model LearningObjectiveMastery {
+  id         String  @id @default(uuid())
+  studentId  String?
+  classId    String
+  subTopicId String  @map("learning_objective_id")
+
+  masteryScore Decimal  @db.Decimal(5, 2)
+  attempts     Int      @default(0)
+  lastAssessed DateTime @default(now())
+
+  status String @default("SECURE")
+
+  student  Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class    Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subTopic SubTopic @relation(fields: [subTopicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, subTopicId])
+  @@index([classId])
+  @@index([status])
+  @@map("learning_objective_mastery")
+}
+
+// 2. Misconception Pattern (Deep Diagnosis)
+// When AI analyzes the 'distractors' (wrong answers) from an Assessment
+model MisconceptionPattern {
+  id           String @id @default(uuid())
+  assessmentId String
+  subTopicId   String
+
+  description  String  @db.Text
+  wrongAnswer  String?
+  studentCount Int
+
+  isAddressed Boolean @default(false)
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  subTopic   SubTopic   @relation(fields: [subTopicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([assessmentId])
+  @@index([subTopicId])
+  @@map("misconception_patterns")
+}
+
+// 3. Proactive AI Drafts (Pending Actions Queue)
+// The "Tap on the shoulder" requests built by background AI.
+model PendingTeacherAction {
+  id        String  @id @default(uuid())
+  teacherId String
+  classId   String?
+
+  actionType  String
+  title       String
+  description String @db.Text
+
+  draftPayload Json
+
+  status     String    @default("PENDING")
+  resolvedAt DateTime?
+
+  teacher User   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  class   Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId])
+  @@index([actionType])
+  @@index([status])
+  @@map("pending_teacher_actions")
+}
+
+// 4. Intervention Effectiveness Tracker (Closing the loop)
+// Tracks what the teacher did and whether it actually improved the score later.
+model InterventionRecord {
+  id         String   @id @default(uuid())
+  teacherId  String
+  classId    String
+  subTopicId String
+  studentIds String[]
+
+  strategyUsed String
+  notes        String? @db.Text
+
+  preInterventionScore  Decimal? @db.Decimal(5, 2)
+  postInterventionScore Decimal? @db.Decimal(5, 2)
+  effectiveness         String   @default("PENDING")
+
+  teacher  User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  class    Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subTopic SubTopic @relation(fields: [subTopicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId])
+  @@index([classId])
+  @@index([effectiveness])
+  @@map("intervention_records")
+}
+
+// ── Adapt Workspace ──────────────────────────────────────────────────
+// A customisable lesson plan created from an approved AI-drafted action.
+// The teacher can edit steps, add/remove activities, target specific
+// students, schedule the lesson, then mark it DEPLOYED or COMPLETED.
+model AdaptedLesson {
+  id         String @id @default(uuid())
+  teacherId  String
+  classId    String
+  subTopicId String
+
+  title     String
+  objective String @db.Text
+
+  // The AI-drafted steps the teacher customises
+  activities Json // Array of { type, title, description, durationMinutes, materials?, differentiation? }
+
+  // Which students this adapted lesson targets (empty = whole class)
+  targetStudentIds String[]
+
+  // Link back to the approved PendingTeacherAction that seeded this lesson
+  sourceActionId String?
+
+  status        String    @default("DRAFT") // DRAFT | READY | DEPLOYED | COMPLETED
+  scheduledDate DateTime?
+  completedDate DateTime?
+
+  teacher  User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  class    Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subTopic SubTopic @relation(fields: [subTopicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId])
+  @@index([classId])
+  @@index([status])
+  @@map("adapted_lessons")
 }

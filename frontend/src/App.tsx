@@ -34,6 +34,7 @@ import AcademicCalendar from './pages/academics/AcademicCalendar';
 import VirtualClassrooms from './pages/academics/VirtualClassrooms';
 import VirtualClassroom from './pages/academics/VirtualClassroom';
 import { Toaster } from 'react-hot-toast';
+import { AppDialogProvider } from './components/ui/AppDialogProvider';
 import VerifyReport from './pages/public/VerifyReport';
 import PublicPayment from './pages/public/PublicPayment';
 import ShareTargetHandler from './pages/public/ShareTargetHandler';
@@ -44,14 +45,31 @@ import AIAssistant from './pages/ai/AIAssistant';
 import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
 import MasterAI from './pages/ai/MasterAI';
 import AIIntelligenceHub from './pages/ai/AIIntelligenceHub';
+import { PWAManager } from './components/pwa/PWAManager';
 
 function App() {
   return (
-    <AuthProvider>
-      <ThemeProvider>
-        <BranchProvider>
-          <Router>
-            <Toaster position="top-right" />
+    <AppDialogProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <BranchProvider>
+            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <Toaster
+                position="top-center"
+                toastOptions={{
+                  duration: 2800,
+                  style: {
+                    borderRadius: '18px',
+                    padding: '14px 16px',
+                    background: 'rgba(15, 23, 42, 0.94)',
+                    color: '#fff',
+                    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.28)',
+                    border: '1px solid rgba(148, 163, 184, 0.18)',
+                    backdropFilter: 'blur(14px)',
+                  },
+                }}
+              />
+            <PWAManager />
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/verify/report/:id" element={<VerifyReport />} />
@@ -160,6 +178,11 @@ function App() {
                       <BranchDetail />
                     </RoleGuard>
                   } />
+                  <Route path="/branches/:id/edit" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
+                      <Branches />
+                    </RoleGuard>
+                  } />
 
                   <Route path="/communication" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT']}>
@@ -224,10 +247,11 @@ function App() {
               </Route>
 
             </Routes>
-          </Router>
-        </BranchProvider>
-      </ThemeProvider>
-    </AuthProvider>
+            </Router>
+          </BranchProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </AppDialogProvider>
   );
 }
 

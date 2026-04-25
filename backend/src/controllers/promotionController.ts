@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import aiService from '../services/aiService';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
 
 // --- Schemas ---
 
@@ -22,6 +24,8 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
     if (!classId) {
       return res.status(400).json({ message: 'Class ID is required' });
     }
+
+    await ensureAcademicClassAccess(req as AuthRequest, classId as string);
 
     // 1. Fetch students in the class with comprehensive data
     const students = await prisma.student.findMany({
@@ -135,6 +139,9 @@ export const getPromotionCandidates = async (req: Request, res: Response) => {
 
     res.json(candidates);
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ message: error.message });
+    }
     console.error('Get promotion candidates error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -144,6 +151,44 @@ export const processPromotions = async (req: Request, res: Response) => {
   try {
     const { promotions } = processPromotionSchema.parse(req.body);
     const userId = (req as any).user?.userId;
+
+    const sourceStudents = await prisma.student.findMany({
+      where: { id: { in: promotions.map((promo) => promo.studentId) } },
+      include: { class: true },
+    });
+    const sourceStudentMap = new Map(sourceStudents.map((student) => [student.id, student]));
+
+    const targetClassIds = [...new Set(promotions.map((promo) => promo.targetClassId))];
+    const targetClasses = await prisma.class.findMany({ where: { id: { in: targetClassIds } } });
+    const targetClassMap = new Map(targetClasses.map((classItem) => [classItem.id, classItem]));
+
+    for (const promo of promotions) {
+      const sourceStudent = sourceStudentMap.get(promo.studentId);
+      if (!sourceStudent) {
+        return res.status(404).json({ message: 'Student not found for promotion batch' });
+      }
+
+      await ensureAcademicClassAccess(req as AuthRequest, sourceStudent.classId);
+
+      const targetClass = targetClassMap.get(promo.targetClassId);
+      if (!targetClass) {
+        return res.status(404).json({ message: 'Target class not found' });
+      }
+
+      if (sourceStudent.class.branchId && targetClass.branchId && sourceStudent.class.branchId !== targetClass.branchId) {
+        return res.status(400).json({ message: 'Promotions must stay within the same branch' });
+      }
+
+      const currentGrade = sourceStudent.class.gradeLevel;
+      const targetGrade = targetClass.gradeLevel;
+      const validGradeMove = targetGrade === currentGrade || targetGrade === currentGrade + 1;
+
+      if (!validGradeMove) {
+        return res.status(400).json({
+          message: `Invalid promotion target for ${sourceStudent.firstName} ${sourceStudent.lastName}. Students can only remain in the same grade or move to the next grade.`,
+        });
+      }
+    }
 
     // Use a transaction to ensure data integrity
     await prisma.$transaction(async (tx) => {
@@ -178,6 +223,9 @@ export const processPromotions = async (req: Request, res: Response) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
+    }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ message: error.message });
     }
     console.error('Process promotions error:', error);
     res.status(500).json({ message: 'Internal server error' });
