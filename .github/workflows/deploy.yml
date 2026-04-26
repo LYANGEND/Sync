@@ -155,9 +155,12 @@ jobs:
             echo "⏳ Waiting for backend to start..."
             sleep 8
             echo "🗄️ Running Prisma migrations..."
-            if ! docker exec sync_backend npx prisma migrate deploy 2>&1; then
+            MIGRATE_OUTPUT=$(docker exec sync_backend npx prisma migrate deploy 2>&1) && {
+              echo "$MIGRATE_OUTPUT"
+            } || {
+              echo "$MIGRATE_OUTPUT"
               echo "⚠️ Migration failed — checking for recoverable failed-migration state..."
-              FAILED=$(docker exec sync_backend npx prisma migrate status 2>&1 | grep -oP '`\K[^`]+(?=` migration.*failed)' || true)
+              FAILED=$(echo "$MIGRATE_OUTPUT" | sed -n 's/.*The `\([^`]*\)` migration.*failed.*/\1/p')
               if [ -n "$FAILED" ]; then
                 echo "🔧 Auto-resolving failed migration: $FAILED"
                 docker exec sync_backend npx prisma migrate resolve --rolled-back "$FAILED"
@@ -168,7 +171,7 @@ jobs:
                 docker exec sync_backend npx prisma migrate status || true
                 exit 1
               fi
-            fi
+            }
             echo "✅ Migrations applied"
 
             echo "🔄 Restarting frontend..."
