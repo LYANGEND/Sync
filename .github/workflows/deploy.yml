@@ -155,15 +155,19 @@ jobs:
             echo "⏳ Waiting for backend to start..."
             sleep 8
             echo "🗄️ Running Prisma migrations..."
-            if ! docker exec sync_backend npx prisma migrate deploy; then
-              echo "❌ Prisma migrate deploy failed."
-              echo "🔎 Current migration status:"
-              docker exec sync_backend npx prisma migrate status || true
-              echo ""
-              echo "If this is the known failed migration state for 20260424103137_add_attendance_details, run on the server:"
-              echo "  docker exec sync_backend npx prisma migrate resolve --rolled-back 20260424103137_add_attendance_details"
-              echo "  docker exec sync_backend npx prisma migrate deploy"
-              exit 1
+            if ! docker exec sync_backend npx prisma migrate deploy 2>&1; then
+              echo "⚠️ Migration failed — checking for recoverable failed-migration state..."
+              FAILED=$(docker exec sync_backend npx prisma migrate status 2>&1 | grep -oP '`\K[^`]+(?=` migration.*failed)' || true)
+              if [ -n "$FAILED" ]; then
+                echo "🔧 Auto-resolving failed migration: $FAILED"
+                docker exec sync_backend npx prisma migrate resolve --rolled-back "$FAILED"
+                echo "🔄 Re-running prisma migrate deploy..."
+                docker exec sync_backend npx prisma migrate deploy
+              else
+                echo "❌ Prisma migrate deploy failed with an unrecoverable error."
+                docker exec sync_backend npx prisma migrate status || true
+                exit 1
+              fi
             fi
             echo "✅ Migrations applied"
 
