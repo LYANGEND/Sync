@@ -3,12 +3,116 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const SYSTEM_TENANT_ID = 'SYSTEM';
+const SYSTEM_TENANT_SLUG = 'lyangend';
+
+type SeedUserSpec = {
+  email: string;
+  password: string;
+  fullName: string;
+  role: 'PLATFORM_ADMIN' | 'SUPER_ADMIN' | 'BRANCH_MANAGER' | 'BURSAR' | 'TEACHER' | 'SECRETARY' | 'PARENT';
+  branchId?: string;
+  tenantId?: string;
+};
+
+async function ensureSeedUser(spec: SeedUserSpec) {
+  const passwordHash = await bcrypt.hash(spec.password, 10);
+
+  const user = await prisma.user.upsert({
+    where: {
+      email_tenantId: {
+        email: spec.email,
+        tenantId: spec.tenantId ?? SYSTEM_TENANT_ID,
+      },
+    },
+    update: {
+      fullName: spec.fullName,
+      role: spec.role,
+      branchId: spec.branchId,
+      isActive: true,
+      passwordHash,
+    },
+    create: {
+      email: spec.email,
+      passwordHash,
+      fullName: spec.fullName,
+      role: spec.role,
+      branchId: spec.branchId,
+      tenantId: spec.tenantId ?? SYSTEM_TENANT_ID,
+    },
+  });
+
+  return user;
+}
+
 async function main() {
   console.log('🌱 Starting database seeding...');
 
+  const tenant = await prisma.tenant.upsert({
+    where: { id: SYSTEM_TENANT_ID },
+    update: {
+      name: 'Lyangend Early Learning Centre',
+      slug: SYSTEM_TENANT_SLUG,
+      status: 'ACTIVE',
+      plan: 'PROFESSIONAL',
+      domainStatus: 'NONE',
+      locale: 'en',
+      timezone: 'Africa/Lusaka',
+      currency: 'ZMW',
+      maxUsers: 500,
+      maxStudents: 5000,
+      onboardingStatus: 'IN_PROGRESS',
+      onboardingOwner: 'System Owner',
+      onboardingChecklist: {
+        tenantProvisioned: true,
+        schoolProfileConfigured: true,
+        adminTrained: false,
+        classesConfigured: true,
+        usersImported: true,
+        studentsImported: true,
+        feesConfigured: true,
+        communicationsConfigured: false,
+        customDomainConfigured: false,
+        goLiveApproved: false,
+      },
+      onboardingStartedAt: new Date(),
+      maintenanceMode: false,
+      maintenanceMessage: null,
+    },
+    create: {
+      id: SYSTEM_TENANT_ID,
+      name: 'Lyangend Early Learning Centre',
+      slug: SYSTEM_TENANT_SLUG,
+      status: 'ACTIVE',
+      plan: 'PROFESSIONAL',
+      domainStatus: 'NONE',
+      locale: 'en',
+      timezone: 'Africa/Lusaka',
+      currency: 'ZMW',
+      maxUsers: 500,
+      maxStudents: 5000,
+      onboardingStatus: 'IN_PROGRESS',
+      onboardingOwner: 'System Owner',
+      onboardingChecklist: {
+        tenantProvisioned: true,
+        schoolProfileConfigured: true,
+        adminTrained: false,
+        classesConfigured: true,
+        usersImported: true,
+        studentsImported: true,
+        feesConfigured: true,
+        communicationsConfigured: false,
+        customDomainConfigured: false,
+        goLiveApproved: false,
+      },
+      onboardingStartedAt: new Date(),
+    },
+  });
+  console.log(`✅ Tenant ready: ${tenant.name} (${tenant.slug})`);
+
   // Create Main Branch
   let mainBranch = await prisma.branch.findUnique({
-    where: { code: 'MAIN' }
+    where: { code_tenantId: { code: 'MAIN', tenantId: SYSTEM_TENANT_ID } }
   });
 
   if (!mainBranch) {
@@ -25,73 +129,59 @@ async function main() {
     console.log('✅ Main Branch already exists');
   }
 
-  // Check if super admin already exists
-  const existingAdmin = await prisma.user.findFirst({
-    where: { role: 'SUPER_ADMIN' }
+  const platformAdmin = await ensureSeedUser({
+    email: 'owner@sync.com',
+    password: 'owner123',
+    fullName: 'System Owner',
+    role: 'PLATFORM_ADMIN',
+    tenantId: SYSTEM_TENANT_ID,
   });
+  console.log('✅ Platform admin ready:', platformAdmin.email);
 
-  let superAdmin;
-  if (!existingAdmin) {
-    // Create super admin
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-
-    superAdmin = await prisma.user.create({
-      data: {
-        email: 'admin@sync.com',
-        passwordHash: hashedPassword,
-        fullName: 'Super Admin',
-        role: 'SUPER_ADMIN',
-        branchId: mainBranch.id,
-      }
-    });
-
-    console.log('✅ Created super admin:', superAdmin.email);
-  } else {
-    superAdmin = existingAdmin;
-    console.log('✅ Super admin already exists');
-  }
-
-  // Create Bursar user
-  let bursar = await prisma.user.findFirst({
-    where: { email: 'bursar@sync.com' }
+  const superAdmin = await ensureSeedUser({
+    email: 'admin@sync.com',
+    password: 'admin123',
+    fullName: 'Super Admin',
+    role: 'SUPER_ADMIN',
+    branchId: mainBranch.id,
   });
+  console.log('✅ Super admin ready:', superAdmin.email);
 
-  if (!bursar) {
-    const hashedPassword = await bcrypt.hash('bursar123', 10);
-    bursar = await prisma.user.create({
-      data: {
-        email: 'bursar@sync.com',
-        passwordHash: hashedPassword,
-        fullName: 'Sarah Mulenga',
-        role: 'BURSAR',
-        branchId: mainBranch.id,
-      }
-    });
-    console.log('✅ Created bursar:', bursar.fullName);
-  } else {
-    console.log('✅ Bursar already exists');
-  }
-
-  // Create or get teacher Robbie Tembo
-  let teacher = await prisma.user.findFirst({
-    where: { email: 'robbie.tembo@sync.com' }
+  const branchManager = await ensureSeedUser({
+    email: 'manager@sync.com',
+    password: 'manager123',
+    fullName: 'Branch Manager',
+    role: 'BRANCH_MANAGER',
+    branchId: mainBranch.id,
   });
+  console.log('✅ Branch manager ready:', branchManager.email);
 
-  if (!teacher) {
-    const hashedPassword = await bcrypt.hash('teacher123', 10);
-    teacher = await prisma.user.create({
-      data: {
-        email: 'robbie.tembo@sync.com',
-        passwordHash: hashedPassword,
-        fullName: 'Robbie Tembo',
-        role: 'TEACHER',
-        branchId: mainBranch.id,
-      }
-    });
-    console.log('✅ Created teacher:', teacher.fullName);
-  } else {
-    console.log('✅ Teacher Robbie Tembo already exists');
-  }
+  const bursar = await ensureSeedUser({
+    email: 'bursar@sync.com',
+    password: 'bursar123',
+    fullName: 'Sarah Mulenga',
+    role: 'BURSAR',
+    branchId: mainBranch.id,
+  });
+  console.log('✅ Bursar ready:', bursar.fullName);
+
+  const secretary = await ensureSeedUser({
+    email: 'secretary@sync.com',
+    password: 'secretary123',
+    fullName: 'Mercy Phiri',
+    role: 'SECRETARY',
+    branchId: mainBranch.id,
+  });
+  console.log('✅ Secretary ready:', secretary.fullName);
+
+  const teacher = await ensureSeedUser({
+    email: 'robbie.tembo@sync.com',
+    password: 'teacher123',
+    fullName: 'Robbie Tembo',
+    role: 'TEACHER',
+    branchId: mainBranch.id,
+  });
+  console.log('✅ Teacher ready:', teacher.fullName);
 
   // Create default academic term if none exists
   let currentTerm = await prisma.academicTerm.findFirst({
@@ -206,7 +296,7 @@ async function main() {
 
   const createdSubjects: any[] = [];
   for (const s of subjectsData) {
-    let subject = await prisma.subject.findUnique({ where: { code: s.code } });
+    let subject = await prisma.subject.findFirst({ where: { code: s.code } });
     if (!subject) {
       subject = await prisma.subject.create({
         data: {
@@ -270,7 +360,9 @@ async function main() {
   console.log('\n💰 Seeding finance data...');
 
   // Create School Settings with notification preferences
-  let settings = await prisma.schoolSettings.findFirst();
+  let settings = await prisma.schoolSettings.findFirst({
+    where: { tenantId: SYSTEM_TENANT_ID },
+  });
   if (!settings) {
     settings = await prisma.schoolSettings.create({
       data: {
@@ -288,6 +380,7 @@ async function main() {
         overdueReminderEnabled: true,
         overdueReminderFrequency: 7,
         currentTermId: currentTerm.id,
+        tenantId: SYSTEM_TENANT_ID,
       }
     });
     console.log('✅ Created school settings');
@@ -428,7 +521,7 @@ async function main() {
     if (studentData.guardianEmail) {
       const parentPassword = await bcrypt.hash('parent123', 10);
       const parentUser = await prisma.user.upsert({
-        where: { email: studentData.guardianEmail },
+        where: { email_tenantId: { email: studentData.guardianEmail, tenantId: SYSTEM_TENANT_ID } },
         update: {},
         create: {
           email: studentData.guardianEmail,
@@ -486,9 +579,14 @@ async function main() {
   console.log('  - Students with PARTIAL payment (Debtors): 3');
   console.log('  - Students with NO payment (Debtors): 3');
   console.log('  - Fee templates created: 6');
+  console.log(`  - Tenant slug: ${SYSTEM_TENANT_SLUG}`);
   console.log('\n🔑 Login Credentials:');
+  console.log(`  - Platform owner (/ops/login): ${platformAdmin.email} / owner123`);
+  console.log(`  - School slug: ${SYSTEM_TENANT_SLUG}`);
   console.log('  - Admin: admin@sync.com / admin123');
+  console.log('  - Branch Manager: manager@sync.com / manager123');
   console.log('  - Bursar: bursar@sync.com / bursar123');
+  console.log('  - Secretary: secretary@sync.com / secretary123');
   console.log('  - Teacher: robbie.tembo@sync.com / teacher123');
   console.log('  - Parent: (Use any guardian email from above) e.g., peter.mwamba@email.com / parent123');
 }

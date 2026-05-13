@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain, AlertTriangle, CheckCircle2, RefreshCcw, Clock3 } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -67,6 +67,51 @@ interface Term {
   endDate: string;
 }
 
+type DomainStatus = 'NONE' | 'PENDING_DNS' | 'PENDING_VERIFICATION' | 'VERIFIED' | 'FAILED';
+
+interface DomainStatusRecord {
+  host: string;
+  expected: string | null;
+  resolved: string[];
+  matched: boolean;
+  error: string | null;
+}
+
+interface DomainVerificationResult {
+  status: DomainStatus;
+  verified: boolean;
+  checkedAt: string;
+  summary: string;
+  cname: DomainStatusRecord;
+  txt: DomainStatusRecord;
+}
+
+interface TenantDomainStatusData {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  domain?: string | null;
+  domainStatus: DomainStatus;
+  domainRequestedAt?: string | null;
+  domainVerifiedAt?: string | null;
+  domainLastCheckedAt?: string | null;
+  instructions?: {
+    type: string;
+    host: string;
+    target: string | null;
+    txtName: string;
+    txtValue: string | null;
+  } | null;
+  verification?: DomainVerificationResult | null;
+}
+
+const domainStatusClass = (status: DomainStatus) => {
+  if (status === 'VERIFIED') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300';
+  if (status === 'FAILED') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300';
+  if (status === 'PENDING_DNS' || status === 'PENDING_VERIFICATION') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300';
+  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
+};
+
 const Settings = () => {
   const { confirm } = useAppDialog();
   const { refreshSettings } = useTheme();
@@ -128,6 +173,8 @@ const Settings = () => {
   const [testSending, setTestSending] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ channel: string; success: boolean; message: string } | null>(null);
   const [testRecipient, setTestRecipient] = useState('');
+  const [domainStatus, setDomainStatus] = useState<TenantDomainStatusData | null>(null);
+  const [checkingDomain, setCheckingDomain] = useState(false);
 
   const handleSendTest = async (channel: 'email' | 'sms' | 'whatsapp') => {
     setTestSending(channel);
@@ -154,6 +201,13 @@ const Settings = () => {
         api.get('/settings'),
         api.get('/academic-terms')
       ]);
+
+      try {
+        const domainRes = await api.get('/settings/domain-status');
+        setDomainStatus(domainRes.data);
+      } catch (domainError) {
+        console.error('Failed to fetch domain status', domainError);
+      }
 
       setSettings({
         schoolName: settingsRes.data.schoolName || '',
@@ -207,6 +261,19 @@ const Settings = () => {
       console.error('Failed to fetch settings', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckDomainStatus = async () => {
+    setCheckingDomain(true);
+    try {
+      const response = await api.post('/settings/domain-status/check');
+      setDomainStatus(response.data);
+    } catch (error) {
+      console.error('Failed to check domain status', error);
+      alert('Failed to check custom domain status. Please try again.');
+    } finally {
+      setCheckingDomain(false);
     }
   };
 
@@ -442,6 +509,96 @@ const Settings = () => {
                     placeholder="https://"
                   />
                 </div>
+              </div>
+
+              <div className="col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Globe className="text-blue-600 dark:text-blue-400" size={18} />
+                      <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Custom domain health</h3>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Track your school’s custom domain DNS setup and verification status.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${domainStatusClass(domainStatus?.domainStatus || 'NONE')}`}>
+                      {domainStatus?.domainStatus || 'NONE'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCheckDomainStatus}
+                      disabled={checkingDomain || !domainStatus?.domain}
+                      className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-800 dark:text-blue-300"
+                    >
+                      <RefreshCcw size={16} className={checkingDomain ? 'animate-spin' : ''} />
+                      Check now
+                    </button>
+                  </div>
+                </div>
+
+                {!domainStatus?.domain ? (
+                  <div className="mt-4 rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-slate-700 dark:text-gray-300">
+                    No custom domain is configured yet. Contact platform operations to provision one for your school.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Custom domain</p>
+                        <p className="mt-1 font-semibold text-gray-900 dark:text-white">{domainStatus.domain}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Last checked</p>
+                        <p className="mt-1 font-semibold text-gray-900 dark:text-white">{domainStatus.domainLastCheckedAt ? new Date(domainStatus.domainLastCheckedAt).toLocaleString() : 'Not checked yet'}</p>
+                      </div>
+                    </div>
+
+                    <div className={`rounded-lg border p-4 ${domainStatusClass(domainStatus.domainStatus)}`}>
+                      <div className="flex items-start gap-3">
+                        {domainStatus.domainStatus === 'VERIFIED' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+                        <div>
+                          <p className="font-semibold">{domainStatus.verification?.summary || (domainStatus.domainStatus === 'VERIFIED' ? 'Your domain is verified and healthy.' : 'Your domain is still being verified.')}</p>
+                          <div className="mt-2 space-y-1 text-sm">
+                            {domainStatus.domainRequestedAt && <p>Requested: {new Date(domainStatus.domainRequestedAt).toLocaleString()}</p>}
+                            {domainStatus.domainVerifiedAt && <p>Verified: {new Date(domainStatus.domainVerifiedAt).toLocaleString()}</p>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {domainStatus.instructions && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-100">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <Server size={16} /> DNS records expected
+                        </div>
+                        <p className="mt-3">CNAME: <span className="font-mono">{domainStatus.instructions.host}</span> → <span className="font-mono">{domainStatus.instructions.target || '—'}</span></p>
+                        <p className="mt-1">TXT: <span className="font-mono">{domainStatus.instructions.txtName}</span> = <span className="font-mono">{domainStatus.instructions.txtValue || '—'}</span></p>
+                      </div>
+                    )}
+
+                    {domainStatus.verification && (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">CNAME result</p>
+                          <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">Expected: <span className="font-mono">{domainStatus.verification.cname.expected || '—'}</span></p>
+                          <p className="mt-1 text-sm text-gray-700 dark:text-gray-200">Resolved: <span className="font-mono">{domainStatus.verification.cname.resolved.length ? domainStatus.verification.cname.resolved.join(', ') : domainStatus.verification.cname.error || 'Not found'}</span></p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">TXT result</p>
+                          <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">Expected: <span className="font-mono">{domainStatus.verification.txt.expected || '—'}</span></p>
+                          <p className="mt-1 text-sm text-gray-700 dark:text-gray-200">Resolved: <span className="font-mono">{domainStatus.verification.txt.resolved.length ? domainStatus.verification.txt.resolved.join(', ') : domainStatus.verification.txt.error || 'Not found'}</span></p>
+                        </div>
+                      </div>
+                    )}
+
+                    {domainStatus.domainStatus !== 'VERIFIED' && (
+                      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+                        <Clock3 size={16} className="mt-0.5" />
+                        <p>DNS propagation can take time. If records are correct and this still fails after propagation, contact platform operations.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -6,8 +6,14 @@ if (!JWT_SECRET) {
   throw new Error('FATAL: JWT_SECRET environment variable is not set. Server cannot start without it.');
 }
 
-export const generateToken = (userId: string, role: string, branchId?: string | null) => {
-  return jwt.sign({ userId, role, branchId }, JWT_SECRET, { expiresIn: '24h' });
+export const generateToken = (
+  userId: string,
+  role: string,
+  tenantId: string,
+  branchId?: string | null,
+  extraClaims: Record<string, unknown> = {}
+) => {
+  return jwt.sign({ userId, role, tenantId, branchId, ...extraClaims }, JWT_SECRET, { expiresIn: '24h' });
 };
 
 export const hashPassword = async (password: string) => {

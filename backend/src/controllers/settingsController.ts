@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { buildTenantDomainStatusSummary, checkTenantDomainVerification } from '../services/domainVerificationService';
 
 const updateSettingsSchema = z.object({
   schoolName: z.string().min(2),
@@ -205,5 +207,52 @@ export const deleteLogo = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Delete logo error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getDomainStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.tenantId) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.user.tenantId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        domain: true,
+        domainStatus: true,
+        domainDnsTarget: true,
+        domainVerificationToken: true,
+        domainRequestedAt: true,
+        domainVerifiedAt: true,
+        domainLastCheckedAt: true,
+      },
+    });
+
+    if (!tenant) {
+      return res.status(404).json({ message: 'Tenant not found' });
+    }
+
+    res.json(buildTenantDomainStatusSummary(tenant));
+  } catch (error) {
+    console.error('Get domain status error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const checkDomainStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.tenantId) {
+      return res.status(400).json({ message: 'Tenant context missing' });
+    }
+
+    const verification = await checkTenantDomainVerification(req.user.tenantId);
+    res.json(buildTenantDomainStatusSummary(verification.tenant, verification.result));
+  } catch (error: any) {
+    console.error('Check domain status error:', error);
+    res.status(error?.statusCode || 500).json({ message: error?.message || 'Internal server error' });
   }
 };

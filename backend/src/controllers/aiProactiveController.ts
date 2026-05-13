@@ -391,19 +391,25 @@ Include 3-5 action items, 2-3 opportunities, 2-3 risks. Be specific and actionab
     }
 
     // Cache the digest
-    await prisma.aIInsightsCache.upsert({
-      where: { cacheKey: 'weekly-digest' },
-      create: {
-        cacheKey: 'weekly-digest',
-        data: aiInsights as any,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
-      },
-      update: {
-        data: aiInsights as any,
-        generatedAt: new Date(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      },
-    });
+    const existingCache = await prisma.aIInsightsCache.findFirst({ where: { cacheKey: 'weekly-digest' } });
+    if (existingCache) {
+      await prisma.aIInsightsCache.update({
+        where: { id: existingCache.id },
+        data: {
+          data: aiInsights as any,
+          generatedAt: new Date(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+    } else {
+      await prisma.aIInsightsCache.create({
+        data: {
+          cacheKey: 'weekly-digest',
+          data: aiInsights as any,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+    }
 
     res.json(aiInsights);
   } catch (error: any) {
@@ -511,7 +517,7 @@ export const dismissAlert = async (req: Request, res: Response) => {
  */
 export const getWeeklyDigest = async (req: Request, res: Response) => {
   try {
-    const cached = await prisma.aIInsightsCache.findUnique({
+    const cached = await prisma.aIInsightsCache.findFirst({
       where: { cacheKey: 'weekly-digest' },
     });
 

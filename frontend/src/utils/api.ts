@@ -9,12 +9,26 @@ const api = axios.create({
   },
 });
 
+const getTenantSlug = () => {
+  const storedSlug = localStorage.getItem('tenantSlug');
+  if (storedSlug) return storedSlug;
+
+  const host = window.location.hostname;
+  const subdomain = host.includes('.') ? host.split('.')[0] : '';
+  return subdomain && !['www', 'localhost', '127'].includes(subdomain) ? subdomain : '';
+};
+
 // Add a request interceptor to add the auth token to every request
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    const isPlatformRoute = typeof config.url === 'string' && config.url.startsWith('/platform');
+    const tenantSlug = isPlatformRoute ? '' : getTenantSlug();
+    if (tenantSlug) {
+      config.headers['X-Tenant-Slug'] = tenantSlug;
     }
     return config;
   },

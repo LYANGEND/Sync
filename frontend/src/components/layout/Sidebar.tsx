@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Building2, Server, FileWarning, ShieldAlert, Activity } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -14,6 +14,16 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
   const { settings } = useTheme();
 
   const menuGroups = [
+    {
+      title: 'Platform',
+      items: [
+        { icon: Building2, label: 'Tenants', path: '/ops/tenants', roles: ['PLATFORM_ADMIN'] },
+        { icon: Server, label: 'Health', path: '/ops/health', roles: ['PLATFORM_ADMIN'] },
+        { icon: FileWarning, label: 'Ops Feed', path: '/ops/operations', roles: ['PLATFORM_ADMIN'] },
+        { icon: ShieldAlert, label: 'Security', path: '/ops/security', roles: ['PLATFORM_ADMIN'] },
+        { icon: Activity, label: 'Audit', path: '/ops/audit', roles: ['PLATFORM_ADMIN'] }
+      ]
+    },
     {
       title: 'Overview',
       items: [
@@ -127,7 +137,7 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                 {filteredItems.map((item) => {
                   const isActive = item.path === '/'
                     ? location.pathname === '/'
-                    : location.pathname.startsWith(item.path);
+                    : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
                   return (
                     <Link
                       key={item.label}

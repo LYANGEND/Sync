@@ -10,7 +10,7 @@ async function main() {
     console.log(`🔍 Checking for parent user: ${email}`);
 
     // 1. Check if user exists
-    let parentUser = await prisma.user.findUnique({
+    let parentUser = await prisma.user.findFirst({
         where: { email }
     });
 

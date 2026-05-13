@@ -22,7 +22,7 @@ export const createSubject = async (req: Request, res: Response) => {
   try {
     const { name, code } = subjectSchema.parse(req.body);
 
-    const existingSubject = await prisma.subject.findUnique({
+    const existingSubject = await prisma.subject.findFirst({
       where: { code },
     });
 

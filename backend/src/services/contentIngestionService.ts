@@ -331,7 +331,7 @@ async function findOrCreateSubject(name: string): Promise<{ id: string; name: st
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 8);
 
-  const existing = await prisma.subject.findUnique({ where: { code } });
+  const existing = await prisma.subject.findFirst({ where: { code } });
   if (existing) return { id: existing.id, name: existing.name };
 
   const created = await prisma.subject.create({

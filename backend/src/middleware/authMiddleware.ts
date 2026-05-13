@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { tenantStore } from './tenantContext';
+import prisma from '../utils/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -10,7 +12,10 @@ export interface AuthRequest extends Request {
   user?: {
     userId: string;
     role: string;
+    tenantId?: string;
     branchId?: string;
+    impersonatedBy?: string;
+    impersonationReason?: string;
   };
 }
 
@@ -22,12 +27,44 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+  jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
     req.user = user;
-    next();
+    const tid = user?.tenantId;
+    if (tid) {
+      try {
+        const tenant = await prisma.tenant.findUnique({
+          where: { id: tid },
+          select: { status: true, maintenanceMode: true, maintenanceMessage: true },
+        });
+
+        if (!tenant) {
+          return res.status(403).json({ error: 'Tenant not found. Please contact support.' });
+        }
+
+        if (tenant.status === 'SUSPENDED' && !user.impersonatedBy) {
+          return res.status(403).json({ error: 'Tenant is suspended. Please contact support.' });
+        }
+
+        if (tenant.maintenanceMode && user.role !== 'SUPER_ADMIN' && !user.impersonatedBy) {
+          return res.status(423).json({
+            error: 'Tenant is in maintenance mode',
+            message: tenant.maintenanceMessage || 'This school portal is temporarily unavailable.',
+          });
+        }
+
+        tenantStore.run({ tenantId: tid }, () => next());
+      } catch (error) {
+        return res.status(500).json({ error: 'Failed to validate tenant access' });
+      }
+    } else if (user?.role === 'PLATFORM_ADMIN') {
+      // Platform admins operate without tenant scope
+      next();
+    } else {
+      return res.status(403).json({ error: 'Tenant context missing. Please contact support.' });
+    }
   });
 };
 

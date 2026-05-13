@@ -1,0 +1,3 @@
+ALTER TABLE "tenants"
+ADD COLUMN IF NOT EXISTS "maintenanceMode" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN IF NOT EXISTS "maintenanceMessage" TEXT;

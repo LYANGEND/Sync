@@ -6,11 +6,12 @@ import {
   checkSmsBalance,
 } from '../controllers/smsController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { requireFeature } from '../middleware/featureGate';
 
 const router = Router();
 
-// All SMS routes require authentication
-router.use(authenticateToken);
+// All SMS routes require authentication + SMS feature
+router.use(authenticateToken, requireFeature('SMS'));
 
 const smsRoles = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY'];
 

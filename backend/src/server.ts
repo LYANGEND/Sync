@@ -8,6 +8,7 @@ import { initScheduler } from './utils/scheduler';
 import { processScheduledAnnouncements } from './controllers/communicationController';
 import { initClassroomAutomationScheduler } from './services/classroomAutomationService';
 import { setClassroomSocketServer } from './services/classroomRealtimeService';
+import { initDomainVerificationScheduler } from './services/domainVerificationService';
 
 const PORT = process.env.PORT || 3000;
 
@@ -83,6 +84,7 @@ server.listen(PORT, () => {
   // Start background scheduler for automated debt collection
   initScheduler();
   initClassroomAutomationScheduler();
+  initDomainVerificationScheduler();
 
   // Process scheduled announcements every minute
   setInterval(processScheduledAnnouncements, 60 * 1000);

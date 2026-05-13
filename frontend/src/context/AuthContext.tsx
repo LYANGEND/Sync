@@ -7,7 +7,14 @@ interface User {
   fullName: string;
   role: string;
   profilePictureUrl?: string;
+  tenantId?: string;
   branchId?: string;
+  impersonatedBy?: string;
+  tenant?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
 }
 
 interface AuthContextType {
@@ -30,6 +37,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearSession = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('tenantSlug');
+    localStorage.removeItem('platformSession');
     setToken(null);
     setUser(null);
   };
@@ -103,6 +112,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
+    if (newUser.role === 'PLATFORM_ADMIN') {
+      localStorage.removeItem('tenantSlug');
+    } else if (newUser.tenant?.slug) {
+      localStorage.setItem('tenantSlug', newUser.tenant.slug);
+    }
     setToken(newToken);
     setUser(newUser);
   };

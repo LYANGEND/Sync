@@ -4,8 +4,8 @@ import {
   ArrowLeft, ListTree, GraduationCap, Layers, Target, Clock,
   Loader2, AlertCircle, Sparkles,
 } from 'lucide-react';
+import { useAppDialog } from '../ui/AppDialogProvider';
 import syllabusService, {
-  import { useAppDialog } from '../ui/AppDialogProvider';
   SubjectSyllabusOverview, Topic, SubTopic, parseLearningObjectives,
 } from '../../services/syllabusService';
 

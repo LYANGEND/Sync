@@ -408,30 +408,37 @@ const tools: ToolDefinition[] = [
       const errors: string[] = [];
       for (const s of students) {
         try {
-          const student = await prisma.student.upsert({
-            where: { admissionNumber: s.admissionNumber },
-            update: {
-              firstName: s.firstName,
-              lastName: s.lastName,
-              gender: s.gender || undefined,
-              dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : undefined,
-              classId: s.classId || undefined,
-              guardianName: s.guardianName || undefined,
-              guardianPhone: s.guardianPhone || undefined,
-              address: s.address || undefined,
-            },
-            create: {
-              firstName: s.firstName,
-              lastName: s.lastName,
-              admissionNumber: s.admissionNumber,
-              gender: s.gender || 'MALE',
-              dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : new Date('2010-01-01'),
-              classId: s.classId,
-              guardianName: s.guardianName || null,
-              guardianPhone: s.guardianPhone || null,
-              address: s.address || null,
-            },
-          });
+          const existingStudent = await prisma.student.findFirst({ where: { admissionNumber: s.admissionNumber } });
+          let student;
+          if (existingStudent) {
+            student = await prisma.student.update({
+              where: { id: existingStudent.id },
+              data: {
+                firstName: s.firstName,
+                lastName: s.lastName,
+                gender: s.gender || undefined,
+                dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : undefined,
+                classId: s.classId || undefined,
+                guardianName: s.guardianName || undefined,
+                guardianPhone: s.guardianPhone || undefined,
+                address: s.address || undefined,
+              },
+            });
+          } else {
+            student = await prisma.student.create({
+              data: {
+                firstName: s.firstName,
+                lastName: s.lastName,
+                admissionNumber: s.admissionNumber,
+                gender: s.gender || 'MALE',
+                dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : new Date('2010-01-01'),
+                classId: s.classId,
+                guardianName: s.guardianName || null,
+                guardianPhone: s.guardianPhone || null,
+                address: s.address || null,
+              },
+            });
+          }
           // Check if it was an update by seeing if createdAt < updatedAt
           if (student.createdAt.getTime() < student.updatedAt.getTime() - 1000) {
             updated.push(student);
@@ -583,11 +590,18 @@ const tools: ToolDefinition[] = [
       const errors: string[] = [];
       for (const s of subjects) {
         try {
-          const subj = await prisma.subject.upsert({
-            where: { code: s.code },
-            update: { name: s.name },
-            create: { name: s.name, code: s.code },
-          });
+          const existingSubj = await prisma.subject.findFirst({ where: { code: s.code } });
+          let subj;
+          if (existingSubj) {
+            subj = await prisma.subject.update({
+              where: { id: existingSubj.id },
+              data: { name: s.name },
+            });
+          } else {
+            subj = await prisma.subject.create({
+              data: { name: s.name, code: s.code },
+            });
+          }
           // Check if it was an update
           if (subj.createdAt.getTime() < subj.updatedAt.getTime() - 1000) {
             updated.push(subj);

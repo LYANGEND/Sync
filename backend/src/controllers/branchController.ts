@@ -37,7 +37,7 @@ export const createBranch = async (req: Request, res: Response) => {
         const { name, code, address, phone, email, isMain, status, capacity, parentBranchId } = parseResult.data;
 
         // Check if code already exists
-        const existingBranch = await prisma.branch.findUnique({ where: { code } });
+        const existingBranch = await prisma.branch.findFirst({ where: { code } });
         if (existingBranch) {
             return res.status(409).json({ message: 'Branch code already exists' });
         }

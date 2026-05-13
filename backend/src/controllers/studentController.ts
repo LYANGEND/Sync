@@ -146,7 +146,7 @@ export const createStudent = async (req: Request, res: Response) => {
     // If guardian email is provided, try to link or create a parent account
     if (data.guardianEmail) {
       console.log('DEBUG: Processing guardian email:', data.guardianEmail);
-      const existingParent = await prisma.user.findUnique({
+      const existingParent = await prisma.user.findFirst({
         where: { email: data.guardianEmail }
       });
 
@@ -202,7 +202,7 @@ export const createStudent = async (req: Request, res: Response) => {
           // Handle race condition where user was created between findUnique and create
           if (createError.code === 'P2002') {
             console.log('DEBUG: Race condition detected - parent created by another request');
-            const retryParent = await prisma.user.findUnique({
+            const retryParent = await prisma.user.findFirst({
               where: { email: data.guardianEmail }
             });
             if (retryParent) {

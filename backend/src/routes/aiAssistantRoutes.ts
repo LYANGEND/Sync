@@ -21,10 +21,11 @@ import {
 } from '../controllers/aiAssistantController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { aiLimiter } from '../middleware/rateLimiter';
+import { requireFeature } from '../middleware/featureGate';
 
 const router = Router();
 
-router.use(authenticateToken);
+router.use(authenticateToken, requireFeature('AI_TUTOR'));
 
 // AI Status
 router.get('/status', getAIStatus);

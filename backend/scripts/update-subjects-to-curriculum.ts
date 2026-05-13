@@ -98,14 +98,14 @@ async function main() {
   // ── Step 1: Rename codes ───────────────────────────────────────
   console.log('1️⃣  Renaming mismatched subject codes...');
   for (const [oldCode, newCode] of Object.entries(CODE_RENAMES)) {
-    const existing = await prisma.subject.findUnique({ where: { code: oldCode } });
+    const existing = await prisma.subject.findFirst({ where: { code: oldCode } });
     if (!existing) {
       console.log(`   ⏭️  ${oldCode} not found (already renamed or doesn't exist)`);
       continue;
     }
 
     // Check if the target code already exists
-    const target = await prisma.subject.findUnique({ where: { code: newCode } });
+    const target = await prisma.subject.findFirst({ where: { code: newCode } });
     if (target) {
       console.log(`   ⚠️  ${oldCode} → ${newCode}: target code already exists. Will merge instead.`);
       // Merge: move all relationships from old subject to target
@@ -128,12 +128,12 @@ async function main() {
   // ── Step 2: Merge duplicates ───────────────────────────────────
   console.log('\n2️⃣  Merging duplicate subjects...');
   for (const [sourceCode, targetCode] of Object.entries(MERGES)) {
-    const source = await prisma.subject.findUnique({ where: { code: sourceCode } });
+    const source = await prisma.subject.findFirst({ where: { code: sourceCode } });
     if (!source) {
       console.log(`   ⏭️  ${sourceCode} not found (already merged or doesn't exist)`);
       continue;
     }
-    const target = await prisma.subject.findUnique({ where: { code: targetCode } });
+    const target = await prisma.subject.findFirst({ where: { code: targetCode } });
     if (!target) {
       // Just rename the source
       const cdcDef = CDC_SUBJECTS.find(s => s.code === targetCode);
@@ -150,7 +150,7 @@ async function main() {
   // ── Step 3: Update existing subject names to CDC standard ──────
   console.log('\n3️⃣  Updating subject names to CDC standard...');
   for (const cdcDef of CDC_SUBJECTS) {
-    const existing = await prisma.subject.findUnique({ where: { code: cdcDef.code } });
+    const existing = await prisma.subject.findFirst({ where: { code: cdcDef.code } });
     if (existing && existing.name !== cdcDef.name) {
       await prisma.subject.update({
         where: { id: existing.id },
@@ -163,7 +163,7 @@ async function main() {
   // ── Step 4: Add missing CDC subjects ───────────────────────────
   console.log('\n4️⃣  Adding missing CDC subjects...');
   for (const cdcDef of CDC_SUBJECTS) {
-    const existing = await prisma.subject.findUnique({ where: { code: cdcDef.code } });
+    const existing = await prisma.subject.findFirst({ where: { code: cdcDef.code } });
     if (existing) continue;
 
     await prisma.subject.create({
@@ -200,7 +200,7 @@ async function main() {
     const coreSubjects = getCoreSubjectsForGrade(cls.gradeLevel);
     for (const code of coreSubjects) {
       if (currentCodes.has(code)) continue;
-      const subj = await prisma.subject.findUnique({ where: { code } });
+      const subj = await prisma.subject.findFirst({ where: { code } });
       if (subj) {
         await prisma.class.update({
           where: { id: cls.id },

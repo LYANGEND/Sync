@@ -54,6 +54,10 @@ import masterAIRoutes from './routes/masterAIRoutes';
 import aiIntelligenceRoutes from './routes/aiIntelligenceRoutes';
 // SMS Gateway Routes
 import smsRoutes from './routes/smsRoutes';
+// Tenant Management
+import tenantRoutes from './routes/tenantRoutes';
+// Platform Administration
+import platformRoutes from './routes/platformRoutes';
 // New AI Enhancement Features (disabled — schema not yet aligned)
 // TODO: Re-enable once Prisma schema supports StudentGrade, voice attendance compound keys, etc.
 // import aiTeacherAssistantRoutes from './routes/aiTeacherAssistantRoutes';
@@ -77,7 +81,7 @@ const allowedOrigins = process.env.CORS_ORIGINS
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? allowedOrigins : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Slug', 'X-Tenant-Id'],
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -158,6 +162,12 @@ app.use('/api/v1/ai', aiIntelligenceRoutes);
 
 // SMS Gateway
 app.use('/api/v1/sms', smsRoutes);
+
+// Tenant Management
+app.use('/api/v1/tenant', tenantRoutes);
+
+// Platform Administration (cross-tenant)
+app.use('/api/v1/platform', platformRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

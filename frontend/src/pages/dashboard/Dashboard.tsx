@@ -100,6 +100,10 @@ const Dashboard = () => {
     return <Navigate to="/my-children" replace />;
   }
 
+  if (user?.role === 'PLATFORM_ADMIN') {
+    return <Navigate to="/ops/tenants" replace />;
+  }
+
   if (loading) {
     return <DashboardSkeleton />;
   }

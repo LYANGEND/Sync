@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { BranchProvider } from './context/BranchContext';
 import Login from './pages/auth/Login';
+import PlatformLogin from './pages/auth/PlatformLogin';
 import Dashboard from './pages/dashboard/Dashboard';
 import Students from './pages/students/Students';
 import StudentProfile from './pages/students/StudentProfile';
@@ -38,6 +39,8 @@ import { AppDialogProvider } from './components/ui/AppDialogProvider';
 import VerifyReport from './pages/public/VerifyReport';
 import PublicPayment from './pages/public/PublicPayment';
 import ShareTargetHandler from './pages/public/ShareTargetHandler';
+import OpsDashboard from './pages/ops/OpsDashboard';
+import { shouldExposePlatformRoutes } from './utils/platformAccess';
 
 // New AI & Intelligence Pages
 import Analytics from './pages/analytics/Analytics';
@@ -71,7 +74,8 @@ function App() {
               />
             <PWAManager />
             <Routes>
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={shouldExposePlatformRoutes() ? <Navigate to="/ops/login" replace /> : <Login />} />
+              <Route path="/ops/login" element={shouldExposePlatformRoutes() ? <PlatformLogin /> : <Navigate to="/login" replace />} />
               <Route path="/verify/report/:id" element={<VerifyReport />} />
               <Route path="/pay" element={<PublicPayment />} />
               <Route path="/share-target" element={<ShareTargetHandler />} />
@@ -82,6 +86,16 @@ function App() {
 
                 <Route element={<DashboardLayout />}>
                   <Route path="/" element={<Dashboard />} />
+                  <Route path="/ops" element={
+                    <RoleGuard allowedRoles={['PLATFORM_ADMIN']}>
+                      <Navigate to="/ops/tenants" replace />
+                    </RoleGuard>
+                  } />
+                  <Route path="/ops/:view" element={
+                    <RoleGuard allowedRoles={['PLATFORM_ADMIN']}>
+                      <OpsDashboard />
+                    </RoleGuard>
+                  } />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/my-children" element={
                     <RoleGuard allowedRoles={['PARENT']}>

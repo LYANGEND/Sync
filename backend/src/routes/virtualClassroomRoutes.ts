@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { requireFeature } from '../middleware/featureGate';
 import {
   createClassroom,
   getClassrooms,
@@ -23,8 +24,8 @@ import {
 
 const router = Router();
 
-// All routes require authentication
-router.use(authenticateToken);
+// All routes require authentication + VIRTUAL_CLASSROOM feature
+router.use(authenticateToken, requireFeature('VIRTUAL_CLASSROOM'));
 
 // ==========================================
 // CLASSROOM CRUD

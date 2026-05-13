@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { isPlatformHost } from '../../utils/platformAccess';
 import {
   Loader2,
   Eye,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 
 const Login = () => {
+  const [tenantSlug, setTenantSlug] = useState(() => localStorage.getItem('tenantSlug') || '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -24,8 +26,17 @@ const Login = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get('/settings/public').then(r => setPublicSettings(r.data)).catch(() => {});
-  }, []);
+    if (isPlatformHost()) {
+      navigate('/ops/login', { replace: true });
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const slug = tenantSlug.trim().toLowerCase();
+    api.get('/settings/public', slug ? { headers: { 'X-Tenant-Slug': slug } } : undefined)
+      .then(r => setPublicSettings(r.data))
+      .catch(() => {});
+  }, [tenantSlug]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +44,17 @@ const Login = () => {
     setLoading(true);
 
     try {
+      const slug = tenantSlug.trim().toLowerCase();
+      if (!slug) {
+        setError('Enter your school slug to continue.');
+        setLoading(false);
+        return;
+      }
+
+      localStorage.removeItem('platformSession');
+      localStorage.setItem('tenantSlug', slug);
       const response = await api.post('/auth/login', { email, password });
+
       const { token, user } = response.data;
       login(token, user);
       navigate('/');
@@ -137,6 +158,21 @@ const Login = () => {
             )}
 
             <div className="space-y-3">
+              <div>
+                <label htmlFor="tenantSlug" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  School slug
+                </label>
+                <input
+                  id="tenantSlug"
+                  type="text"
+                  required
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value)}
+                  className="block w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white dark:bg-slate-800"
+                  placeholder="lyangend"
+                />
+              </div>
+
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email or ID

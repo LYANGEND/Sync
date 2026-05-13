@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Check, X, BellRing, Trash2 } from 'lucide-react';
+import { Bell, Search, Check, X, BellRing, Trash2, ShieldCheck } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -34,10 +34,16 @@ const Header = () => {
       return;
     }
 
+    if (user?.role === 'PLATFORM_ADMIN') {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isLoading, user?.role]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -57,7 +63,7 @@ const Header = () => {
   }, [showSearch]);
 
   const fetchNotifications = async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || user?.role === 'PLATFORM_ADMIN') return;
 
     try {
       const response = await api.get('/communication/notifications');
@@ -137,6 +143,25 @@ const Header = () => {
     return 'Good evening';
   };
 
+  const returnToOps = () => {
+    const savedSession = localStorage.getItem('platformSession');
+    if (!savedSession) return;
+
+    try {
+      const parsed = JSON.parse(savedSession);
+      localStorage.setItem('token', parsed.token);
+      localStorage.setItem('user', JSON.stringify(parsed.user));
+      localStorage.removeItem('tenantSlug');
+      localStorage.removeItem('platformSession');
+      window.location.href = '/ops';
+    } catch {
+      localStorage.removeItem('platformSession');
+      window.location.href = '/ops/login';
+    }
+  };
+
+  const isImpersonating = Boolean(user?.impersonatedBy || localStorage.getItem('platformSession'));
+
   return (
     <header
       className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-b border-gray-200/50 dark:border-slate-700/50 fixed top-0 right-0 left-0 md:left-64 z-40 transition-all duration-300"
@@ -208,6 +233,25 @@ const Header = () => {
 
         {/* Right Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {isImpersonating && (
+            <>
+              <button
+                onClick={returnToOps}
+                className="hidden md:inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+              >
+                <ShieldCheck size={14} />
+                Return to Ops
+              </button>
+              <button
+                onClick={returnToOps}
+                className="md:hidden p-2.5 text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors"
+                title="Return to Ops"
+              >
+                <ShieldCheck size={20} />
+              </button>
+            </>
+          )}
+
           {/* Mobile Search Toggle */}
           <button
             onClick={() => {

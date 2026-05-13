@@ -245,7 +245,7 @@ export const createUser = async (req: Request, res: Response) => {
   try {
     const { email, password, fullName, role, branchId } = createUserSchema.extend({ role: roleSchema }).parse(req.body);
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await prisma.user.findFirst({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }

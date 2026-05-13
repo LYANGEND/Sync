@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { requireFeature } from '../middleware/featureGate';
 import {
   getStaffPayrolls, createStaffPayroll, updateStaffPayroll, deleteStaffPayroll,
   getPayrollRuns, createPayrollRun, getPayrollRunDetail,
@@ -8,7 +9,7 @@ import {
 
 const router = Router();
 
-router.use(authenticateToken);
+router.use(authenticateToken, requireFeature('PAYROLL'));
 
 // Staff Payroll Records
 router.get('/staff', authorizeRole(['SUPER_ADMIN', 'BURSAR']), getStaffPayrolls);

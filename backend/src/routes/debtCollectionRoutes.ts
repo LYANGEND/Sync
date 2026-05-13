@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { requireFeature } from '../middleware/featureGate';
 import {
   getDebtors,
   listCampaigns,
@@ -16,7 +17,7 @@ import {
 
 const router = Router();
 
-router.use(authenticateToken);
+router.use(authenticateToken, requireFeature('DEBT_COLLECTION'));
 
 const allowedRoles = ['SUPER_ADMIN', 'BURSAR'];
 

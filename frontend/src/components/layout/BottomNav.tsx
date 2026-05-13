@@ -10,6 +10,7 @@ import {
   Wallet,
   GraduationCap,
   Bell,
+  ShieldCheck,
   TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -80,6 +81,13 @@ const BottomNav = ({ onMenuClick }: BottomNavProps) => {
         { icon: BookOpen, label: 'Classes', path: '/academics', roles: ['TEACHER'] },
         { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['TEACHER'], badgeKey: 'messages' },
         { icon: User, label: 'Profile', path: '/profile', roles: ['TEACHER'] },
+      ];
+    }
+
+    if (role === 'PLATFORM_ADMIN') {
+      return [
+        { icon: ShieldCheck, label: 'Ops', path: '/ops/tenants', roles: ['PLATFORM_ADMIN'] },
+        { icon: User, label: 'Profile', path: '/profile', roles: ['PLATFORM_ADMIN'] },
       ];
     }
 

@@ -1148,7 +1148,7 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
     }
 
     // Find the collection in our database
-    const collection = await prisma.mobileMoneyCollection.findUnique({
+    const collection = await prisma.mobileMoneyCollection.findFirst({
       where: { reference },
       include: {
         student: {
@@ -1362,7 +1362,7 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
     }
 
     // Find the collection
-    const collection = await prisma.mobileMoneyCollection.findUnique({
+    const collection = await prisma.mobileMoneyCollection.findFirst({
       where: { reference },
     });
 
