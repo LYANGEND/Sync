@@ -12,7 +12,10 @@ DROP INDEX "student_fee_structures_studentId_feeTemplateId_key";
 ALTER TABLE "payments" ADD COLUMN     "academicTermId" TEXT;
 
 -- AlterTable
-ALTER TABLE "student_fee_structures" ADD COLUMN     "academicTermId" TEXT NOT NULL;
+ALTER TABLE "student_fee_structures" ADD COLUMN     "academicTermId" TEXT NOT NULL DEFAULT '6e822711-8e28-4518-8543-4264228fbabc';
+
+-- AlterTable
+ALTER TABLE "student_fee_structures" ALTER COLUMN "academicTermId" DROP DEFAULT;
 
 -- CreateTable
 CREATE TABLE "term_financial_summaries" (
