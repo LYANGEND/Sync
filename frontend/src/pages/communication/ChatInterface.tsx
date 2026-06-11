@@ -51,9 +51,37 @@ const ChatInterface = () => {
   const [groupName, setGroupName] = useState('');
   const [groupMembers, setGroupMembers] = useState<UserInfo[]>([]);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const searchRequestId = useRef(0);
+
+  const fetchConversations = useCallback(async () => {
+    try {
+      const response = await api.get('/communication/conversations');
+      setConversations(response.data);
+    } catch (error) {
+      console.error('Failed to fetch conversations', error);
+    } finally {
+      setConversationsLoading(false);
+    }
+  }, []);
+
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    setMessagesLoading(true);
+    try {
+      const response = await api.get(`/communication/conversations/${conversationId}/messages?limit=50`);
+      setMessages(response.data);
+    } catch (error) {
+      console.error('Failed to fetch messages', error);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
 
   // Initialize Socket.io
   useEffect(() => {
@@ -61,10 +89,15 @@ const ChatInterface = () => {
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      setSocketConnected(true);
       console.log('Socket connected');
       if (currentUser?.id) {
         socket.emit('join_user', currentUser.id);
       }
+    });
+
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
     });
 
     // Listen for new messages
@@ -100,9 +133,10 @@ const ChatInterface = () => {
     });
 
     return () => {
+      setSocketConnected(false);
       socket.disconnect();
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, fetchConversations]);
 
   // Join/leave conversation rooms
   useEffect(() => {
@@ -117,16 +151,24 @@ const ChatInterface = () => {
 
   useEffect(() => {
     fetchConversations();
+  }, [fetchConversations]);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      if (typingTimeout.current) clearTimeout(typingTimeout.current);
+    };
   }, []);
 
   useEffect(() => {
     if (selectedConversation?.id) {
       fetchMessages(selectedConversation.id);
-      // Also poll as fallback
-      const interval = setInterval(() => fetchMessages(selectedConversation.id), 10000);
-      return () => clearInterval(interval);
+      if (!socketConnected) {
+        const interval = setInterval(() => fetchMessages(selectedConversation.id), 15000);
+        return () => clearInterval(interval);
+      }
     }
-  }, [selectedConversation?.id]);
+  }, [selectedConversation?.id, socketConnected, fetchMessages]);
 
   useEffect(() => {
     scrollToBottom();
@@ -136,33 +178,24 @@ const ChatInterface = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const fetchConversations = async () => {
-    try {
-      const response = await api.get('/communication/conversations');
-      setConversations(response.data);
-    } catch (error) {
-      console.error('Failed to fetch conversations', error);
-    }
-  };
-
-  const fetchMessages = async (conversationId: string) => {
-    try {
-      const response = await api.get(`/communication/conversations/${conversationId}/messages`);
-      setMessages(response.data);
-    } catch (error) {
-      console.error('Failed to fetch messages', error);
-    }
-  };
-
   const handleSearchUsers = async (query: string) => {
     setSearchQuery(query);
-    if (query.length < 2) { setSearchResults([]); return; }
-    try {
-      const response = await api.get(`/communication/users/search?query=${query}`);
-      setSearchResults(response.data);
-    } catch (error) {
-      console.error('Failed to search users', error);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (query.trim().length < 2) {
+      setSearchResults([]);
+      return;
     }
+    const requestId = ++searchRequestId.current;
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const response = await api.get(`/communication/users/search?query=${encodeURIComponent(query.trim())}`);
+        if (requestId === searchRequestId.current) {
+          setSearchResults(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to search users', error);
+      }
+    }, 350);
   };
 
   const startNewChat = async (user: UserInfo) => {
@@ -197,7 +230,9 @@ const ChatInterface = () => {
         name: groupName,
         participantIds: groupMembers.map(m => m.id),
       });
-      await fetchConversations();
+      if (!socketConnected) {
+        await fetchConversations();
+      }
       const newConv = {
         id: res.data.id,
         isGroup: true,
@@ -370,7 +405,13 @@ const ChatInterface = () => {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            {conversations.map(conv => {
+            {conversationsLoading ? (
+              <div className="p-4 space-y-3">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="h-16 rounded-xl bg-gray-100 dark:bg-slate-700 animate-pulse" />
+                ))}
+              </div>
+            ) : conversations.map(conv => {
               const isActive = selectedConversation?.id === conv.id;
               return (
                 <div
@@ -412,7 +453,7 @@ const ChatInterface = () => {
                 </div>
               );
             })}
-            {conversations.length === 0 && (
+            {!conversationsLoading && conversations.length === 0 && (
               <div className="p-6 text-center text-gray-400 text-sm">
                 No conversations yet. Start a new chat!
               </div>
@@ -444,7 +485,13 @@ const ChatInterface = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 dark:bg-slate-900/50">
-              {messages.map(msg => {
+              {messagesLoading ? (
+                <div className="space-y-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className={`h-12 rounded-2xl bg-gray-100 dark:bg-slate-700 animate-pulse ${i % 2 ? 'ml-auto w-2/3' : 'w-3/4'}`} />
+                  ))}
+                </div>
+              ) : messages.map(msg => {
                 const isMyMessage = msg.senderId === currentUser?.id;
                 return (
                   <div key={msg.id} className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}>

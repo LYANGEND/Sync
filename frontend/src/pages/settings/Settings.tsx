@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;

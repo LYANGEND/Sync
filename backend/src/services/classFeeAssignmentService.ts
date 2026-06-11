@@ -55,6 +55,7 @@ export const syncStudentClassFees = async (studentId: string) => {
     .map(assignment => ({
       studentId: student.id,
       feeTemplateId: assignment.feeTemplateId,
+      academicTermId: assignment.feeTemplate.academicTermId,
       amountDue: applyScholarshipDiscount(Number(assignment.feeTemplate.amount), scholarshipPercentage),
       amountPaid: 0,
       dueDate: assignment.dueDate,
@@ -130,6 +131,7 @@ export const syncClassFeesToStudents = async (classId: string) => {
       .map(assignment => ({
         studentId: student.id,
         feeTemplateId: assignment.feeTemplateId,
+        academicTermId: assignment.feeTemplate.academicTermId,
         amountDue: applyScholarshipDiscount(Number(assignment.feeTemplate.amount), scholarshipPercentage),
         amountPaid: 0,
         dueDate: assignment.dueDate,

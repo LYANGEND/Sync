@@ -87,6 +87,10 @@ export const createPayment = async (req: Request, res: Response) => {
     // Link payment to the branch of the student
     const branchId = student.branchId;
 
+    // Automatically assign term based on payment date
+    const { getTermForDate } = await import('../utils/termHelper');
+    const academicTermId = await getTermForDate(new Date());
+
     const payment = await prisma.payment.create({
       data: {
         transactionId,
@@ -96,6 +100,7 @@ export const createPayment = async (req: Request, res: Response) => {
         notes,
         recordedByUserId: userId,
         branchId, // Assign branch
+        academicTermId, // Assign term
       },
       include: {
         student: {

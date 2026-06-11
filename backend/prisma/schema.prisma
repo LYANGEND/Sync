@@ -247,15 +247,18 @@ model AcademicTerm {
   endDate   DateTime
   isActive  Boolean  @default(false)
 
-  classes          Class[]
-  feeTemplates     FeeTemplate[]
-  assessments      Assessment[]
-  termResults      TermResult[]
-  studentReports   StudentTermReport[]
-  timetablePeriods TimetablePeriod[]
-  lessonPlans      LessonPlan[]
-  financialReports FinancialReport[]
-  classFeeAssignments ClassFeeAssignment[]
+  classes              Class[]
+  feeTemplates         FeeTemplate[]
+  assessments          Assessment[]
+  termResults          TermResult[]
+  studentReports       StudentTermReport[]
+  timetablePeriods     TimetablePeriod[]
+  lessonPlans          LessonPlan[]
+  financialReports     FinancialReport[]
+  classFeeAssignments  ClassFeeAssignment[]
+  studentFeeStructures StudentFeeStructure[]
+  payments             Payment[]
+  financialSummaries   TermFinancialSummary[]
 
   activeInSettings SchoolSettings?
 
@@ -357,6 +360,7 @@ model Notification {
   type      NotificationType @default(INFO)
   createdAt DateTime         @default(now())
 
+  @@index([userId, isRead, createdAt])
   @@map("notifications")
 }
 
@@ -406,6 +410,8 @@ model StudentFeeStructure {
   student       Student     @relation(fields: [studentId], references: [id])
   feeTemplateId String
   feeTemplate   FeeTemplate @relation(fields: [feeTemplateId], references: [id])
+  academicTermId String
+  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
   amountDue     Decimal     @db.Decimal(10, 2)
   amountPaid    Decimal     @default(0) @db.Decimal(10, 2)
   dueDate       DateTime?
@@ -414,7 +420,9 @@ model StudentFeeStructure {
 
   allocations PaymentAllocation[]
 
-  @@unique([studentId, feeTemplateId])
+  @@unique([studentId, feeTemplateId, academicTermId])
+  @@index([academicTermId])
+  @@index([studentId, academicTermId])
   @@map("student_fee_structures")
 }
 
@@ -486,6 +494,8 @@ model Payment {
   transactionId String?       @unique // Auto-generated: TXN-XXXXXXXX
   studentId     String
   student       Student       @relation(fields: [studentId], references: [id])
+  academicTermId String?
+  academicTerm   AcademicTerm? @relation(fields: [academicTermId], references: [id])
   amount        Decimal       @db.Decimal(10, 2)
   paymentDate   DateTime      @default(now())
   method        PaymentMethod
@@ -523,6 +533,8 @@ model Payment {
 
   @@index([transactionId])
   @@index([studentId, status]) // For student payment history
+  @@index([studentId, academicTermId])
+  @@index([academicTermId, paymentDate])
   @@index([paymentDate, status]) // For reports filtering by status
   @@index([isReconciled, paymentDate])
   @@map("payments")
@@ -913,6 +925,7 @@ model ConversationParticipant {
   joinedAt       DateTime     @default(now())
 
   @@unique([conversationId, userId])
+  @@index([userId])
   @@map("conversation_participants")
 }
 
@@ -927,6 +940,8 @@ model Message {
   readAt         DateTime? // When the message was read
   createdAt      DateTime     @default(now())
 
+  @@index([conversationId, createdAt])
+  @@index([conversationId, isRead, senderId])
   @@map("messages")
 }
 
@@ -940,6 +955,7 @@ model Conversation {
   participants ConversationParticipant[]
   messages     Message[]
 
+  @@index([updatedAt])
   @@map("conversations")
 }
 
@@ -990,18 +1006,19 @@ model Branch {
   studentEnrollments StudentBranch[]
 
   // Accounting relations
-  chartOfAccounts   ChartOfAccount[]
-  journalEntries    JournalEntry[]
-  vendors           Vendor[]
-  expenses          Expense[]
-  invoices          Invoice[]
-  refunds           Refund[]
-  staffPayrolls     StaffPayroll[]
-  payrollRuns       PayrollRun[]
-  budgets           Budget[]
-  pettyCashAccounts PettyCashAccount[]
-  receiptSequences  ReceiptSequence[]
-  financialReports  FinancialReport[]
+  chartOfAccounts      ChartOfAccount[]
+  journalEntries       JournalEntry[]
+  vendors              Vendor[]
+  expenses             Expense[]
+  invoices             Invoice[]
+  refunds              Refund[]
+  staffPayrolls        StaffPayroll[]
+  payrollRuns          PayrollRun[]
+  budgets              Budget[]
+  pettyCashAccounts    PettyCashAccount[]
+  receiptSequences     ReceiptSequence[]
+  financialReports     FinancialReport[]
+  termFinancialSummaries TermFinancialSummary[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2153,6 +2170,7 @@ model MessageTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([category, channel, updatedAt])
   @@map("message_templates")
 }
 
@@ -2613,4 +2631,43 @@ model AdaptedLesson {
   @@index([classId])
   @@index([status])
   @@map("adapted_lessons")
+}
+
+// ========================================
+// TERM-BASED FINANCIAL TRACKING
+// ========================================
+
+// Pre-calculated financial summary per term for fast reporting
+model TermFinancialSummary {
+  id             String       @id @default(uuid())
+  academicTermId String
+  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+
+  // Revenue tracking
+  totalFeesExpected    Decimal @db.Decimal(12, 2)
+  totalFeesCollected   Decimal @db.Decimal(12, 2)
+  totalOutstanding     Decimal @db.Decimal(12, 2)
+  collectionRate       Decimal @db.Decimal(5, 2) // Percentage
+
+  // Payment method breakdown
+  cashCollected        Decimal @default(0) @db.Decimal(12, 2)
+  mobileMoneyCollected Decimal @default(0) @db.Decimal(12, 2)
+  bankCollected        Decimal @default(0) @db.Decimal(12, 2)
+
+  // Student counts
+  totalStudents         Int
+  studentsFullyPaid     Int
+  studentsPartiallyPaid Int
+  studentsNotPaid       Int
+
+  // Timestamps
+  lastCalculatedAt DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([academicTermId, branchId])
+  @@index([academicTermId])
+  @@map("term_financial_summaries")
 }

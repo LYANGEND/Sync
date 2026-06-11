@@ -397,6 +397,7 @@ async function main() {
           data: {
             studentId: student.id,
             feeTemplateId: feeTemplate.id,
+            academicTermId: currentTerm.id,
             amountDue: feeTemplate.amount,
             amountPaid: studentData.paidAmount ?? (studentData.feeStatus === 'PAID' ? feeTemplate.amount : 0),
             dueDate: studentData.dueDate ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -415,6 +416,7 @@ async function main() {
               transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
               recordedByUserId: bursar.id,
               branchId: mainBranch.id,
+              academicTermId: currentTerm.id,
             }
           });
           console.log(`  💳 Created payment of ZMW ${paymentAmount} for ${studentData.firstName}`);
@@ -475,6 +477,7 @@ async function main() {
           transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
           recordedByUserId: bursar.id,
           branchId: mainBranch.id,
+          academicTermId: currentTerm.id,
         }
       });
     }

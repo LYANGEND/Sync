@@ -398,20 +398,22 @@ export const getConversations = async (req: Request, res: Response) => {
       orderBy: { updatedAt: 'desc' }
     });
 
-    // Get unread counts for each conversation
-    const unreadCounts = await Promise.all(
-      conversations.map(c =>
-        prisma.message.count({
+    const unreadCounts = conversations.length > 0
+      ? await prisma.message.groupBy({
+          by: ['conversationId'],
           where: {
-            conversationId: c.id,
+            conversationId: { in: conversations.map(c => c.id) },
             senderId: { not: userId },
             isRead: false,
           },
+          _count: { _all: true },
         })
-      )
+      : [];
+    const unreadCountByConversation = new Map(
+      unreadCounts.map(item => [item.conversationId, item._count._all])
     );
 
-    const formatted = conversations.map((c, idx) => {
+    const formatted = conversations.map((c) => {
       const otherParticipants = c.participants
         .filter(p => p.userId !== userId)
         .map(p => p.user);
@@ -429,7 +431,7 @@ export const getConversations = async (req: Request, res: Response) => {
           isRead: lastMessage.isRead,
           senderId: lastMessage.senderId
         } : null,
-        unreadCount: unreadCounts[idx],
+        unreadCount: unreadCountByConversation.get(c.id) || 0,
         updatedAt: c.updatedAt
       };
     });
@@ -445,6 +447,8 @@ export const getMessages = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
     const { conversationId } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
+    const before = typeof req.query.before === 'string' ? req.query.before : undefined;
 
     const participant = await prisma.conversationParticipant.findUnique({
       where: {
@@ -457,8 +461,12 @@ export const getMessages = async (req: Request, res: Response) => {
     }
 
     const messages = await prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        conversationId,
+        ...(before && { createdAt: { lt: new Date(before) } }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
       include: {
         sender: { select: { id: true, fullName: true } }
       }
@@ -477,7 +485,7 @@ export const getMessages = async (req: Request, res: Response) => {
       },
     });
 
-    res.json(messages);
+    res.json(messages.reverse());
   } catch (error) {
     console.error('Get messages error:', error);
     res.status(500).json({ message: 'Failed to fetch messages' });
@@ -655,7 +663,9 @@ export const searchUsers = async (req: Request, res: Response) => {
     const currentUserId = currentUser?.userId;
     const userRole = currentUser?.role;
 
-    if (!query || typeof query !== 'string' || query.length < 2) {
+    const normalizedQuery = typeof query === 'string' ? query.trim() : '';
+
+    if (normalizedQuery.length < 2) {
       return res.json([]);
     }
 
@@ -663,8 +673,8 @@ export const searchUsers = async (req: Request, res: Response) => {
       AND: [
         {
           OR: [
-            { fullName: { contains: query, mode: 'insensitive' } },
-            { email: { contains: query, mode: 'insensitive' } }
+            { fullName: { contains: normalizedQuery, mode: 'insensitive' } },
+            { email: { contains: normalizedQuery, mode: 'insensitive' } }
           ]
         },
         { id: { not: currentUserId } },
@@ -682,8 +692,11 @@ export const searchUsers = async (req: Request, res: Response) => {
     const users = await prisma.user.findMany({
       where: whereClause,
       select: { id: true, fullName: true, role: true, email: true },
+      orderBy: { fullName: 'asc' },
       take: 10
     });
+
+    res.set('Cache-Control', 'private, max-age=30');
 
     res.json(users);
   } catch (error) {
@@ -741,6 +754,7 @@ export const getSentCommunications = async (req: Request, res: Response) => {
 export const getCommunicationStatsHandler = async (_req: Request, res: Response) => {
   try {
     const stats = await getCommunicationStats();
+    res.set('Cache-Control', 'private, max-age=30');
     res.json(stats);
   } catch (error) {
     console.error('Get communication stats error:', error);
@@ -766,6 +780,8 @@ export const getAnnouncementHistory = async (req: Request, res: Response) => {
       }),
       (prisma as any).announcement.count(),
     ]);
+
+    res.set('Cache-Control', 'private, max-age=15');
 
     res.json({
       announcements,
@@ -830,6 +846,8 @@ export const getMessageTemplates = async (req: Request, res: Response) => {
       where,
       orderBy: { updatedAt: 'desc' },
     });
+
+    res.set('Cache-Control', 'private, max-age=60');
 
     res.json(templates);
   } catch (error) {

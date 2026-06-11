@@ -45,6 +45,7 @@ import payrollRoutes from './routes/payrollRoutes';
 import budgetRoutes from './routes/budgetRoutes';
 import pettyCashRoutes from './routes/pettyCashRoutes';
 import financialRoutes from './routes/financialRoutes';
+import termFinancialRoutes from './routes/termFinancialRoutes';
 import debtCollectionRoutes from './routes/debtCollectionRoutes';
 // Virtual Classroom & AI Tutor
 import virtualClassroomRoutes from './routes/virtualClassroomRoutes';
@@ -140,6 +141,7 @@ app.use('/api/v1/payroll', payrollRoutes);
 app.use('/api/v1/budgets', budgetRoutes);
 app.use('/api/v1/petty-cash', pettyCashRoutes);
 app.use('/api/v1/financial', financialRoutes);
+app.use('/api/v1/financial', termFinancialRoutes);
 app.use('/api/v1/debt-collection', debtCollectionRoutes);
 
 // Virtual Classroom & AI Tutor

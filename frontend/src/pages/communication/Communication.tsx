@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../utils/api';
 import { 
@@ -6,15 +6,27 @@ import {
   Megaphone, Clock, BarChart3, Smartphone, MessageCircle, AlertTriangle,
   Sparkles, Calendar, FileText, Zap, Plus, Trash2, Phone, Wand2, ChevronDown, Wallet
 } from 'lucide-react';
-import ChatInterface from './ChatInterface';
-import SentItems from './SentItems';
-import AnnouncementHistory from './AnnouncementHistory';
 import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+
+const ChatInterface = lazy(() => import('./ChatInterface'));
+const SentItems = lazy(() => import('./SentItems'));
+const AnnouncementHistory = lazy(() => import('./AnnouncementHistory'));
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT', 'STUDENT'];
 
 type TabType = 'announcements' | 'messages' | 'sent' | 'history' | 'templates' | 'emergency' | 'sms';
+
+const TabFallback = ({ label = 'Loading section...' }: { label?: string }) => (
+  <div className="bg-white dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-slate-700 p-6 space-y-4">
+    <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400 text-sm font-medium">
+      <span className="h-4 w-4 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+      {label}
+    </div>
+    <div className="h-12 rounded-xl bg-gray-100 dark:bg-slate-700 animate-pulse" />
+    <div className="h-64 rounded-2xl bg-gray-100 dark:bg-slate-700 animate-pulse" />
+  </div>
+);
 
 const Communication = () => {
   const { user } = useAuth();
@@ -249,20 +261,34 @@ const Communication = () => {
   ];
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-6xl mx-auto space-y-6">
-      {/* Enhanced Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden relative">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none stroke-current">
-          <Megaphone size={160} />
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
+      {/* Match Finance Hub Standard Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Communication Hub</h1>
+          <p className="text-slate-500 dark:text-gray-400">Centralized platform for messaging and broadcasts</p>
         </div>
-        <div className="relative z-10">
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Megaphone className="w-8 h-8 text-blue-200" />
-            Communication Hub
-          </h1>
-          <p className="text-blue-100 mt-2 text-sm md:text-base max-w-2xl leading-relaxed">
-            Centralized platform for announcements, direct messaging, and multi-channel broadcasts to students, parents, and staff.
-          </p>
+        <div className="flex flex-wrap gap-2">
+          {canChat && activeTab !== 'messages' && (
+            <button type="button" onClick={() => setActiveTab('messages')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+              <MessageSquare size={18} /> <span>Message</span>
+            </button>
+          )}
+          {canSendAnnouncements && activeTab !== 'announcements' && (
+            <button type="button" onClick={() => setActiveTab('announcements')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+              <Megaphone size={18} /> <span>Announce</span>
+            </button>
+          )}
+          {isAdmin && activeTab !== 'sms' && (
+            <button type="button" onClick={() => setActiveTab('sms')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+              <Phone size={18} /> <span>SMS</span>
+            </button>
+          )}
+          {isSuperAdmin && activeTab !== 'emergency' && (
+            <button type="button" onClick={() => setActiveTab('emergency')} className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-red-700 transition-colors text-sm font-medium">
+              <AlertTriangle size={18} /> <span>Emergency</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -287,31 +313,19 @@ const Communication = () => {
       </AnimatePresence>
 
       {/* Tab Navigation (Framer Motion) */}
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide relative z-0">
+      <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg w-full md:w-fit mb-6 overflow-x-auto scrollbar-hide relative z-0">
         {tabs.filter(t => t.show).map(tab => {
           const isActive = activeTab === tab.key;
           return (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`relative px-4 py-2.5 rounded-xl font-medium transition-colors flex items-center gap-2 whitespace-nowrap text-sm ${
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
                 isActive
-                  ? tab.key === 'emergency' 
-                    ? 'text-red-700 dark:text-red-400' 
-                    : tab.key === 'sms'
-                    ? 'text-green-700 dark:text-green-400'
-                    : 'text-blue-700 dark:text-blue-400'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800'
+                  ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
+                  : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
               }`}
             >
-              {isActive && (
-                <motion.div
-                  layoutId="communicationTabs"
-                  className="absolute inset-0 bg-white dark:bg-slate-800 shadow-sm border border-gray-200 dark:border-slate-700 rounded-xl -z-10"
-                  initial={false}
-                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                />
-              )}
               <span className="relative z-10 flex items-center gap-2">
                 {tab.icon}
                 {tab.label}
@@ -711,11 +725,17 @@ const Communication = () => {
           )}
         </div>
       ) : activeTab === 'messages' && canChat ? (
-        <ChatInterface />
+        <Suspense fallback={<TabFallback label="Loading messages..." />}>
+          <ChatInterface />
+        </Suspense>
       ) : activeTab === 'sent' && canViewLogs ? (
-        <SentItems />
+        <Suspense fallback={<TabFallback label="Loading sent items..." />}>
+          <SentItems />
+        </Suspense>
       ) : activeTab === 'history' && canSendAnnouncements ? (
-        <AnnouncementHistory />
+        <Suspense fallback={<TabFallback label="Loading announcement history..." />}>
+          <AnnouncementHistory />
+        </Suspense>
       ) : activeTab === 'templates' && canSendAnnouncements ? (
         // ===== TEMPLATES TAB =====
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">

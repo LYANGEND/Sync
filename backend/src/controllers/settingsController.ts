@@ -99,15 +99,38 @@ export const updateSettings = async (req: Request, res: Response) => {
 
     const existing = await prisma.schoolSettings.findFirst();
 
+    // Prevent masked placeholders (e.g. "••••1234") or empty strings
+    // from overwriting real secrets when saving settings forms.
+    const isMaskedPlaceholder = (value: unknown): value is string =>
+      typeof value === 'string' && /^•{4}/.test(value);
+    const shouldPreserveSecret = (value: unknown): boolean =>
+      value === '' || isMaskedPlaceholder(value);
+
+    const updateData: Record<string, any> = { ...data };
+    const secretFields: Array<keyof typeof updateData> = [
+      'aiApiKey',
+      'smsApiKey',
+      'smsApiSecret',
+      'whatsappApiKey',
+      'lencoApiKey',
+      'smtpPassword',
+    ];
+
+    for (const field of secretFields) {
+      if (field in updateData && shouldPreserveSecret(updateData[field])) {
+        delete updateData[field];
+      }
+    }
+
     let settings;
     if (existing) {
       settings = await prisma.schoolSettings.update({
         where: { id: existing.id },
-        data,
+        data: updateData,
       });
     } else {
       settings = await prisma.schoolSettings.create({
-        data,
+        data: updateData,
       });
     }
 
