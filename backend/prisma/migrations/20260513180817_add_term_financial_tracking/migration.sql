@@ -12,10 +12,27 @@ DROP INDEX "student_fee_structures_studentId_feeTemplateId_key";
 ALTER TABLE "payments" ADD COLUMN     "academicTermId" TEXT;
 
 -- AlterTable
-ALTER TABLE "student_fee_structures" ADD COLUMN     "academicTermId" TEXT NOT NULL DEFAULT '6e822711-8e28-4518-8543-4264228fbabc';
+ALTER TABLE "student_fee_structures" ADD COLUMN     "academicTermId" TEXT;
+
+-- Backfill term from linked fee template to avoid hardcoded/nonexistent IDs
+UPDATE "student_fee_structures" sfs
+SET "academicTermId" = ft."academicTermId"
+FROM "fee_templates" ft
+WHERE ft."id" = sfs."feeTemplateId";
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "student_fee_structures"
+    WHERE "academicTermId" IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Cannot set student_fee_structures.academicTermId because some rows are missing linked fee_templates.';
+  END IF;
+END $$;
 
 -- AlterTable
-ALTER TABLE "student_fee_structures" ALTER COLUMN "academicTermId" DROP DEFAULT;
+ALTER TABLE "student_fee_structures" ALTER COLUMN "academicTermId" SET NOT NULL;
 
 -- CreateTable
 CREATE TABLE "term_financial_summaries" (
