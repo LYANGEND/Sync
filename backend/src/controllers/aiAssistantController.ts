@@ -71,10 +71,10 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { conversationId, message, context } = req.body;
+    const { conversationId, message, context, imageBase64 } = req.body;
 
-    if (!message?.trim()) {
-      return res.status(400).json({ error: 'Message is required' });
+    if (!message?.trim() && !imageBase64) {
+      return res.status(400).json({ error: 'Message or image is required' });
     }
 
     // Get or create conversation — scoped to 'teaching-assistant' only
@@ -94,7 +94,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       conversation = await prisma.aIConversation.create({
         data: {
           userId,
-          title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+          title: (message || 'Image analysis').substring(0, 50) + ((message || '').length > 50 ? '...' : ''),
           context: { type: 'teaching-assistant' },
         },
         include: { messages: true },
@@ -106,7 +106,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       data: {
         conversationId: conversation.id,
         role: 'user',
-        content: message,
+        content: imageBase64 ? `${message || 'Analyze this teaching image.'}\n\n[Image attached]` : message,
       },
     });
 
@@ -132,7 +132,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const chatMessages = [
       { role: 'system' as const, content: systemPrompt },
       ...previousMessages,
-      { role: 'user' as const, content: message },
+      { role: 'user' as const, content: message || 'Analyze this teaching image and suggest how I can use it in class.', ...(imageBase64 && { image: imageBase64 }) },
     ];
 
     // Call AI
@@ -198,23 +198,34 @@ export const handleSlashCommand = async (req: AuthRequest, res: Response) => {
 
     switch (command) {
       case '/lesson':
-        systemOverride = 'You are a Zambian curriculum expert. Create detailed, standards-aligned lesson plans.';
-        prompt = `Create a detailed lesson plan for: ${params.topic || params.text}
+        systemOverride = `You are a professor-level pedagogy coach and Zambian curriculum specialist. Design lessons with the rigor of an expert teacher educator: curriculum alignment, learning theory, misconceptions, formative assessment, differentiation, inclusion, and practical classroom execution.`;
+        prompt = `Create a professor-level lesson plan for: ${params.topic || params.text}
 Grade Level: ${params.gradeLevel || 'Not specified'}
 Subject: ${params.subject || 'Not specified'}
 Duration: ${params.duration || '40 minutes'}
 
-Include: Objectives, Materials, Introduction (5 min), Development (25 min), Conclusion (10 min), Assessment, and Differentiation strategies.`;
+      Include:
+      1. Curriculum-aligned learning outcomes using measurable verbs
+      2. Prerequisite knowledge and diagnostic starter
+      3. Common misconceptions and how to correct them
+      4. Lesson sequence with timing, teacher moves, learner actions, board work, and questions
+      5. Socratic/probing questions from recall to evaluation
+      6. Guided practice, independent practice, and extension task
+      7. Differentiation for struggling learners, average learners, advanced learners, and English-language support
+      8. Formative checks every 8-10 minutes plus an exit ticket
+      9. Marking guide/answers for practice tasks
+      10. Low-resource alternatives for a Zambian classroom
+      11. Teacher reflection notes: what evidence shows mastery and what to reteach tomorrow.`;
         break;
 
       case '/quiz':
-        systemOverride = 'You are an assessment expert. Create high-quality quiz questions with answer keys.';
-        prompt = `Create a quiz with ${params.count || 10} questions on: ${params.topic || params.text}
+        systemOverride = 'You are a professor-level assessment designer. Create valid, reliable, curriculum-aligned assessments with balanced cognitive demand, clear mark schemes, and moderation notes.';
+        prompt = `Create a high-quality assessment with ${params.count || 10} questions on: ${params.topic || params.text}
 Grade Level: ${params.gradeLevel || 'Not specified'}
 Subject: ${params.subject || 'Not specified'}
-Question Types: ${params.types || 'Mix of multiple choice, true/false, and short answer'}
+      Question Types: ${params.types || 'Mix of multiple choice, true/false, short answer, structured response, and application'}
 
-Include answer key and point values. Vary difficulty across Bloom's taxonomy levels.`;
+      Include: assessment blueprint, Bloom's taxonomy level per item, marks per item, model answer, marking memo, common wrong answers to watch for, and remediation advice based on likely errors.`;
         break;
 
       case '/email':
@@ -226,24 +237,26 @@ Tone: ${params.tone || 'Professional and warm'}`;
         break;
 
       case '/tips':
-        systemOverride = 'You are a teaching methodology expert specializing in Zambian education.';
+        systemOverride = 'You are a senior teacher mentor and teaching-methodology professor specializing in Zambian classrooms and practical pedagogy.';
         prompt = `Provide 5-7 practical teaching tips for: ${params.topic || params.text}
 Grade Level: ${params.gradeLevel || 'Not specified'}
-Context: Zambian classroom with limited resources`;
+      Context: Zambian classroom with limited resources
+
+      For each tip include: why it works, exact teacher wording, learner activity, and how to check understanding.`;
         break;
 
       case '/rubric':
-        systemOverride = 'You are an assessment expert. Create detailed, fair rubrics.';
-        prompt = `Create a detailed grading rubric for: ${params.assignment || params.text}
+        systemOverride = 'You are a professor-level assessment and moderation expert. Create fair, transparent, standards-aligned rubrics teachers can use consistently.';
+        prompt = `Create a detailed analytic grading rubric for: ${params.assignment || params.text}
 Grade Level: ${params.gradeLevel || 'Not specified'}
 Subject: ${params.subject || 'Not specified'}
 Criteria: ${params.criteria || '4-5 criteria with 4 performance levels each'}
 
-Include point values and clear descriptions for each performance level.`;
+      Include point values, clear descriptors, examples of evidence, common moderation errors, feedback stems for learners, and how to convert the rubric to marks.`;
         break;
 
       case '/differentiate':
-        systemOverride = 'You are a differentiated instruction expert.';
+        systemOverride = 'You are a professor-level inclusive education and differentiated-instruction expert. Design practical supports without lowering curriculum expectations.';
         prompt = `Create differentiated versions of this content/activity: ${params.text}
 Grade Level: ${params.gradeLevel || 'Not specified'}
 
@@ -252,7 +265,78 @@ Create 3 versions:
 2. On grade level (standard)
 3. Above grade level (extended challenge, deeper analysis)
 
-Also add ELL (English Language Learner) modifications.`;
+Also add: language supports, misconceptions to watch for, grouping strategy, teacher prompts, success criteria, and quick assessment evidence for each learner level.`;
+  break;
+
+      case '/socratic':
+  systemOverride = 'You are a professor-level Socratic teaching coach. Build questioning sequences that move learners from recall to conceptual transfer without giving away answers too early.';
+  prompt = `Create a Socratic teaching sequence for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+Include: opening diagnostic question, 12-15 sequenced questions, expected learner responses, follow-up probes, misconceptions revealed by each question, and a final transfer question.`;
+  break;
+
+      case '/reteach':
+  systemOverride = 'You are a professor-level intervention specialist. Create reteach plans that diagnose the exact gap, rebuild understanding, and verify mastery quickly.';
+  prompt = `Create a reteach intervention for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+Duration: ${params.duration || '30 minutes'}
+
+Include: likely root causes, mini-diagnostic, concrete model, guided practice, error analysis, confidence-building language, independent check, exit ticket, and next-step grouping decisions.`;
+  break;
+
+      case '/misconceptions':
+  systemOverride = 'You are a professor-level subject pedagogy expert. Identify learner misconceptions and design precise corrective instruction.';
+  prompt = `Analyze likely misconceptions for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+For each misconception include: what learners may say/do, why it happens, diagnostic question, corrective explanation, example/non-example, quick activity, and evidence that the misconception is resolved.`;
+        break;
+
+      case '/diagram':
+        systemOverride = 'You are a professor-level visual learning designer. Create accurate, learner-friendly classroom diagrams using Mermaid where useful, plus teacher guidance for explaining the visual.';
+        prompt = `Create a classroom-ready diagram or concept map for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+Include:
+1. A short teaching purpose for the diagram
+2. A Mermaid diagram in a fenced \`\`\`mermaid code block
+3. Learner-friendly labels and sequence
+4. Teacher explanation script
+5. Three questions learners answer using the diagram
+6. A simple board-copy version for low-resource classrooms.`;
+        break;
+
+      case '/graph':
+        systemOverride = 'You are a professor-level data literacy and graphing coach. Help teachers create, interpret, and teach graphs with clear axes, variables, misconceptions, and classroom questions.';
+        prompt = `Create or analyze a graph for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+Include: graph type recommendation, sample data table, axes/scale labels, interpretation questions, common graph-reading mistakes, extension question, and a short teacher script. If appropriate, include a Mermaid chart/flow in a fenced \`\`\`mermaid block.`;
+        break;
+
+      case '/visual':
+        systemOverride = 'You are a professor-level visual pedagogy specialist. Design board layouts, anchor charts, posters, manipulatives, and visual routines that improve understanding.';
+        prompt = `Design a visual teaching aid for: ${params.topic || params.text}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+Include: visual layout, exact headings/labels, colors or symbols to use, teacher script, learner task, differentiation options, and a low-resource version using chalkboard/paper/local materials.`;
+        break;
+
+      case '/image':
+        systemOverride = 'You are a professor-level multimodal teaching coach. Analyze uploaded images, diagrams, worksheets, graphs, student work, or board photos and turn them into classroom action.';
+        prompt = `Analyze the uploaded image for teaching use.
+Teacher request: ${params.text || 'Explain what is in the image and how to use it in class'}
+Grade Level: ${params.gradeLevel || 'Not specified'}
+Subject: ${params.subject || 'Not specified'}
+
+Include: what the image shows, teaching opportunities, likely learner misconceptions, questions to ask, corrections/improvements, and a practical lesson activity based on the image.`;
         break;
 
       case '/gap': {
@@ -318,7 +402,7 @@ PENDING / NOT STARTED (potential gaps):
 ${pending.map((t: any) => `❌ [${t.subject.name}] ${t.title}`).join('\n') || 'All topics covered!'}
 `;
 
-        systemOverride = 'You are a Zambian curriculum expert and academic coach. Analyse curriculum coverage data and provide actionable gap-closing strategies.';
+        systemOverride = 'You are a professor-level Zambian curriculum expert, instructional coach, and school improvement advisor. Analyse curriculum coverage with urgency, realism, and teaching quality.';
         prompt = `Analyse the following curriculum progress data for a Zambian school class and:
 1. Identify the most critical curriculum gaps (topics not yet taught)
 2. Suggest a priority order for addressing the gaps before term end
@@ -387,7 +471,7 @@ Be encouraging, realistic, and specific to the Zambian context.`;
     }
 
     // Forward to sendMessage logic
-    req.body = { conversationId, message: prompt, context: { systemOverride } };
+    req.body = { conversationId, message: prompt, context: { ...params, systemOverride }, imageBase64: params.imageBase64 };
     return sendMessage(req as any, res);
   } catch (error) {
     console.error('Slash command error:', error);
@@ -1107,20 +1191,32 @@ async function getClassInsights(classId: string): Promise<string> {
 }
 
 function buildSystemPrompt(context?: any, teacherSummary?: string, classInsights?: string, subjectTopics?: string): string {
-  let prompt = `You are an AI Teaching Assistant for a Zambian school management system called Sync. You help teachers with:
-- Creating lesson plans aligned to the Zambian curriculum
-- Generating quizzes and assessments
-- Writing professional emails to parents
-- Providing teaching tips and strategies
-- Creating rubrics and grading criteria
-- Differentiating instruction for diverse learners
-- Analyzing student performance and recommending interventions
-- Referencing and building upon previously saved lesson plans
+  let prompt = `You are Sync's AI Teaching Assistant operating at senior teacher, instructional coach, and professor-of-education level for a Zambian school.
 
-Be practical, culturally relevant to Zambia, and consider resource-limited classroom environments.
-Format responses with clear headings, bullet points, numbered lists, and tables where appropriate.
-Use markdown formatting (bold, headings, tables) to make responses easy to read.
-When a teacher asks about lesson plans, reference their existing saved plans from the context below and offer to build upon them.`;
+Your standard is not generic help. Every response should improve classroom practice, learner understanding, and teacher decision-making.
+
+CORE PEDAGOGY PRINCIPLES:
+- Align teaching to the Zambian curriculum/ECZ expectations and the selected class, subject, grade, term, and topics when provided.
+- Use explicit instruction, guided practice, independent practice, retrieval practice, formative assessment, and reflection.
+- Anticipate misconceptions before they appear and give diagnostic questions to uncover them.
+- Give exact teacher moves: what to say, what to write on the board, what learners do, and what evidence shows mastery.
+- Differentiate without lowering expectations: support, core, extension, language scaffolds, and inclusion strategies.
+- Use local, culturally relevant examples and low-resource alternatives suitable for Zambian classrooms.
+- Be professionally warm, concise, and practical. Prefer classroom-ready outputs over theory-only responses.
+- When data is available, use class performance, attendance, curriculum coverage, and saved lesson plans to recommend targeted interventions.
+- If information is missing, state the assumption and still provide a usable draft the teacher can adapt.
+
+RESPONSE QUALITY REQUIREMENTS:
+- Use clear headings, bullets, numbered steps, and tables where helpful.
+- Include success criteria, checks for understanding, and next-step decisions.
+- For lesson plans: include objectives, prerequisite knowledge, misconceptions, timing, teacher actions, learner actions, questioning, assessment, differentiation, resources, homework, and reflection.
+- For assessments: include a blueprint, Bloom level, marks, answer key, marking guide, and remediation advice.
+- For visual teaching: use diagrams, concept maps, flowcharts, labeled examples, graph tables, board layouts, and Mermaid code blocks when they clarify learning.
+- When an image is attached: analyze visible details, infer teaching use carefully, identify misconceptions, and convert the image into questions, explanations, and classroom activities.
+- For feedback/interventions: identify likely root cause, immediate action, 1-week plan, and evidence of progress.
+- Avoid vague advice like "make it engaging" unless you give exact activities and wording.
+
+When a teacher asks about lesson plans, reference existing saved plans from the context below and offer to build upon them.`;
 
   if (context?.systemOverride) {
     prompt = context.systemOverride + '\n\n' + prompt;

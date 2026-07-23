@@ -13,6 +13,7 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  imageBase64?: string;
   createdAt: string;
 }
 
@@ -77,8 +78,8 @@ const aiAssistantService = {
   getConversations: () =>
     api.get<Conversation[]>('/ai-assistant/conversations').then(r => r.data),
 
-  createConversation: (title: string) =>
-    api.post<Conversation>('/ai-assistant/conversations', { title }).then(r => r.data),
+  createConversation: (title: string, context?: Record<string, unknown>) =>
+    api.post<Conversation>('/ai-assistant/conversations', { title, context }).then(r => r.data),
 
   getConversation: (id: string) =>
     api.get<{ conversation: Conversation; messages: Message[] }>(`/ai-assistant/conversations/${id}`).then(r => r.data),
@@ -87,15 +88,15 @@ const aiAssistantService = {
     api.delete(`/ai-assistant/conversations/${id}`).then(r => r.data),
 
   // Chat - conversationId in body
-  sendMessage: (conversationId: string, message: string) =>
-    api.post<ChatResponse>('/ai-assistant/chat', { conversationId, message }).then(r => r.data),
+  sendMessage: (conversationId: string, message: string, context?: Record<string, unknown>, imageBase64?: string) =>
+    api.post<ChatResponse>('/ai-assistant/chat', { conversationId, message, context, imageBase64 }).then(r => r.data),
 
   // Slash Commands - command + params in body
-  executeCommand: (conversationId: string, command: string, args: string) =>
+  executeCommand: (conversationId: string, command: string, args: string, context?: Record<string, unknown>, imageBase64?: string) =>
     api.post<ChatResponse>('/ai-assistant/command', {
       conversationId,
       command,
-      params: { text: args },
+      params: { text: args, imageBase64, ...context },
     }).then(r => r.data),
 
   // Artifacts - flat routes

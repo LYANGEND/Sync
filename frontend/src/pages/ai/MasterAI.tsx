@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
 import ReactMarkdown from 'react-markdown';
 import { useVoiceConversation } from '../../hooks/useVoiceConversation';
+import { useTheme } from '../../context/ThemeContext';
 
 interface ChatMessage {
   id: string;
@@ -108,6 +109,7 @@ function groupConversationsByDate(conversations: MasterAIConversation[]) {
 // MAIN COMPONENT
 // ==========================================
 const MasterAI = () => {
+  const { settings: themeSettings } = useTheme();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -685,9 +687,16 @@ const MasterAI = () => {
     : conversations;
 
   const groupedConversations = groupConversationsByDate(filteredConversations);
+  const schoolName = themeSettings.schoolName || 'Your School';
+  const schoolInitial = schoolName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden">
+    <div
+      className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden"
+      style={{
+        backgroundImage: 'radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 30%), radial-gradient(circle at bottom left, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%)',
+      }}
+    >
       {/* ============ SIDEBAR ============ */}
       <div
         className={`${
@@ -697,10 +706,33 @@ const MasterAI = () => {
         } transition-all duration-300 flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col fixed md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none h-full`}
       >
         {/* Sidebar Header */}
-        <div className="p-3 flex-shrink-0">
+        <div className="p-3 flex-shrink-0 space-y-3 border-b border-gray-100 dark:border-slate-700/80">
+          <div className="rounded-2xl border border-gray-200 dark:border-slate-700 bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              {themeSettings.logoUrl ? (
+                <img
+                  src={themeSettings.logoUrl}
+                  alt={schoolName}
+                  className="w-11 h-11 rounded-2xl object-contain bg-white dark:bg-slate-800 p-1 shadow-sm"
+                />
+              ) : (
+                <div
+                  className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold shadow-sm"
+                  style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}
+                >
+                  {schoolInitial}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">AI Workspace</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{schoolName}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Operational command center</p>
+              </div>
+            </div>
+          </div>
           <button
             onClick={startNewChat}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm"
           >
             <Plus size={18} />
             New Chat
@@ -716,7 +748,8 @@ const MasterAI = () => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search conversations..."
-              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 placeholder-gray-400 outline-none focus:border-purple-300 dark:focus:border-purple-600 transition-colors"
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 placeholder-gray-400 outline-none transition-colors"
+              style={{ boxShadow: 'none' }}
             />
           </div>
         </div>
@@ -771,7 +804,7 @@ const MasterAI = () => {
       {/* ============ MAIN CHAT AREA ============ */}
       <div className="flex-1 flex flex-col min-w-0 w-full relative">
         {/* Header */}
-        <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
+        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
           <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -780,24 +813,44 @@ const MasterAI = () => {
             >
               {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
             </button>
-            <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-purple-600 dark:text-purple-400" />
-            </div>
+            {themeSettings.logoUrl ? (
+              <img
+                src={themeSettings.logoUrl}
+                alt={schoolName}
+                className="w-8 h-8 md:w-9 md:h-9 rounded-xl object-contain bg-white dark:bg-slate-800 p-1 border border-gray-200 dark:border-slate-700 flex-shrink-0"
+              />
+            ) : (
+              <div
+                className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-sm"
+                style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}
+              >
+                <Sparkles className="w-4 h-4 md:w-5 md:h-5" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5 md:gap-2 text-xs md:text-sm">
                 <span className="truncate">Master AI Ops</span>
-                <span className="text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium flex-shrink-0">BETA</span>
+                <span
+                  className="text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                  style={{
+                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, transparent)',
+                    color: 'var(--primary-color)',
+                  }}
+                >
+                  BETA
+                </span>
               </h2>
               <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="hidden sm:inline">Natural language control across all modules</span>
+                <span className="hidden sm:inline">Natural language control for {schoolName}</span>
                 <span className="sm:hidden">AI Operations</span>
               </p>
             </div>
             {activeConversationId && (
               <button
                 onClick={startNewChat}
-                className="p-2 rounded-lg text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors flex-shrink-0"
+                className="p-2 rounded-lg text-gray-400 transition-colors flex-shrink-0"
+                style={{ color: activeConversationId ? 'var(--primary-color)' : undefined }}
                 title="New Chat"
               >
                 <Plus size={16} className="md:w-[18px] md:h-[18px]" />
@@ -808,8 +861,9 @@ const MasterAI = () => {
               className={`p-2 rounded-lg transition-all flex-shrink-0 ${
                 voiceMode
                   ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/30 animate-pulse'
-                  : 'text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                    : 'text-gray-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
               }`}
+                  style={!voiceMode ? { color: 'var(--primary-color)' } : undefined}
               title={voiceMode ? 'End Voice Call' : 'Start Voice Call'}
             >
               {voiceMode ? <PhoneOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Phone size={16} className="md:w-[18px] md:h-[18px]" />}
@@ -824,7 +878,7 @@ const MasterAI = () => {
               <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
             </div>
           ) : messages.length === 0 ? (
-            <WelcomeScreen onCommand={sendCommand} />
+            <WelcomeScreen onCommand={sendCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} />
           ) : (
             messages.map(msg => (
               <MessageBubble
@@ -832,6 +886,7 @@ const MasterAI = () => {
                 message={msg}
                 onSuggestionClick={sendCommand}
                 onPlayAudio={playResponseAudio}
+                schoolName={schoolName}
               />
             ))
           )}
@@ -847,7 +902,8 @@ const MasterAI = () => {
                   key={i}
                   onClick={() => sendCommand(cmd.command)}
                   disabled={isProcessing}
-                  className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-full text-[11px] md:text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 flex-shrink-0"
+                  className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-full text-[11px] md:text-xs font-medium whitespace-nowrap bg-white/90 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 transition-colors disabled:opacity-50 flex-shrink-0"
+                  style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, rgb(229 231 235))' }}
                 >
                   <cmd.icon size={12} className="flex-shrink-0" />
                   <span className="hidden sm:inline">{cmd.label}</span>
@@ -1015,7 +1071,13 @@ const MasterAI = () => {
                   </button>
                 </div>
               )}
-              <div className="flex items-end gap-1.5 md:gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-1.5 md:p-2 shadow-sm focus-within:border-purple-300 dark:focus-within:border-purple-600 focus-within:ring-1 focus-within:ring-purple-100 dark:focus-within:ring-purple-900/30 transition-all">
+              <div
+                className="flex items-end gap-1.5 md:gap-2 bg-white/95 dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-1.5 md:p-2 shadow-sm transition-all"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--primary-color) 10%, rgb(229 231 235))',
+                  boxShadow: '0 8px 30px rgba(15, 23, 42, 0.06)',
+                }}
+              >
                 <input 
                   type="file" 
                   accept="image/*" 
@@ -1025,14 +1087,16 @@ const MasterAI = () => {
                 />
                 <button 
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors flex-shrink-0"
+                  className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:bg-purple-50 transition-colors flex-shrink-0"
+                  style={{ color: 'var(--primary-color)' }}
                   title="Add Image"
                 >
                   <ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />
                 </button>
                 <button 
                   onClick={toggleListening}
-                  className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+                  className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:bg-purple-50'}`}
+                  style={!isListening ? { color: 'var(--primary-color)' } : undefined}
                   title={isListening ? "Stop listening" : "Start speaking"}
                 >
                   {isListening ? <MicOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
@@ -1051,13 +1115,14 @@ const MasterAI = () => {
                 <button
                   onClick={() => sendCommand()}
                   disabled={(!input.trim() && !imageBase64) || isProcessing}
-                  className="p-2 md:p-2.5 mb-0.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                  className="p-2 md:p-2.5 mb-0.5 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}
                 >
                   {isProcessing ? <Loader2 size={16} className="md:w-[18px] md:h-[18px] animate-spin" /> : <Send size={16} className="md:w-[18px] md:h-[18px]" />}
                 </button>
               </div>
               <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
-                <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage data across all modules. Actions are executed immediately.</span>
+                <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage operations across {schoolName}. Actions are executed immediately.</span>
                 <span className="sm:hidden">AI can process images, voice, and execute actions immediately.</span>
               </p>
             </>
@@ -1163,16 +1228,27 @@ const ConversationItem = ({
 // ==========================================
 // WELCOME SCREEN
 // ==========================================
-const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
+const WelcomeScreen = ({ onCommand, schoolName, logoUrl }: { onCommand: (cmd: string) => void; schoolName: string; logoUrl?: string }) => (
   <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-4 md:px-4">
-    <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-4 md:mb-6">
-      <Sparkles className="w-8 h-8 md:w-10 md:h-10 text-purple-600 dark:text-purple-400" />
+    {logoUrl ? (
+      <img
+        src={logoUrl}
+        alt={schoolName}
+        className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-contain bg-white dark:bg-slate-800 p-2 shadow-sm border border-gray-200 dark:border-slate-700 mb-4 md:mb-6"
+      />
+    ) : (
+      <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl flex items-center justify-center mb-4 md:mb-6 text-white shadow-sm" style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}>
+        <Sparkles className="w-8 h-8 md:w-10 md:h-10" />
+      </div>
+    )}
+    <div className="mb-3 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+      {schoolName} AI Command Center
     </div>
     <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center px-2">
-      What would you like me to do?
+      What would you like me to do for {schoolName}?
     </h3>
     <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-2">
-      Tell me in plain English and I'll execute it across any module — calendar, students, classes, fees, and more.
+      Tell me in plain English and I’ll execute it across calendar, students, classes, fees, communication, and more.
     </p>
 
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl px-2">
@@ -1180,33 +1256,34 @@ const WelcomeScreen = ({ onCommand }: { onCommand: (cmd: string) => void }) => (
         <button
           key={i}
           onClick={() => onCommand(cmd.command)}
-          className="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-all text-left group"
+          className="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-white/95 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 transition-all text-left group shadow-sm hover:-translate-y-0.5"
+          style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 10%, rgb(229 231 235))' }}
         >
-          <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)', color: 'var(--primary-color)' }}>
             <cmd.icon size={16} className="md:w-[18px] md:h-[18px]" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs md:text-sm font-medium text-gray-900 dark:text-white">{cmd.label}</p>
             <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
           </div>
-          <ArrowRight size={12} className="md:w-[14px] md:h-[14px] text-gray-300 dark:text-gray-600 flex-shrink-0 group-hover:text-purple-500 transition-colors" />
+          <ArrowRight size={12} className="md:w-[14px] md:h-[14px] text-gray-300 dark:text-gray-600 flex-shrink-0 transition-colors" style={{ color: 'var(--primary-color)' }} />
         </button>
       ))}
     </div>
 
-    <div className="mt-6 md:mt-8 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-xl p-4 md:p-5 border border-purple-100 dark:border-purple-800/30 max-w-lg w-full mx-2">
+    <div className="mt-6 md:mt-8 rounded-xl p-4 md:p-5 border max-w-lg w-full mx-2 shadow-sm bg-white/85 dark:bg-slate-800/80" style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, rgb(226 232 240))' }}>
       <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-        <Zap size={14} className="text-purple-600 dark:text-purple-400 flex-shrink-0" />
-        <span>What can I do?</span>
+        <Zap size={14} className="flex-shrink-0" style={{ color: 'var(--primary-color)' }} />
+        <span>What can I help {schoolName} with?</span>
       </h4>
       <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1.5">
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Add public holidays by country to the academic calendar</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Create classes, subjects, and fee structures</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Search for students, teachers, and users</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Create announcements and send notifications</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Set up academic terms and assessment schedules</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>Record expenses and manage scholarships</span></li>
-        <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5 flex-shrink-0">•</span><span>View school statistics and analytics</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Add public holidays by country to the academic calendar</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Create classes, subjects, and fee structures</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Search for students, teachers, and users</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Create announcements and send notifications</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Set up academic terms and assessment schedules</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Record expenses and manage scholarships</span></li>
+        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>View school statistics and analytics</span></li>
       </ul>
     </div>
   </div>
@@ -1219,10 +1296,12 @@ const MessageBubble = ({
   message,
   onSuggestionClick,
   onPlayAudio,
+  schoolName,
 }: {
   message: ChatMessage;
   onSuggestionClick: (cmd: string) => void;
   onPlayAudio: (text: string) => void;
+  schoolName: string;
 }) => {
   const isUser = message.role === 'user';
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1253,7 +1332,7 @@ const MessageBubble = ({
   if (isUser) {
     return (
       <div className="flex gap-2 md:gap-3 justify-end">
-        <div className="max-w-[90%] md:max-w-[85%] bg-purple-600 text-white rounded-2xl rounded-br-md px-3 md:px-4 py-2.5 md:py-3">
+        <div className="max-w-[90%] md:max-w-[85%] text-white rounded-2xl rounded-br-md px-3 md:px-4 py-2.5 md:py-3 shadow-sm" style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}>
           {message.image && (
             <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-48 md:max-h-60 object-cover border border-purple-400" />
           )}
@@ -1270,12 +1349,13 @@ const MessageBubble = ({
 
   return (
     <div className="flex gap-2 md:gap-3">
-      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-1">
-        <Sparkles size={14} className="md:w-4 md:h-4 text-purple-600 dark:text-purple-400" />
+      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1" style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}>
+        <Sparkles size={14} className="md:w-4 md:h-4" style={{ color: 'var(--primary-color)' }} />
       </div>
       <div className="flex-1 min-w-0 space-y-2 md:space-y-3">
         {/* Message Text */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-3 md:px-4 py-2.5 md:py-3 border border-gray-200 dark:border-slate-700 inline-block max-w-[90%] md:max-w-[85%]">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">{schoolName} AI</div>
           <div className="prose prose-sm dark:prose-invert max-w-none text-xs md:text-sm text-gray-900 dark:text-white leading-relaxed">
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>

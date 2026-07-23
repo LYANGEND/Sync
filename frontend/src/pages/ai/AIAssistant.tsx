@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   GraduationCap, Send, Plus, Trash2, MessageSquare, Sparkles, BookOpen,
   FileText, Star, ChevronLeft, Loader2, AlertCircle, Command, Package,
-  Users, BarChart3, Download, Eye, X, Save, ArrowRight, BookMarked
+  Users, BarChart3, Download, Eye, X, Save, ArrowRight, BookMarked, Brain, Target, Lightbulb, ImagePlus
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,14 +28,49 @@ interface StudentInsight {
 }
 
 const SLASH_COMMANDS = [
-  { command: '/lesson', description: 'Generate a lesson plan', icon: BookOpen },
-  { command: '/quiz', description: 'Create quiz questions', icon: FileText },
-  { command: '/rubric', description: 'Create an assessment rubric', icon: Star },
-  { command: '/email', description: 'Draft a parent email', icon: MessageSquare },
-  { command: '/tips', description: 'Get teaching tips', icon: Sparkles },
-  { command: '/differentiate', description: 'Differentiate for learners', icon: Command },
+  { command: '/lesson', description: 'Professor-level lesson plan with checks, misconceptions, and differentiation', icon: BookOpen },
+  { command: '/quiz', description: 'Assessment blueprint with Bloom levels, marking guide, and answer key', icon: FileText },
+  { command: '/rubric', description: 'Standards-aligned analytic rubric with performance descriptors', icon: Star },
+  { command: '/email', description: 'Professional parent communication with supportive next steps', icon: MessageSquare },
+  { command: '/socratic', description: 'Socratic questioning sequence for deep understanding', icon: Brain },
+  { command: '/reteach', description: 'Reteach plan for learners who did not master the concept', icon: Target },
+  { command: '/misconceptions', description: 'Likely misconceptions, diagnostics, and correction strategies', icon: Lightbulb },
+  { command: '/diagram', description: 'Generate a classroom-ready Mermaid diagram or flowchart', icon: ImagePlus },
+  { command: '/graph', description: 'Create graph/table data and explain how to teach it', icon: BarChart3 },
+  { command: '/visual', description: 'Design visual aids, anchor charts, board layouts, and posters', icon: Sparkles },
+  { command: '/image', description: 'Analyze an uploaded image, worksheet, graph, or diagram', icon: ImagePlus },
+  { command: '/tips', description: 'Teaching tips with exact wording, activities, and checks', icon: Sparkles },
+  { command: '/differentiate', description: 'Differentiate for support, core, extension, and language needs', icon: Command },
   { command: '/gap', description: 'Detect curriculum gaps for a class', icon: AlertCircle },
   { command: '/career', description: 'Career & subject path advice for a student', icon: GraduationCap },
+];
+
+const PROFESSOR_PROMPTS = [
+  {
+    title: 'Plan a mastery lesson',
+    prompt: '/lesson Create a complete mastery lesson with misconception checks, guided practice, independent practice, exit ticket, and extension task',
+    icon: BookOpen,
+  },
+  {
+    title: 'Diagnose misconceptions',
+    prompt: '/misconceptions Identify likely misconceptions, quick diagnostic questions, correction explanations, and examples/non-examples',
+    icon: Lightbulb,
+  },
+  {
+    title: 'Build an assessment',
+    prompt: '/quiz Create a balanced assessment with Bloom taxonomy levels, marks allocation, answer key, and moderation notes',
+    icon: FileText,
+  },
+  {
+    title: 'Create a diagram',
+    prompt: '/diagram Create a clear visual diagram, flowchart, or concept map learners can copy into their books',
+    icon: ImagePlus,
+  },
+  {
+    title: 'Reteach struggling learners',
+    prompt: '/reteach Create a 30-minute reteach intervention for learners below mastery, including scaffolds and checks for understanding',
+    icon: Target,
+  },
 ];
 
 const AIAssistant = () => {
@@ -46,6 +81,7 @@ const AIAssistant = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [aiAvailable, setAiAvailable] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -70,6 +106,7 @@ const AIAssistant = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadInitialData(); }, []);
   useEffect(() => { scrollToBottom(); }, [messages]);
@@ -143,10 +180,12 @@ const AIAssistant = () => {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || sending) return;
+    if ((!input.trim() && !imageBase64) || sending) return;
 
-    const userMessage = input.trim();
+    const currentImage = imageBase64;
+    const userMessage = input.trim() || 'Analyze this teaching image and suggest how I can use it in class.';
     setInput('');
+    setImageBase64(null);
     setSending(true);
 
     // Build context from selected class/subject
@@ -168,7 +207,7 @@ const AIAssistant = () => {
     let convId = activeConversation;
     if (!convId) {
       try {
-        const data = await aiAssistantService.createConversation(userMessage.slice(0, 50));
+        const data = await aiAssistantService.createConversation(userMessage.slice(0, 50), context);
         convId = data.id;
         setActiveConversation(convId);
         setConversations(prev => [data, ...prev]);
@@ -184,6 +223,7 @@ const AIAssistant = () => {
       id: `temp-${Date.now()}`,
       role: 'user',
       content: userMessage,
+      imageBase64: currentImage || undefined,
       createdAt: new Date().toISOString(),
     };
     setMessages(prev => [...prev, tempUserMsg]);
@@ -197,9 +237,9 @@ const AIAssistant = () => {
         const parts = userMessage.split(' ');
         const command = parts[0];
         const topic = parts.slice(1).join(' ');
-        res = await aiAssistantService.executeCommand(convId!, command, topic);
+        res = await aiAssistantService.executeCommand(convId!, command, topic, context, currentImage || undefined);
       } else {
-        res = await aiAssistantService.sendMessage(convId!, userMessage);
+        res = await aiAssistantService.sendMessage(convId!, userMessage, context, currentImage || undefined);
       }
 
       const assistantMsg: Message = {
@@ -215,6 +255,7 @@ const AIAssistant = () => {
       // Remove the temp user message on error
       setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id));
       setInput(userMessage);
+      setImageBase64(currentImage);
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -231,6 +272,23 @@ const AIAssistant = () => {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     setShowCommands(e.target.value === '/');
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => setImageBase64(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const insertCommand = (command: string) => {
@@ -513,10 +571,10 @@ const AIAssistant = () => {
                 <Sparkles className="w-10 h-10 text-purple-600 dark:text-purple-400" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                How can I help you teach today?
+                Teach like a master educator
               </h3>
               <p className="text-gray-500 dark:text-gray-400 max-w-md mb-2">
-                I can create lesson plans, quizzes, rubrics, email drafts, and more.
+                Ask for lesson design, diagrams, graph interpretation, visual aids, image analysis, assessment quality, or intervention plans.
               </p>
               {selectedClass && (
                 <p className="text-sm text-purple-600 dark:text-purple-400 mb-6">
@@ -533,17 +591,17 @@ const AIAssistant = () => {
                   💡 Select a class or subject above for curriculum-aware responses
                 </p>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
-                {SLASH_COMMANDS.slice(0, 4).map(cmd => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
+                {PROFESSOR_PROMPTS.map(cmd => (
                   <button
-                    key={cmd.command}
-                    onClick={() => insertCommand(cmd.command)}
-                    className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left"
+                    key={cmd.title}
+                    onClick={() => setInput(cmd.prompt + ' ')}
+                    className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 transition-colors text-left shadow-sm"
                   >
                     <cmd.icon className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                     <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{cmd.command}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{cmd.description}</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{cmd.title}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">{cmd.prompt.replace(/^\/\w+\s*/, '')}</p>
                     </div>
                   </button>
                 ))}
@@ -585,6 +643,14 @@ const AIAssistant = () => {
                           th: ({children}) => <th className="px-3 py-1.5 text-left font-semibold border-b border-gray-200 dark:border-slate-600">{children}</th>,
                           td: ({children}) => <td className="px-3 py-1.5 border-b border-gray-100 dark:border-slate-700">{children}</td>,
                           blockquote: ({children}) => <blockquote className="border-l-4 border-purple-400 pl-3 my-2 italic text-gray-500">{children}</blockquote>,
+                          code: ({inline, className, children, ...props}: any) => {
+                            const match = /language-(\w+)/.exec(className || '');
+                            const language = match?.[1]?.toLowerCase();
+                            if (!inline && language === 'mermaid') {
+                              return <MermaidDiagram chart={String(children).replace(/\n$/, '')} />;
+                            }
+                            return <code className={className} {...props}>{children}</code>;
+                          },
                         }}
                       >{msg.content}</ReactMarkdown>
                     </div>
@@ -600,7 +666,12 @@ const AIAssistant = () => {
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                  <div className="space-y-2">
+                    {msg.imageBase64 && (
+                      <img src={msg.imageBase64} alt="Teacher upload" className="max-h-48 rounded-xl border border-white/30 object-contain" />
+                    )}
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                  </div>
                 )}
                 <p className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-purple-200' : 'text-gray-400'}`}>
                   {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -646,7 +717,28 @@ const AIAssistant = () => {
 
         {/* Input Area */}
         <div className="px-4 pb-4">
+          {imageBase64 && (
+            <div className="mb-2 inline-flex items-center gap-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 p-2">
+              <img src={imageBase64} alt="Upload preview" className="h-14 w-14 rounded-lg object-cover bg-white" />
+              <div className="text-left">
+                <p className="text-xs font-medium text-purple-700 dark:text-purple-300">Image attached</p>
+                <p className="text-[10px] text-purple-500 dark:text-purple-400">Ask AI to analyze, explain, improve, or turn it into a lesson visual.</p>
+              </div>
+              <button onClick={() => setImageBase64(null)} className="p-1 rounded-full hover:bg-purple-100 dark:hover:bg-purple-800/40">
+                <X className="w-4 h-4 text-purple-500" />
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2 bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-2 shadow-sm">
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!aiAvailable || sending}
+              className="p-2.5 text-purple-600 dark:text-purple-400 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+              title="Attach image, diagram, worksheet, or graph"
+            >
+              <ImagePlus className="w-5 h-5" />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
@@ -655,7 +747,7 @@ const AIAssistant = () => {
               placeholder={aiAvailable
                 ? selectedSubject
                   ? `Ask about ${selectedSubject.name}${selectedClass ? ` in ${selectedClass.name}` : ''} or type / for commands...`
-                  : selectedClass ? `Ask about ${selectedClass.name} or type / for commands...` : 'Ask anything or type / for commands...'
+                  : selectedClass ? `Ask about ${selectedClass.name}, attach images, or type / for commands...` : 'Ask anything, attach an image, or type / for commands...'
                 : 'AI is not configured. Contact admin to enable.'}
               disabled={!aiAvailable || sending}
               rows={1}
@@ -664,7 +756,7 @@ const AIAssistant = () => {
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || sending || !aiAvailable}
+              disabled={(!input.trim() && !imageBase64) || sending || !aiAvailable}
               className="p-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             >
               <Send className="w-5 h-5" />
@@ -816,6 +908,48 @@ const AIAssistant = () => {
           ))}
         </div>
       </div>
+    </div>
+  );
+};
+
+const MermaidDiagram = ({ chart }: { chart: string }) => {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+  const diagramIdRef = useRef(`teaching-ai-diagram-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  useEffect(() => {
+    let cancelled = false;
+    const renderDiagram = async () => {
+      try {
+        const mermaid = (await import('mermaid')).default;
+        mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
+        const result = await mermaid.render(diagramIdRef.current, chart);
+        if (!cancelled) {
+          setSvg(result.svg);
+          setError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setError('Could not render this diagram. The Mermaid source is shown below.');
+        }
+      }
+    };
+    renderDiagram();
+    return () => { cancelled = true; };
+  }, [chart]);
+
+  if (error) {
+    return (
+      <div className="my-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3">
+        <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">{error}</p>
+        <pre className="overflow-x-auto text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap">{chart}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 overflow-x-auto">
+      {svg ? <div className="min-w-fit" dangerouslySetInnerHTML={{ __html: svg }} /> : <Loader2 className="w-4 h-4 animate-spin text-purple-500" />}
     </div>
   );
 };
