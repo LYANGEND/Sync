@@ -19,8 +19,8 @@ router.put('/features/:feature', authenticateToken, authorizeRole(['SUPER_ADMIN'
 
 // Custom fields definition
 router.get('/custom-fields', authenticateToken, listCustomFields);
-router.post('/custom-fields', authenticateToken, authorizeRole(['SUPER_ADMIN', 'ADMIN']), createCustomField);
-router.delete('/custom-fields/:id', authenticateToken, authorizeRole(['SUPER_ADMIN', 'ADMIN']), deleteCustomField);
+router.post('/custom-fields', authenticateToken, authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']), createCustomField);
+router.delete('/custom-fields/:id', authenticateToken, authorizeRole(['SUPER_ADMIN', 'BRANCH_MANAGER']), deleteCustomField);
 
 // Custom field values for a specific entity (e.g., student)
 router.get('/custom-fields/:entityId/values', authenticateToken, getCustomFieldValues);

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { getCurrentTenantId } from '../middleware/tenantContext';
+import { signTenantFileUrl } from '../services/tenantFileService';
 
 // ==================== Schemas ====================
 
@@ -354,7 +356,15 @@ export const getBranchUsers = async (req: Request, res: Response) => {
             }
         }
 
-        res.json(allUsers);
+        const tenantId = getCurrentTenantId();
+        if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
+
+        res.json(allUsers.map(user => ({
+            ...user,
+            profilePictureUrl: user.profilePictureUrl
+                ? signTenantFileUrl(user.profilePictureUrl, tenantId)
+                : null
+        })));
     } catch (error) {
         console.error('Get branch users error:', error);
         res.status(500).json({ message: 'Internal server error' });

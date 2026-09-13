@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import syllabusService, { parseLearningObjectives } from '../../services/syllabusService';
+import { PageHeader } from '../../components/ui/DesignSystem';
 
 interface Class {
   id: string;
@@ -76,9 +77,9 @@ function gradeLabel(gl: number): string {
 }
 
 const statusConfig = {
-  PENDING:     { label: 'Not Started', color: 'text-gray-400',  bg: 'bg-gray-100 dark:bg-slate-700', ring: 'ring-gray-300',  icon: Circle },
-  IN_PROGRESS: { label: 'In Progress', color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-900/20', ring: 'ring-amber-400', icon: PlayCircle },
-  COMPLETED:   { label: 'Completed',   color: 'text-green-500', bg: 'bg-green-50 dark:bg-green-900/20', ring: 'ring-green-400', icon: CheckCircle },
+  PENDING:     { label: 'Not Started', badge: 'ds-badge-neutral', icon: Circle },
+  IN_PROGRESS: { label: 'In Progress', badge: 'ds-badge-warning', icon: PlayCircle },
+  COMPLETED:   { label: 'Completed', badge: 'ds-badge-success', icon: CheckCircle },
 };
 
 const nextStatus: Record<string, 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'> = {
@@ -410,15 +411,9 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
+    <div className="ds-page">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-            <BookOpen className="text-blue-600" />
-            Lesson Planner
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">
+      <PageHeader title="Lesson Planner" description={<>
             Track syllabus coverage and manage lesson plans
             {selectedClass && selectedSubject && (
               <span className="ml-1">
@@ -427,10 +422,9 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 {' '}· <span className="font-medium text-gray-700 dark:text-gray-300">{selectedSubject.name}</span>
               </span>
             )}
-          </p>
-        </div>
+      </>} />
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="ds-card ds-toolbar">
           <select
             value={selectedClassId}
             onChange={(e) => {
@@ -444,7 +438,8 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 setSelectedSubjectId(classSubjects.length > 0 ? classSubjects[0].id : '');
               }
             }}
-            className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white text-sm"
+            aria-label="Lesson planner class"
+            className="ds-select w-full sm:w-auto"
           >
             {classes.map(c => (
               <option key={c.id} value={c.id}>{c.name} ({gradeLabel(c.gradeLevel)})</option>
@@ -461,7 +456,8 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
               <select
                 value={selectedSubjectId}
                 onChange={(e) => { setSelectedSubjectId(e.target.value); setExpandedTopics(new Set()); }}
-                className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white text-sm"
+                aria-label="Lesson planner subject"
+                className="ds-select w-full sm:w-auto"
               >
                 {filteredSubjects.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
@@ -470,38 +466,33 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
             );
           })()}
         </div>
-      </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-slate-700 mb-6">
+      <div className="ds-actions" role="group" aria-label="Lesson planner view">
         <button
           onClick={() => setActiveTab('SYLLABUS')}
-          className={`px-6 py-3 font-medium text-sm transition-colors relative flex items-center gap-2 ${
-            activeTab === 'SYLLABUS' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
+          aria-pressed={activeTab === 'SYLLABUS'}
+          className={activeTab === 'SYLLABUS' ? 'ds-button-primary' : 'ds-button-secondary'}
         >
           <BarChart3 size={16} />
           Syllabus Tracker
           {total > 0 && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-              pct === 100 ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                : pct > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                : 'bg-gray-100 text-gray-500 dark:bg-slate-700 dark:text-gray-400'
+            <span className={`ds-badge ${
+              pct === 100 ? 'ds-badge-success'
+                : pct > 0 ? 'ds-badge-warning'
+                : 'ds-badge-neutral'
             }`}>
               {pct}%
             </span>
           )}
-          {activeTab === 'SYLLABUS' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600" />}
         </button>
         <button
           onClick={() => setActiveTab('PLANS')}
-          className={`px-6 py-3 font-medium text-sm transition-colors relative flex items-center gap-2 ${
-            activeTab === 'PLANS' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
+          aria-pressed={activeTab === 'PLANS'}
+          className={activeTab === 'PLANS' ? 'ds-button-primary' : 'ds-button-secondary'}
         >
           <FileText size={16} />
           Lesson Plans
-          {activeTab === 'PLANS' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -509,18 +500,18 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
       {activeTab === 'SYLLABUS' ? (
         <div className="space-y-4">
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
+            <div role="status" className="ds-card flex items-center justify-center py-16 text-[var(--text-secondary)] gap-2">
               <Loader2 size={20} className="animate-spin" /> Loading syllabus...
             </div>
           ) : topics.length === 0 ? (
-            <div className="text-center py-16 bg-gray-50 dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
+            <div className="ds-card ds-empty">
               <Layers size={40} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-              <p className="text-gray-500 dark:text-gray-400 font-medium">No topics found for this subject & grade.</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-md mx-auto">
+              <p className="ds-label">No topics found for this subject & grade.</p>
+              <p className="ds-helper mt-1 max-w-md mx-auto">
                 {selectedClass && `${selectedClass.name} is ${gradeLabel(selectedClass.gradeLevel)}.`}
                 {' '}Generate a full syllabus with AI or add topics manually.
               </p>
-              <div className="flex items-center justify-center gap-3 mt-4">
+              <div className="ds-actions justify-center mt-4">
                 <button
                   onClick={async () => {
                     if (!selectedSubjectId || !selectedClass) return;
@@ -536,14 +527,14 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                     }
                   }}
                   disabled={loading}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 text-sm font-medium shadow-sm disabled:opacity-60 transition"
+                  className="ds-button-primary"
                 >
                   {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                  {loading ? 'Generating...' : '✨ Generate with AI'}
+                  {loading ? 'Generating...' : 'Generate with AI'}
                 </button>
                 <button
                   onClick={() => setShowAddTopicModal(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 text-sm"
+                  className="ds-button-outline"
                 >
                   <Plus size={16} /> Add manually
                 </button>
@@ -552,22 +543,22 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
           ) : (
             <>
               {/* ---- Progress Overview ---- */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-                    <BarChart3 size={16} className="text-blue-500" />
+              <div className="ds-card">
+                <div className="flex flex-wrap gap-3 items-center justify-between mb-3">
+                  <h2 className="flex items-center gap-2">
+                    <BarChart3 size={20} aria-hidden="true" />
                     Syllabus Progress
-                  </h3>
+                  </h2>
                   <button
                     onClick={() => setShowAddTopicModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs font-medium"
+                    className="ds-button-primary"
                   >
                     <Plus size={14} /> Add Topic
                   </button>
                 </div>
 
                 {/* Progress bar */}
-                <div className="relative h-3 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden mb-3">
+                <div className="relative h-3 bg-[var(--surface-muted)] rounded-full overflow-hidden mb-3" role="img" aria-label={`Syllabus progress: ${completed} completed, ${inProgress} in progress, ${pending} not started. ${pct}% completed.`}>
                   <div
                     className="absolute left-0 top-0 h-full bg-green-500 rounded-full transition-all duration-500"
                     style={{ width: `${pct}%` }}
@@ -616,30 +607,28 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                   return (
                     <div
                       key={topic.id}
-                      className={`border rounded-xl overflow-hidden transition-shadow hover:shadow-sm ${
-                        topic.status === 'COMPLETED'
-                          ? 'border-green-200 dark:border-green-900/40 bg-green-50/30 dark:bg-green-900/10'
-                          : topic.status === 'IN_PROGRESS'
-                          ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-900/10'
-                          : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800'
-                      }`}
+                      className="ds-surface overflow-hidden"
                     >
-                      <div className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
                         {/* Status toggle */}
                         <button
                           onClick={() => handleStatusChange(topic.id, topic.status)}
-                          className={`flex-shrink-0 transition-colors ${cfg.color} hover:opacity-80`}
+                          className="ds-button-ghost shrink-0"
+                          aria-label={`${topic.title}: ${cfg.label}. Change to ${statusConfig[nextStatus[topic.status]].label}`}
                           title={`Click to change: ${cfg.label} → ${statusConfig[nextStatus[topic.status]].label}`}
                         >
-                          <StatusIcon size={22} />
+                          <StatusIcon size={22} aria-hidden="true" />
                         </button>
 
                         {/* Order + expand toggle */}
                         <button
                           onClick={() => subtopics.length > 0 && toggleExpand(topic.id)}
-                          className="flex items-center gap-2 flex-1 text-left min-w-0"
+                          className="ds-button-ghost flex-1 justify-start text-left min-w-0 px-2"
+                          aria-expanded={subtopics.length > 0 ? isExpanded : undefined}
+                          aria-controls={isExpanded && subtopics.length > 0 ? `lesson-topic-${topic.id}` : undefined}
+                          aria-label={subtopics.length > 0 ? `${isExpanded ? 'Collapse' : 'Expand'} ${topic.title}` : topic.title}
                         >
-                          <span className="text-xs font-mono text-gray-400 dark:text-gray-500 w-5 text-right">{topic.orderIndex || idx + 1}.</span>
+                          <span className="text-xs font-mono text-[var(--text-secondary)] w-5 text-right">{topic.orderIndex || idx + 1}.</span>
                           {subtopics.length > 0 && (
                             isExpanded
                               ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
@@ -654,19 +643,19 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                               {topic.title}
                             </span>
                             {topic.description && (
-                              <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 hidden sm:inline">{topic.description}</span>
+                              <span className="text-xs text-[var(--text-secondary)] ml-2 hidden sm:inline">{topic.description}</span>
                             )}
                           </div>
                         </button>
 
                         {/* Right side badges */}
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           {subtopics.length > 0 && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300 font-medium">
+                            <span className="ds-badge ds-badge-info">
                               {subtopics.length} sub
                             </span>
                           )}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>
+                          <span className={`ds-badge ${cfg.badge}`}>
                             {cfg.label}
                           </span>
                           {topic.completedAt && (
@@ -679,36 +668,36 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
                       {/* Expanded subtopics */}
                       {isExpanded && subtopics.length > 0 && (
-                        <div className="border-t border-gray-100 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 divide-y divide-gray-50 dark:divide-slate-700/30">
+                        <div id={`lesson-topic-${topic.id}`} className="border-t border-[var(--border-color)] bg-[var(--surface-muted)] divide-y divide-[var(--border-color)]">
                           {subtopics.map((st, stIdx) => {
                             const objectives = parseLearningObjectives(st.learningObjectives);
                             return (
-                              <div key={st.id} className="px-6 py-2.5 flex items-start gap-3 pl-14">
-                                <div className="mt-0.5 flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold flex-shrink-0">
+                              <div key={st.id} className="px-4 sm:px-6 py-3 flex items-start gap-3 sm:pl-14">
+                                <div className="mt-0.5 flex items-center justify-center w-5 h-5 rounded-full bg-[var(--surface)] text-[var(--text-secondary)] text-xs font-bold flex-shrink-0">
                                   {stIdx + 1}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{st.title}</span>
                                     {st.duration && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400 flex items-center gap-0.5">
+                                      <span className="ds-badge ds-badge-neutral">
                                         <Clock size={9} /> {st.duration}min
                                       </span>
                                     )}
                                   </div>
                                   {st.description && (
-                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{st.description}</p>
+                                    <p className="ds-helper mt-1">{st.description}</p>
                                   )}
                                   {objectives.length > 0 && (
                                     <div className="mt-1 space-y-0.5">
                                       {objectives.slice(0, 3).map((obj, i) => (
-                                        <div key={i} className="flex items-start gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                                        <div key={i} className="flex items-start gap-1.5 text-xs text-[var(--text-secondary)]">
                                           <Target size={9} className="text-emerald-500 mt-0.5 flex-shrink-0" />
                                           <span>{obj}</span>
                                         </div>
                                       ))}
                                       {objectives.length > 3 && (
-                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 pl-4">+{objectives.length - 3} more objectives</span>
+                                        <span className="text-xs text-[var(--text-secondary)] pl-4">+{objectives.length - 3} more objectives</span>
                                       )}
                                     </div>
                                   )}
@@ -728,19 +717,19 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
       ) : (
         /* =============== LESSON PLANS TAB =============== */
         <div className="space-y-4">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Weekly Lesson Plans</h2>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap gap-3 justify-between items-center mb-4">
+            <h2>Weekly Lesson Plans</h2>
+            <div className="ds-actions">
               <button
                 onClick={() => openAIModal()}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all text-sm shadow-sm"
+                className="ds-button-secondary"
               >
                 <Sparkles size={16} />
                 Generate with AI
               </button>
               <button
                 onClick={() => setShowAddPlanModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                className="ds-button-primary"
               >
                 <Plus size={16} />
                 Create Plan
@@ -749,16 +738,16 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
+            <div role="status" className="ds-card flex items-center justify-center py-16 text-[var(--text-secondary)] gap-2">
               <Loader2 size={20} className="animate-spin" /> Loading plans...
             </div>
           ) : lessonPlans.length === 0 ? (
-            <div className="text-center py-16 bg-gray-50 dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
+            <div className="ds-card ds-empty">
               <FileText size={40} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
               <p className="text-gray-500 dark:text-gray-400">No lesson plans found.</p>
               <button
                 onClick={() => setShowAddPlanModal(true)}
-                className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                className="ds-button-outline mt-3"
               >
                 Create your first lesson plan
               </button>
@@ -766,14 +755,14 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {lessonPlans.map((plan) => (
-                <div key={plan.id} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 hover:shadow-md transition-shadow">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="flex items-center gap-2 text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full text-sm font-medium">
+                <div key={plan.id} className="ds-card">
+                  <div className="flex flex-wrap gap-2 justify-between items-start mb-4">
+                    <div className="ds-badge ds-badge-neutral">
                       <Calendar size={16} />
                       Week of {new Date(plan.weekStartDate).toLocaleDateString()}
                     </div>
                     {plan.subject && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                      <span className="ds-badge ds-badge-info">
                         <BookOpen size={12} />
                         {plan.subject.name}
                       </span>
@@ -783,7 +772,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                   <div className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3 prose prose-sm dark:prose-invert max-w-none">
                     <ReactMarkdown>{plan.content}</ReactMarkdown>
                   </div>
-                  <div className="flex justify-between items-center pt-4 border-t border-gray-100 dark:border-slate-700">
+                  <div className="flex flex-wrap gap-3 justify-between items-center pt-4 border-t border-[var(--border-color)]">
                     <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                       <FileText size={16} />
                       {plan.teacher.fullName}
@@ -791,7 +780,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                         <span className="text-gray-400 dark:text-gray-500">· {plan.class.name}</span>
                       )}
                     </div>
-                    <button className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1">
+                    <button className="ds-button-ghost" aria-label={`View details for ${plan.title}`}>
                       View Details <ArrowUpRight size={14} />
                     </button>
                   </div>
@@ -804,49 +793,51 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
       {/* Add Topic Modal */}
       {showAddTopicModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Add New Topic</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+          <div role="dialog" aria-labelledby="lesson-add-topic-title" className="ds-card w-full max-w-md max-h-[90dvh] overflow-y-auto">
+            <h2 id="lesson-add-topic-title" className="mb-4">Add New Topic</h2>
             <form onSubmit={handleAddTopic} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Topic Title</label>
+                <label htmlFor="lesson-topic-title" className="ds-label mb-1">Topic Title (required)</label>
                 <input
+                  id="lesson-topic-title"
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                   value={newTopic.title}
                   onChange={(e) => setNewTopic({ ...newTopic, title: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                <label htmlFor="lesson-topic-description" className="ds-label mb-1">Description</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  id="lesson-topic-description" className="ds-textarea"
                   rows={3}
                   value={newTopic.description}
                   onChange={(e) => setNewTopic({ ...newTopic, description: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Order Index</label>
+                <label htmlFor="lesson-topic-order" className="ds-label mb-1">Order Index</label>
                 <input
+                  id="lesson-topic-order"
                   type="number"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                   value={newTopic.orderIndex}
                   onChange={(e) => setNewTopic({ ...newTopic, orderIndex: parseInt(e.target.value) })}
                 />
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   type="button"
                   onClick={() => setShowAddTopicModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-outline"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   Add Topic
                 </button>
@@ -858,53 +849,56 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
       {/* Add Plan Modal */}
       {showAddPlanModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-lg">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Create Lesson Plan</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+          <div role="dialog" aria-labelledby="lesson-add-plan-title" className="ds-card w-full max-w-lg max-h-[90dvh] overflow-y-auto">
+            <h2 id="lesson-add-plan-title" className="mb-4">Create Lesson Plan</h2>
             <form onSubmit={handleAddPlan} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Week Start Date</label>
+                <label htmlFor="lesson-plan-week" className="ds-label mb-1">Week Start Date (required)</label>
                 <input
+                  id="lesson-plan-week"
                   type="date"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                   value={newPlan.weekStartDate}
                   onChange={(e) => setNewPlan({ ...newPlan, weekStartDate: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                <label htmlFor="lesson-plan-title" className="ds-label mb-1">Title (required)</label>
                 <input
+                  id="lesson-plan-title"
                   type="text"
                   required
                   placeholder="e.g., Introduction to Algebra"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                   value={newPlan.title}
                   onChange={(e) => setNewPlan({ ...newPlan, title: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Content / Objectives</label>
+                <label htmlFor="lesson-plan-content" className="ds-label mb-1">Content / Objectives (required)</label>
                 <textarea
+                  id="lesson-plan-content"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-textarea"
                   rows={6}
                   placeholder="Outline the lesson objectives and activities..."
                   value={newPlan.content}
                   onChange={(e) => setNewPlan({ ...newPlan, content: e.target.value })}
                 />
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   type="button"
                   onClick={() => setShowAddPlanModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-outline"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   Create Plan
                 </button>
@@ -916,37 +910,38 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
       {/* AI Generate Lesson Plan Modal */}
       {showAIModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+          <div role="dialog" aria-labelledby="lesson-ai-title" aria-describedby="lesson-ai-description" className="ds-surface w-full max-w-2xl max-h-[90dvh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-slate-700">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-lg flex items-center justify-center">
-                  <Sparkles size={20} className="text-white" />
+                <div className="ds-avatar">
+                  <Sparkles size={20} aria-hidden="true" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">AI Lesson Plan Generator</h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <h2 id="lesson-ai-title">AI Lesson Plan Generator</h2>
+                  <p id="lesson-ai-description" className="ds-helper">
                     Select a class, subject, and topic to generate
                   </p>
                 </div>
               </div>
-              <button onClick={() => setShowAIModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                <X size={20} />
+              <button onClick={() => setShowAIModal(false)} className="ds-button-ghost" aria-label="Close AI lesson plan generator">
+                <X size={20} aria-hidden="true" />
               </button>
             </div>
 
             {!generatedPlan ? (
               /* Configuration Step */
-              <div className="p-6 space-y-5">
+              <div className="p-4 sm:p-6 space-y-4">
                 {/* Class & Subject Selectors */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
+                    <label htmlFor="lesson-ai-class" className="ds-label mb-1">Class</label>
                     <select
+                      id="lesson-ai-class"
                       value={aiClassId}
                       onChange={(e) => handleAIClassChange(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white text-sm"
+                      className="ds-select"
                     >
                       <option value="">Choose a class...</option>
                       {classes.map(c => (
@@ -955,11 +950,12 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                    <label htmlFor="lesson-ai-subject" className="ds-label mb-1">Subject</label>
                     <select
+                      id="lesson-ai-subject"
                       value={aiSubjectId}
                       onChange={(e) => handleAISubjectChange(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white text-sm"
+                      className="ds-select"
                     >
                       <option value="">Choose a subject...</option>
                       {aiAvailableSubjects.map(s => (
@@ -973,24 +969,25 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Topic</label>
+                  <label htmlFor="lesson-ai-topic" id="lesson-ai-topic-label" className="ds-label mb-1">Select Topic</label>
                   {aiTopicsLoading ? (
-                    <div className="flex items-center gap-2 px-4 py-2.5 text-gray-400 dark:text-gray-500 text-sm">
+                    <div role="status" aria-labelledby="lesson-ai-topic-label" className="flex items-center gap-2 px-4 py-2.5 ds-helper">
                       <Loader2 size={16} className="animate-spin" /> Loading topics...
                     </div>
                   ) : !aiSubjectId ? (
-                    <div className="px-4 py-3 bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+                    <div className="ds-alert ds-badge-neutral">
                       Select a class and subject above to see available topics.
                     </div>
                   ) : aiTopics.length === 0 ? (
-                    <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-300">
+                    <div className="ds-alert ds-badge-warning">
                       No topics found for this subject in this class. Please add topics via the Syllabus Tracker or select a different subject.
                     </div>
                   ) : (
                     <select
+                      id="lesson-ai-topic"
                       value={aiSelectedTopicId}
                       onChange={(e) => setAISelectedTopicId(e.target.value)}
-                      className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                      className="ds-select"
                     >
                       <option value="">Choose a topic...</option>
                       {aiTopics.map(t => (
@@ -1003,11 +1000,12 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Lesson Duration (minutes)</label>
+                  <label htmlFor="lesson-ai-duration" className="ds-label mb-1">Lesson Duration (minutes)</label>
                   <select
+                    id="lesson-ai-duration"
                     value={aiDuration}
                     onChange={(e) => setAIDuration(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-select"
                   >
                     <option value={30}>30 minutes</option>
                     <option value={40}>40 minutes</option>
@@ -1020,11 +1018,11 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 {aiSelectedTopicId && (() => {
                   const t = aiTopics.find(tp => tp.id === aiSelectedTopicId);
                   return t?.subtopics && t.subtopics.length > 0 ? (
-                    <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4">
-                      <p className="text-sm font-medium text-purple-700 dark:text-purple-300 mb-2">Subtopics to include:</p>
+                    <div className="ds-surface p-4">
+                      <p className="ds-label mb-2">Subtopics to include:</p>
                       <ul className="space-y-1">
                         {t.subtopics.map((st, i) => (
-                          <li key={st.id} className="text-sm text-purple-600 dark:text-purple-400 flex items-center gap-2">
+                          <li key={st.id} className="ds-helper flex items-center gap-2">
                             <CheckCircle size={14} /> {i + 1}. {st.title}
                           </li>
                         ))}
@@ -1033,17 +1031,17 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                   ) : null;
                 })()}
 
-                <div className="flex justify-end gap-3 pt-2">
+                <div className="ds-form-actions">
                   <button
                     onClick={() => setShowAIModal(false)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                    className="ds-button-outline"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleAIGenerate}
                     disabled={!aiSelectedTopicId || aiGenerating}
-                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    aria-busy={aiGenerating} className="ds-button-primary"
                   >
                     {aiGenerating ? (
                       <>
@@ -1061,65 +1059,68 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
               </div>
             ) : (
               /* Preview Step */
-              <div className="p-6 space-y-4">
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 flex items-center gap-2">
+              <div className="p-4 sm:p-6 space-y-4">
+                <div role="status" className="ds-alert ds-badge-success">
                   <CheckCircle size={18} className="text-green-600" />
                   <span className="text-sm font-medium text-green-700 dark:text-green-300">Lesson plan generated successfully!</span>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                  <label htmlFor="lesson-ai-plan-title" className="ds-label mb-1">Title</label>
                   <input
+                    id="lesson-ai-plan-title"
                     type="text"
                     value={generatedPlan.title}
                     onChange={(e) => setGeneratedPlan({ ...generatedPlan, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Lesson Plan Content</label>
+                    {previewMode ? <span className="ds-label">Lesson Plan Content</span> : <label htmlFor="lesson-ai-content" className="ds-label">Lesson Plan Content</label>}
                     <button
                       type="button"
                       onClick={() => setPreviewMode(!previewMode)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                      aria-label={previewMode ? 'Edit lesson plan content' : 'Preview lesson plan content'}
+                      className="ds-button-outline"
                     >
                       {previewMode ? <><Edit3 size={12} /> Edit</> : <><Eye size={12} /> Preview</>}
                     </button>
                   </div>
                   {previewMode ? (
-                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white text-sm max-h-[500px] overflow-y-auto prose prose-sm dark:prose-invert prose-headings:text-gray-800 dark:prose-headings:text-white prose-p:text-gray-700 dark:prose-p:text-gray-300 max-w-none">
+                    <div id="lesson-ai-content" role="region" aria-label="Lesson plan content preview" tabIndex={0} className="ds-surface px-4 py-3 max-h-[500px] overflow-auto prose prose-sm dark:prose-invert max-w-none">
                       <ReactMarkdown>{generatedPlan.content}</ReactMarkdown>
                     </div>
                   ) : (
                     <textarea
+                      id="lesson-ai-content"
                       value={generatedPlan.content}
                       onChange={(e) => setGeneratedPlan({ ...generatedPlan, content: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-slate-700 dark:text-white font-mono text-sm"
+                      className="ds-textarea font-mono"
                       rows={16}
                     />
                   )}
                 </div>
 
-                <div className="flex justify-between gap-3 pt-2">
+                <div className="ds-form-actions justify-between">
                   <button
                     onClick={() => setGeneratedPlan(null)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg flex items-center gap-2"
+                    className="ds-button-secondary"
                   >
                     <Sparkles size={16} />
                     Regenerate
                   </button>
-                  <div className="flex gap-3">
+                  <div className="ds-actions">
                     <button
                       onClick={() => setShowAIModal(false)}
-                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                      className="ds-button-outline"
                     >
                       Discard
                     </button>
                     <button
                       onClick={handleSaveAIPlan}
-                      className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      className="ds-button-primary"
                     >
                       <FileText size={16} />
                       Save Lesson Plan

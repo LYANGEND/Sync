@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 const applyScholarshipDiscount = (amount: number, percentage?: number | null) => {
   if (!percentage || percentage <= 0) return amount;
@@ -68,6 +69,14 @@ export const syncStudentClassFees = async (studentId: string) => {
     data: dataToCreate,
     skipDuplicates: true,
   });
+
+  if (result.count > 0) {
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: student.tenantId,
+      scope: 'tenant',
+      source: 'student-fees.synchronized',
+    });
+  }
 
   return {
     created: result.count,
@@ -148,6 +157,14 @@ export const syncClassFeesToStudents = async (classId: string) => {
     data: dataToCreate,
     skipDuplicates: true,
   });
+
+  if (result.count > 0) {
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: students[0].tenantId,
+      scope: 'tenant',
+      source: 'class-fees.synchronized',
+    });
+  }
 
   return {
     assignmentCount: classAssignments.length,

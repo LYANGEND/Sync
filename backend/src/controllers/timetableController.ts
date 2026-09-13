@@ -123,6 +123,15 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
     const { classIds, subjectId, dayOfWeek, startTime, endTime, academicTermId } = data;
     let { teacherId } = data;
 
+    const [classes, subject, term] = await Promise.all([
+      prisma.class.findMany({ where: { id: { in: classIds } }, select: { id: true } }),
+      prisma.subject.findFirst({ where: { id: subjectId }, select: { id: true } }),
+      prisma.academicTerm.findFirst({ where: { id: academicTermId }, select: { id: true } }),
+    ]);
+    if (classes.length !== new Set(classIds).size || !subject || !term) {
+      return res.status(400).json({ message: 'Class, subject, or academic term does not belong to this tenant' });
+    }
+
     // If teacherId not provided, look up from TeacherSubject allocation for this class
     if (!teacherId) {
       const allocation = await prisma.teacherSubject.findFirst({
@@ -138,6 +147,11 @@ export const createTimetablePeriod = async (req: Request, res: Response) => {
       }
 
       teacherId = allocation.teacherId;
+    }
+
+    const teacher = await prisma.user.findFirst({ where: { id: teacherId }, select: { id: true } });
+    if (!teacher) {
+      return res.status(400).json({ message: 'Teacher does not belong to this tenant' });
     }
 
     // 1. Check for Teacher Conflict

@@ -1,7 +1,10 @@
+import { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Building2, Server, FileWarning, ShieldAlert, Activity } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Building2, Server, FileWarning, ShieldAlert, Activity, Sliders } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { Button } from '../ui/DesignSystem';
+import { ACADEMICS_ROLES } from '../../utils/academicNavigation';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -12,63 +15,118 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
   const location = useLocation();
   const { logout, user } = useAuth();
   const { settings } = useTheme();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    // CSS owns visibility. This query only enables modal behavior below the same md breakpoint.
+    const desktop = window.matchMedia('(min-width: 768px)');
+    let release: (() => void) | undefined;
+    const sync = () => {
+      release?.();
+      release = undefined;
+      if (desktop.matches) return;
+
+      const previous = document.activeElement as HTMLElement | null;
+      const overflow = document.body.style.overflow;
+      const background = ['dashboard-content', 'dashboard-skip-link']
+        .map(id => document.getElementById(id))
+        .filter((element): element is HTMLElement => Boolean(element));
+      const inertValues = background.map(element => element.hasAttribute('inert'));
+      background.forEach(element => element.setAttribute('inert', ''));
+      document.body.style.overflow = 'hidden';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Navigation');
+
+      const focusable = () => Array.from(panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      )).filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+      const focusFirst = () => (focusable()[0] || panel).focus();
+      const handleKey = (event: KeyboardEvent) => {
+        // Native dialogs (e.g. a sign-out confirmation) own their own focus/Escape handling.
+        if (document.querySelector('dialog[open]')) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          closeRef.current?.();
+        } else if (event.key === 'Tab') {
+          const elements = focusable();
+          const first = elements[0];
+          const last = elements[elements.length - 1];
+          if (!first) {
+            event.preventDefault();
+            panel.focus();
+          } else if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      };
+      const containFocus = (event: FocusEvent) => {
+        if (!panel.contains(event.target as Node) && !document.querySelector('dialog[open]')) focusFirst();
+      };
+      focusFirst();
+      document.addEventListener('keydown', handleKey, true);
+      document.addEventListener('focusin', containFocus);
+      release = () => {
+        document.removeEventListener('keydown', handleKey, true);
+        document.removeEventListener('focusin', containFocus);
+        background.forEach((element, index) => { if (!inertValues[index]) element.removeAttribute('inert'); });
+        document.body.style.overflow = overflow;
+        panel.removeAttribute('role');
+        panel.removeAttribute('aria-modal');
+        panel.removeAttribute('aria-label');
+        if (previous?.isConnected && previous.getClientRects().length > 0) previous.focus();
+        else if (desktop.matches && panel.contains(document.activeElement)) {
+          panel.querySelector<HTMLElement>('[aria-current="page"], a[href]')?.focus();
+        }
+      };
+    };
+    sync();
+    desktop.addEventListener('change', sync);
+    return () => { desktop.removeEventListener('change', sync); release?.(); };
+  }, [isOpen]);
 
   const menuGroups = [
     {
-      title: 'Platform',
-      items: [
-        { icon: Building2, label: 'Tenants', path: '/ops/tenants', roles: ['PLATFORM_ADMIN'] },
-        { icon: Server, label: 'Health', path: '/ops/health', roles: ['PLATFORM_ADMIN'] },
-        { icon: FileWarning, label: 'Ops Feed', path: '/ops/operations', roles: ['PLATFORM_ADMIN'] },
-        { icon: ShieldAlert, label: 'Security', path: '/ops/security', roles: ['PLATFORM_ADMIN'] },
-        { icon: Activity, label: 'Audit', path: '/ops/audit', roles: ['PLATFORM_ADMIN'] }
-      ]
-    },
-    {
       title: 'Overview',
       items: [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] }
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] },
+        { icon: GraduationCap, label: 'My Children', path: '/my-children', roles: ['PARENT'] },
       ]
     },
     {
-      title: 'My Family',
+      title: 'Learning',
       items: [
-        { icon: GraduationCap, label: 'My Children', path: '/my-children', roles: ['PARENT'] },
+        { icon: BookOpen, label: 'Academics', path: '/academics', roles: ACADEMICS_ROLES },
+        { icon: Users, label: 'Students', path: '/students', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] },
         { icon: TrendingUp, label: 'Academic Progress', path: '/academics/progress', roles: ['PARENT'] },
-        { icon: CalendarCheck, label: 'Timetable', path: '/academics/timetable', roles: ['PARENT'] },
         { icon: Award, label: 'Academic Reports', path: '/academics/reports', roles: ['PARENT'] },
       ]
     },
     {
-      title: 'Academics',
+      title: 'Operations',
       items: [
-        { icon: BookOpen, label: 'Class Overview', path: '/academics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER'] },
-        { icon: Users, label: 'Students', path: '/students', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY'] },
-        { icon: Users, label: 'Attendance', path: '/academics/attendance', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY'] },
-        { icon: TrendingUp, label: 'Gradebook', path: '/academics/gradebook', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'BURSAR', 'SECRETARY'] },
-        { icon: Calendar, label: 'Academic Calendar', path: '/academics/calendar', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'TEACHER', 'PARENT'] },
-      ]
-    },
-    {
-      title: 'Finance',
-      items: [
-        { icon: CreditCard, label: 'Finance Hub', path: '/finance', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR'] }
-      ]
-    },
-    {
-      title: 'Communication',
-      items: [
+        { icon: CreditCard, label: 'Finance Hub', path: '/finance', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR'] },
         { icon: MessageSquare, label: 'Messages', path: '/communication', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER', 'SECRETARY', 'PARENT'] },
         { icon: Video, label: 'Virtual Classroom', path: '/virtual-classroom', roles: ['SUPER_ADMIN', 'TEACHER', 'PARENT'] },
       ]
     },
     {
-      title: 'Intelligence & AI',
+      title: 'Intelligence',
       items: [
         { icon: Brain, label: 'Intelligence Hub', path: '/ai-intelligence', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER'] },
+        { icon: BarChart3, label: 'Analytics', path: '/analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
         { icon: Cpu, label: 'Command Center', path: '/ai-analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
         { icon: GraduationCap, label: 'Teaching AI', path: '/ai-assistant', roles: ['SUPER_ADMIN', 'TEACHER'] },
-        { icon: BarChart3, label: 'Analytics', path: '/analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
         { icon: Sparkles, label: 'Master AI Ops', path: '/master-ai', roles: ['SUPER_ADMIN'] },
       ]
     },
@@ -79,79 +137,94 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
         { icon: UserCog, label: 'User Directory', path: '/users', roles: ['SUPER_ADMIN'] },
         { icon: Settings, label: 'Settings', path: '/settings', roles: ['SUPER_ADMIN'] },
       ]
+    },
+    {
+      title: 'Platform',
+      items: [
+        { icon: Building2, label: 'Tenants', path: '/ops/tenants', roles: ['PLATFORM_ADMIN'] },
+        { icon: Server, label: 'Health', path: '/ops/health', roles: ['PLATFORM_ADMIN'] },
+        { icon: FileWarning, label: 'Ops Feed', path: '/ops/operations', roles: ['PLATFORM_ADMIN'] },
+        { icon: ShieldAlert, label: 'Security', path: '/ops/security', roles: ['PLATFORM_ADMIN'] },
+        { icon: CreditCard, label: 'Billing', path: '/ops/billing', roles: ['PLATFORM_ADMIN'] },
+        { icon: Sliders, label: 'Settings', path: '/ops/settings', roles: ['PLATFORM_ADMIN'] },
+        { icon: Activity, label: 'Audit', path: '/ops/audit', roles: ['PLATFORM_ADMIN'] }
+      ]
     }
   ];
+
+  const activePath = menuGroups.flatMap(group => group.items)
+    .filter(item => user && item.roles.includes(user.role))
+    .filter(item => location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
 
   return (
     <>
       {/* Mobile Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          className="fixed inset-0 bg-slate-950/60 z-[100] md:hidden"
           onClick={onClose}
+          aria-hidden="true"
         />
       )}
 
-      <div className={`
-        h-screen w-64 bg-slate-900 text-white flex flex-col fixed left-0 top-0 z-50 transition-transform duration-300 ease-in-out
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:translate-x-0
-      `}>
-        <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* School Logo — persisted from Settings */}
+      <div id="primary-sidebar" ref={panelRef} tabIndex={-1} className={`
+        ds-sidebar fixed left-0 top-0 z-[100] flex h-[100dvh] w-[17.5rem] max-w-[calc(100vw-2rem)] flex-col border-r border-[var(--border-color)] bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_0_0_1px_rgba(15,23,42,0.02),8px_0_30px_rgba(15,23,42,0.08)] transition-transform duration-200 ease-in-out motion-reduce:transition-none md:z-50
+        ${isOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'}
+        md:visible md:translate-x-0
+      `} style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-color)] px-4">
+          <div className="flex min-w-0 items-center gap-3">
             {settings.logoUrl ? (
               <img
                 src={settings.logoUrl.startsWith('http') ? settings.logoUrl : settings.logoUrl}
-                alt="Logo"
-                className="w-10 h-10 rounded-lg object-contain bg-white/10 p-0.5 shrink-0"
+                alt={`${settings.schoolName} logo`}
+                className="h-10 w-10 shrink-0 rounded-2xl bg-[var(--surface-muted)] p-1 object-contain ring-1 ring-[var(--border-color)]"
               />
             ) : (
               <div
-                className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg shrink-0"
-                style={{ background: `linear-gradient(135deg, var(--primary-color), var(--accent-color, #f59e0b))` }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--action-color)] text-lg font-bold text-[var(--action-foreground)]"
               >
                 {settings.schoolName?.charAt(0) || 'S'}
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-lg font-bold truncate" style={{ color: 'var(--primary-color)' }}>{settings.schoolName}</h1>
-              <p className="text-[10px] text-slate-400 truncate">School Management</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Sync workspace</p>
+              <p className="mt-0.5 truncate text-sm font-semibold text-[var(--text-primary)]">{settings.schoolName}</p>
             </div>
           </div>
-          <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white ml-2">
-            <X size={24} />
-          </button>
+          <Button variant="ghost"
+            onClick={onClose}
+            aria-label="Close navigation"
+            className="ml-2 shrink-0 px-2 md:hidden"
+          >
+            <X size={24} aria-hidden="true" />
+          </Button>
         </div>
 
-        <nav className="flex-1 px-4 py-6 space-y-6 overflow-y-auto custom-scrollbar">
+        <nav className="custom-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Primary navigation">
           {menuGroups.map((group, groupIdx) => {
             const filteredItems = group.items.filter(item => user && item.roles.includes(user.role));
             if (filteredItems.length === 0) return null;
 
             return (
-              <div key={groupIdx} className="space-y-1">
-                <h3 className="px-4 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+              <div key={groupIdx} className="space-y-1.5">
+                <h2 className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                   {group.title}
-                </h3>
+                </h2>
                 {filteredItems.map((item) => {
-                  const isActive = item.path === '/'
-                    ? location.pathname === '/'
-                    : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+                  const isActive = item.path === activePath;
                   return (
                     <Link
                       key={item.label}
                       to={item.path}
                       onClick={onClose}
-                      className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg transition-colors text-sm ${
-                        isActive
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}
-                      style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`ds-nav-item ${isActive ? 'ds-nav-item-active' : ''}`}
                     >
-                      <item.icon size={18} className={isActive ? "text-white" : "text-slate-400"} />
-                      <span className={isActive ? "font-medium" : ""}>{item.label}</span>
+                      {isActive && <span className="ds-nav-indicator" aria-hidden="true" />}
+                      <item.icon size={17} className="shrink-0" aria-hidden="true" />
+                      <span className={isActive ? 'font-semibold' : 'font-medium'}>{item.label}</span>
                     </Link>
                   );
                 })}
@@ -160,14 +233,14 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
-          <button
+        <div className="border-t border-[var(--border-color)] p-3">
+          <Button variant="ghost"
             onClick={logout}
-            className="w-full flex items-center space-x-3 px-4 py-3 text-red-400 hover:bg-slate-800 rounded-lg transition-colors text-sm"
+            className="w-full justify-start gap-3 rounded-xl px-3 py-2.5 text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]"
           >
-            <LogOut size={18} />
-            <span className="font-medium">Sign Out</span>
-          </button>
+            <LogOut size={18} aria-hidden="true" />
+            <span>Sign Out</span>
+          </Button>
         </div>
       </div>
     </>

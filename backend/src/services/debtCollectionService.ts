@@ -4,6 +4,7 @@ import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 import aiService from './aiService';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // DEBTOR SEGMENTATION
@@ -338,6 +339,11 @@ export async function createCampaign(data: {
       createdById: data.createdById,
     },
   });
+  await invalidateFinancialSnapshotAfterMutation({
+    tenantId: campaign.tenantId,
+    scope: 'tenant',
+    source: 'debt-campaign.created',
+  });
   return campaign;
 }
 
@@ -376,9 +382,14 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   let skipped = 0;
 
   // Mark campaign as active
-  await (prisma as any).debtCollectionCampaign.update({
+  const activeCampaign = await (prisma as any).debtCollectionCampaign.update({
     where: { id: campaignId },
     data: { status: 'ACTIVE', startedAt: new Date(), totalTargeted: filtered.length },
+  });
+  await invalidateFinancialSnapshotAfterMutation({
+    tenantId: activeCampaign.tenantId,
+    scope: 'tenant',
+    source: 'debt-campaign.started',
   });
 
   for (const debtor of filtered) {
@@ -412,19 +423,12 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
             recipientName: debtor.parentName || undefined,
           });
         } else if (channel === 'SMS' && debtor.parentPhone) {
-          const smsResult = await smsService.send(debtor.parentPhone, msg.message);
-          success = smsResult.success;
-          // Log SMS
-          await logCommunication({
-            channel: 'SMS',
-            status: success ? 'SENT' : 'FAILED',
-            recipientPhone: debtor.parentPhone,
-            recipientName: debtor.parentName || undefined,
-            subject: msg.subject,
-            message: msg.message,
+          const smsResult = await smsService.send(debtor.parentPhone, msg.message, {
             source: 'debt_collection',
             sentById,
+            recipientName: debtor.parentName || undefined,
           });
+          success = smsResult.success;
         } else if (channel === 'WHATSAPP' && debtor.parentPhone) {
           const waResult = await whatsappService.sendMessage(debtor.parentPhone, msg.message);
           success = waResult.success;
@@ -473,13 +477,18 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   }
 
   // Update campaign results
-  await (prisma as any).debtCollectionCampaign.update({
+  const completedCampaign = await (prisma as any).debtCollectionCampaign.update({
     where: { id: campaignId },
     data: {
       status: 'COMPLETED',
       completedAt: new Date(),
       totalContacted: sent,
     },
+  });
+  await invalidateFinancialSnapshotAfterMutation({
+    tenantId: completedCampaign.tenantId,
+    scope: 'tenant',
+    source: 'debt-campaign.completed',
   });
 
   return { sent, failed, skipped };
@@ -534,9 +543,12 @@ export async function sendQuickReminders(options: {
             recipientName: debtor.parentName || undefined,
           });
         } else if (channel === 'SMS' && debtor.parentPhone) {
-          const smsR = await smsService.send(debtor.parentPhone, msg.message);
+          const smsR = await smsService.send(debtor.parentPhone, msg.message, {
+            source: 'quick_reminder',
+            sentById: options.sentById,
+            recipientName: debtor.parentName || undefined,
+          });
           success = smsR.success;
-          await logCommunication({ channel: 'SMS', status: success ? 'SENT' : 'FAILED', recipientPhone: debtor.parentPhone, recipientName: debtor.parentName || undefined, message: msg.message, source: 'quick_reminder', sentById: options.sentById });
         } else if (channel === 'WHATSAPP' && debtor.parentPhone) {
           const waR = await whatsappService.sendMessage(debtor.parentPhone, msg.message);
           success = waR.success;
@@ -653,6 +665,14 @@ export async function reconcileCampaignPayments(): Promise<number> {
     });
   }
 
+  if (campaigns.length > 0) {
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: campaigns[0].tenantId,
+      scope: 'tenant',
+      source: 'debt-campaign.reconciled',
+    });
+  }
+
   return reconciled;
 }
 
@@ -722,9 +742,11 @@ export async function runScheduledCollection(): Promise<void> {
             recipientName: debtor.parentName || undefined,
           });
         } else if (ch === 'SMS' && debtor.parentPhone) {
-          const smsR = await smsService.send(debtor.parentPhone, msg.message);
+          const smsR = await smsService.send(debtor.parentPhone, msg.message, {
+            source: 'scheduled_collection',
+            recipientName: debtor.parentName || undefined,
+          });
           success = smsR.success;
-          await logCommunication({ channel: 'SMS', status: success ? 'SENT' : 'FAILED', recipientPhone: debtor.parentPhone, recipientName: debtor.parentName || undefined, message: msg.message, source: 'scheduled_collection' });
         } else if (ch === 'WHATSAPP' && debtor.parentPhone) {
           const waR = await whatsappService.sendMessage(debtor.parentPhone, msg.message);
           success = waR.success;

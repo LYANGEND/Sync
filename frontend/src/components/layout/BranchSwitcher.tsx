@@ -22,7 +22,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ className = '' }) => {
         const userBranch = branches.find(b => b.id === user.branchId);
         return (
             <div className={`flex items-center gap-2 px-3 py-2 bg-slate-800 rounded-lg text-sm ${className}`}>
-                <Building size={16} className="text-blue-400" />
+                <Building size={16} className="brand-accent-text" />
                 <span className="text-white font-medium">{userBranch?.name || 'My Branch'}</span>
             </div>
         );
@@ -34,7 +34,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ className = '' }) => {
                 onClick={() => setIsOpen(!isOpen)}
                 className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm transition-colors"
             >
-                <GitBranch size={16} className="text-blue-400" />
+                <GitBranch size={16} className="brand-accent-text" />
                 <span className="text-white font-medium max-w-[150px] truncate">
                     {loading ? 'Loading...' : selectedBranch?.name || 'All Branches'}
                 </span>
@@ -62,14 +62,14 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ className = '' }) => {
                                     setSelectedBranchId(null);
                                     setIsOpen(false);
                                 }}
-                                className={`w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700 transition-colors ${selectedBranchId === null ? 'bg-blue-600/20' : ''
+                                className={`w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700 transition-colors ${selectedBranchId === null ? 'brand-primary-soft' : ''
                                     }`}
                             >
                                 <div className="flex items-center gap-2">
                                     <Building size={16} className="text-slate-400" />
                                     <span className="text-white">All Branches</span>
                                 </div>
-                                {selectedBranchId === null && <Check size={16} className="text-blue-400" />}
+                                {selectedBranchId === null && <Check size={16} className="brand-accent-text" />}
                             </button>
 
                             {/* Branch list */}
@@ -80,11 +80,11 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ className = '' }) => {
                                         setSelectedBranchId(branch.id);
                                         setIsOpen(false);
                                     }}
-                                    className={`w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700 transition-colors ${selectedBranchId === branch.id ? 'bg-blue-600/20' : ''
+                                    className={`w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700 transition-colors ${selectedBranchId === branch.id ? 'brand-primary-soft' : ''
                                         }`}
                                 >
                                     <div className="flex items-center gap-2">
-                                        <Building size={16} className={branch.isMain ? 'text-blue-400' : 'text-slate-400'} />
+                                        <Building size={16} className={branch.isMain ? 'brand-accent-text' : 'text-slate-400'} />
                                         <div className="text-left">
                                             <span className="text-white block">{branch.name}</span>
                                             <span className="text-xs text-slate-400">{branch.code}</span>
@@ -92,9 +92,9 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ className = '' }) => {
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {branch.isMain && (
-                                            <span className="text-xs bg-blue-600/30 text-blue-400 px-1.5 py-0.5 rounded">Main</span>
+                                            <span className="text-xs brand-accent-soft px-1.5 py-0.5 rounded">Main</span>
                                         )}
-                                        {selectedBranchId === branch.id && <Check size={16} className="text-blue-400" />}
+                                        {selectedBranchId === branch.id && <Check size={16} className="brand-accent-text" />}
                                     </div>
                                 </button>
                             ))}

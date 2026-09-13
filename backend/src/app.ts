@@ -58,15 +58,14 @@ import smsRoutes from './routes/smsRoutes';
 import tenantRoutes from './routes/tenantRoutes';
 // Platform Administration
 import platformRoutes from './routes/platformRoutes';
-// New AI Enhancement Features (disabled — schema not yet aligned)
-// TODO: Re-enable once Prisma schema supports StudentGrade, voice attendance compound keys, etc.
-// import aiTeacherAssistantRoutes from './routes/aiTeacherAssistantRoutes';
-// import aiParentEngagementRoutes from './routes/aiParentEngagementRoutes';
-// import voiceAttendanceRoutes from './routes/voiceAttendanceRoutes';
+import subscriptionBillingRoutes from './routes/subscriptionBillingRoutes';
+import tenantFileRoutes from './routes/tenantFileRoutes';
 // Middleware
-import { generalLimiter } from './middleware/rateLimiter';
+import { generalLimiter, getApiRateLimitRuntimeStatus } from './middleware/rateLimiter';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
-import path from 'path';
+import { getQueueRuntimeStatus } from './queues/queueRuntime';
+import { getFinancialSnapshotCacheStatus } from './cache/financialSnapshotCache';
+import { getSmsRateLimitRuntimeStatus } from './services/smsRateLimitService';
 
 const app: Application = express();
 
@@ -84,7 +83,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Slug', 'X-Tenant-Id'],
   credentials: true,
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buffer) => {
+    (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" } // Allow serving images
@@ -94,8 +98,8 @@ app.use(morgan('dev'));
 // Apply rate limiting to all routes
 app.use('/api/', generalLimiter);
 
-// Serve static files (uploaded images) — use process.cwd() so it works in both dev and production
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Uploaded files are capability-protected with short-lived, tenant/path-bound signatures.
+app.use('/uploads', generalLimiter, tenantFileRoutes);
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
@@ -155,11 +159,6 @@ app.use('/api/v1/master-ai', masterAIRoutes);
 // New AI Intelligence Features (grade forecast, fee defaulters, timetable, exam scheduling, parent letters)
 app.use('/api/v1/ai', aiIntelligenceRoutes);
 
-// New AI Enhancement Features — disabled until schema is aligned
-// app.use('/api/v1/ai-teacher-assistant', aiTeacherAssistantRoutes);
-// app.use('/api/v1/ai-parent-engagement', aiParentEngagementRoutes);
-// app.use('/api/v1/voice-attendance', voiceAttendanceRoutes);
-
 // SMS Gateway
 app.use('/api/v1/sms', smsRoutes);
 
@@ -169,9 +168,28 @@ app.use('/api/v1/tenant', tenantRoutes);
 // Platform Administration (cross-tenant)
 app.use('/api/v1/platform', platformRoutes);
 
+// Tenant self-service subscription billing (pay platform invoices via Lenco)
+app.use('/api/v1/billing/subscription', subscriptionBillingRoutes);
+
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  const rateLimit = getApiRateLimitRuntimeStatus();
+  const snapshotCache = getFinancialSnapshotCacheStatus();
+  const smsRateLimit = getSmsRateLimitRuntimeStatus();
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    queue: getQueueRuntimeStatus(),
+    rateLimit: { state: rateLimit.state, distributed: rateLimit.distributed },
+    financialSnapshotCache: {
+      state: snapshotCache.state,
+      distributed: snapshotCache.distributed,
+    },
+    smsRateLimit: {
+      state: smsRateLimit.state,
+      distributed: smsRateLimit.distributed,
+    },
+  });
 });
 
 // Basic Route
@@ -181,7 +199,22 @@ app.get('/', (req: Request, res: Response) => {
 
 // Health Check
 app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok' });
+  const rateLimit = getApiRateLimitRuntimeStatus();
+  const snapshotCache = getFinancialSnapshotCacheStatus();
+  const smsRateLimit = getSmsRateLimitRuntimeStatus();
+  res.status(200).json({
+    status: 'ok',
+    queue: getQueueRuntimeStatus(),
+    rateLimit: { state: rateLimit.state, distributed: rateLimit.distributed },
+    financialSnapshotCache: {
+      state: snapshotCache.state,
+      distributed: snapshotCache.distributed,
+    },
+    smsRateLimit: {
+      state: smsRateLimit.state,
+      distributed: smsRateLimit.distributed,
+    },
+  });
 });
 
 // 404 handler for unknown routes

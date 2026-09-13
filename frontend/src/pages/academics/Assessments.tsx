@@ -6,6 +6,7 @@ import SubjectGradebook from '../../components/academics/SubjectGradebook';
 import { BarChart2, TrendingUp, Award, Calculator, Download, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { PageHeader } from '../../components/ui/DesignSystem';
 
 interface Assessment {
   id: string;
@@ -358,19 +359,16 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
 
   if (view === 'questions' && currentAssessment) {
     return (
-      <div className="p-6">
+      <div className="ds-page">
         <button
           onClick={() => setView('list')}
-          className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6"
+          className="ds-button-ghost"
         >
-          <ArrowLeft size={20} className="mr-2" />
+          <ArrowLeft size={20} aria-hidden="true" />
           Back to Assessments
         </button>
 
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-white">{currentAssessment.title}</h2>
-          <p className="text-gray-500 dark:text-gray-400">Manage Questions</p>
-        </div>
+        <PageHeader title={currentAssessment.title} description="Manage Questions" />
 
         <QuestionBuilder
           assessmentId={currentAssessment.id}
@@ -435,38 +433,40 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
 
   if (view === 'create') {
     return (
-      <div className="p-6">
+      <div className="ds-page">
         <button
           onClick={() => setView('list')}
-          className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6"
+          className="ds-button-ghost"
         >
-          <ArrowLeft size={20} className="mr-2" />
+          <ArrowLeft size={20} aria-hidden="true" />
           Back to Assessments
         </button>
 
-        <div className="max-w-2xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 p-6">
-          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-6">Create New Assessment</h2>
+        <PageHeader title="Create New Assessment" description="Set the assessment details, class, subject and academic term." />
+        <div className="ds-card max-w-2xl">
 
           <form onSubmit={handleCreateAssessment} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+              <label htmlFor="assessment-title" className="ds-label mb-2">Title (required)</label>
               <input
+                id="assessment-title"
                 type="text"
                 required
                 value={newAssessment.title}
                 onChange={e => setNewAssessment({ ...newAssessment, title: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 dark:text-white"
+                className="ds-input"
                 placeholder="e.g., Mid-Term Mathematics Exam"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                <label htmlFor="assessment-type" className="ds-label mb-2">Type</label>
                 <select
+                  id="assessment-type"
                   value={newAssessment.type}
                   onChange={e => setNewAssessment({ ...newAssessment, type: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="QUIZ">Quiz</option>
                   <option value="TEST">Test</option>
@@ -476,25 +476,27 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date</label>
+                <label htmlFor="assessment-date" className="ds-label mb-2">Date (required)</label>
                 <input
+                  id="assessment-date"
                   type="date"
                   required
                   value={newAssessment.date}
                   onChange={e => setNewAssessment({ ...newAssessment, date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
+                <label htmlFor="assessment-class" className="ds-label mb-2">Class (required)</label>
                 <select
+                  id="assessment-class"
                   required
                   value={newAssessment.classId}
                   onChange={e => setNewAssessment({ ...newAssessment, classId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="">Select Class</option>
                   {classes.map(c => (
@@ -503,12 +505,13 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                <label htmlFor="assessment-subject" className="ds-label mb-2">Subject (required)</label>
                 <select
+                  id="assessment-subject"
                   required
                   value={newAssessment.subjectId}
                   onChange={e => setNewAssessment({ ...newAssessment, subjectId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="">Select Subject</option>
                   {filteredCreateSubjects.map(s => (
@@ -519,12 +522,13 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
+              <label htmlFor="assessment-term" className="ds-label mb-2">Academic Term (required)</label>
               <select
+                id="assessment-term"
                 required
                 value={newAssessment.termId}
                 onChange={e => setNewAssessment({ ...newAssessment, termId: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                className="ds-select"
               >
                 <option value="">Select Term</option>
                 {terms.map(t => (
@@ -533,46 +537,49 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Total Marks</label>
+                <label htmlFor="assessment-marks" className="ds-label mb-2">Total Marks (required)</label>
                 <input
+                  id="assessment-marks"
                   type="number"
                   required
                   min="1"
                   value={newAssessment.totalMarks}
                   onChange={e => setNewAssessment({ ...newAssessment, totalMarks: Number(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Weight (%)</label>
+                <label htmlFor="assessment-weight" className="ds-label mb-2">Weight (%) (required)</label>
                 <input
+                  id="assessment-weight"
                   type="number"
                   required
                   min="0"
                   max="100"
                   value={newAssessment.weight}
                   onChange={e => setNewAssessment({ ...newAssessment, weight: Number(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                  className="ds-input"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (Optional)</label>
+              <label htmlFor="assessment-description" className="ds-label mb-2">Description (optional)</label>
               <textarea
+                id="assessment-description"
                 value={newAssessment.description}
                 onChange={e => setNewAssessment({ ...newAssessment, description: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                className="ds-textarea"
                 rows={3}
               />
             </div>
 
-            <div className="pt-4">
+            <div className="ds-form-actions">
               <button
                 type="submit"
-                className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="ds-button-primary w-full sm:w-auto"
               >
                 Create Assessment
               </button>
@@ -585,119 +592,122 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
 
   if (view === 'grade' && currentAssessment) {
     return (
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
+      <div className="ds-page">
+        <PageHeader title={currentAssessment.title} description="Review student scores and remarks." />
+        <div className="ds-toolbar justify-between">
+          <div className="ds-actions">
             <button
               onClick={() => setView('list')}
-              className="flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              className="ds-button-ghost"
             >
-              <ArrowLeft size={20} className="mr-2" />
+              <ArrowLeft size={20} aria-hidden="true" />
               Back to Assessments
             </button>
-            <div className="h-6 w-px bg-gray-300 dark:bg-slate-600"></div>
-            <button onClick={downloadTemplate} className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium">
-              <Download size={16} className="mr-1" /> Template
+            <button onClick={downloadTemplate} className="ds-button-outline">
+              <Download size={16} aria-hidden="true" /> Template
             </button>
-            <label className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium cursor-pointer">
-              <Upload size={16} className="mr-1" /> Import
-              <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} />
+            <label className="ds-button-outline relative cursor-pointer focus-within:ring-2 focus-within:ring-[var(--action-color)]">
+              <Upload size={16} aria-hidden="true" /> Import
+              <input type="file" accept=".xlsx, .xls" aria-label="Import grades from an Excel workbook" className="absolute inset-0 w-full cursor-pointer opacity-0" onChange={handleFileUpload} />
             </label>
           </div>
 
           <button
             onClick={saveGrades}
             disabled={savingGrades}
-            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            aria-busy={savingGrades}
+            className="ds-button-primary"
           >
-            <Save size={20} className="mr-2" />
+            <Save size={20} aria-hidden="true" />
             {savingGrades ? 'Saving...' : 'Save Grades'}
           </button>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50">
-            <div className="flex justify-between items-start mb-6">
+        <div className="ds-surface overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-[var(--border-color)] bg-[var(--surface-muted)]">
+            <div className="flex flex-wrap gap-4 justify-between items-start mb-6">
               <div>
-                <h2 className="text-xl font-bold text-gray-800 dark:text-white">{currentAssessment.title}</h2>
-                <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
-                  <span className="flex items-center"><BookOpen size={16} className="mr-1" /> {currentAssessment.subject.name}</span>
-                  <span className="flex items-center"><Users size={16} className="mr-1" /> {currentAssessment.class.name}</span>
-                  <span className="flex items-center"><Calendar size={16} className="mr-1" /> {new Date(currentAssessment.date).toLocaleDateString()}</span>
+                <h2>Assessment summary</h2>
+                <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-[var(--text-secondary)]">
+                  <span className="flex items-center"><BookOpen size={16} className="mr-1" aria-hidden="true" /> {currentAssessment.subject.name}</span>
+                  <span className="flex items-center"><Users size={16} className="mr-1" aria-hidden="true" /> {currentAssessment.class.name}</span>
+                  <span className="flex items-center"><Calendar size={16} className="mr-1" aria-hidden="true" /> {new Date(currentAssessment.date).toLocaleDateString()}</span>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-sm text-gray-500 dark:text-gray-400">Total Marks</div>
-                <div className="text-2xl font-bold text-gray-800 dark:text-white">{currentAssessment.totalMarks}</div>
+                <div className="ds-helper">Total Marks</div>
+                <div className="text-2xl font-bold">{currentAssessment.totalMarks}</div>
               </div>
             </div>
 
             {/* Analytics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
-              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
-                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
-                  <BarChart2 size={14} className="text-blue-500" /> Average Score
+              <div className="ds-card">
+                <div className="ds-helper mb-1 flex items-center gap-1">
+                  <BarChart2 size={16} aria-hidden="true" /> Average Score
                 </div>
-                <div className="text-xl font-bold text-gray-800 dark:text-white">
+                <div className="text-xl font-bold">
                   {(Object.values(grades).reduce((acc, g) => acc + (Number(g.score) || 0), 0) / (Object.keys(grades).length || 1)).toFixed(1)}
-                  <span className="text-xs text-gray-400 font-normal ml-1">/ {currentAssessment.totalMarks}</span>
+                  <span className="text-xs text-[var(--text-secondary)] font-normal ml-1">/ {currentAssessment.totalMarks}</span>
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
-                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
-                  <TrendingUp size={14} className="text-green-500" /> Pass Rate
+              <div className="ds-card">
+                <div className="ds-helper mb-1 flex items-center gap-1">
+                  <TrendingUp size={16} aria-hidden="true" /> Pass Rate
                 </div>
-                <div className="text-xl font-bold text-gray-800 dark:text-white">
+                <div className="text-xl font-bold">
                   {(Object.values(grades).filter(g => (Number(g.score) || 0) >= (currentAssessment.totalMarks * 0.5)).length / (Object.keys(grades).length || 1) * 100).toFixed(1)}%
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm">
-                <div className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1 flex items-center gap-1">
-                  <Award size={14} className="text-purple-500" /> Highest Score
+              <div className="ds-card">
+                <div className="ds-helper mb-1 flex items-center gap-1">
+                  <Award size={16} aria-hidden="true" /> Highest Score
                 </div>
-                <div className="text-xl font-bold text-gray-800 dark:text-white">
+                <div className="text-xl font-bold">
                   {Math.max(...Object.values(grades).map(g => Number(g.score) || 0))}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
+          <div className="overflow-x-auto" role="region" aria-label={`Grades for ${currentAssessment.title}`} tabIndex={0} aria-busy={loading}>
+            <table className="ds-table">
+              <thead>
                 <tr>
-                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Student</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Admission No.</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300 w-32">Score</th>
-                  <th className="px-6 py-3 font-semibold text-gray-600 dark:text-gray-300">Remarks</th>
+                  <th scope="col">Student</th>
+                  <th scope="col">Admission No.</th>
+                  <th scope="col" className="w-32">Score</th>
+                  <th scope="col">Remarks</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+              <tbody>
                 {students.map(student => (
-                  <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                    <td className="px-6 py-4 font-medium text-gray-800 dark:text-white">
+                  <tr key={student.id}>
+                    <td className="font-medium">
                       {student.firstName} {student.lastName}
                     </td>
-                    <td className="px-6 py-4 text-gray-500 dark:text-gray-400 font-mono text-sm">
+                    <td className="text-[var(--text-secondary)] font-mono">
                       {student.admissionNumber}
                     </td>
-                    <td className="px-6 py-4">
+                    <td>
                       <input
+                        aria-label={`Score for ${student.firstName} ${student.lastName} (${student.admissionNumber}), out of ${currentAssessment.totalMarks}`}
                         type="number"
                         min="0"
                         max={currentAssessment.totalMarks}
                         value={grades[student.id]?.score || ''}
                         onChange={e => handleGradeChange(student.id, 'score', e.target.value)}
-                        className="w-full px-3 py-1 border border-gray-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                        className="ds-input min-w-[100px]"
                         placeholder="-"
                       />
                     </td>
-                    <td className="px-6 py-4">
+                    <td>
                       <input
+                        aria-label={`Remarks for ${student.firstName} ${student.lastName} (${student.admissionNumber})`}
                         type="text"
                         value={grades[student.id]?.remarks || ''}
                         onChange={e => handleGradeChange(student.id, 'remarks', e.target.value)}
-                        className="w-full px-3 py-1 border border-gray-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                        className="ds-input min-w-[220px]"
                         placeholder="Optional remarks"
                       />
                     </td>
@@ -712,54 +722,52 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Assessments</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">Manage exams, tests, and homework assignments.</p>
-      </div>
+    <div className="ds-page">
+      <PageHeader title="Assessments" description="Manage exams, tests, and homework assignments." />
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
-        <div className="flex flex-1 gap-4 w-full sm:w-auto">
-          <div className="relative flex-1 sm:flex-none sm:w-64">
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+      <div className="ds-card ds-toolbar justify-between">
+        <div className="flex flex-wrap gap-4 w-full">
+          <div className="ds-field flex-1 min-w-0 sm:min-w-[200px]">
+            <label htmlFor="assessment-filter-class" className="ds-label">Class</label>
             <select
+              id="assessment-filter-class"
               value={selectedClass}
               onChange={(e) => setSelectedClass(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
+              className="ds-select"
             >
               <option value="">All Classes</option>
               {classes.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
           </div>
           {!propSubjectId && (
-          <div className="relative flex-1 sm:flex-none sm:w-64">
-            <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <div className="ds-field flex-1 min-w-0 sm:min-w-[200px]">
+            <label htmlFor="assessment-filter-subject" className="ds-label">Subject</label>
             <select
+              id="assessment-filter-subject"
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
+              className="ds-select"
             >
               <option value="">All Subjects</option>
               {filteredListSubjects.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
           </div>
           )}
         </div>
 
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="ds-actions w-full">
           {selectedClass && selectedSubject && (
             <button
               onClick={() => setView('gradebook')}
-              className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors shadow-sm"
+              className="ds-button-outline"
+              aria-label="View full subject gradebook"
               title="View full subject matrix"
             >
-              <Calculator size={18} />
+              <Calculator size={18} aria-hidden="true" />
               <span className="hidden sm:inline">Gradebook</span>
             </button>
           )}
@@ -767,17 +775,19 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
             <button
               onClick={handleBulkDelete}
               disabled={deleting}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-red-700 transition-colors disabled:bg-red-300 shadow-sm"
+              className="ds-button-destructive"
+              aria-label={`Delete ${selectedAssessments.size} selected assessments`}
+              aria-busy={deleting}
             >
-              <Trash2 size={18} />
+              <Trash2 size={18} aria-hidden="true" />
               <span className="hidden sm:inline">Delete ({selectedAssessments.size})</span>
             </button>
           )}
           <button
             onClick={() => setView('create')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-sm w-full sm:w-auto"
+            className="ds-button-primary"
           >
-            <Plus size={18} />
+            <Plus size={18} aria-hidden="true" />
             <span className="hidden sm:inline">New Assessment</span>
             <span className="sm:hidden">Create</span>
           </button>
@@ -785,9 +795,11 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
             <button
               onClick={handleAIGenerateAssessment}
               disabled={generatingAI}
-              className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+              className="ds-button-secondary"
+              aria-label={generatingAI ? 'Generating assessment with AI' : 'AI Generate assessment'}
+              aria-busy={generatingAI}
             >
-              {generatingAI ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {generatingAI ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
               <span className="hidden sm:inline">{generatingAI ? 'Generating...' : 'AI Generate'}</span>
             </button>
           )}
@@ -795,17 +807,17 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-4"></div>
+        <div role="status" className="ds-empty flex flex-col items-center justify-center">
+          <Loader2 className="animate-spin mb-4" size={32} aria-hidden="true" />
           <p>Loading assessments...</p>
         </div>
       ) : assessments.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
-          <div className="bg-blue-50 dark:bg-blue-900/30 text-blue-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-            <FileText size={32} />
+        <div className="ds-surface ds-empty">
+          <div className="bg-[var(--surface-muted)] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FileText size={32} aria-hidden="true" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white">No assessments found</h3>
-          <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-sm mx-auto">
+          <h3>No assessments found</h3>
+          <p className="ds-helper mt-2 max-w-sm mx-auto">
             {selectedClass || selectedSubject
               ? "Try adjusting your filters to find what you're looking for."
               : "Create your first assessment to start tracking student performance."}
@@ -813,7 +825,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
           {!selectedClass && !selectedSubject && (
             <button
               onClick={() => setView('create')}
-              className="mt-6 text-blue-600 font-medium hover:text-blue-700"
+              className="ds-button-primary mt-6"
             >
               Create New Assessment
             </button>
@@ -822,76 +834,79 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {assessments.map(assessment => {
-            const typeColors =
-              assessment.type === 'EXAM' ? { border: 'border-red-500', bg: 'bg-red-50 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-300' } :
-                assessment.type === 'TEST' ? { border: 'border-orange-500', bg: 'bg-orange-50 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-300' } :
-                  assessment.type === 'QUIZ' ? { border: 'border-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300' } :
-                    { border: 'border-green-500', bg: 'bg-green-50 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-300' };
+            const typeBadge = assessment.type === 'EXAM' ? 'ds-badge-error' :
+              assessment.type === 'TEST' ? 'ds-badge-warning' :
+                assessment.type === 'QUIZ' ? 'ds-badge-info' : 'ds-badge-success';
 
             return (
               <div
                 key={assessment.id}
-                className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 hover:shadow-md transition-all duration-200 relative group overflow-hidden border-l-4 ${typeColors.border}`}
+                className="ds-surface flex flex-col overflow-hidden"
               >
-                <div className="p-5">
-                  <div className="flex justify-between items-start mb-3">
-                    <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold uppercase tracking-wide ${typeColors.bg} ${typeColors.text}`}>
+                <div className="p-4 sm:p-6 flex-1">
+                  <div className="flex flex-wrap gap-2 justify-between items-start mb-3">
+                    <span className={`ds-badge ${typeBadge}`}>
                       {assessment.type}
                     </span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-medium text-gray-400 dark:text-gray-500 flex items-center bg-gray-50 dark:bg-slate-700 px-2 py-1 rounded">
-                        <Calendar size={12} className="mr-1.5" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="ds-badge ds-badge-neutral">
+                        <Calendar size={12} aria-hidden="true" />
                         {new Date(assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                       </span>
-                      <input
-                        type="checkbox"
-                        checked={selectedAssessments.has(assessment.id)}
-                        onChange={() => toggleSelection(assessment.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
+                      <label className="inline-flex min-h-11 items-center gap-2 cursor-pointer text-sm text-[var(--text-secondary)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedAssessments.has(assessment.id)}
+                          onChange={() => toggleSelection(assessment.id)}
+                          className="ds-choice"
+                        />
+                        <span>Select<span className="sr-only"> {assessment.title} ({assessment.class.name}, {assessment.subject.name})</span></span>
+                      </label>
                     </div>
                   </div>
 
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 line-clamp-1 group-hover:text-blue-600 transition-colors">
+                  <h3 className="mb-1 break-words">
                     {assessment.title}
                   </h3>
 
                   <div className="flex flex-col gap-1.5 mt-4">
-                    <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                      <BookOpen size={16} className="mr-2 text-gray-400" />
+                    <div className="flex items-center text-sm text-[var(--text-secondary)]">
+                      <BookOpen size={16} className="mr-2 shrink-0" aria-hidden="true" />
                       <span className="truncate font-medium">{assessment.subject.name}</span>
                     </div>
-                    <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                      <Users size={16} className="mr-2 text-gray-400" />
+                    <div className="flex items-center text-sm text-[var(--text-secondary)]">
+                      <Users size={16} className="mr-2 shrink-0" aria-hidden="true" />
                       <span className="truncate">{assessment.class.name}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="px-5 py-4 bg-gray-50 dark:bg-slate-700/50 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                <div className="p-4 sm:px-6 bg-[var(--surface-muted)] border-t border-[var(--border-color)] flex flex-wrap gap-3 items-center justify-between">
                   <div className="flex flex-col">
-                    <span className="text-xl font-bold text-gray-800 dark:text-white leading-none">
+                    <span className="text-xl font-bold leading-none">
                       {assessment._count?.results || 0}
                     </span>
-                    <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-500 mt-1">Graded</span>
+                    <span className="text-xs font-semibold text-[var(--text-secondary)] mt-1">Graded</span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     {(assessment.type === 'QUIZ' || assessment.type === 'TEST' || assessment.type === 'EXAM') && (
                       <button
                         onClick={() => openQuestionBuilder(assessment)}
-                        className="p-2 text-gray-500 hover:text-blue-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-200"
+                        className="ds-button-ghost"
+                        aria-label={`Manage questions for ${assessment.title}`}
                         title="Manage Questions"
                       >
-                        <Edit3 size={18} />
+                        <Edit3 size={18} aria-hidden="true" />
                       </button>
                     )}
                     <button
                       onClick={() => openGradebook(assessment)}
-                      className="flex items-center bg-white dark:bg-slate-600 border border-gray-200 dark:border-slate-500 text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm group-hover:border-blue-300"
+                      className="ds-button-outline"
+                      aria-label={`Grade ${assessment.title}`}
                     >
                       Grade
-                      <ChevronRight size={16} className="ml-1 text-gray-400 group-hover:text-blue-500" />
+                      <ChevronRight size={16} aria-hidden="true" />
                     </button>
                   </div>
                 </div>

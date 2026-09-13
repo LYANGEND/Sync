@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateSequenceNumber, logFinancialAction } from '../services/accountingService';
 import { onExpensePaid } from '../services/accountingBridge';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // VENDOR MANAGEMENT
@@ -47,6 +48,12 @@ export const createVendor = async (req: Request, res: Response) => {
       data: { ...data, branchId: user?.branchId },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: vendor.tenantId,
+      branchId: vendor.branchId,
+      source: 'vendor.created',
+    });
+
     res.status(201).json(vendor);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -61,6 +68,11 @@ export const updateVendor = async (req: Request, res: Response) => {
       where: { id: req.params.id },
       data,
     });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: vendor.tenantId,
+      branchId: vendor.branchId,
+      source: 'vendor.updated',
+    });
     res.json(vendor);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -71,9 +83,14 @@ export const updateVendor = async (req: Request, res: Response) => {
 export const deleteVendor = async (req: Request, res: Response) => {
   try {
     // Soft delete
-    await prisma.vendor.update({
+    const vendor = await prisma.vendor.update({
       where: { id: req.params.id },
       data: { isActive: false },
+    });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: vendor.tenantId,
+      branchId: vendor.branchId,
+      source: 'vendor.deactivated',
     });
     res.json({ message: 'Vendor deactivated' });
   } catch (error) {
@@ -182,6 +199,12 @@ export const createExpense = async (req: Request, res: Response) => {
       include: { vendor: true },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.created',
+    });
+
     await logFinancialAction({
       userId: user.userId,
       action: 'EXPENSE_CREATED',
@@ -221,6 +244,12 @@ export const updateExpense = async (req: Request, res: Response) => {
       include: { vendor: true },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.updated',
+    });
+
     res.json(expense);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -246,6 +275,12 @@ export const approveExpense = async (req: Request, res: Response) => {
         approvedBy: user.userId,
         approvedAt: new Date(),
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.approved',
     });
 
     await logFinancialAction({
@@ -279,6 +314,12 @@ export const rejectExpense = async (req: Request, res: Response) => {
         rejectedAt: new Date(),
         rejectionReason: reason,
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.rejected',
     });
 
     await logFinancialAction({
@@ -317,6 +358,12 @@ export const markExpensePaid = async (req: Request, res: Response) => {
     const expense = await prisma.expense.update({
       where: { id: req.params.id },
       data: { status: 'PAID', paymentMethod, paymentRef },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.paid',
     });
 
     await logFinancialAction({
@@ -410,9 +457,15 @@ export const deleteExpense = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cannot delete a paid expense' });
     }
 
-    await prisma.expense.update({
+    const expense = await prisma.expense.update({
       where: { id: req.params.id },
       data: { status: 'CANCELLED' },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: expense.tenantId,
+      branchId: expense.branchId,
+      source: 'expense.cancelled',
     });
 
     res.json({ message: 'Expense cancelled' });

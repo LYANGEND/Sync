@@ -8,6 +8,7 @@ import StudentReportCard from '../../components/academics/StudentReportCard';
 import ClassBroadsheet from '../../components/academics/ClassBroadsheet';
 import aiIntelligenceService, { ParentLetterResponse } from '../../services/aiIntelligenceService';
 import toast from 'react-hot-toast';
+import { PageHeader } from '../../components/ui/DesignSystem';
 
 
 interface Class {
@@ -51,6 +52,7 @@ const ReportCards: React.FC = () => {
   const [generatingLetter, setGeneratingLetter] = useState(false);
   const [showLetterModal, setShowLetterModal] = useState(false);
   const reportRef = React.useRef<HTMLDivElement>(null);
+  const exportButtonRef = React.useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     fetchInitialData();
@@ -217,7 +219,7 @@ const ReportCards: React.FC = () => {
 
   if (showBroadsheet) {
     return (
-      <div className="p-6 h-[calc(100vh-64px)]">
+      <div className="ds-page h-[calc(100vh-64px)]">
         <ClassBroadsheet
           reports={classReports}
           onClose={() => setShowBroadsheet(false)}
@@ -227,17 +229,18 @@ const ReportCards: React.FC = () => {
   }
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
-      <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">Report Cards</h2>
+    <div className="ds-page">
+      <PageHeader title="Report Cards" description="Generate student reports, review class results and export reports for the selected term." />
 
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
+      <div className="ds-card">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="ds-field">
+            <label htmlFor="report-term" className="ds-label">Academic Term</label>
             <select
+              id="report-term"
               value={selectedTerm}
               onChange={(e) => setSelectedTerm(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
+              className="ds-select"
             >
               <option value="">Select Term</option>
               {terms.map((term) => (
@@ -248,15 +251,16 @@ const ReportCards: React.FC = () => {
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
+          <div className="ds-field">
+            <label htmlFor="report-class" className="ds-label">Class</label>
             <select
+              id="report-class"
               value={selectedClass}
               onChange={(e) => {
                 setSelectedClass(e.target.value);
                 setSelectedStudent('');
               }}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
+              className="ds-select"
             >
               <option value="">Select Class</option>
               {classes.map((cls) => (
@@ -265,13 +269,14 @@ const ReportCards: React.FC = () => {
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student</label>
+          <div className="ds-field">
+            <label htmlFor="report-student" className="ds-label">Student</label>
             <select
+              id="report-student"
               value={selectedStudent}
               onChange={(e) => setSelectedStudent(e.target.value)}
               disabled={!selectedClass}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-gray-100 dark:disabled:bg-slate-700 disabled:text-gray-400 dark:disabled:text-gray-500 bg-white dark:bg-slate-700 dark:text-white"
+              className="ds-select"
             >
               <option value="">None (Select for individual report)</option>
               {students.map((student) => (
@@ -283,44 +288,53 @@ const ReportCards: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-6 flex gap-3">
+        <div className="ds-actions mt-6">
           <button
             onClick={handleGenerateReport}
             disabled={!selectedStudent || !selectedTerm || generating}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300 disabled:cursor-not-allowed"
+            className="ds-button-primary"
+            aria-busy={generating || undefined}
           >
             <FileText size={20} />
             {generating && selectedStudent ? 'Generating...' : 'Generate Student Report'}
           </button>
-          <div className="relative">
+          <div className="relative" onKeyDown={event => {
+            if (event.key === 'Escape' && showExportMenu) {
+              setShowExportMenu(false);
+              exportButtonRef.current?.focus();
+            }
+          }}>
             <button
+              ref={exportButtonRef}
               onClick={() => setShowExportMenu(!showExportMenu)}
               disabled={!selectedClass || !selectedTerm || generating}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+              className="ds-button-secondary"
+              aria-expanded={showExportMenu}
+              aria-controls="report-export-actions"
             >
               <Download size={20} />
               Export / Print
             </button>
 
             {showExportMenu && (
-              <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-100 dark:border-slate-700 z-50 overflow-hidden">
+              <div id="report-export-actions" className="ds-surface absolute left-0 mt-2 w-56 z-50 overflow-hidden">
                 <button
                   onClick={() => handleExport('PRINT')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300 border-b border-gray-50 dark:border-slate-700"
+                  className="ds-button-ghost w-full justify-start text-left"
                 >
                   <Printer size={16} className="text-blue-600" />
                   Print Reports (PDF)
                 </button>
                 <button
                   onClick={() => handleExport('EXCEL')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300 border-b border-gray-50 dark:border-slate-700"
+                  className="ds-button-ghost w-full justify-start text-left"
                 >
                   <FileSpreadsheet size={16} className="text-green-600" />
                   Export Excel (Results)
                 </button>
                 <button
                   onClick={() => handleExport('CSV')}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 text-gray-700 dark:text-gray-300"
+                  className="ds-button-ghost w-full justify-start text-left"
                 >
                   <FileText size={16} className="text-gray-500" />
                   Export CSV
@@ -331,7 +345,7 @@ const ReportCards: React.FC = () => {
           <button
             onClick={handleViewBroadsheet}
             disabled={!selectedClass || !selectedTerm || generating}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:bg-emerald-300 disabled:cursor-not-allowed"
+            className="ds-button-outline"
           >
             <FileSpreadsheet size={20} />
             Broadsheet
@@ -340,7 +354,8 @@ const ReportCards: React.FC = () => {
             onClick={handleGenerateParentLetter}
             disabled={!selectedStudent || !selectedTerm || generatingLetter}
             title="Generate an AI-written personalised letter to the student's guardian"
-            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors disabled:bg-violet-300 disabled:cursor-not-allowed"
+            className="ds-button-outline"
+            aria-busy={generatingLetter || undefined}
           >
             {generatingLetter ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}
             {generatingLetter ? 'Writing…' : 'AI Parent Letter'}
@@ -348,17 +363,17 @@ const ReportCards: React.FC = () => {
         </div>
 
         {error && (
-          <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg border border-red-200 dark:border-red-800 flex items-center gap-2">
-            <AlertCircle size={20} />
+          <div className="ds-alert ds-badge-error mt-4" role="alert">
+            <AlertCircle size={20} className="shrink-0" aria-hidden="true" />
             <span>{error}</span>
-            <button onClick={() => setError(null)} className="ml-auto"><div className="sr-only">Close</div></button>
+            <button onClick={() => setError(null)} className="ds-button-ghost ml-auto shrink-0" aria-label="Dismiss report error"><X size={18} aria-hidden="true" /></button>
           </div>
         )}
         {success && (
-          <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg border border-green-200 dark:border-green-800 flex items-center gap-2">
-            <CheckCircle size={20} />
+          <div className="ds-alert ds-badge-success mt-4" role="status">
+            <CheckCircle size={20} className="shrink-0" aria-hidden="true" />
             <span>{success}</span>
-            <button onClick={() => setSuccess(null)} className="ml-auto"><div className="sr-only">Close</div></button>
+            <button onClick={() => setSuccess(null)} className="ds-button-ghost ml-auto shrink-0" aria-label="Dismiss report confirmation"><X size={18} aria-hidden="true" /></button>
           </div>
         )}
       </div>
@@ -390,16 +405,16 @@ const ReportCards: React.FC = () => {
 
       {/* AI Parent Letter Modal */}
       {showLetterModal && parentLetter && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+          <div className="ds-surface max-w-2xl w-full max-h-[90vh] flex flex-col" role="dialog" aria-labelledby="parent-letter-title" aria-describedby="parent-letter-description">
+            <div className="flex flex-wrap items-center justify-between gap-4 p-6 border-b border-[var(--border-color)]">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
-                  <Brain className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                <div className="p-2 bg-[var(--surface-muted)] rounded-xl">
+                  <Brain className="w-5 h-5 text-[var(--text-secondary)]" aria-hidden="true" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">AI Parent Letter</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <h3 id="parent-letter-title">AI Parent Letter</h3>
+                  <p id="parent-letter-description" className="ds-helper">
                     {parentLetter.studentName} · {parentLetter.termName}
                   </p>
                 </div>
@@ -414,13 +429,14 @@ const ReportCards: React.FC = () => {
                       win.print();
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  className="ds-button-secondary"
                 >
                   <Printer size={15} /> Print
                 </button>
                 <button
                   onClick={() => setShowLetterModal(false)}
-                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg"
+                  className="ds-button-ghost"
+                  aria-label="Close parent letter"
                 >
                   <X size={18} />
                 </button>
@@ -432,7 +448,7 @@ const ReportCards: React.FC = () => {
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parentLetter.letterHtml || `<p style="white-space:pre-wrap">${parentLetter.letterPlainText}</p>`) }}
               />
             </div>
-            <div className="p-4 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500 text-center">
+            <div className="p-4 border-t border-[var(--border-color)] ds-helper text-center">
               Generated by AI · Review before sending · Generated {new Date(parentLetter.generatedAt).toLocaleString()}
             </div>
           </div>

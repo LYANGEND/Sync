@@ -1,5 +1,12 @@
 
 import { prisma } from './utils/prisma';
+import { runWithTenant } from './middleware/tenantContext';
+
+const tenantId = process.env.TENANT_ID?.trim();
+if (!tenantId) {
+    throw new Error('TENANT_ID is required for tenant-scoped database diagnostics');
+}
+
 async function main() {
     console.log('Testing DB Connection...');
     try {
@@ -26,4 +33,4 @@ async function main() {
     }
 }
 
-main();
+runWithTenant(tenantId, main);

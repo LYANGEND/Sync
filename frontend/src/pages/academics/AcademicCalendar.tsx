@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, Edit3, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { PageHeader } from '../../components/ui/DesignSystem';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -181,49 +182,49 @@ const AcademicCalendar: React.FC = () => {
   const sortedEvents = [...events].sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
   return (
-    <div className="p-4 md:p-6">
+    <div className="ds-page">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-        <div className="flex items-center gap-3">
-          <CalendarIcon className="w-6 h-6 text-blue-600" />
-          <h2 className="text-xl font-bold text-gray-800 dark:text-white">Academic Calendar</h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-0.5">
-            <button onClick={() => setViewMode('month')} className={`px-3 py-1 text-sm rounded-md ${viewMode === 'month' ? 'bg-white dark:bg-slate-600 shadow-sm font-medium' : ''}`}>
+      <PageHeader title="Academic Calendar" description="School events, holidays, and important dates." actions={
+        <div className="ds-actions">
+          <div className="ds-actions" role="group" aria-label="Calendar view">
+            <button onClick={() => setViewMode('month')} aria-pressed={viewMode === 'month'} className={viewMode === 'month' ? 'ds-button-primary' : 'ds-button-secondary'}>
               Month
             </button>
-            <button onClick={() => setViewMode('list')} className={`px-3 py-1 text-sm rounded-md ${viewMode === 'list' ? 'bg-white dark:bg-slate-600 shadow-sm font-medium' : ''}`}>
+            <button onClick={() => setViewMode('list')} aria-pressed={viewMode === 'list'} className={viewMode === 'list' ? 'ds-button-primary' : 'ds-button-secondary'}>
               List
             </button>
           </div>
           {isAdmin && (
-            <button onClick={() => openCreateModal()} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-              <Plus className="w-4 h-4" /> Add Event
+            <button onClick={() => openCreateModal()} className="ds-button-primary">
+              <Plus className="w-4 h-4" aria-hidden="true" /> Add Event
             </button>
           )}
         </div>
-      </div>
+      } />
+
+      {loading && <p role="status" className="ds-helper">Loading calendar events...</p>}
 
       {viewMode === 'month' ? (
         <>
           {/* Month Navigation */}
-          <div className="flex items-center justify-between mb-4">
-            <button onClick={prevMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
-              <ChevronLeft className="w-5 h-5" />
+          <div className="ds-card flex items-center justify-between gap-3">
+            <button onClick={prevMonth} className="ds-button-ghost" aria-label="Previous month">
+              <ChevronLeft className="w-5 h-5" aria-hidden="true" />
             </button>
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{MONTHS[month]} {year}</h3>
-            <button onClick={nextMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
-              <ChevronRight className="w-5 h-5" />
+            <h2 aria-live="polite">{MONTHS[month]} {year}</h2>
+            <button onClick={nextMonth} className="ds-button-ghost" aria-label="Next month">
+              <ChevronRight className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
 
           {/* Calendar Grid */}
-          <div className="border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden">
+          {/* Specialized calendar exception: seven columns and compact event chips, not ds-table padding or full-height buttons. */}
+          <div className="ds-surface overflow-x-auto" role="region" aria-label={`${MONTHS[month]} ${year} calendar`} tabIndex={0}>
+            <div className="min-w-[560px]">
             {/* Day Headers */}
-            <div className="grid grid-cols-7 bg-gray-50 dark:bg-slate-900">
+            <div className="grid grid-cols-7 bg-[var(--surface-muted)]">
               {DAYS.map(d => (
-                <div key={d} className="p-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-slate-700">
+                <div key={d} className="p-2 text-center text-xs font-semibold text-[var(--text-secondary)] border-b border-[var(--border-color)]">
                   {d}
                 </div>
               ))}
@@ -236,32 +237,38 @@ const AcademicCalendar: React.FC = () => {
                 return (
                   <div
                     key={i}
-                    className={`min-h-[80px] md:min-h-[100px] border-b border-r border-gray-100 dark:border-slate-700/50 p-1 ${
-                      day ? 'cursor-pointer hover:bg-blue-50/50 dark:hover:bg-slate-800/50' : 'bg-gray-50/50 dark:bg-slate-900/30'
+                    className={`min-h-[80px] md:min-h-[100px] border-b border-r border-[var(--border-color)] p-1 ${
+                      day ? 'hover:bg-[var(--surface-muted)]' : 'bg-[var(--surface-muted)]'
                     }`}
                     onClick={() => day && isAdmin && openCreateModal(new Date(year, month, day))}
                   >
                     {day && (
                       <>
-                        <div className={`text-xs font-medium mb-0.5 w-6 h-6 flex items-center justify-center rounded-full ${
-                          isToday(day) ? 'bg-blue-600 text-white' : 'text-gray-700 dark:text-gray-300'
-                        }`}>
-                          {day}
-                        </div>
+                        {isAdmin ? (
+                          <button type="button" className={`ds-button-ghost mb-0.5 ${isToday(day) ? 'ring-2 ring-inset ring-[var(--action-color)]' : ''}`}
+                            aria-label={`Add event on ${new Date(year, month, day).toLocaleDateString()}`}
+                            aria-current={isToday(day) ? 'date' : undefined}
+                            onClick={ev => { ev.stopPropagation(); openCreateModal(new Date(year, month, day)); }}>
+                            {day}
+                          </button>
+                        ) : (
+                          <div aria-current={isToday(day) ? 'date' : undefined} className={`text-xs font-semibold mb-0.5 w-6 h-6 flex items-center justify-center rounded-full ${isToday(day) ? 'bg-[var(--action-color)] text-[var(--action-foreground)]' : 'text-[var(--text-primary)]'}`}>{day}</div>
+                        )}
                         <div className="space-y-0.5">
                           {dayEvents.slice(0, 3).map(e => (
-                            <div
+                            <button type="button"
                               key={e.id}
-                              className="text-[10px] md:text-xs px-1 py-0.5 rounded truncate text-white font-medium"
-                              style={{ backgroundColor: e.color || getEventColor(e.eventType) }}
+                              className="ds-button-secondary w-full !min-h-0 !min-w-0 !justify-start !rounded !px-1 !py-0.5 !text-xs border-l-4"
+                              style={{ borderLeftColor: e.color || getEventColor(e.eventType) }}
                               onClick={(ev) => { ev.stopPropagation(); setSelectedDate(new Date(year, month, day)); }}
                               title={e.title}
+                              aria-label={`${e.title}, ${new Date(year, month, day).toLocaleDateString()}`}
                             >
-                              {e.title}
-                            </div>
+                              <span className="truncate">{e.title}</span>
+                            </button>
                           ))}
                           {dayEvents.length > 3 && (
-                            <div className="text-[10px] text-gray-500">+{dayEvents.length - 3} more</div>
+                            <div className="text-xs text-[var(--text-secondary)]">+{dayEvents.length - 3} more</div>
                           )}
                         </div>
                       </>
@@ -270,14 +277,15 @@ const AcademicCalendar: React.FC = () => {
                 );
               })}
             </div>
+            </div>
           </div>
 
           {/* Event Legend */}
           <div className="mt-4 flex flex-wrap gap-3">
             {EVENT_TYPES.map(t => (
-              <div key={t.value} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: t.color }}></div>
-                <span>{t.icon} {t.label}</span>
+              <div key={t.value} className="ds-badge ds-badge-neutral">
+                <div aria-hidden="true" className="w-3 h-3 rounded-sm" style={{ backgroundColor: t.color }}></div>
+                <span>{t.label}</span>
               </div>
             ))}
           </div>
@@ -286,24 +294,24 @@ const AcademicCalendar: React.FC = () => {
         /* List View */
         <div className="space-y-3">
           {sortedEvents.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-              <CalendarIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <div className="ds-card ds-empty">
+              <CalendarIcon className="w-12 h-12 mx-auto mb-3" aria-hidden="true" />
               <p>No events this month</p>
             </div>
           ) : (
             sortedEvents.map(event => (
-              <div key={event.id} className="flex items-start gap-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl" style={{ backgroundColor: `${getEventColor(event.eventType)}20` }}>
+              <div key={event.id} className="ds-card flex flex-wrap items-start gap-4">
+                <div aria-hidden="true" className="w-12 h-12 rounded-xl flex items-center justify-center text-xl" style={{ backgroundColor: `${getEventColor(event.eventType)}20` }}>
                   {getEventIcon(event.eventType)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-gray-800 dark:text-white">{event.title}</h4>
-                  {event.description && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{event.description}</p>}
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{ backgroundColor: getEventColor(event.eventType) }}>
+                  <h3 className="break-words">{event.title}</h3>
+                  {event.description && <p className="ds-helper mt-1 break-words">{event.description}</p>}
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    <span className="ds-badge ds-badge-neutral" style={{ borderLeftColor: getEventColor(event.eventType), borderLeftWidth: 4 }}>
                       {EVENT_TYPES.find(t => t.value === event.eventType)?.label}
                     </span>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-[var(--text-secondary)]">
                       {new Date(event.startDate).toLocaleDateString()} 
                       {event.startDate !== event.endDate && ` — ${new Date(event.endDate).toLocaleDateString()}`}
                     </span>
@@ -311,11 +319,11 @@ const AcademicCalendar: React.FC = () => {
                 </div>
                 {isAdmin && (
                   <div className="flex gap-1">
-                    <button onClick={() => openEditModal(event)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
-                      <Edit3 className="w-4 h-4 text-gray-500" />
+                    <button onClick={() => openEditModal(event)} className="ds-button-ghost" aria-label={`Edit ${event.title}`}>
+                      <Edit3 className="w-4 h-4" aria-hidden="true" />
                     </button>
-                    <button onClick={() => handleDelete(event.id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
-                      <Trash2 className="w-4 h-4 text-red-500" />
+                    <button onClick={() => handleDelete(event.id)} className="ds-button-destructive" aria-label={`Delete ${event.title}`}>
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
                 )}
@@ -327,57 +335,57 @@ const AcademicCalendar: React.FC = () => {
 
       {/* Create/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div role="dialog" aria-labelledby="calendar-event-title" className="ds-card w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+              <h3 id="calendar-event-title">
                 {editingEvent ? 'Edit Event' : 'New Event'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
-                <X className="w-5 h-5" />
+              <button onClick={() => setShowModal(false)} className="ds-button-ghost" aria-label="Close event editor">
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
-                <input type="text" required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                <label htmlFor="calendar-title" className="ds-label mb-1">Title (required)</label>
+                <input id="calendar-title" type="text" required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                  className="ds-input"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                <select value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                <label htmlFor="calendar-type" className="ds-label mb-1">Type</label>
+                <select id="calendar-type" value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}
+                  className="ds-select"
                 >
                   {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
-                  <input type="date" required value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                  <label htmlFor="calendar-start" className="ds-label mb-1">Start Date (required)</label>
+                  <input id="calendar-start" type="date" required value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })}
+                    className="ds-input"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
-                  <input type="date" required value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                  <label htmlFor="calendar-end" className="ds-label mb-1">End Date (required)</label>
+                  <input id="calendar-end" type="date" required value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })}
+                    className="ds-input"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                <label htmlFor="calendar-description" className="ds-label mb-1">Description</label>
+                <textarea id="calendar-description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
+                  className="ds-textarea"
                 />
               </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">
+              <div className="ds-form-actions">
+                <button type="button" onClick={() => setShowModal(false)} className="ds-button-outline">
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <button type="submit" className="ds-button-primary">
                   {editingEvent ? 'Update' : 'Create'}
                 </button>
               </div>

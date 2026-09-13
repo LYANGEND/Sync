@@ -2,6 +2,8 @@ import { prisma } from '../utils/prisma';
 import { SchoolSettings } from '@prisma/client';
 import axios from 'axios';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
+import { reserveSmsQuota } from './smsRateLimitService';
+import { getPlatformSmsSettings } from './platformSmsSettingsService';
 
 interface SmsResult {
   success: boolean;
@@ -14,12 +16,6 @@ interface SmsResult {
 
 /** Valid Zambian mobile number patterns (after stripping formatting) */
 const ZAMBIAN_PHONE_REGEX = /^(260[79][5-7]\d{7}|0[79][5-7]\d{7})$/;
-
-/** Daily SMS rate limits */
-const RATE_LIMITS = {
-  perUser: 500,   // max SMS per user per day
-  global: 5000,   // max SMS across all users per day
-};
 
 /**
  * Sanitize user-supplied values before interpolating into SMS text.
@@ -75,6 +71,32 @@ class SmsService {
   // ─── public API ────────────────────────────────────────────
 
   /**
+   * Resolves the SMS provider settings actually used for a send.
+   * Prefers the tenant's own configured provider (SchoolSettings). If the
+   * tenant hasn't configured one, falls back to the platform-wide default
+   * provider (PlatformSmsSettings) when it's enabled and configured.
+   * Returns null if no usable provider is available either way.
+   */
+  private async resolveEffectiveSettings(settings: SchoolSettings): Promise<SchoolSettings | null> {
+    if (settings.smsProvider && settings.smsApiKey) {
+      return settings;
+    }
+
+    const platform = await getPlatformSmsSettings();
+    if (!platform.enabled || !platform.provider || !platform.apiKey) {
+      return null;
+    }
+
+    return {
+      ...settings,
+      smsProvider: platform.provider,
+      smsApiKey: platform.apiKey,
+      smsApiSecret: platform.apiSecret,
+      smsSenderId: platform.senderId,
+    };
+  }
+
+  /**
    * Send a single SMS message (with audit logging).
    * Optionally schedule for a future date/time.
    */
@@ -89,36 +111,37 @@ class SmsService {
       return { success: false, error: validationError };
     }
 
-    const logId = await logCommunication({
-      channel: 'SMS',
-      status: 'PENDING',
-      recipientPhone: phone,
-      recipientName: options?.recipientName,
-      message: message.substring(0, 500),
-      source: options?.source || 'sms_direct',
-      sentById: options?.sentById,
-    });
-
+    let logId: string | null = null;
     try {
       // ── Rate limiting ──
       const rateLimitError = await this.checkRateLimit(options?.sentById);
       if (rateLimitError) {
-        if (logId) await updateCommunicationLogStatus(logId, 'FAILED', rateLimitError);
         return { success: false, error: rateLimitError };
       }
 
-      const settings = await prisma.schoolSettings.findFirst();
-      if (!settings) {
+      logId = await logCommunication({
+        channel: 'SMS',
+        status: 'PENDING',
+        recipientPhone: phone,
+        recipientName: options?.recipientName,
+        message: message.substring(0, 500),
+        source: options?.source || 'sms_direct',
+        sentById: options?.sentById,
+      });
+
+      const rawSettings = await prisma.schoolSettings.findFirst();
+      if (!rawSettings) {
         if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'No school settings found');
         return { success: false, error: 'No school settings found' };
       }
 
-      if (!settings.smsNotificationsEnabled) {
+      if (!rawSettings.smsNotificationsEnabled) {
         if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS notifications are disabled');
         return { success: false, error: 'SMS notifications are disabled' };
       }
 
-      if (!settings.smsProvider || !settings.smsApiKey) {
+      const settings = await this.resolveEffectiveSettings(rawSettings);
+      if (!settings) {
         if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'SMS provider not configured');
         return { success: false, error: 'SMS provider not configured' };
       }
@@ -126,7 +149,7 @@ class SmsService {
       const formattedPhone = this.formatPhone(phone);
 
       let result: SmsResult;
-      switch (settings.smsProvider.toUpperCase()) {
+      switch (settings.smsProvider!.toUpperCase()) {
         case 'MSHASTRA':
           result = await this.sendViaMshastra(formattedPhone, message, settings, options?.scheduledAt);
           break;
@@ -161,13 +184,40 @@ class SmsService {
     recipients: { phone: string; message: string }[],
     options?: { source?: string; sentById?: string; scheduledAt?: string },
   ): Promise<{ total: number; sent: number; failed: number; results: SmsResult[] }> {
-    const settings = await prisma.schoolSettings.findFirst();
+    if (recipients.length === 0) {
+      return { total: 0, sent: 0, failed: 0, results: [] };
+    }
+
+    const rawSettings = await prisma.schoolSettings.findFirst();
+    const settings = rawSettings ? await this.resolveEffectiveSettings(rawSettings) : null;
     const isMshastra = settings?.smsProvider?.toUpperCase() === 'MSHASTRA';
 
     // Check if all messages are identical → use mShastra comma-separated bulk endpoint
     const allSameMessage = recipients.every((r) => r.message === recipients[0]?.message);
+    const allPhonesValid = recipients.every((recipient) => !this.validatePhone(recipient.phone));
+    const canUseMshastraBatch = isMshastra
+      && allPhonesValid
+      && recipients.length > 1
+      && Boolean(settings);
 
-    if (isMshastra && allSameMessage && recipients.length > 1 && settings) {
+    if (canUseMshastraBatch) {
+      let rateLimitError: string | null;
+      try {
+        rateLimitError = await this.checkRateLimit(options?.sentById, recipients.length);
+      } catch (error: any) {
+        rateLimitError = error.message || 'SMS rate-limit check failed';
+      }
+      if (rateLimitError) {
+        return {
+          total: recipients.length,
+          sent: 0,
+          failed: recipients.length,
+          results: recipients.map(() => ({ success: false, error: rateLimitError! })),
+        };
+      }
+    }
+
+    if (canUseMshastraBatch && allSameMessage && settings) {
       const phones = recipients.map((r) => this.formatPhoneMshastra(r.phone));
       const message = recipients[0].message;
 
@@ -204,7 +254,7 @@ class SmsService {
     }
 
     // mShastra JSON API — different messages per recipient in a single POST
-    if (isMshastra && !allSameMessage && recipients.length > 1 && settings) {
+    if (canUseMshastraBatch && !allSameMessage && settings) {
       return this.sendViaJsonApi(recipients, settings, options);
     }
 
@@ -295,36 +345,21 @@ class SmsService {
    * Check daily SMS rate limits (per-user and global).
    * Returns an error string if limit is exceeded, or null if within limits.
    */
-  private async checkRateLimit(sentById?: string): Promise<string | null> {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+  private async checkRateLimit(sentById?: string, amount = 1): Promise<string | null> {
+    const decision = await reserveSmsQuota(sentById, amount);
+    if (decision.allowed) return null;
 
-    // Global daily limit
-    const globalCount = await prisma.communicationLog.count({
-      where: {
-        channel: 'SMS',
-        createdAt: { gte: todayStart },
-      },
-    });
-    if (globalCount >= RATE_LIMITS.global) {
-      return `Global daily SMS limit reached (${RATE_LIMITS.global}). Try again tomorrow.`;
-    }
-
-    // Per-user daily limit
-    if (sentById) {
-      const userCount = await prisma.communicationLog.count({
-        where: {
-          channel: 'SMS',
-          sentById,
-          createdAt: { gte: todayStart },
-        },
-      });
-      if (userCount >= RATE_LIMITS.perUser) {
-        return `Your daily SMS limit reached (${RATE_LIMITS.perUser}). Try again tomorrow.`;
-      }
-    }
-
-    return null;
+    console.warn(JSON.stringify({
+      event: 'sms.rate-limit.denied',
+      timestamp: new Date().toISOString(),
+      scope: decision.limitedScope,
+      amount,
+      backend: decision.backend,
+      resetAt: decision.resetAt,
+    }));
+    return decision.limitedScope === 'user'
+      ? `Your daily SMS limit reached (${decision.limit}). Try again tomorrow.`
+      : `School daily SMS limit reached (${decision.limit}). Try again tomorrow.`;
   }
 
   // ─── phone formatting ─────────────────────────────────────

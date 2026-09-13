@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
-import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, Brain, AlertTriangle, CheckCircle2, RefreshCcw, Clock3 } from 'lucide-react';
+import { Save, School, Calendar, Globe, Phone, Mail, MapPin, MessageSquare, Server, Palette, Bell, Send, Upload, Trash2, Image, CreditCard, Bot, AlertTriangle, CheckCircle2, RefreshCcw, Clock3 } from 'lucide-react';
 
 interface SettingsData {
   schoolName: string;
@@ -105,6 +105,26 @@ interface TenantDomainStatusData {
   verification?: DomainVerificationResult | null;
 }
 
+type PlatformInvoiceStatusType = 'DRAFT' | 'ISSUED' | 'PAID' | 'OVERDUE' | 'VOID';
+
+interface MyInvoice {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  totalAmount: string;
+  status: PlatformInvoiceStatusType;
+  dueAt: string | null;
+  paidAt: string | null;
+  currency?: string;
+}
+
+interface InvoiceCollectionStatus {
+  id: string;
+  invoiceId: string;
+  status: 'PENDING' | 'PAY_OFFLINE' | 'SUCCESSFUL' | 'FAILED';
+  reasonForFailure: string | null;
+}
+
 const domainStatusClass = (status: DomainStatus) => {
   if (status === 'VERIFIED') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300';
   if (status === 'FAILED') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300';
@@ -123,9 +143,9 @@ const Settings = () => {
     schoolWebsite: '',
     currentTermId: '',
 
-    primaryColor: '#1A3A9C',
+    primaryColor: '#2563EB',
     secondaryColor: '#475569',
-    accentColor: '#F5820A',
+    accentColor: '#F59E0B',
 
     emailNotificationsEnabled: true,
     smsNotificationsEnabled: false,
@@ -164,7 +184,7 @@ const Settings = () => {
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments' | 'ai'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments' | 'ai' | 'subscription'>('general');
 
   // Logo upload state
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -175,6 +195,87 @@ const Settings = () => {
   const [testRecipient, setTestRecipient] = useState('');
   const [domainStatus, setDomainStatus] = useState<TenantDomainStatusData | null>(null);
   const [checkingDomain, setCheckingDomain] = useState(false);
+
+  // Subscription billing (platform invoices) state
+  const [myInvoices, setMyInvoices] = useState<MyInvoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null);
+  const [payModalInvoice, setPayModalInvoice] = useState<MyInvoice | null>(null);
+  const [payPhone, setPayPhone] = useState('');
+  const [payCountry, setPayCountry] = useState<'zm' | 'mw'>('zm');
+  const [payOperator, setPayOperator] = useState<'airtel' | 'mtn' | 'tnm'>('airtel');
+  const [payError, setPayError] = useState<string | null>(null);
+  const [collectionStatus, setCollectionStatus] = useState<InvoiceCollectionStatus | null>(null);
+
+  const loadMyInvoices = async () => {
+    setInvoicesLoading(true);
+    try {
+      const response = await api.get('/billing/subscription/invoices');
+      setMyInvoices(response.data || []);
+    } catch (error) {
+      console.error('Failed to load invoices', error);
+    } finally {
+      setInvoicesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'subscription') {
+      loadMyInvoices();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const openPayModal = (invoice: MyInvoice) => {
+    setPayModalInvoice(invoice);
+    setPayPhone('');
+    setPayCountry('zm');
+    setPayOperator('airtel');
+    setPayError(null);
+    setCollectionStatus(null);
+  };
+
+  const submitInvoicePayment = async () => {
+    if (!payModalInvoice) return;
+    setPayError(null);
+    setPayingInvoiceId(payModalInvoice.id);
+    try {
+      const response = await api.post(`/billing/subscription/invoices/${payModalInvoice.id}/pay-with-lenco`, {
+        phone: payPhone,
+        country: payCountry,
+        operator: payOperator,
+      });
+      setCollectionStatus(response.data);
+      if (response.data?.status === 'FAILED') {
+        setPayError(response.data.reasonForFailure || 'Payment failed. Please try again.');
+      }
+    } catch (error: any) {
+      setPayError(error.response?.data?.error || 'Failed to initiate payment');
+    } finally {
+      setPayingInvoiceId(null);
+    }
+  };
+
+  const checkPaymentStatus = async () => {
+    if (!payModalInvoice) return;
+    try {
+      const response = await api.get(`/billing/subscription/invoices/${payModalInvoice.id}/payment-status`);
+      setCollectionStatus(response.data);
+      if (response.data?.status === 'SUCCESSFUL') {
+        await loadMyInvoices();
+      }
+    } catch (error) {
+      console.error('Failed to check payment status', error);
+    }
+  };
+
+  const invoiceStatusClass = (status: PlatformInvoiceStatusType) => {
+    if (status === 'PAID') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300';
+    if (status === 'OVERDUE') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300';
+    if (status === 'ISSUED') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300';
+    if (status === 'VOID') return 'border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500';
+    return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
+  };
 
   const handleSendTest = async (channel: 'email' | 'sms' | 'whatsapp') => {
     setTestSending(channel);
@@ -343,45 +444,54 @@ const Settings = () => {
   if (loading) return <div className="p-6 dark:text-white">Loading...</div>;
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">System Settings</h1>
+    <div className="ds-page">
+      <div className="mb-6">
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Configuration</p>
+        <h1 className="ds-page-title mt-2">System Settings</h1>
+      </div>
 
-      <div className="flex space-x-4 mb-6 border-b border-gray-200 dark:border-slate-700 overflow-x-auto scrollbar-hide">
+      <div className="mb-6 flex space-x-4 overflow-x-auto border-b border-slate-200 pb-2 dark:border-slate-700 scrollbar-hide">
         <button
           onClick={() => setActiveTab('general')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'general' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'general' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           General
         </button>
         <button
           onClick={() => setActiveTab('academic')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'academic' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'academic' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Academic
         </button>
         <button
           onClick={() => setActiveTab('theme')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'theme' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'theme' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Theme & Branding
         </button>
         <button
           onClick={() => setActiveTab('communication')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'communication' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'communication' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Communication
         </button>
         <button
           onClick={() => setActiveTab('payments')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'payments' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Payments
         </button>
         <button
           onClick={() => setActiveTab('ai')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'ai' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'ai' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           AI & Intelligence
+        </button>
+        <button
+          onClick={() => setActiveTab('subscription')}
+          className={`whitespace-nowrap border-b-2 pb-2 px-1 text-sm font-medium ${activeTab === 'subscription' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+        >
+          Subscription & Billing
         </button>
       </div>
 
@@ -635,11 +745,15 @@ const Settings = () => {
         {activeTab === 'theme' && (
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex items-center gap-2 mb-4 border-b pb-2">
-              <Palette className="text-blue-600 dark:text-blue-400" size={20} />
+              <Palette className="brand-primary-text" size={20} />
               <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Theme & Branding</h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Your interface uses one primary color and one accent color for a consistent brand across every page.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Primary Color</label>
                 <div className="flex items-center space-x-2">
@@ -653,31 +767,11 @@ const Settings = () => {
                     type="text"
                     value={settings.primaryColor}
                     onChange={(e) => setSettings({ ...settings, primaryColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg uppercase bg-white dark:bg-slate-700 dark:text-white"
                     pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
                   />
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for buttons, links, and active states.</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Secondary Color</label>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="color"
-                    value={settings.secondaryColor}
-                    onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
-                    className="h-10 w-10 rounded border border-gray-300 dark:border-slate-600 cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={settings.secondaryColor}
-                    onChange={(e) => setSettings({ ...settings, secondaryColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
-                    pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for text, borders, and backgrounds.</p>
               </div>
 
               <div>
@@ -693,7 +787,7 @@ const Settings = () => {
                     type="text"
                     value={settings.accentColor}
                     onChange={(e) => setSettings({ ...settings, accentColor: e.target.value })}
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase bg-white dark:bg-slate-700 dark:text-white"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg uppercase bg-white dark:bg-slate-700 dark:text-white"
                     pattern="^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$"
                   />
                 </div>
@@ -1217,17 +1311,159 @@ const Settings = () => {
           </div>
         )}
 
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={saving}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
-          >
-            <Save size={20} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
+        {activeTab !== 'subscription' && (
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
+            >
+              <Save size={20} />
+              {saving ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
+        )}
       </form>
+
+      {activeTab === 'subscription' && (
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
+          <div className="flex items-center gap-2 mb-4 border-b pb-2">
+            <CreditCard className="text-blue-600 dark:text-blue-400" size={20} />
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Subscription Invoices</h2>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Invoices issued by Sync for your school's subscription. Pay directly via mobile money.
+          </p>
+
+          {invoicesLoading ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Loading invoices…</p>
+          ) : myInvoices.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">No invoices yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase text-gray-500 dark:text-gray-400">
+                    <th className="pb-2 pr-4">Period</th>
+                    <th className="pb-2 pr-4">Amount</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2 pr-4">Due</th>
+                    <th className="pb-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myInvoices.map((invoice) => (
+                    <tr key={invoice.id} className="border-t border-gray-100 dark:border-slate-700">
+                      <td className="py-2 pr-4 text-gray-700 dark:text-gray-200">
+                        {new Date(invoice.periodStart).toLocaleDateString()} – {new Date(invoice.periodEnd).toLocaleDateString()}
+                      </td>
+                      <td className="py-2 pr-4 text-gray-700 dark:text-gray-200">{invoice.currency || 'ZMW'} {Number(invoice.totalAmount).toFixed(2)}</td>
+                      <td className="py-2 pr-4">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${invoiceStatusClass(invoice.status)}`}>{invoice.status}</span>
+                      </td>
+                      <td className="py-2 pr-4 text-gray-500 dark:text-gray-400">{invoice.dueAt ? new Date(invoice.dueAt).toLocaleDateString() : '—'}</td>
+                      <td className="py-2 text-right">
+                        {(invoice.status === 'ISSUED' || invoice.status === 'OVERDUE') && (
+                          <button
+                            type="button"
+                            onClick={() => openPayModal(invoice)}
+                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900"
+                          >
+                            Pay with Mobile Money
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {payModalInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg dark:bg-slate-800">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Pay Invoice</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {payModalInvoice.currency || 'ZMW'} {Number(payModalInvoice.totalAmount).toFixed(2)} — you'll receive a prompt on your phone to authorize the payment.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                Phone number
+                <input
+                  type="text"
+                  value={payPhone}
+                  onChange={(e) => setPayPhone(e.target.value)}
+                  placeholder="e.g. 0977123456"
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                />
+              </label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                Country
+                <select
+                  value={payCountry}
+                  onChange={(e) => setPayCountry(e.target.value as 'zm' | 'mw')}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                >
+                  <option value="zm">Zambia</option>
+                  <option value="mw">Malawi</option>
+                </select>
+              </label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                Mobile network
+                <select
+                  value={payOperator}
+                  onChange={(e) => setPayOperator(e.target.value as 'airtel' | 'mtn' | 'tnm')}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                >
+                  {payCountry === 'zm' ? (
+                    <>
+                      <option value="airtel">Airtel</option>
+                      <option value="mtn">MTN</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="airtel">Airtel</option>
+                      <option value="tnm">TNM</option>
+                    </>
+                  )}
+                </select>
+              </label>
+
+              {payError && <p className="text-xs text-red-600 dark:text-red-400">{payError}</p>}
+              {collectionStatus && (
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  Status: <span className="font-semibold">{collectionStatus.status}</span>
+                  {collectionStatus.status === 'PENDING' || collectionStatus.status === 'PAY_OFFLINE' ? (
+                    <button type="button" onClick={checkPaymentStatus} className="ml-2 text-blue-600 underline dark:text-blue-400">Check status</button>
+                  ) : null}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPayModalInvoice(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 dark:border-slate-600 dark:text-gray-200"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                disabled={!payPhone || payingInvoiceId === payModalInvoice.id}
+                onClick={submitInvoicePayment}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                {payingInvoiceId === payModalInvoice.id ? 'Sending prompt…' : 'Pay Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

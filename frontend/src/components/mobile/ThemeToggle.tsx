@@ -15,7 +15,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
     showLabel = false,
     className = '',
 }) => {
-    const { theme, isDark, toggleTheme, setTheme } = useTheme();
+    const { isDark, toggleTheme } = useTheme();
 
     const handleToggle = () => {
         hapticLight();
@@ -24,11 +24,10 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
 
     return (
         <button
+            type="button"
             onClick={handleToggle}
-            className={`p-2.5 rounded-xl transition-all duration-200 ${isDark
-                    ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                } ${className}`}
+            className={`ds-button-ghost px-2.5 ${className}`}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
             <div className="flex items-center gap-2">

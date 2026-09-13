@@ -1,4 +1,5 @@
 import { runScheduledCollection, reconcileCampaignPayments } from '../services/debtCollectionService';
+import { forEachActiveTenant } from './tenantJobRunner';
 
 /**
  * Simple interval-based scheduler for debt collection.
@@ -23,13 +24,15 @@ async function runDailyTasks() {
     console.log(`[Scheduler] Starting daily tasks at ${new Date().toISOString()}`);
 
     // 1. Run automated debt collection (sends reminders based on escalation rules)
-    await runScheduledCollection();
+    await forEachActiveTenant('DebtCollection', async () => {
+      await runScheduledCollection();
 
-    // 2. Reconcile payments (detect which contacted debtors have paid)
-    const reconciled = await reconcileCampaignPayments();
-    if (reconciled > 0) {
-      console.log(`[Scheduler] Reconciled ${reconciled} campaign payments`);
-    }
+      // 2. Reconcile payments (detect which contacted debtors have paid)
+      const reconciled = await reconcileCampaignPayments();
+      if (reconciled > 0) {
+        console.log(`[Scheduler] Reconciled ${reconciled} campaign payments`);
+      }
+    }, 23 * 60 * 60 * 1000);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[Scheduler] Daily tasks completed in ${elapsed}s`);
@@ -66,7 +69,9 @@ export function initScheduler() {
   // Also run reconciliation every 6 hours (to detect payments quickly)
   setInterval(async () => {
     try {
-      await reconcileCampaignPayments();
+      await forEachActiveTenant('PaymentReconciliation', async () => {
+        await reconcileCampaignPayments();
+      }, 5 * 60 * 60 * 1000);
     } catch (error) {
       console.error('[Scheduler] Reconciliation failed:', error);
     }

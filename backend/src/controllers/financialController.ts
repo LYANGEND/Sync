@@ -8,6 +8,7 @@ import {
   getCashFlowSummary,
   getAgedReceivables,
 } from '../services/accountingService';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // FINANCIAL STATEMENTS
@@ -121,6 +122,11 @@ export const createAccount = async (req: Request, res: Response) => {
     const account = await prisma.chartOfAccount.create({
       data: { code, name, type, parentId, description, branchId: user?.branchId },
     });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: account.tenantId,
+      branchId: account.branchId,
+      source: 'chart-of-account.created',
+    });
     res.status(201).json(account);
   } catch (error: any) {
     if (error.code === 'P2002') return res.status(400).json({ error: 'Account code already exists' });
@@ -176,15 +182,25 @@ export const seedDefaultAccounts = async (req: Request, res: Response) => {
     ];
 
     let created = 0;
+    let createdTenantId: string | undefined;
     for (const account of defaults) {
       try {
-        await prisma.chartOfAccount.create({
+        const createdAccount = await prisma.chartOfAccount.create({
           data: { ...account, isSystem: true, branchId },
         });
+        createdTenantId ||= createdAccount.tenantId;
         created++;
       } catch (e) {
         // Skip if already exists
       }
+    }
+
+    if (createdTenantId) {
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: createdTenantId,
+        branchId,
+        source: 'chart-of-account.defaults-seeded',
+      });
     }
 
     res.json({ message: `Seeded ${created} default accounts`, total: defaults.length });
@@ -250,6 +266,12 @@ export const createRefund = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: refund.tenantId,
+      branchId: refund.branchId,
+      source: 'refund.created',
+    });
+
     res.status(201).json(refund);
   } catch (error) {
     res.status(500).json({ error: 'Failed to create refund' });
@@ -264,6 +286,11 @@ export const approveRefund = async (req: Request, res: Response) => {
     const refund = await prisma.refund.update({
       where: { id: req.params.id },
       data: { status: 'APPROVED', approvedBy: user.userId, approvedAt: new Date() },
+    });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: refund.tenantId,
+      branchId: refund.branchId,
+      source: 'refund.approved',
     });
     res.json(refund);
   } catch (error) {
@@ -283,6 +310,12 @@ export const processRefund = async (req: Request, res: Response) => {
     const updated = await prisma.refund.update({
       where: { id: req.params.id },
       data: { status: 'PROCESSED', processedBy: user.userId, processedAt: new Date() },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'refund.processed',
     });
 
     res.json(updated);
@@ -362,6 +395,11 @@ export const createFeeCategory = async (req: Request, res: Response) => {
     const { name, code, description, parentId } = req.body;
     const category = await prisma.feeCategory.create({
       data: { name, code, description, parentId },
+    });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: category.tenantId,
+      scope: 'tenant',
+      source: 'fee-category.created',
     });
     res.status(201).json(category);
   } catch (error: any) {

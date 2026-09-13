@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { getSettings, updateSettings, getPublicSettings, uploadLogo, deleteLogo, getDomainStatus, checkDomainStatus } from '../controllers/settingsController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { uploadSchoolLogo } from '../middleware/uploadMiddleware';
+import { requirePublicTenant } from '../middleware/publicTenantContext';
 
 const router = Router();
 
-router.get('/public', getPublicSettings);
+router.get('/public', requirePublicTenant, getPublicSettings);
 
 router.use(authenticateToken);
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Download, User, Share2, Award, BookOpen } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileText, Download, User, Award, BookOpen } from 'lucide-react';
 import api from '../../utils/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -157,29 +157,32 @@ const AcademicReports = () => {
         doc.save(`${selectedChild.firstName}_${termData.termName}_Report.pdf`);
     };
 
-    if (loading) return <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading academic data...</div>;
+    if (loading) return <div className="ds-page ds-empty">Loading academic data...</div>;
 
     return (
-        <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
-                    <Award className="text-blue-600" size={32} />
-                    Academic Reports
-                </h1>
-                <p className="text-gray-500 dark:text-gray-400 mt-2">View and download term performance reports for your children.</p>
+        <div className="ds-page max-w-7xl mx-auto">
+            <div className="ds-page-header">
+                <div>
+                    <p className="ds-page-kicker">Parent portal</p>
+                    <h1 className="ds-page-title flex items-center gap-3">
+                        <Award className="text-[var(--action-color)]" size={32} />
+                        Academic Reports
+                    </h1>
+                    <p className="ds-page-subtitle">View and download term performance reports for your children.</p>
+                </div>
             </div>
 
             {children.length > 0 ? (
                 <>
                     {/* Child Selector Tabs */}
-                    <div className="flex space-x-2 mb-8 overflow-x-auto pb-2 border-b border-gray-200 dark:border-slate-700">
+                    <div className="mb-8 flex space-x-2 overflow-x-auto border-b border-[var(--border-color)] pb-2">
                         {children.map(child => (
                             <button
                                 key={child.id}
                                 onClick={() => setSelectedChildId(child.id)}
-                                className={`flex items-center space-x-2 px-6 py-3 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap border-b-2 ${selectedChildId === child.id
-                                        ? 'border-blue-600 text-blue-600 bg-blue-50/50 dark:bg-blue-900/30'
-                                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700'
+                                className={`flex items-center space-x-2 whitespace-nowrap rounded-t-lg border-b-2 px-6 py-3 text-sm font-medium transition-colors ${selectedChildId === child.id
+                                        ? 'border-[var(--action-color)] bg-[var(--surface-muted)] text-[var(--text-primary)]'
+                                        : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]'
                                     }`}
                             >
                                 <User size={18} />
@@ -196,17 +199,17 @@ const AcademicReports = () => {
                                 const average = Math.round(totalScore / termData.results.length);
 
                                 return (
-                                    <div key={termId} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
-                                        <div className="bg-gray-50 dark:bg-slate-700 px-6 py-4 border-b border-gray-200 dark:border-slate-600 flex justify-between items-center flex-wrap gap-4">
+                                    <div key={termId} className="ds-surface overflow-hidden">
+                                        <div className="border-b border-[var(--border-color)] bg-[var(--surface-muted)] px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
                                             <div>
-                                                <h3 className="text-lg font-bold text-gray-800 dark:text-white">{termData.termName}</h3>
-                                                <p className="text-sm text-gray-500 dark:text-gray-400">
-                                                    {new Date(termData.startDate).getFullYear()} • Average: <span className="font-bold text-blue-600">{average}%</span>
+                                                <h3 className="text-lg font-bold text-[var(--text-primary)]">{termData.termName}</h3>
+                                                <p className="text-sm text-[var(--text-secondary)]">
+                                                    {new Date(termData.startDate).getFullYear()} • Average: <span className="font-bold text-[var(--action-color)]">{average}%</span>
                                                 </p>
                                             </div>
                                             <button
                                                 onClick={() => generateReportCard(termId)}
-                                                className="flex items-center gap-2 bg-white dark:bg-slate-600 border border-gray-300 dark:border-slate-500 hover:bg-gray-50 dark:hover:bg-slate-500 text-gray-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                                className="ds-button-outline"
                                             >
                                                 <Download size={16} />
                                                 Download Report PDF
@@ -226,23 +229,23 @@ const AcademicReports = () => {
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
                                                         {termData.results.map((result) => (
-                                                            <tr key={result.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                                            <tr key={result.id} className="transition-colors hover:bg-[var(--surface-muted)]">
                                                                 <td className="py-3 px-4">
                                                                     <div className="flex items-center gap-2">
-                                                                        <BookOpen size={14} className="text-gray-400" />
-                                                                        <span className="font-medium text-gray-800 dark:text-white">{result.subject.name}</span>
+                                                                        <BookOpen size={14} className="text-[var(--text-tertiary)]" />
+                                                                        <span className="font-medium text-[var(--text-primary)]">{result.subject.name}</span>
                                                                     </div>
                                                                 </td>
-                                                                <td className="py-3 px-4 font-semibold text-gray-900 dark:text-white">{Number(result.totalScore)}%</td>
+                                                                <td className="py-3 px-4 font-semibold text-[var(--text-primary)]">{Number(result.totalScore)}%</td>
                                                                 <td className="py-3 px-4">
-                                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${(result.grade?.startsWith('A') || result.grade === 'D1' || result.grade === 'D2') ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                                                                            (result.grade?.startsWith('B') || result.grade?.startsWith('C')) ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
-                                                                                'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'
+                                                                    <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${(result.grade?.startsWith('A') || result.grade === 'D1' || result.grade === 'D2') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200' :
+                                                                            (result.grade?.startsWith('B') || result.grade?.startsWith('C')) ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200' :
+                                                                                'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200'
                                                                         }`}>
                                                                         {result.grade || '-'}
                                                                     </span>
                                                                 </td>
-                                                                <td className="py-3 px-4 text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">{result.remarks || '-'}</td>
+                                                                <td className="max-w-xs truncate py-3 px-4 text-sm text-[var(--text-secondary)]">{result.remarks || '-'}</td>
                                                             </tr>
                                                         ))}
                                                     </tbody>
@@ -254,16 +257,16 @@ const AcademicReports = () => {
                             })}
                         </div>
                     ) : (
-                        <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-slate-600">
-                            <FileText size={48} className="mx-auto text-gray-300 dark:text-gray-600 mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">No Academic Records</h3>
-                            <p className="text-gray-500 dark:text-gray-400 mt-1">No term reports found for {selectedChild?.firstName}.</p>
+                        <div className="ds-empty ds-card">
+                            <FileText size={48} className="mx-auto mb-4 text-[var(--text-tertiary)]" />
+                            <h3 className="text-lg font-medium text-[var(--text-primary)]">No Academic Records</h3>
+                            <p className="mt-1">No term reports found for {selectedChild?.firstName}.</p>
                         </div>
                     )}
                 </>
             ) : (
-                <div className="text-center py-20">
-                    <p className="text-gray-500 dark:text-gray-400">No children linked to your account.</p>
+                <div className="ds-empty ds-card">
+                    <p>No children linked to your account.</p>
                 </div>
             )}
         </div>

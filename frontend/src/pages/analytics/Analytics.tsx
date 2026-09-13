@@ -301,7 +301,7 @@ const Analytics = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
                 <p className="text-xl font-bold text-green-600">{dashboard.attendance.present}</p>
                 <p className="text-xs text-gray-500">Present</p>

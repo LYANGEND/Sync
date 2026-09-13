@@ -18,6 +18,13 @@ export type ConversationContextType =
   | 'master-ai-ops'
   | 'financial-advisor';
 
+export class AIConversationAccessError extends Error {
+  constructor() {
+    super('AI conversation not found or access denied');
+    this.name = 'AIConversationAccessError';
+  }
+}
+
 // ------------------------------------------------------------------
 // CREATE
 // ------------------------------------------------------------------
@@ -182,10 +189,17 @@ export async function getOrCreateConversation(
  */
 export async function saveMessage(
   conversationId: string,
+  userId: string,
   role: 'user' | 'assistant' | 'system',
   content: string,
   tokenCount?: number,
 ) {
+  const conversation = await prisma.aIConversation.findFirst({
+    where: { id: conversationId, userId },
+    select: { id: true },
+  });
+  if (!conversation) throw new AIConversationAccessError();
+
   const msg = await prisma.aIMessage.create({
     data: { conversationId, role, content, tokenCount },
   });
@@ -203,8 +217,15 @@ export async function saveMessage(
  */
 export async function getMessageHistory(
   conversationId: string,
+  userId: string,
   limit = 20,
 ) {
+  const conversation = await prisma.aIConversation.findFirst({
+    where: { id: conversationId, userId },
+    select: { id: true },
+  });
+  if (!conversation) throw new AIConversationAccessError();
+
   return prisma.aIMessage.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'asc' },

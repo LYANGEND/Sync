@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { tenantStore } from './tenantContext';
-import prisma from '../utils/prisma';
+import { systemPrisma } from '../utils/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -35,7 +35,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     const tid = user?.tenantId;
     if (tid) {
       try {
-        const tenant = await prisma.tenant.findUnique({
+        const tenant = await systemPrisma.tenant.findUnique({
           where: { id: tid },
           select: { status: true, maintenanceMode: true, maintenanceMessage: true },
         });

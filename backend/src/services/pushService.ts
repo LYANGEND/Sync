@@ -2,6 +2,12 @@ import webpush from 'web-push';
 import { prisma } from '../utils/prisma';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 
+interface StoredPushSubscription {
+  id: string;
+  endpoint: string;
+  keys: unknown;
+}
+
 const publicVapidKey = process.env.VAPID_PUBLIC_KEY || '';
 const privateVapidKey = process.env.VAPID_PRIVATE_KEY || '';
 const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@example.com';
@@ -19,17 +25,24 @@ if (!vapidConfigured) {
   }
 }
 
-export const sendPushNotification = async (subscription: any, payload: any) => {
+export const sendPushNotification = async (subscription: StoredPushSubscription, payload: any) => {
   try {
-    await webpush.sendNotification(subscription, JSON.stringify(payload));
+    await webpush.sendNotification({
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+    } as webpush.PushSubscription, JSON.stringify(payload));
     return true;
   } catch (error: any) {
     console.error('Error sending push notification:', error);
     // Remove invalid subscriptions (expired / unsubscribed)
     if (error.statusCode === 404 || error.statusCode === 410) {
       try {
-        await prisma.pushSubscription.delete({ where: { endpoint: subscription.endpoint } });
-        console.log('Removed invalid push subscription:', subscription.endpoint);
+        const removed = await prisma.pushSubscription.deleteMany({
+          where: { id: subscription.id, endpoint: subscription.endpoint },
+        });
+        if (removed.count > 0) {
+          console.log('Removed invalid push subscription:', subscription.id);
+        }
       } catch {}
     }
     return false;
@@ -74,7 +87,7 @@ export const sendPushToUser = async (
       };
 
       const success = await sendPushNotification(
-        { endpoint: sub.endpoint, keys: sub.keys },
+        { id: sub.id, endpoint: sub.endpoint, keys: sub.keys },
         payload
       );
 

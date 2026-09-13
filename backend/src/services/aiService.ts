@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import axios from 'axios';
+import { applyAITenantBoundary, requireAITenantId } from './aiTenantBoundary';
 
 interface AIConfig {
   provider: string;
@@ -30,8 +31,7 @@ interface AIResponse {
  * Used by all AI-powered features: auto-grading, report remarks, risk analysis, financial advisor, etc.
  */
 class AIService {
-  private config: AIConfig | null = null;
-  private configLoadedAt: number = 0;
+  private configByTenant = new Map<string, { config: AIConfig | null; loadedAt: number }>();
   private CONFIG_TTL = 5 * 60 * 1000; // Cache config for 5 minutes
 
   /** Check if an env var has a real value (not empty or placeholder) */
@@ -43,16 +43,20 @@ class AIService {
    * Load AI configuration from school settings, falling back to .env variables
    */
   private async loadConfig(): Promise<AIConfig | null> {
+    const tenantId = requireAITenantId();
     const now = Date.now();
-    if (this.config && now - this.configLoadedAt < this.CONFIG_TTL) {
-      return this.config;
+    const cached = this.configByTenant.get(tenantId);
+    if (cached && now - cached.loadedAt < this.CONFIG_TTL) {
+      return cached.config;
     }
+
+    let config: AIConfig | null = null;
 
     // Try loading from school settings first
     const settings = await prisma.schoolSettings.findFirst();
     if (settings && (settings as any).aiEnabled && (settings as any).aiApiKey) {
       const provider = (settings as any).aiProvider || 'openai';
-      this.config = {
+      config = {
         provider,
         apiKey: (settings as any).aiApiKey,
         model: (settings as any).aiModel || 'gpt-4o-mini',
@@ -61,30 +65,30 @@ class AIService {
 
       // For Azure provider, merge in Azure-specific env vars that aren't stored in DB
       if (provider === 'azure') {
-        this.config.azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-        this.config.azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
-        this.config.azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || this.config.model;
+        config.azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+        config.azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
+        config.azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || config.model;
         // If the API key from DB doesn't look like an Azure key, prefer the env var
         if (this.isValidEnvVar(process.env.AZURE_OPENAI_API_KEY)) {
-          this.config.apiKey = process.env.AZURE_OPENAI_API_KEY!;
+          config.apiKey = process.env.AZURE_OPENAI_API_KEY!;
         }
         // Azure requires an endpoint — if missing, fall through to env var fallbacks
-        if (!this.isValidEnvVar(this.config.azureEndpoint)) {
-          this.config = null;
+        if (!this.isValidEnvVar(config.azureEndpoint)) {
+          config = null;
           // Don't return — let it fall through to env var-based config below
         } else {
-          this.configLoadedAt = now;
-          return this.config;
+          this.configByTenant.set(tenantId, { config, loadedAt: now });
+          return config;
         }
       } else {
-        this.configLoadedAt = now;
-        return this.config;
+        this.configByTenant.set(tenantId, { config, loadedAt: now });
+        return config;
       }
     }
 
     // Fallback: check for Azure OpenAI env vars
     if (this.isValidEnvVar(process.env.AZURE_OPENAI_API_KEY) && this.isValidEnvVar(process.env.AZURE_OPENAI_ENDPOINT)) {
-      this.config = {
+      config = {
         provider: 'azure',
         apiKey: process.env.AZURE_OPENAI_API_KEY!,
         model: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o-mini',
@@ -93,35 +97,35 @@ class AIService {
         azureApiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview',
         azureDeployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o-mini',
       };
-      this.configLoadedAt = now;
-      return this.config;
+      this.configByTenant.set(tenantId, { config, loadedAt: now });
+      return config;
     }
 
     // Fallback: check for standard OpenAI env var
     if (this.isValidEnvVar(process.env.OPENAI_API_KEY)) {
-      this.config = {
+      config = {
         provider: 'openai',
         apiKey: process.env.OPENAI_API_KEY!,
         model: 'gpt-4o-mini',
         enabled: true,
       };
-      this.configLoadedAt = now;
-      return this.config;
+      this.configByTenant.set(tenantId, { config, loadedAt: now });
+      return config;
     }
 
     // Fallback: check for Google Gemini env var
     if (this.isValidEnvVar(process.env.GEMINI_API_KEY)) {
-      this.config = {
+      config = {
         provider: 'gemini',
         apiKey: process.env.GEMINI_API_KEY!,
         model: 'gemini-2.0-flash',
         enabled: true,
       };
-      this.configLoadedAt = now;
-      return this.config;
+      this.configByTenant.set(tenantId, { config, loadedAt: now });
+      return config;
     }
 
-    this.config = null;
+    this.configByTenant.set(tenantId, { config: null, loadedAt: now });
     return null;
   }
 
@@ -149,16 +153,17 @@ class AIService {
     const temperature = options?.temperature ?? 0.7;
     const maxTokens = options?.maxTokens ?? 2000;
     const model = options?.model || config.model;
+    const tenantBoundMessages = applyAITenantBoundary(messages);
 
     try {
       if (config.provider === 'azure') {
-        return await this.chatAzureOpenAI(config, messages, temperature, maxTokens);
+        return await this.chatAzureOpenAI(config, tenantBoundMessages, temperature, maxTokens);
       } else if (config.provider === 'openai') {
-        return await this.chatOpenAI(config.apiKey, model, messages, temperature, maxTokens);
+        return await this.chatOpenAI(config.apiKey, model, tenantBoundMessages, temperature, maxTokens);
       } else if (config.provider === 'anthropic') {
-        return await this.chatAnthropic(config.apiKey, model, messages, temperature, maxTokens);
+        return await this.chatAnthropic(config.apiKey, model, tenantBoundMessages, temperature, maxTokens);
       } else if (config.provider === 'gemini') {
-        return await this.chatGemini(config.apiKey, model, messages, temperature, maxTokens);
+        return await this.chatGemini(config.apiKey, model, tenantBoundMessages, temperature, maxTokens);
       } else {
         throw new Error(`Unsupported AI provider: ${config.provider}`);
       }

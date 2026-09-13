@@ -1,7 +1,8 @@
 import { resolveCname, resolveTxt } from 'node:dns/promises';
 import { Prisma, Tenant, TenantDomainStatus } from '@prisma/client';
-import prisma from '../utils/prisma';
+import { systemPrisma as prisma } from '../utils/prisma';
 import { broadcastNotification } from './notificationService';
+import { runWithTenant } from '../middleware/tenantContext';
 
 type TenantDomainRecord = Pick<
   Tenant,
@@ -99,7 +100,7 @@ const notifyTenantAdmins = async (tenantId: string, title: string, message: stri
   });
 
   if (!admins.length) return;
-  await broadcastNotification(admins.map((admin) => admin.id), title, message, type).catch((error) => {
+  await runWithTenant(tenantId, () => broadcastNotification(admins.map((admin) => admin.id), title, message, type)).catch((error) => {
     console.error('[DomainVerification] Failed to notify tenant admins:', error);
   });
 };

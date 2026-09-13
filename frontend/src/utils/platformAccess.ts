@@ -1,5 +1,3 @@
-const LOCAL_PLATFORM_HOSTS = new Set(['localhost', '127.0.0.1']);
-
 const readConfiguredHosts = () => {
   const raw = (import.meta.env.VITE_PLATFORM_HOSTS || '') as string;
   return raw
@@ -15,14 +13,13 @@ export const getCurrentHost = () => normalizeHost(window.location.hostname || ''
 export const isPlatformHost = () => {
   const host = getCurrentHost();
   if (!host) return false;
-  if (LOCAL_PLATFORM_HOSTS.has(host)) return true;
 
   const configuredHosts = readConfiguredHosts().map(normalizeHost);
-  if (!configuredHosts.length) {
-    return host.startsWith('ops.');
+  if (configuredHosts.length) {
+    return configuredHosts.includes(host);
   }
 
-  return configuredHosts.includes(host);
+  return host.startsWith('ops.');
 };
 
 export const shouldExposePlatformRoutes = () => isPlatformHost();

@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma';
 import axios from 'axios';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
+import { getPlatformWhatsappSettings } from './platformWhatsappSettingsService';
 
 interface WhatsAppResult {
   success: boolean;
@@ -14,6 +15,26 @@ interface WhatsAppResult {
  * All messages are logged to the CommunicationLog audit trail.
  */
 class WhatsAppService {
+  /**
+   * Resolves the WhatsApp provider config actually used for a send.
+   * Prefers the tenant's own configured provider (SchoolSettings). If the
+   * tenant hasn't configured one, falls back to the platform-wide default
+   * provider (PlatformWhatsappSettings) when it's enabled and configured.
+   * Returns null if no usable provider is available either way.
+   */
+  private async resolveEffectiveConfig(settings: any): Promise<{ provider: string; apiKey: string; phoneId: string | null } | null> {
+    if (settings.whatsappProvider && settings.whatsappApiKey) {
+      return { provider: settings.whatsappProvider, apiKey: settings.whatsappApiKey, phoneId: settings.whatsappPhoneId };
+    }
+
+    const platform = await getPlatformWhatsappSettings();
+    if (!platform.enabled || !platform.provider || !platform.apiKey) {
+      return null;
+    }
+
+    return { provider: platform.provider, apiKey: platform.apiKey, phoneId: platform.phoneId };
+  }
+
   /**
    * Send a WhatsApp text message (with audit logging)
    */
@@ -41,21 +62,19 @@ class WhatsAppService {
         return { success: false, error: 'WhatsApp is disabled' };
       }
 
-      const provider = (settings as any).whatsappProvider;
-      const apiKey = (settings as any).whatsappApiKey;
-      const phoneId = (settings as any).whatsappPhoneId;
-
-      if (!provider || !apiKey) {
+      const config = await this.resolveEffectiveConfig(settings);
+      if (!config) {
         if (logId) await updateCommunicationLogStatus(logId, 'FAILED', 'WhatsApp not configured');
         return { success: false, error: 'WhatsApp not configured' };
       }
+      const { provider, apiKey, phoneId } = config;
 
       const formattedPhone = this.formatPhone(phone);
 
       let result: WhatsAppResult;
       switch (provider.toUpperCase()) {
         case 'META':
-          result = await this.sendViaMeta(formattedPhone, message, apiKey, phoneId);
+          result = await this.sendViaMeta(formattedPhone, message, apiKey, phoneId || '');
           break;
         case 'TWILIO_WHATSAPP':
           result = await this.sendViaTwilio(formattedPhone, message, settings);
@@ -82,10 +101,9 @@ class WhatsAppService {
       const settings = await prisma.schoolSettings.findFirst();
       if (!settings) return { success: false, error: 'No settings found' };
 
-      const apiKey = (settings as any).whatsappApiKey;
-      const phoneId = (settings as any).whatsappPhoneId;
-
-      if (!apiKey || !phoneId) return { success: false, error: 'WhatsApp not configured' };
+      const config = await this.resolveEffectiveConfig(settings);
+      if (!config || !config.phoneId) return { success: false, error: 'WhatsApp not configured' };
+      const { apiKey, phoneId } = config;
 
       const formattedPhone = this.formatPhone(phone);
 

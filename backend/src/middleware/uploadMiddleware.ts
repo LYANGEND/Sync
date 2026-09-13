@@ -1,45 +1,63 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
+import {
+  createTenantFileReference,
+  getUploadsRoot,
+  TenantFileCategory,
+} from '../services/tenantFileService';
 
 // Use process.cwd() for uploads so paths work in both dev and production (Docker)
-const uploadDir = path.join(process.cwd(), 'uploads/profiles');
-const logoDir = path.join(process.cwd(), 'uploads/logos');
+const uploadsRoot = getUploadsRoot();
 
 // Ensure upload directories exist
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-if (!fs.existsSync(logoDir)) {
-  fs.mkdirSync(logoDir, { recursive: true });
-}
+fs.mkdirSync(uploadsRoot, { recursive: true });
+
+const tenantUploadDirectory = (req: any, category: TenantFileCategory) => {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    throw new Error('Tenant context is required for uploads');
+  }
+  createTenantFileReference(tenantId, category, 'placeholder.png');
+  const directory = path.join(uploadsRoot, tenantId, category);
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+};
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
 
 const profileStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    try { cb(null, tenantUploadDirectory(req, 'profiles')); } catch (error) { cb(error as Error, ''); }
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    const extension = IMAGE_EXTENSIONS[file.mimetype];
+    cb(null, `image-${Date.now()}-${randomUUID()}${extension}`);
   }
 });
 
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, logoDir);
+    try { cb(null, tenantUploadDirectory(req, 'logos')); } catch (error) { cb(error as Error, ''); }
   },
   filename: (req, file, cb) => {
     // Use a fixed name for school logo so it's easy to reference
-    const ext = path.extname(file.originalname);
+    const ext = IMAGE_EXTENSIONS[file.mimetype];
     cb(null, 'school-logo' + ext);
   }
 });
 
 const imageFilter = (req: any, file: any, cb: any) => {
-  if (file.mimetype.startsWith('image/')) {
+  if (IMAGE_EXTENSIONS[file.mimetype]) {
     cb(null, true);
   } else {
-    cb(new Error('Not an image! Please upload an image.'), false);
+    cb(new Error('Only JPEG, PNG, WebP, and GIF images are supported.'), false);
   }
 };
 

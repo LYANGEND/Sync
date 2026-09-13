@@ -28,13 +28,13 @@ interface BranchContextType {
 const BranchContext = createContext<BranchContextType | undefined>(undefined);
 
 export const BranchProvider = ({ children }: { children: ReactNode }) => {
-    const { isAuthenticated, isLoading: authLoading } = useAuth();
+    const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     const [branches, setBranches] = useState<Branch[]>([]);
     const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     const fetchBranches = useCallback(async () => {
-        if (authLoading || !isAuthenticated) {
+        if (authLoading || !isAuthenticated || user?.role === 'PLATFORM_ADMIN') {
             setBranches([]);
             setLoading(false);
             return;
@@ -45,11 +45,6 @@ export const BranchProvider = ({ children }: { children: ReactNode }) => {
             const response = await api.get('/branches');
             setBranches(response.data);
 
-            // If no branch selected and there's a main branch, select it
-            if (!selectedBranchId && response.data.length > 0) {
-                const mainBranch = response.data.find((b: Branch) => b.isMain);
-                // Don't auto-select, keep as "All Branches" for admins
-            }
         } catch (error: any) {
             const status = error.response?.status;
             if (status !== 401 && status !== 403) {
@@ -58,7 +53,7 @@ export const BranchProvider = ({ children }: { children: ReactNode }) => {
         } finally {
             setLoading(false);
         }
-    }, [authLoading, isAuthenticated, selectedBranchId]);
+    }, [authLoading, isAuthenticated, user?.role]);
 
     useEffect(() => {
         fetchBranches();

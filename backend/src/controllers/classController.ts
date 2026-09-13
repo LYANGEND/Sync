@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { syncStudentClassFees } from '../services/classFeeAssignmentService';
+import { normalizeClassName } from '../services/classResolutionService';
 
 const classSchema = z.object({
-  name: z.string().min(2),
+  name: z.string().trim().min(2).transform(normalizeClassName),
   gradeLevel: z.number().int().min(0).max(12),
   teacherId: z.string().uuid(),
   academicTermId: z.string().uuid(),
@@ -100,6 +102,17 @@ export const createClass = async (req: Request, res: Response) => {
   try {
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
 
+    const [teacher, term, subjects] = await Promise.all([
+      prisma.user.findFirst({ where: { id: teacherId }, select: { id: true } }),
+      prisma.academicTerm.findFirst({ where: { id: academicTermId }, select: { id: true } }),
+      subjectIds?.length
+        ? prisma.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true } })
+        : Promise.resolve([]),
+    ]);
+    if (!teacher || !term || subjects.length !== (subjectIds?.length || 0)) {
+      return res.status(400).json({ error: 'Teacher, term, or subject does not belong to this tenant' });
+    }
+
     const newClass = await prisma.class.create({
       data: {
         name,
@@ -121,6 +134,9 @@ export const createClass = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({ error: 'A class with this name already exists for this branch and term' });
+    }
     res.status(500).json({ error: 'Failed to create class' });
   }
 };
@@ -129,6 +145,17 @@ export const updateClass = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
+
+    const [teacher, term, subjects] = await Promise.all([
+      prisma.user.findFirst({ where: { id: teacherId }, select: { id: true } }),
+      prisma.academicTerm.findFirst({ where: { id: academicTermId }, select: { id: true } }),
+      subjectIds?.length
+        ? prisma.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true } })
+        : Promise.resolve([]),
+    ]);
+    if (!teacher || !term || subjects.length !== (subjectIds?.length || 0)) {
+      return res.status(400).json({ error: 'Teacher, term, or subject does not belong to this tenant' });
+    }
 
     const updatedClass = await prisma.class.update({
       where: { id },
@@ -150,6 +177,9 @@ export const updateClass = async (req: Request, res: Response) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({ error: 'A class with this name already exists for this branch and term' });
     }
     res.status(500).json({ error: 'Failed to update class' });
   }
@@ -213,7 +243,7 @@ export const addStudentsToClass = async (req: Request, res: Response) => {
 };
 
 const bulkClassSchema = z.object({
-  name: z.string().min(2),
+  name: z.string().trim().min(2).transform(normalizeClassName),
   gradeLevel: z.number().int().min(-2).max(12),
   teacherId: z.string().uuid().optional(),
   academicTermId: z.string().uuid().optional(),

@@ -92,13 +92,13 @@ const Scholarships = () => {
   };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold text-slate-800 dark:text-white">Scholarship Programs</h2>
-        <div className="flex space-x-3">
+    <div className="ds-page">
+      <div className="ds-page-header">
+        <h2 className="ds-page-title">Scholarship Programs</h2>
+        <div className="ds-actions">
           <button
             onClick={() => setShowImportModal(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
+            className="ds-button-outline"
           >
             <Upload size={20} />
             <span>Import Scholarships</span>
@@ -109,7 +109,7 @@ const Scholarships = () => {
               setFormData({ name: '', percentage: '', description: '' });
               setShowModal(true);
             }}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+            className="ds-button-primary"
           >
             <Plus size={20} />
             <span>Add Scholarship</span>
@@ -119,21 +119,23 @@ const Scholarships = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {scholarships.map((scholarship) => (
-          <div key={scholarship.id} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+          <div key={scholarship.id} className="ds-card">
             <div className="flex justify-between items-start mb-4">
-              <div className="p-3 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg">
+              <div className="p-3 text-[var(--text-secondary)]">
                 <GraduationCap size={24} />
               </div>
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(scholarship)}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                  className="ds-button-ghost"
+                  aria-label={`Edit ${scholarship.name}`}
                 >
                   <Edit2 size={16} />
                 </button>
                 <button
                   onClick={() => handleDelete(scholarship.id)}
-                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                  className="ds-button-destructive"
+                  aria-label={`Delete ${scholarship.name}`}
                 >
                   <Trash2 size={16} />
                 </button>
@@ -158,8 +160,8 @@ const Scholarships = () => {
         ))}
 
         {scholarships.length === 0 && !loading && (
-          <div className="col-span-full text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-300 dark:border-slate-600">
-            <div className="mx-auto w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4">
+          <div className="ds-surface ds-empty col-span-full">
+            <div className="mx-auto w-12 h-12 flex items-center justify-center mb-4">
               <GraduationCap className="text-slate-400" size={24} />
             </div>
             <h3 className="text-lg font-medium text-slate-900 dark:text-white">No scholarships found</h3>
@@ -169,58 +171,61 @@ const Scholarships = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+          <div className="ds-card w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="scholarship-dialog-title">
+            <h2 id="scholarship-dialog-title" className="text-xl font-bold mb-4 text-[var(--text-primary)]">
               {editingId ? 'Edit Scholarship' : 'New Scholarship'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Program Name</label>
+                <label htmlFor="scholarship-name" className="ds-label mb-1">Program Name</label>
                 <input
+                  id="scholarship-name"
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  className="ds-input"
                   placeholder="e.g. Presidential Scholarship"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Discount Percentage (%)</label>
+                <label htmlFor="scholarship-percentage" className="ds-label mb-1">Discount Percentage (%)</label>
                 <input
+                  id="scholarship-percentage"
                   type="number"
                   required
                   min="0"
                   max="100"
                   step="0.01"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  className="ds-input"
                   placeholder="0-100"
                   value={formData.percentage}
                   onChange={(e) => setFormData({ ...formData, percentage: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Description</label>
+                <label htmlFor="scholarship-description" className="ds-label mb-1">Description</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  id="scholarship-description"
+                  className="ds-textarea"
                   rows={3}
                   placeholder="Optional description..."
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 />
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   {editingId ? 'Update' : 'Create'}
                 </button>

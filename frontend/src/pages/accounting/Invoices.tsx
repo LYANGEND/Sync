@@ -8,13 +8,13 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const statusColors: Record<string, string> = {
-  DRAFT: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
-  SENT: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-  PARTIALLY_PAID: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-  PAID: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  OVERDUE: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-  CANCELLED: 'bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300',
-  CREDITED: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+  DRAFT: 'ds-badge-neutral',
+  SENT: 'ds-badge-info',
+  PARTIALLY_PAID: 'ds-badge-warning',
+  PAID: 'ds-badge-success',
+  OVERDUE: 'ds-badge-error',
+  CANCELLED: 'ds-badge-neutral',
+  CREDITED: 'ds-badge-info',
 };
 
 interface InvoiceSummary {
@@ -417,119 +417,119 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
   });
 
   const summaryCards = summary ? [
-    { label: 'Total Invoiced', value: summary.totalInvoiced, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-    { label: 'Total Collected', value: summary.totalCollected, color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20' },
-    { label: 'Outstanding', value: summary.totalOutstanding, color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' },
-    { label: 'Overdue', value: summary.totalOverdue, color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-900/20' },
+    { label: 'Total Invoiced', value: summary.totalInvoiced, color: 'text-[var(--text-primary)]' },
+    { label: 'Total Collected', value: summary.totalCollected, color: 'text-green-700 dark:text-green-300' },
+    { label: 'Outstanding', value: summary.totalOutstanding, color: 'text-amber-800 dark:text-amber-200' },
+    { label: 'Overdue', value: summary.totalOverdue, color: 'text-red-700 dark:text-red-300' },
   ] : [];
 
   const fmt = (n: number | string | null | undefined) => `K${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>;
+    return <div className="ds-page"><div className="ds-surface flex items-center justify-center h-64" role="status"><span className="ds-helper">Loading invoices…</span></div></div>;
   }
 
   return (
-    <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         {!embedded ? (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Invoice Management</h1>
-            <p className="text-gray-500 dark:text-gray-400">Create, send, and track student invoices</p>
+          <div className="min-w-0">
+            <h1 className="ds-page-title">Invoice Management</h1>
+            <p className="ds-page-subtitle">Create, send, and track student invoices</p>
           </div>
         ) : <div />}
-        <div className="flex flex-wrap gap-2">
+        <div className="ds-actions">
           <button
             onClick={() => setShowBulkGenerateModal(true)}
-            className="flex items-center space-x-2 border border-blue-200 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/20"
+            className="ds-button-outline"
           >
-            <Layers size={16} /><span>Generate Invoices</span>
+            <Layers size={16} aria-hidden="true" /><span>Generate Invoices</span>
           </button>
           <button onClick={() => setShowCreateModal(true)}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
-            <Plus size={16} /><span>New Invoice</span>
+            className="ds-button-primary">
+            <Plus size={16} aria-hidden="true" /><span>New Invoice</span>
           </button>
         </div>
       </div>
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {summaryCards.map(stat => (
-            <div key={stat.label} className={`${stat.bg} p-4 rounded-lg`}>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{stat.label}</p>
-              <p className={`text-2xl font-bold ${stat.color}`}>{fmt(stat.value)}</p>
+            <div key={stat.label} className="ds-card">
+              <p className="ds-helper">{stat.label}</p>
+              <p className={`text-2xl font-bold break-words ${stat.color}`}>{fmt(stat.value)}</p>
             </div>
           ))}
         </div>
       )}
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          <input type="text" placeholder="Search by invoice # or student..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white" />
+      <div className="ds-surface ds-toolbar p-4">
+        <div className="relative w-full sm:flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" size={16} aria-hidden="true" />
+          <input type="text" aria-label="Search invoices by invoice number or student" placeholder="Search by invoice # or student..." value={search} onChange={e => setSearch(e.target.value)}
+            className="ds-input pl-10" />
         </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white">
+        <select aria-label="Filter invoices by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="ds-select w-full sm:w-auto">
           <option value="">All Statuses</option>
           {Object.keys(statusColors).map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
         </select>
       </div>
 
       {/* Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-700">
+      <div className="ds-table-container" role="region" aria-label="Invoices" tabIndex={0}>
+        <table className="ds-table">
+          <thead>
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Invoice #</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Student</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Issue Date</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Due Date</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">Total</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">Paid</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">Balance</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">Status</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">Actions</th>
+              <th scope="col">Invoice #</th>
+              <th scope="col">Student</th>
+              <th scope="col">Issue Date</th>
+              <th scope="col">Due Date</th>
+              <th scope="col" className="text-right">Total</th>
+              <th scope="col" className="text-right">Paid</th>
+              <th scope="col" className="text-right">Balance</th>
+              <th scope="col" className="text-center">Status</th>
+              <th scope="col" className="text-center">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+          <tbody>
             {filteredInvoices.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No invoices found</td></tr>
+              <tr><td colSpan={9}><div className="ds-empty">No invoices found</div></td></tr>
             ) : filteredInvoices.map(inv => (
-              <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                <td className="px-4 py-3 font-mono text-blue-600 dark:text-blue-400">{inv.invoiceNumber}</td>
-                <td className="px-4 py-3">
+              <tr key={inv.id}>
+                <td className="font-mono">{inv.invoiceNumber}</td>
+                <td>
                   {inv.student ? `${inv.student.firstName} ${inv.student.lastName}` : '—'}
-                  {inv.student?.admissionNumber && <span className="block text-xs text-gray-400">{inv.student.admissionNumber}</span>}
+                  {inv.student?.admissionNumber && <span className="ds-helper block">{inv.student.admissionNumber}</span>}
                 </td>
-                <td className="px-4 py-3">{new Date(inv.issueDate).toLocaleDateString()}</td>
-                <td className="px-4 py-3">{new Date(inv.dueDate).toLocaleDateString()}</td>
-                <td className="px-4 py-3 text-right font-medium">{fmt(inv.totalAmount)}</td>
-                <td className="px-4 py-3 text-right text-green-600">{fmt(inv.amountPaid)}</td>
-                <td className="px-4 py-3 text-right text-red-600 font-medium">{fmt(inv.balanceDue)}</td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[inv.status] || ''}`}>
+                <td>{new Date(inv.issueDate).toLocaleDateString()}</td>
+                <td>{new Date(inv.dueDate).toLocaleDateString()}</td>
+                <td className="text-right font-medium">{fmt(inv.totalAmount)}</td>
+                <td className="text-right text-green-700 dark:text-green-300">{fmt(inv.amountPaid)}</td>
+                <td className="text-right text-red-700 dark:text-red-300 font-medium">{fmt(inv.balanceDue)}</td>
+                <td className="text-center">
+                  <span className={`ds-badge ${statusColors[inv.status] || 'ds-badge-neutral'}`}>
                     {inv.status.replace(/_/g, ' ')}
                   </span>
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-center space-x-1">
-                    <button onClick={() => handleViewDetail(inv.id)} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="View"><Eye size={16} /></button>
-                    <button onClick={() => handleDownloadInvoice(inv)} className="p-1 text-slate-600 hover:bg-slate-50 rounded" title="Download PDF"><Download size={16} /></button>
+                <td>
+                  <div className="ds-actions flex-nowrap justify-center">
+                    <button onClick={() => handleViewDetail(inv.id)} className="ds-button-ghost" aria-label={`View invoice ${inv.invoiceNumber}`} title="View"><Eye size={16} aria-hidden="true" /></button>
+                    <button onClick={() => handleDownloadInvoice(inv)} className="ds-button-ghost" aria-label={`Download PDF for invoice ${inv.invoiceNumber}`} title="Download PDF"><Download size={16} aria-hidden="true" /></button>
                     {inv.status === 'DRAFT' && (
-                      <button onClick={() => handleSend(inv.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Send"><Send size={16} /></button>
+                      <button onClick={() => handleSend(inv.id)} className="ds-button-ghost" aria-label={`Send invoice ${inv.invoiceNumber}`} title="Send"><Send size={16} aria-hidden="true" /></button>
                     )}
                     {(inv.status === 'SENT' || inv.status === 'PARTIALLY_PAID' || inv.status === 'OVERDUE') && (
-                      <button onClick={() => { setSelectedInvoice(inv); setPaymentAmount(''); setShowPaymentModal(true); }} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Record Payment"><DollarSign size={16} /></button>
+                      <button onClick={() => { setSelectedInvoice(inv); setPaymentAmount(''); setShowPaymentModal(true); }} className="ds-button-ghost" aria-label={`Record payment for invoice ${inv.invoiceNumber}`} title="Record Payment"><DollarSign size={16} aria-hidden="true" /></button>
                     )}
                     {inv.status !== 'CANCELLED' && inv.status !== 'CREDITED' && (
                       <button onClick={() => { setCreditNoteForm({ invoiceId: inv.id, amount: '', reason: '' }); setShowCreditNoteModal(true); }}
-                        className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Credit Note"><FileText size={16} /></button>
+                        className="ds-button-ghost" aria-label={`Issue credit note for invoice ${inv.invoiceNumber}`} title="Credit Note"><FileText size={16} aria-hidden="true" /></button>
                     )}
                     {inv.status === 'DRAFT' && (
-                      <button onClick={() => handleCancel(inv.id)} className="p-1 text-red-500 hover:bg-red-50 rounded" title="Cancel"><XCircle size={16} /></button>
+                      <button onClick={() => handleCancel(inv.id)} className="ds-button-destructive" aria-label={`Cancel invoice ${inv.invoiceNumber}`} title="Cancel"><XCircle size={16} aria-hidden="true" /></button>
                     )}
                   </div>
                 </td>
@@ -541,86 +541,86 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== INVOICE DETAIL MODAL ======== */}
       {showDetailModal && selectedInvoice && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Invoice {selectedInvoice.invoiceNumber}</h2>
-              <button onClick={() => setShowDetailModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4">
+          <div className="ds-modal w-full max-w-2xl" role="dialog" aria-modal="true" aria-label={`Invoice ${selectedInvoice.invoiceNumber}`}>
+            <div className="ds-modal-header">
+              <h2>Invoice {selectedInvoice.invoiceNumber}</h2>
+              <button onClick={() => setShowDetailModal(false)} className="ds-button-ghost" aria-label="Close invoice details"><X size={20} aria-hidden="true" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="ds-modal-body space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-500">Student</p>
-                  <p className="font-medium dark:text-white">{selectedInvoice.student ? `${selectedInvoice.student.firstName} ${selectedInvoice.student.lastName}` : '—'}</p>
-                  {selectedInvoice.student?.guardianName && <p className="text-xs text-gray-500 mt-1">Guardian: {selectedInvoice.student.guardianName}</p>}
+                  <p className="ds-helper">Student</p>
+                  <p className="font-medium">{selectedInvoice.student ? `${selectedInvoice.student.firstName} ${selectedInvoice.student.lastName}` : '—'}</p>
+                  {selectedInvoice.student?.guardianName && <p className="ds-helper mt-1">Guardian: {selectedInvoice.student.guardianName}</p>}
                 </div>
                 <div>
-                  <p className="text-gray-500">Status</p>
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedInvoice.status] || ''}`}>
+                  <p className="ds-helper">Status</p>
+                  <span className={`ds-badge ${statusColors[selectedInvoice.status] || 'ds-badge-neutral'}`}>
                     {selectedInvoice.status.replace(/_/g, ' ')}
                   </span>
                 </div>
                 <div>
-                  <p className="text-gray-500">Issue Date</p>
-                  <p className="font-medium dark:text-white">{new Date(selectedInvoice.issueDate).toLocaleDateString()}</p>
+                  <p className="ds-helper">Issue Date</p>
+                  <p className="font-medium">{new Date(selectedInvoice.issueDate).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500">Due Date</p>
-                  <p className="font-medium dark:text-white">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</p>
+                  <p className="ds-helper">Due Date</p>
+                  <p className="font-medium">{new Date(selectedInvoice.dueDate).toLocaleDateString()}</p>
                 </div>
               </div>
 
               <div className="flex justify-end">
                 <button
                   onClick={() => handleDownloadInvoice(selectedInvoice)}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-lg text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:border-gray-600 dark:hover:bg-gray-700"
+                  className="ds-button-outline"
                 >
-                  <Download size={16} /> Download PDF
+                  <Download size={16} aria-hidden="true" /> Download PDF
                 </button>
               </div>
 
-              <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+              <div className="ds-table-container" role="region" aria-label={`Line items and totals for invoice ${selectedInvoice.invoiceNumber}`} tabIndex={0}>
+                <table className="ds-table">
+                  <thead>
                     <tr>
-                      <th className="px-4 py-2 text-left text-gray-600 dark:text-gray-300">Item</th>
-                      <th className="px-4 py-2 text-right text-gray-600 dark:text-gray-300">Qty</th>
-                      <th className="px-4 py-2 text-right text-gray-600 dark:text-gray-300">Price</th>
-                      <th className="px-4 py-2 text-right text-gray-600 dark:text-gray-300">Amount</th>
+                      <th scope="col">Item</th>
+                      <th scope="col" className="text-right">Qty</th>
+                      <th scope="col" className="text-right">Price</th>
+                      <th scope="col" className="text-right">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y dark:divide-gray-700">
+                  <tbody>
                     {(selectedInvoice.items || []).map((item, i) => (
                       <tr key={i}>
-                        <td className="px-4 py-2 dark:text-gray-200">{item.description}</td>
-                        <td className="px-4 py-2 text-right dark:text-gray-200">{item.quantity}</td>
-                        <td className="px-4 py-2 text-right dark:text-gray-200">{fmt(item.unitPrice)}</td>
-                        <td className="px-4 py-2 text-right dark:text-gray-200">{fmt(item.amount)}</td>
+                        <td>{item.description}</td>
+                        <td className="text-right">{item.quantity}</td>
+                        <td className="text-right">{fmt(item.unitPrice)}</td>
+                        <td className="text-right">{fmt(item.amount)}</td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="bg-gray-50 dark:bg-gray-700">
+                  <tfoot className="bg-[var(--surface-muted)]">
                     <tr>
-                      <td colSpan={3} className="px-4 py-2 text-right font-medium dark:text-gray-200">Subtotal</td>
-                      <td className="px-4 py-2 text-right font-medium dark:text-gray-200">{fmt(selectedInvoice.subtotal)}</td>
+                      <td colSpan={3} className="text-right font-medium">Subtotal</td>
+                      <td className="text-right font-medium">{fmt(selectedInvoice.subtotal)}</td>
                     </tr>
                     {selectedInvoice.discount > 0 && (
                       <tr>
-                        <td colSpan={3} className="px-4 py-2 text-right text-green-600">Discount</td>
-                        <td className="px-4 py-2 text-right text-green-600">-{fmt(selectedInvoice.discount)}</td>
+                        <td colSpan={3} className="text-right text-green-700 dark:text-green-300">Discount</td>
+                        <td className="text-right text-green-700 dark:text-green-300">-{fmt(selectedInvoice.discount)}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={3} className="px-4 py-2 text-right font-bold dark:text-white">Total</td>
-                      <td className="px-4 py-2 text-right font-bold dark:text-white">{fmt(selectedInvoice.totalAmount)}</td>
+                      <td colSpan={3} className="text-right font-bold">Total</td>
+                      <td className="text-right font-bold">{fmt(selectedInvoice.totalAmount)}</td>
                     </tr>
                     <tr>
-                      <td colSpan={3} className="px-4 py-2 text-right text-green-600 font-medium">Paid</td>
-                      <td className="px-4 py-2 text-right text-green-600 font-medium">{fmt(selectedInvoice.amountPaid)}</td>
+                      <td colSpan={3} className="text-right text-green-700 dark:text-green-300 font-medium">Paid</td>
+                      <td className="text-right text-green-700 dark:text-green-300 font-medium">{fmt(selectedInvoice.amountPaid)}</td>
                     </tr>
                     <tr>
-                      <td colSpan={3} className="px-4 py-2 text-right text-red-600 font-bold">Balance Due</td>
-                      <td className="px-4 py-2 text-right text-red-600 font-bold">{fmt(selectedInvoice.balanceDue)}</td>
+                      <td colSpan={3} className="text-right text-red-700 dark:text-red-300 font-bold">Balance Due</td>
+                      <td className="text-right text-red-700 dark:text-red-300 font-bold">{fmt(selectedInvoice.balanceDue)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -628,14 +628,14 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
               {selectedInvoice.creditNotes && selectedInvoice.creditNotes.length > 0 && (
                 <div>
-                  <h4 className="font-medium text-gray-900 dark:text-white mb-2">Credit Notes</h4>
+                  <h3 className="mb-2">Credit Notes</h3>
                   {selectedInvoice.creditNotes.map(cn => (
-                    <div key={cn.id} className="flex justify-between items-center bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg mb-2">
-                      <div>
-                        <span className="font-mono text-sm text-purple-600">{cn.creditNoteNumber}</span>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{cn.reason}</p>
+                    <div key={cn.id} className="ds-surface-muted flex flex-wrap justify-between items-center gap-3 p-4 mb-2">
+                      <div className="min-w-0 break-words">
+                        <span className="font-mono text-sm text-purple-700 dark:text-purple-300">{cn.creditNoteNumber}</span>
+                        <p className="ds-helper">{cn.reason}</p>
                       </div>
-                      <span className="font-medium text-purple-600">{fmt(cn.amount)}</span>
+                      <span className="font-medium text-purple-700 dark:text-purple-300">{fmt(cn.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -647,20 +647,21 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== CREATE INVOICE MODAL ======== */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Create Invoice</h2>
-              <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4">
+          <div className="ds-modal w-full max-w-2xl" role="dialog" aria-modal="true" aria-label="Create Invoice">
+            <div className="ds-modal-header">
+              <h2>Create Invoice</h2>
+              <button onClick={() => setShowCreateModal(false)} className="ds-button-ghost" aria-label="Close create invoice"><X size={20} aria-hidden="true" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class Filter</label>
+            <div className="ds-modal-body space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="ds-field">
+                  <label htmlFor="invoice-create-class" className="ds-label">Class Filter</label>
                   <select
+                    id="invoice-create-class"
                     value={createClassFilter}
                     onChange={e => setCreateClassFilter(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    className="ds-select"
                   >
                     <option value="">All Classes</option>
                     {classes.map(cls => (
@@ -670,12 +671,13 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
+                <div className="ds-field">
+                  <label htmlFor="invoice-create-term" className="ds-label">Academic Term</label>
                   <select
+                    id="invoice-create-term"
                     value={createForm.termId}
                     onChange={e => setCreateForm({ ...createForm, termId: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    className="ds-select"
                   >
                     <option value="">Select term</option>
                     {terms.map(term => (
@@ -684,12 +686,13 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student</label>
+              <div className="ds-field">
+                <label htmlFor="invoice-create-student" className="ds-label">Student</label>
                 <select
+                  id="invoice-create-student"
                   value={createForm.studentId}
                   onChange={e => setCreateForm({ ...createForm, studentId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="">Select student</option>
                   {filteredStudents.map(student => (
@@ -699,53 +702,53 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   ))}
                 </select>
                 {filteredStudents.length === 0 && (
-                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">No students match the selected class.</p>
+                  <p className="ds-helper">No students match the selected class.</p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
-                  <input type="date" value={createForm.dueDate} onChange={e => setCreateForm({ ...createForm, dueDate: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="ds-field">
+                  <label htmlFor="invoice-create-due-date" className="ds-label">Due Date</label>
+                  <input id="invoice-create-due-date" type="date" value={createForm.dueDate} onChange={e => setCreateForm({ ...createForm, dueDate: e.target.value })}
+                    className="ds-input" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Discount (ZMW)</label>
-                  <input type="number" step="0.01" value={createForm.discount} onChange={e => setCreateForm({ ...createForm, discount: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                <div className="ds-field">
+                  <label htmlFor="invoice-create-discount" className="ds-label">Discount (ZMW)</label>
+                  <input id="invoice-create-discount" type="number" step="0.01" value={createForm.discount} onChange={e => setCreateForm({ ...createForm, discount: e.target.value })}
+                    className="ds-input" />
                 </div>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Line Items</label>
-                  <button onClick={addItem} className="text-sm text-blue-600 hover:underline">+ Add Item</button>
+              <div className="ds-section">
+                <div className="ds-actions justify-between">
+                  <h3>Line Items</h3>
+                  <button onClick={addItem} className="ds-button-secondary">+ Add Item</button>
                 </div>
                 {createForm.items.map((item, idx) => (
-                  <div key={idx} className="flex gap-2 mb-2">
-                    <input type="text" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)}
-                      className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Description" />
-                    <input type="number" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)}
-                      className="w-20 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Qty" />
-                    <input type="number" step="0.01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
-                      className="w-32 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Price" />
+                  <div key={idx} className="ds-surface-muted flex flex-wrap sm:flex-nowrap gap-2 p-4">
+                    <input type="text" aria-label={`Line item ${idx + 1} description`} value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)}
+                      className="ds-input w-full sm:flex-1" placeholder="Description" />
+                    <input type="number" aria-label={`Line item ${idx + 1} quantity`} value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)}
+                      className="ds-input w-20" placeholder="Qty" />
+                    <input type="number" step="0.01" aria-label={`Line item ${idx + 1} unit price (ZMW)`} value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
+                      className="ds-input w-32" placeholder="Price" />
                     {createForm.items.length > 1 && (
-                      <button onClick={() => removeItem(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><X size={16} /></button>
+                      <button onClick={() => removeItem(idx)} className="ds-button-destructive" aria-label={`Remove line item ${idx + 1}`}><X size={16} aria-hidden="true" /></button>
                     )}
                   </div>
                 ))}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
-                <textarea value={createForm.notes} onChange={e => setCreateForm({ ...createForm, notes: e.target.value })} rows={2}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <div className="ds-field">
+                <label htmlFor="invoice-create-notes" className="ds-label">Notes</label>
+                <textarea id="invoice-create-notes" value={createForm.notes} onChange={e => setCreateForm({ ...createForm, notes: e.target.value })} rows={2}
+                  className="ds-textarea" />
               </div>
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
+            <div className="ds-modal-footer">
               <button onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="ds-button-outline">Cancel</button>
               <button onClick={handleCreateInvoice}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Invoice</button>
+                className="ds-button-primary">Create Invoice</button>
             </div>
           </div>
         </div>
@@ -753,19 +756,20 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== BULK GENERATE MODAL ======== */}
       {showBulkGenerateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Generate Invoices</h2>
-              <button onClick={() => setShowBulkGenerateModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4">
+          <div className="ds-modal w-full max-w-md" role="dialog" aria-modal="true" aria-label="Generate Invoices">
+            <div className="ds-modal-header">
+              <h2>Generate Invoices</h2>
+              <button onClick={() => setShowBulkGenerateModal(false)} className="ds-button-ghost" aria-label="Close generate invoices"><X size={20} aria-hidden="true" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
+            <div className="ds-modal-body space-y-4">
+              <div className="ds-field">
+                <label htmlFor="invoice-bulk-term" className="ds-label">Academic Term</label>
                 <select
+                  id="invoice-bulk-term"
                   value={bulkForm.termId}
                   onChange={e => setBulkForm({ ...bulkForm, termId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="">Select term</option>
                   {terms.map(term => (
@@ -773,12 +777,13 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Class</label>
+              <div className="ds-field">
+                <label htmlFor="invoice-bulk-class" className="ds-label">Class</label>
                 <select
+                  id="invoice-bulk-class"
                   value={bulkForm.classId}
                   onChange={e => setBulkForm({ ...bulkForm, classId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="ds-select"
                 >
                   <option value="">All active students</option>
                   {classes.map(cls => (
@@ -788,15 +793,15 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   ))}
                 </select>
               </div>
-              <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3 text-sm text-blue-700 dark:text-blue-300">
+              <div className="ds-surface-muted p-4 text-sm">
                 Generates draft invoices for students with fee structures in the selected term and skips existing active invoices.
               </div>
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
+            <div className="ds-modal-footer">
               <button onClick={() => setShowBulkGenerateModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="ds-button-outline">Cancel</button>
               <button onClick={handleGenerateBulkInvoices}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Generate</button>
+                className="ds-button-primary">Generate</button>
             </div>
           </div>
         </div>
@@ -804,29 +809,29 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== PAYMENT MODAL ======== */}
       {showPaymentModal && selectedInvoice && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Record Payment</h2>
-              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4">
+          <div className="ds-modal w-full max-w-md" role="dialog" aria-modal="true" aria-label="Record Payment">
+            <div className="ds-modal-header">
+              <h2>Record Payment</h2>
+              <button onClick={() => setShowPaymentModal(false)} className="ds-button-ghost" aria-label="Close record payment"><X size={20} aria-hidden="true" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg text-sm">
-                <p className="text-gray-500">Invoice: <span className="font-mono text-blue-600">{selectedInvoice.invoiceNumber}</span></p>
-                <p className="text-gray-500">Balance Due: <span className="font-bold text-red-600">{fmt(selectedInvoice.balanceDue)}</span></p>
+            <div className="ds-modal-body space-y-4">
+              <div className="ds-surface-muted p-4 text-sm">
+                <p className="ds-helper">Invoice: <span className="font-mono text-[var(--text-primary)]">{selectedInvoice.invoiceNumber}</span></p>
+                <p className="ds-helper">Balance Due: <span className="font-bold text-red-700 dark:text-red-300">{fmt(selectedInvoice.balanceDue)}</span></p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Payment Amount (ZMW)</label>
-                <input type="number" step="0.01" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)}
+              <div className="ds-field">
+                <label htmlFor="invoice-payment-amount" className="ds-label">Payment Amount (ZMW)</label>
+                <input id="invoice-payment-amount" type="number" step="0.01" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)}
                   max={selectedInvoice.balanceDue}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="0.00" />
+                  className="ds-input" placeholder="0.00" />
               </div>
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
+            <div className="ds-modal-footer">
               <button onClick={() => setShowPaymentModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="ds-button-outline">Cancel</button>
               <button onClick={handleRecordPayment}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Record Payment</button>
+                className="ds-button-primary">Record Payment</button>
             </div>
           </div>
         </div>
@@ -834,29 +839,29 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== CREDIT NOTE MODAL ======== */}
       {showCreditNoteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">Issue Credit Note</h2>
-              <button onClick={() => setShowCreditNoteModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4">
+          <div className="ds-modal w-full max-w-md" role="dialog" aria-modal="true" aria-label="Issue Credit Note">
+            <div className="ds-modal-header">
+              <h2>Issue Credit Note</h2>
+              <button onClick={() => setShowCreditNoteModal(false)} className="ds-button-ghost" aria-label="Close issue credit note"><X size={20} aria-hidden="true" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (ZMW)</label>
-                <input type="number" step="0.01" value={creditNoteForm.amount} onChange={e => setCreditNoteForm({ ...creditNoteForm, amount: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            <div className="ds-modal-body space-y-4">
+              <div className="ds-field">
+                <label htmlFor="invoice-credit-amount" className="ds-label">Amount (ZMW)</label>
+                <input id="invoice-credit-amount" type="number" step="0.01" value={creditNoteForm.amount} onChange={e => setCreditNoteForm({ ...creditNoteForm, amount: e.target.value })}
+                  className="ds-input" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason</label>
-                <textarea value={creditNoteForm.reason} onChange={e => setCreditNoteForm({ ...creditNoteForm, reason: e.target.value })} rows={3}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <div className="ds-field">
+                <label htmlFor="invoice-credit-reason" className="ds-label">Reason</label>
+                <textarea id="invoice-credit-reason" value={creditNoteForm.reason} onChange={e => setCreditNoteForm({ ...creditNoteForm, reason: e.target.value })} rows={3}
+                  className="ds-textarea" />
               </div>
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
+            <div className="ds-modal-footer">
               <button onClick={() => setShowCreditNoteModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="ds-button-outline">Cancel</button>
               <button onClick={handleCreateCreditNote}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">Issue Credit Note</button>
+                className="ds-button-primary">Issue Credit Note</button>
             </div>
           </div>
         </div>

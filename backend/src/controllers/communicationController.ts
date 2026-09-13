@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import type { AuthRequest } from '../middleware/authMiddleware';
 import { z } from 'zod';
 import { sendEmail } from '../services/emailService';
 import { broadcastNotification, createNotification } from '../services/notificationService';
@@ -8,6 +9,18 @@ import { getCommunicationLogs, getCommunicationStats } from '../services/communi
 import smsService from '../services/smsService';
 import whatsappService from '../services/whatsappService';
 import { broadcastPush } from '../services/pushService';
+import {
+  AnnouncementChannel,
+  enqueueAnnouncementDeliveries,
+} from '../queues/announcementQueueService';
+import { getQueueRuntimeStatus } from '../queues/queueRuntime';
+import {
+  claimPushSubscription,
+  pushSubscriptionInputSchema,
+  pushUnsubscribeInputSchema,
+  PushSubscriptionIdentityError,
+  releasePushSubscription,
+} from '../services/pushSubscriptionService';
 
 // ============ ANNOUNCEMENTS ============
 
@@ -29,23 +42,33 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
     const data = sendAnnouncementSchema.parse(req.body);
     const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendSms: shouldSendSms, sendWhatsApp: shouldSendWhatsApp, sendNotification, priority, scheduledAt } = data;
 
-    // Find target users
+    // Resolve the audience without materializing every recipient in queue-backed requests.
     const whereClause: any = { isActive: true };
     if (targetRoles && targetRoles.length > 0) {
       whereClause.role = { in: targetRoles };
     }
 
-    const users = await prisma.user.findMany({
-      where: whereClause,
-      select: { id: true, email: true, fullName: true },
-    });
+    const queueChannels: AnnouncementChannel[] = [];
+    if (shouldSendEmail) queueChannels.push('email');
+    if (shouldSendSms) queueChannels.push('sms');
+    if (shouldSendWhatsApp) queueChannels.push('whatsapp');
+    if (sendNotification) queueChannels.push('push');
 
-    if (users.length === 0) {
+    const isScheduled = scheduledAt ? new Date(scheduledAt) > new Date() : false;
+    const shouldQueue = !isScheduled
+      && queueChannels.length > 0
+      && getQueueRuntimeStatus().state === 'ready';
+    let users: Array<{ id: string; email: string; fullName: string }> = [];
+    const recipientCount = shouldQueue || isScheduled
+      ? await prisma.user.count({ where: whereClause })
+      : (users = await prisma.user.findMany({
+          where: whereClause,
+          select: { id: true, email: true, fullName: true },
+        })).length;
+
+    if (recipientCount === 0) {
       return res.status(404).json({ message: 'No users found for the selected roles' });
     }
-
-    const userIds = users.map(u => u.id);
-    const isScheduled = scheduledAt ? new Date(scheduledAt) > new Date() : false;
 
     // Persist announcement
     const announcement = await (prisma as any).announcement.create({
@@ -57,7 +80,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
         sentViaSms: shouldSendSms,
         sentViaWhatsApp: shouldSendWhatsApp,
         sentViaNotification: sendNotification,
-        recipientCount: users.length,
+        recipientCount,
         priority,
         scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
         sentAt: isScheduled ? null : new Date(),
@@ -69,6 +92,22 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
     if (isScheduled) {
       return res.json({ message: `Announcement scheduled for ${scheduledAt}`, announcementId: announcement.id });
     }
+
+    if (shouldQueue) {
+      const queued = await enqueueAnnouncementDeliveries({
+        announcementId: announcement.id,
+        channels: queueChannels,
+        actorUserId: userId,
+      });
+      return res.status(202).json({
+        message: `Announcement queued for ${recipientCount} users`,
+        announcementId: announcement.id,
+        correlationId: queued.correlationId,
+        jobs: queued.jobs,
+      });
+    }
+
+    const userIds = users.map(u => u.id);
 
     // Send In-App Notifications
     if (sendNotification) {
@@ -124,7 +163,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
       })).catch(err => console.error('Background WhatsApp sending failed', err));
     }
 
-    res.json({ message: `Announcement sent to ${users.length} users`, announcementId: announcement.id });
+    res.json({ message: `Announcement sent to ${recipientCount} users`, announcementId: announcement.id });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
@@ -144,22 +183,22 @@ export const sendEmergencyBroadcast = async (req: Request, res: Response) => {
       message: z.string().min(1),
     }).parse(req.body);
 
-    // Send to ALL active users via ALL channels
-    const users = await prisma.user.findMany({
-      where: { isActive: true },
-      select: { id: true, email: true, fullName: true },
-    });
+    // Queue-backed broadcasts only count the audience; workers load recipients later.
+    const shouldQueue = getQueueRuntimeStatus().state === 'ready';
+    let users: Array<{ id: string; email: string; fullName: string }> = [];
+    const recipientCount = shouldQueue
+      ? await prisma.user.count({ where: { isActive: true } })
+      : (users = await prisma.user.findMany({
+          where: { isActive: true },
+          select: { id: true, email: true, fullName: true },
+        })).length;
 
-    // Also get phone numbers
-    const usersWithPhones = await prisma.user.findMany({
-      where: { isActive: true },
-      include: { children: { select: { guardianPhone: true } } },
-    });
-
-    const userIds = users.map(u => u.id);
+    if (recipientCount === 0) {
+      return res.status(404).json({ message: 'No active users found' });
+    }
 
     // Persist as emergency announcement
-    await (prisma as any).announcement.create({
+    const announcement = await (prisma as any).announcement.create({
       data: {
         subject: `🚨 EMERGENCY: ${subject}`,
         message,
@@ -168,11 +207,33 @@ export const sendEmergencyBroadcast = async (req: Request, res: Response) => {
         sentViaSms: true,
         sentViaWhatsApp: true,
         sentViaNotification: true,
-        recipientCount: users.length,
+        recipientCount,
         priority: 'EMERGENCY',
         sentAt: new Date(),
         createdById: userId,
       },
+    });
+
+    if (shouldQueue) {
+      const queued = await enqueueAnnouncementDeliveries({
+        announcementId: announcement.id,
+        channels: ['email', 'sms', 'whatsapp', 'push'],
+        actorUserId: userId,
+      });
+      return res.status(202).json({
+        message: `Emergency broadcast queued for ${recipientCount} users via ALL channels`,
+        announcementId: announcement.id,
+        correlationId: queued.correlationId,
+        jobs: queued.jobs,
+      });
+    }
+
+    const userIds = users.map(u => u.id);
+
+    // The synchronous fallback needs phone relations in the request process.
+    const usersWithPhones = await prisma.user.findMany({
+      where: { isActive: true },
+      include: { children: { select: { guardianPhone: true } } },
     });
 
     // Fire all channels simultaneously
@@ -218,7 +279,7 @@ export const sendEmergencyBroadcast = async (req: Request, res: Response) => {
       }),
     ]);
 
-    res.json({ message: `Emergency broadcast sent to ${users.length} users via ALL channels` });
+    res.json({ message: `Emergency broadcast sent to ${recipientCount} users via ALL channels` });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
@@ -398,17 +459,21 @@ export const getConversations = async (req: Request, res: Response) => {
       orderBy: { updatedAt: 'desc' }
     });
 
-    // Get unread counts for each conversation
-    const unreadCounts = await Promise.all(
-      conversations.map(c =>
-        prisma.message.count({
+    // Fetch unread counts in one grouped query to avoid N+1 count queries.
+    const conversationIds = conversations.map(c => c.id);
+    const unreadRows = conversationIds.length > 0
+      ? await prisma.message.groupBy({
+          by: ['conversationId'],
           where: {
-            conversationId: c.id,
+            conversationId: { in: conversationIds },
             senderId: { not: userId },
             isRead: false,
           },
+          _count: { _all: true },
         })
-      )
+      : [];
+    const unreadByConversation = new Map(
+      unreadRows.map((row: any) => [row.conversationId, Number(row._count?._all || 0)])
     );
 
     const formatted = conversations.map((c, idx) => {
@@ -429,7 +494,7 @@ export const getConversations = async (req: Request, res: Response) => {
           isRead: lastMessage.isRead,
           senderId: lastMessage.senderId
         } : null,
-        unreadCount: unreadCounts[idx],
+        unreadCount: unreadByConversation.get(c.id) || 0,
         updatedAt: c.updatedAt
       };
     });
@@ -491,10 +556,21 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     let targetConversationId = conversationId;
 
+    if (targetConversationId) {
+      const membership = await prisma.conversationParticipant.findFirst({
+        where: { conversationId: targetConversationId, userId },
+        select: { id: true },
+      });
+      if (!membership) return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
     if (!targetConversationId) {
       if (!recipientId) {
         return res.status(400).json({ message: 'Recipient ID is required for new conversation' });
       }
+
+      const recipient = await prisma.user.findFirst({ where: { id: recipientId, isActive: true }, select: { id: true } });
+      if (!recipient) return res.status(400).json({ message: 'Recipient does not belong to this tenant' });
 
       const existing = await prisma.conversation.findFirst({
         where: {
@@ -586,6 +662,13 @@ export const createGroupChat = async (req: Request, res: Response) => {
     }).parse(req.body);
 
     const allParticipants = [...new Set([userId!, ...participantIds])];
+    const ownedParticipants = await prisma.user.findMany({
+      where: { id: { in: allParticipants }, isActive: true },
+      select: { id: true },
+    });
+    if (ownedParticipants.length !== allParticipants.length) {
+      return res.status(400).json({ message: 'One or more participants do not belong to this tenant' });
+    }
 
     const conversation = await prisma.conversation.create({
       data: {
@@ -694,25 +777,51 @@ export const searchUsers = async (req: Request, res: Response) => {
 
 // ============ PUSH SUBSCRIPTION ============
 
-export const subscribeToPush = async (req: Request, res: Response) => {
+export const subscribeToPush = async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.userId;
-    const subscription = req.body;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const subscription = pushSubscriptionInputSchema.parse(req.body);
+    const result = await claimPushSubscription(tenantId || '', userId || '', subscription);
 
-    if (!userId || !subscription || !subscription.endpoint) {
-      return res.status(400).json({ message: 'Invalid subscription data' });
-    }
-
-    await prisma.pushSubscription.upsert({
-      where: { endpoint: subscription.endpoint },
-      update: { userId, keys: subscription.keys },
-      create: { userId, endpoint: subscription.endpoint, keys: subscription.keys },
+    res.status(result.created ? 201 : 200).json({
+      message: result.reassigned
+        ? 'Push subscription reassigned to the current session'
+        : 'Push subscription saved',
+      reassigned: result.reassigned,
     });
-
-    res.status(201).json({ message: 'Push subscription saved' });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid subscription data', errors: error.errors });
+    }
+    if (error instanceof PushSubscriptionIdentityError) {
+      return res.status(403).json({ message: error.message });
+    }
     console.error('Push subscription error:', error);
     res.status(500).json({ message: 'Failed to save subscription' });
+  }
+};
+
+export const unsubscribeFromPush = async (req: AuthRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const { endpoint } = pushUnsubscribeInputSchema.parse(req.body);
+    const released = await releasePushSubscription(tenantId || '', userId || '', endpoint);
+
+    res.json({
+      message: released ? 'Push subscription removed' : 'Push subscription was already inactive',
+      released,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid subscription data', errors: error.errors });
+    }
+    if (error instanceof PushSubscriptionIdentityError) {
+      return res.status(403).json({ message: error.message });
+    }
+    console.error('Push unsubscription error:', error);
+    res.status(500).json({ message: 'Failed to remove subscription' });
   }
 };
 
@@ -1036,6 +1145,31 @@ export const processScheduledAnnouncements = async () => {
     });
 
     for (const announcement of pending) {
+      const queueChannels: AnnouncementChannel[] = [];
+      if (announcement.sentViaEmail) queueChannels.push('email');
+      if (announcement.sentViaSms) queueChannels.push('sms');
+      if (announcement.sentViaWhatsApp) queueChannels.push('whatsapp');
+      if (announcement.sentViaNotification) queueChannels.push('push');
+
+      if (queueChannels.length > 0 && getQueueRuntimeStatus().state === 'ready') {
+        const queued = await enqueueAnnouncementDeliveries({
+          announcementId: announcement.id,
+          channels: queueChannels,
+          actorUserId: announcement.createdBy?.id,
+        });
+        await (prisma as any).announcement.update({
+          where: { id: announcement.id },
+          data: { sentAt: now },
+        });
+        console.log(JSON.stringify({
+          event: 'announcement.scheduled.queued',
+          announcementId: announcement.id,
+          correlationId: queued.correlationId,
+          jobs: queued.jobs,
+        }));
+        continue;
+      }
+
       const whereClause: any = { isActive: true };
       const roles = announcement.targetRoles;
       if (roles && roles.length > 0 && !roles.includes('ALL')) {

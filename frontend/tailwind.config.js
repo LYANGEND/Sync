@@ -8,9 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: 'var(--primary-color)',
-        secondary: 'var(--secondary-color)',
-        accent: 'var(--accent-color)',
+        surface: 'var(--surface)',
+        canvas: 'var(--bg-primary)',
+        ink: 'var(--text-primary)',
+        muted: 'var(--text-secondary)',
+        edge: 'var(--border-color)',
+        primary: {
+          DEFAULT: 'var(--primary-color)',
+          dark: 'var(--primary-dark)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent-color)',
+          light: 'var(--accent-light)',
+        },
       },
       spacing: {
         'header-safe': 'calc(4rem + env(safe-area-inset-top))',

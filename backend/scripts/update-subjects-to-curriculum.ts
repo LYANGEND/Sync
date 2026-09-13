@@ -10,9 +10,13 @@
  * Run with:  npx tsx scripts/update-subjects-to-curriculum.ts
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../src/utils/prisma';
+import { runWithTenant } from '../src/middleware/tenantContext';
 
-const prisma = new PrismaClient();
+const tenantId = process.env.TENANT_ID?.trim();
+if (!tenantId) {
+  throw new Error('TENANT_ID is required; this maintenance script never runs across all tenants');
+}
 
 // ─── Canonical CDC Subject List ───────────────────────────────────────
 // Based on official CDC syllabi PDFs in "Finalised Syllabi" folder
@@ -305,7 +309,7 @@ async function mergeSubject(sourceId: string, targetId: string, sourceCode: stri
   console.log(`   ✅ Merged ${sourceCode} → ${targetCode} (moved all relationships, deleted ${sourceCode})`);
 }
 
-main().catch(err => {
+runWithTenant(tenantId, main).catch(err => {
   console.error('❌ Migration failed:', err);
   process.exit(1);
 });

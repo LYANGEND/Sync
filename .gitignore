@@ -4,8 +4,10 @@
 .env
 /logs
 *.log
+*_log.txt
 /build
 **/dist
+/frontend/dev-dist
 /coverage
 .idea
 .vscode
@@ -55,4 +57,13 @@ scripts/deploy-azure.ps1
 scripts/backup.sh
 infra/main.bicepparam
 .azure-secrets
+
+# Local validation screenshots and generated deployment output
+/app_screenshot.png
+/dashboard*.png
+/final_top.png
+/ui.png
+/ui[0-9]*.png
+/deploy-output.json
+/console.log*
 nginx-system.conf

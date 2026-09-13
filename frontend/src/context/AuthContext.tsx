@@ -1,5 +1,9 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import api from '../utils/api';
+import {
+  synchronizeExistingPushSubscription,
+  unsubscribeFromPushNotifications,
+} from '../utils/push';
 
 interface User {
   id: string;
@@ -21,7 +25,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (token: string, user: User) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -68,12 +72,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const initAuth = async () => {
       const storedToken = localStorage.getItem('token');
       const storedUser = localStorage.getItem('user');
+      let hasCachedUser = false;
 
       if (storedToken) {
         setToken(storedToken);
         if (storedUser) {
           try {
             setUser(JSON.parse(storedUser));
+            hasCachedUser = true;
+            setIsLoading(false);
           } catch {
             localStorage.removeItem('user');
           }
@@ -93,11 +100,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }
         }
       }
-      setIsLoading(false);
+      if (!hasCachedUser) setIsLoading(false);
     };
 
     initAuth();
   }, []);
+
+  useEffect(() => {
+    if (!token || !user || user.role === 'PLATFORM_ADMIN') return;
+    void synchronizeExistingPushSubscription();
+  }, [token, user?.id, user?.tenantId, user?.role]);
 
   useEffect(() => {
     const handleInvalidAuth = () => {
@@ -121,7 +133,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(newUser);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    if (user?.role !== 'PLATFORM_ADMIN') {
+      await unsubscribeFromPushNotifications();
+    }
     clearSession();
   };
 

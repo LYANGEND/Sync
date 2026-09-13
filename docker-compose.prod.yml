@@ -1,18 +1,82 @@
-version: '3.8'
-
 services:
   backend:
     image: ghcr.io/lyangend/sync/backend:master
     container_name: sync_backend
     restart: always
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
+      - QUEUE_ENABLED=${QUEUE_ENABLED:-false}
+      - QUEUE_REQUIRED=${QUEUE_REQUIRED:-false}
+      - REDIS_URL=${REDIS_URL:-}
+      - QUEUE_PREFIX=${QUEUE_PREFIX:-sync}
+      - API_RATE_LIMIT_ENABLED=${API_RATE_LIMIT_ENABLED:-true}
+      - API_RATE_LIMIT_REQUIRED=${API_RATE_LIMIT_REQUIRED:-true}
+      - AI_FINANCIAL_SNAPSHOT_CACHE_ENABLED=${AI_FINANCIAL_SNAPSHOT_CACHE_ENABLED:-true}
+      - AI_FINANCIAL_SNAPSHOT_CACHE_REDIS_URL=${AI_FINANCIAL_SNAPSHOT_CACHE_REDIS_URL:-}
+      - AI_FINANCIAL_SNAPSHOT_CACHE_TTL_SECONDS=${AI_FINANCIAL_SNAPSHOT_CACHE_TTL_SECONDS:-300}
+      - SMS_RATE_LIMIT_ENABLED=${SMS_RATE_LIMIT_ENABLED:-true}
+      - SMS_RATE_LIMIT_REQUIRED=${SMS_RATE_LIMIT_REQUIRED:-false}
+      - SMS_RATE_LIMIT_REDIS_URL=${SMS_RATE_LIMIT_REDIS_URL:-}
+      - SMS_DAILY_TENANT_LIMIT=${SMS_DAILY_TENANT_LIMIT:-5000}
+      - SMS_DAILY_USER_LIMIT=${SMS_DAILY_USER_LIMIT:-500}
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=${SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS:-900000}
       # PORT is NOT set here — the image default (3000) is used.
       # JWT_SECRET is NOT set here — env_file: .env provides it cleanly.
     ports:
       - "3002:3000"   # host:3002 → container:3000 (app default port)
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - sync_network
+
+  communication-worker:
+    image: ghcr.io/lyangend/sync/backend:master
+    container_name: sync_communication_worker
+    restart: always
+    profiles: ["queues"]
+    command: npm run worker:communications
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - QUEUE_ENABLED=${QUEUE_ENABLED:-false}
+      - QUEUE_REQUIRED=${QUEUE_REQUIRED:-false}
+      - REDIS_URL=${REDIS_URL:-}
+      - QUEUE_PREFIX=${QUEUE_PREFIX:-sync}
+      - SMS_RATE_LIMIT_ENABLED=${SMS_RATE_LIMIT_ENABLED:-true}
+      - SMS_RATE_LIMIT_REQUIRED=${SMS_RATE_LIMIT_REQUIRED:-false}
+      - SMS_RATE_LIMIT_REDIS_URL=${SMS_RATE_LIMIT_REDIS_URL:-}
+      - SMS_DAILY_TENANT_LIMIT=${SMS_DAILY_TENANT_LIMIT:-5000}
+      - SMS_DAILY_USER_LIMIT=${SMS_DAILY_USER_LIMIT:-500}
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=${SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS:-900000}
+    networks:
+      - sync_network
+
+  payment-worker:
+    image: ghcr.io/lyangend/sync/backend:master
+    container_name: sync_payment_worker
+    restart: always
+    profiles: ["queues"]
+    command: npm run worker:payments
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - QUEUE_ENABLED=${QUEUE_ENABLED:-false}
+      - QUEUE_REQUIRED=${QUEUE_REQUIRED:-false}
+      - REDIS_URL=${REDIS_URL:-}
+      - QUEUE_PREFIX=${QUEUE_PREFIX:-sync}
+      - SMS_RATE_LIMIT_ENABLED=${SMS_RATE_LIMIT_ENABLED:-true}
+      - SMS_RATE_LIMIT_REQUIRED=${SMS_RATE_LIMIT_REQUIRED:-false}
+      - SMS_RATE_LIMIT_REDIS_URL=${SMS_RATE_LIMIT_REDIS_URL:-}
+      - SMS_DAILY_TENANT_LIMIT=${SMS_DAILY_TENANT_LIMIT:-5000}
+      - SMS_DAILY_USER_LIMIT=${SMS_DAILY_USER_LIMIT:-500}
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=${SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS:-900000}
     networks:
       - sync_network
 
@@ -30,3 +94,6 @@ services:
 networks:
   sync_network:
     driver: bridge
+
+volumes:
+  uploads_data:

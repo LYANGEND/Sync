@@ -5,20 +5,18 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
+  CreditCard,
   Database,
   Eye,
   FileWarning,
   KeyRound,
   Loader2,
   Lock,
-  LogOut,
   Plus,
   RefreshCcw,
   Search,
   Server,
-  Shield,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
@@ -33,7 +31,10 @@ import { useAuth } from '../../context/AuthContext';
 
 type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'TRIAL';
 type TenantPlan = 'FREE' | 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE';
-type OpsView = 'tenants' | 'health' | 'operations' | 'security' | 'audit';
+type OpsView = 'tenants' | 'health' | 'operations' | 'security' | 'audit' | 'billing' | 'settings';
+type BillingCycleType = 'MONTHLY' | 'ANNUAL';
+type SupportTierType = 'BASIC' | 'PRIORITY' | 'DEDICATED';
+type PlatformInvoiceStatusType = 'DRAFT' | 'ISSUED' | 'PAID' | 'OVERDUE' | 'VOID';
 type TenantOnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'READY_TO_LAUNCH' | 'LIVE' | 'BLOCKED';
 type TenantDomainStatus = 'NONE' | 'PENDING_DNS' | 'PENDING_VERIFICATION' | 'VERIFIED' | 'FAILED';
 
@@ -217,9 +218,95 @@ interface OperationsFeedItem {
   createdAt: string;
 }
 
+interface PlanPricing {
+  id: string;
+  plan: TenantPlan;
+  pricePerActiveStudent: string | number;
+  setupFeeAmount: string | number;
+  setupFeeWaivedOnAnnual: boolean;
+  aiIncludedUnits: number;
+  smsIncludedUnits: number;
+  minimumMonthlyBill: string | number;
+}
+
+interface BillingSettings {
+  id: string;
+  supportFeeBasic: string | number;
+  supportFeePriority: string | number;
+  supportFeeDedicated: string | number;
+  aiOverageRatePerUnit: string | number;
+  smsOverageRatePerUnit: string | number;
+  annualDiscountPercent: string | number;
+  trialAiIncludedUnits: number;
+  trialSmsIncludedUnits: number;
+}
+
+interface PlatformInvoiceItem {
+  id: string;
+  tenantId: string;
+  periodStart: string;
+  periodEnd: string;
+  billingCycle: BillingCycleType;
+  activeStudentCount: number;
+  studentCharge: string | number;
+  setupFeeCharge: string | number;
+  supportFeeCharge: string | number;
+  aiOverageCharge: string | number;
+  smsOverageCharge: string | number;
+  discountAmount: string | number;
+  totalAmount: string | number;
+  status: PlatformInvoiceStatusType;
+  issuedAt?: string | null;
+  dueAt?: string | null;
+  paidAt?: string | null;
+}
+
+interface PlatformSmsSettings {
+  id: string;
+  singleton: boolean;
+  enabled: boolean;
+  provider: string | null;
+  apiKey: string | null;
+  apiSecret: string | null;
+  senderId: string | null;
+  updatedAt: string;
+}
+
+interface PlatformWhatsappSettings {
+  id: string;
+  singleton: boolean;
+  enabled: boolean;
+  provider: string | null;
+  apiKey: string | null;
+  phoneId: string | null;
+  updatedAt: string;
+}
+
+interface PlatformLencoSettings {
+  id: string;
+  singleton: boolean;
+  enabled: boolean;
+  apiKey: string | null;
+  environment: string | null;
+  defaultBearer: string | null;
+  updatedAt: string;
+}
+
 const PLANS: TenantPlan[] = ['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'];
 const STATUSES: TenantStatus[] = ['ACTIVE', 'TRIAL', 'SUSPENDED'];
-const OPS_VIEWS: OpsView[] = ['tenants', 'health', 'operations', 'security', 'audit'];
+const OPS_VIEWS: OpsView[] = ['tenants', 'health', 'operations', 'security', 'audit', 'billing', 'settings'];
+const money = (value: string | number | undefined | null, currency = 'ZMW') => {
+  const num = Number(value || 0);
+  return `${currency} ${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const invoiceStatusClass = (status: PlatformInvoiceStatusType) => {
+  if (status === 'PAID') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800';
+  if (status === 'ISSUED') return 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800';
+  if (status === 'OVERDUE') return 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800';
+  if (status === 'VOID') return 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
+  return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800';
+};
 const ONBOARDING_STATUSES: TenantOnboardingStatus[] = ['NOT_STARTED', 'IN_PROGRESS', 'READY_TO_LAUNCH', 'LIVE', 'BLOCKED'];
 const onboardingTaskLabels: Record<string, string> = {
   tenantProvisioned: 'Tenant provisioned',
@@ -300,7 +387,7 @@ const emptyTenantForm = {
 };
 
 const OpsDashboard = () => {
-  const { user, token, login, logout } = useAuth();
+  const { user, token, login } = useAuth();
   const navigate = useNavigate();
   const { view } = useParams<{ view?: string }>();
   const routeView = OPS_VIEWS.includes(view as OpsView) ? (view as OpsView) : 'tenants';
@@ -323,15 +410,21 @@ const OpsDashboard = () => {
   const [domainCheckResult, setDomainCheckResult] = useState<DomainCheckResult | null>(null);
   const [impersonationReason, setImpersonationReason] = useState('Support investigation');
   const [temporaryPassword, setTemporaryPassword] = useState('');
-
-  // Sidebar menu group collapse state
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    operations: true,
-    security: false,
-  });
-  const toggleGroup = (group: string) => {
-    setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }));
-  };
+  const [pricingPlans, setPricingPlans] = useState<PlanPricing[]>([]);
+  const [billingSettings, setBillingSettings] = useState<BillingSettings | null>(null);
+  const [invoices, setInvoices] = useState<PlatformInvoiceItem[]>([]);
+  const [generatingInvoices, setGeneratingInvoices] = useState(false);
+  const [planDrafts, setPlanDrafts] = useState<Record<string, Partial<PlanPricing>>>({});
+  const [settingsDraft, setSettingsDraft] = useState<Partial<BillingSettings>>({});
+  const [smsSettings, setSmsSettings] = useState<PlatformSmsSettings | null>(null);
+  const [smsSettingsDraft, setSmsSettingsDraft] = useState<Partial<PlatformSmsSettings>>({});
+  const [savingSms, setSavingSms] = useState(false);
+  const [whatsappSettings, setWhatsappSettings] = useState<PlatformWhatsappSettings | null>(null);
+  const [whatsappSettingsDraft, setWhatsappSettingsDraft] = useState<Partial<PlatformWhatsappSettings>>({});
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+  const [lencoSettings, setLencoSettings] = useState<PlatformLencoSettings | null>(null);
+  const [lencoSettingsDraft, setLencoSettingsDraft] = useState<Partial<PlatformLencoSettings>>({});
+  const [savingLenco, setSavingLenco] = useState(false);
 
   const selectedId = selectedTenant?.id;
 
@@ -392,14 +485,40 @@ const OpsDashboard = () => {
     setOperationsFeed(response.data || []);
   }, []);
 
+  const loadPricing = useCallback(async () => {
+    const response = await api.get('/platform/billing/pricing');
+    setPricingPlans(response.data.plans || []);
+    setBillingSettings(response.data.settings || null);
+  }, []);
+
+  const loadInvoices = useCallback(async () => {
+    const response = await api.get('/platform/billing/invoices');
+    setInvoices(response.data || []);
+  }, []);
+
+  const loadSmsSettings = useCallback(async () => {
+    const response = await api.get('/platform/settings/sms');
+    setSmsSettings(response.data || null);
+  }, []);
+
+  const loadWhatsappSettings = useCallback(async () => {
+    const response = await api.get('/platform/settings/whatsapp');
+    setWhatsappSettings(response.data || null);
+  }, []);
+
+  const loadLencoSettings = useCallback(async () => {
+    const response = await api.get('/platform/settings/lenco');
+    setLencoSettings(response.data || null);
+  }, []);
+
   const refreshAll = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([loadOverview(), loadTenants(), loadHealth(), loadOperationsFeed(), loadSecurityEvents(), loadAudit()]);
+      await Promise.all([loadOverview(), loadTenants(), loadHealth(), loadOperationsFeed(), loadSecurityEvents(), loadAudit(), loadPricing(), loadInvoices(), loadSmsSettings(), loadWhatsappSettings(), loadLencoSettings()]);
     } finally {
       setLoading(false);
     }
-  }, [loadAudit, loadHealth, loadOperationsFeed, loadOverview, loadSecurityEvents, loadTenants]);
+  }, [loadAudit, loadHealth, loadOperationsFeed, loadOverview, loadSecurityEvents, loadTenants, loadPricing, loadInvoices, loadSmsSettings, loadWhatsappSettings, loadLencoSettings]);
 
   useEffect(() => {
     refreshAll();
@@ -632,6 +751,133 @@ const OpsDashboard = () => {
     }
   };
 
+  const updatePlanDraft = (plan: TenantPlan, field: keyof PlanPricing, value: string | number | boolean) => {
+    setPlanDrafts((current) => ({ ...current, [plan]: { ...current[plan], [field]: value } }));
+  };
+
+  const savePlanPricing = async (plan: TenantPlan) => {
+    const draft = planDrafts[plan];
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const payload = {
+        pricePerActiveStudent: draft.pricePerActiveStudent !== undefined ? Number(draft.pricePerActiveStudent) : undefined,
+        setupFeeAmount: draft.setupFeeAmount !== undefined ? Number(draft.setupFeeAmount) : undefined,
+        setupFeeWaivedOnAnnual: draft.setupFeeWaivedOnAnnual,
+        aiIncludedUnits: draft.aiIncludedUnits !== undefined ? Number(draft.aiIncludedUnits) : undefined,
+        smsIncludedUnits: draft.smsIncludedUnits !== undefined ? Number(draft.smsIncludedUnits) : undefined,
+        minimumMonthlyBill: draft.minimumMonthlyBill !== undefined ? Number(draft.minimumMonthlyBill) : undefined,
+      };
+      await api.put(`/platform/billing/pricing/${plan}`, payload);
+      setPlanDrafts((current) => { const next = { ...current }; delete next[plan]; return next; });
+      await loadPricing();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save plan pricing');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveBillingSettings = async () => {
+    if (Object.keys(settingsDraft).length === 0) return;
+    setSaving(true);
+    try {
+      const payload = Object.fromEntries(
+        Object.entries(settingsDraft).map(([key, value]) => [key, typeof value === 'boolean' ? value : Number(value)])
+      );
+      await api.put('/platform/billing/settings', payload);
+      setSettingsDraft({});
+      await loadPricing();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save billing settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSmsSettings = async () => {
+    if (Object.keys(smsSettingsDraft).length === 0) return;
+    setSavingSms(true);
+    try {
+      const payload = { ...smsSettingsDraft };
+      await api.put('/platform/settings/sms', payload);
+      setSmsSettingsDraft({});
+      await loadSmsSettings();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save SMS settings');
+    } finally {
+      setSavingSms(false);
+    }
+  };
+
+  const saveWhatsappSettings = async () => {
+    if (Object.keys(whatsappSettingsDraft).length === 0) return;
+    setSavingWhatsapp(true);
+    try {
+      const payload = { ...whatsappSettingsDraft };
+      await api.put('/platform/settings/whatsapp', payload);
+      setWhatsappSettingsDraft({});
+      await loadWhatsappSettings();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save WhatsApp settings');
+    } finally {
+      setSavingWhatsapp(false);
+    }
+  };
+
+  const saveLencoSettings = async () => {
+    if (Object.keys(lencoSettingsDraft).length === 0) return;
+    setSavingLenco(true);
+    try {
+      const payload = { ...lencoSettingsDraft };
+      await api.put('/platform/settings/lenco', payload);
+      setLencoSettingsDraft({});
+      await loadLencoSettings();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save Lenco settings');
+    } finally {
+      setSavingLenco(false);
+    }
+  };
+
+  const generateInvoicesForCurrentPeriod = async () => {
+    if (!window.confirm('Generate/refresh this month\'s DRAFT invoices for every active tenant?')) return;
+    setGeneratingInvoices(true);
+    try {
+      await api.post('/platform/billing/invoices/generate');
+      await loadInvoices();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to generate invoices');
+    } finally {
+      setGeneratingInvoices(false);
+    }
+  };
+
+  const issueInvoiceAction = async (invoice: PlatformInvoiceItem) => {
+    if (!window.confirm('Issue this invoice? It will no longer be editable by regeneration.')) return;
+    setSaving(true);
+    try {
+      await api.post(`/platform/billing/invoices/${invoice.id}/issue`);
+      await loadInvoices();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to issue invoice');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const markInvoicePaidAction = async (invoice: PlatformInvoiceItem) => {
+    setSaving(true);
+    try {
+      await api.post(`/platform/billing/invoices/${invoice.id}/paid`);
+      await loadInvoices();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to mark invoice paid');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const tenantUtilization = useMemo(() => {
     if (!selectedTenant) return { users: 0, students: 0 };
     return {
@@ -647,130 +893,22 @@ const OpsDashboard = () => {
   const stats = overview?.totals;
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col min-h-screen fixed left-0 top-0 z-30">
-        {/* Logo */}
-        <div className="px-6 py-5 border-b border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-500 rounded-xl flex items-center justify-center">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="font-bold">Platform Admin</h1>
-              <p className="text-xs text-slate-400">Sync School Management</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-          {/* Operations Group */}
-          <div className="space-y-1">
-            <button
-              onClick={() => toggleGroup('operations')}
-              className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Building2 className="w-5 h-5" />
-                <span className="font-medium">Operations</span>
-              </div>
-              {expandedGroups.operations ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </button>
-            {expandedGroups.operations && (
-              <div className="ml-4 space-y-1">
-                {[
-                  { id: 'tenants', label: 'Tenants', icon: Building2 },
-                  { id: 'health', label: 'System Health', icon: Server },
-                  { id: 'operations', label: 'Ops Feed', icon: FileWarning },
-                ].map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => changeView(item.id as OpsView)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
-                      activeView === item.id
-                        ? 'bg-purple-600 text-white'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Security & Compliance Group */}
-          <div className="space-y-1">
-            <button
-              onClick={() => toggleGroup('security')}
-              className="w-full flex items-center justify-between px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Shield className="w-5 h-5" />
-                <span className="font-medium">Security</span>
-              </div>
-              {expandedGroups.security ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </button>
-            {expandedGroups.security && (
-              <div className="ml-4 space-y-1">
-                {[
-                  { id: 'security', label: 'Security Events', icon: ShieldAlert },
-                  { id: 'audit', label: 'Audit Logs', icon: Activity },
-                ].map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => changeView(item.id as OpsView)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
-                      activeView === item.id
-                        ? 'bg-purple-600 text-white'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </nav>
-
-        {/* User & Logout */}
-        <div className="px-4 py-4 border-t border-slate-700 space-y-2">
-          <div className="flex items-center gap-3 px-4 py-2">
-            <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-sm font-bold">
-              {user?.fullName?.charAt(0) || 'A'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.fullName || 'Admin'}</p>
-              <p className="text-xs text-slate-400 truncate">{user?.email}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => { logout(); navigate('/ops/login'); }}
-            className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:bg-red-600/20 hover:text-red-400 transition-colors text-sm"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 ml-64 p-4 md:p-6 pb-24 md:pb-6 space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              {activeView === 'tenants' ? 'Tenant Management' : activeView === 'health' ? 'System Health' : activeView === 'operations' ? 'Operations Feed' : activeView === 'security' ? 'Security Events' : 'Audit Logs'}
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {activeView === 'tenants' ? 'Tenant Management' : activeView === 'health' ? 'System Health' : activeView === 'operations' ? 'Operations Feed' : activeView === 'security' ? 'Security Events' : activeView === 'billing' ? 'Billing' : activeView === 'settings' ? 'Platform Settings' : 'Audit Logs'}
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Manage tenants, platform health, feature access, and operational controls.</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {activeView === 'settings'
+                ? 'Platform-wide fallback providers, plus the platform\'s own Lenco account for collecting tenant subscription payments.'
+                : 'Manage tenants, platform health, feature access, and operational controls.'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={refreshAll}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.02)] transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
               <RefreshCcw size={16} />
               Refresh
@@ -778,7 +916,7 @@ const OpsDashboard = () => {
             {activeView === 'tenants' && (
               <button
                 onClick={() => setShowCreate(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
                 <Plus size={16} />
                 New Tenant
@@ -787,26 +925,28 @@ const OpsDashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-8">
-          {[
-            { label: 'Tenants', value: stats?.tenants ?? 0, icon: Building2 },
-            { label: 'Active', value: stats?.activeTenants ?? 0, icon: CheckCircle2 },
-            { label: 'Suspended', value: stats?.suspendedTenants ?? 0, icon: XCircle },
-            { label: 'Maintenance', value: stats?.maintenanceTenants ?? 0, icon: Wrench },
-            { label: 'Users', value: stats?.users ?? 0, icon: Users },
-            { label: 'Students', value: stats?.students ?? 0, icon: ShieldCheck },
-            { label: 'AI failures', value: stats?.aiFailures7d ?? 0, icon: AlertTriangle },
-            { label: 'Failed logins', value: stats?.failedLogins24h ?? 0, icon: ShieldAlert },
-          ].map((item) => (
-            <div key={item.label} className="rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{item.label}</p>
-                <item.icon size={18} className="text-blue-600 dark:text-blue-300" />
+        {activeView !== 'settings' && (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-8">
+            {[
+              { label: 'Tenants', value: stats?.tenants ?? 0, icon: Building2 },
+              { label: 'Active', value: stats?.activeTenants ?? 0, icon: CheckCircle2 },
+              { label: 'Suspended', value: stats?.suspendedTenants ?? 0, icon: XCircle },
+              { label: 'Maintenance', value: stats?.maintenanceTenants ?? 0, icon: Wrench },
+              { label: 'Users', value: stats?.users ?? 0, icon: Users },
+              { label: 'Students', value: stats?.students ?? 0, icon: ShieldCheck },
+              { label: 'AI failures', value: stats?.aiFailures7d ?? 0, icon: AlertTriangle },
+              { label: 'Failed logins', value: stats?.failedLogins24h ?? 0, icon: ShieldAlert },
+            ].map((item) => (
+              <div key={item.label} className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-[0_1px_0_rgba(15,23,42,0.02)] dark:border-slate-700 dark:bg-slate-800/90">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">{item.label}</p>
+                  <item.icon size={18} className="text-slate-500 dark:text-slate-300" />
+                </div>
+                <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{item.value.toLocaleString()}</p>
               </div>
-              <p className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">{item.value.toLocaleString()}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-gray-500">
@@ -816,20 +956,20 @@ const OpsDashboard = () => {
       ) : activeView === 'tenants' ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800 md:flex-row">
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-[0_1px_0_rgba(15,23,42,0.02)] dark:border-slate-700 dark:bg-slate-800/90 md:flex-row">
               <div className="relative flex-1">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-slate-300 focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-slate-600 dark:focus:ring-slate-800"
                   placeholder="Search name, slug, or domain"
                 />
               </div>
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               >
                 <option value="ALL">All statuses</option>
                 {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
@@ -837,14 +977,14 @@ const OpsDashboard = () => {
               <select
                 value={planFilter}
                 onChange={(event) => setPlanFilter(event.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               >
                 <option value="ALL">All plans</option>
                 {PLANS.map((plan) => <option key={plan} value={plan}>{plan}</option>)}
               </select>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.02)] dark:border-slate-700 dark:bg-slate-800">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
                   <thead className="bg-gray-50 dark:bg-slate-900">
@@ -893,12 +1033,90 @@ const OpsDashboard = () => {
             </div>
           </section>
 
-          <aside className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          <aside className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.02)] dark:border-slate-700 dark:bg-slate-800">
             {!selectedTenant ? (
-              <div className="p-8 text-center">
-                <Building2 size={36} className="mx-auto text-gray-300" />
-                <h2 className="mt-3 font-semibold text-gray-900 dark:text-white">Select a tenant</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Tenant controls, limits, feature flags, and admins appear here.</p>
+              <div className="divide-y divide-gray-100 dark:divide-slate-700">
+                <div className="p-5">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+                    <Building2 size={16} />
+                    Platform overview
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select a tenant on the left for detailed controls, or review platform-wide signals below.</p>
+                </div>
+
+                <div className="space-y-3 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Billing risk (30d)</p>
+                  {(overview?.totals.overdueInvoiceCount ?? 0) > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                      <p className="font-semibold">{overview?.totals.overdueInvoiceCount} overdue invoice{overview && overview.totals.overdueInvoiceCount === 1 ? '' : 's'}</p>
+                      <p className="mt-1">ZMW {(overview?.totals.overdueBalance ?? 0).toLocaleString()} outstanding across the platform.</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                      No overdue invoices across any tenant.
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Plan distribution</p>
+                  <div className="space-y-2">
+                    {(overview?.tenantsByPlan ?? []).map((row) => {
+                      const total = overview?.totals.tenants || 1;
+                      const pct = Math.round((row.count / total) * 100);
+                      return (
+                        <div key={row.plan}>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 font-semibold ${planClass(row.plan)}`}>{row.plan}</span>
+                            <span className="text-gray-500 dark:text-gray-400">{row.count} tenant{row.count === 1 ? '' : 's'}</span>
+                          </div>
+                          <div className="mt-1 h-1.5 rounded-full bg-gray-100 dark:bg-slate-700">
+                            <div className="h-1.5 rounded-full bg-slate-900 dark:bg-slate-200" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(!overview || overview.tenantsByPlan.length === 0) && (
+                      <p className="text-sm text-gray-500">No tenants yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">7-day activity</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg border border-gray-200 p-3 dark:border-slate-700">
+                      <p className="text-xs text-gray-500">AI requests</p>
+                      <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{overview?.totals.aiUsage7d ?? 0}</p>
+                      <p className="text-xs text-red-500">{overview?.totals.aiFailures7d ?? 0} failures</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 p-3 dark:border-slate-700">
+                      <p className="text-xs text-gray-500">Audit events</p>
+                      <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{overview?.totals.auditEvents7d ?? 0}</p>
+                      <p className="text-xs text-gray-500">last 7 days</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Recently onboarded</p>
+                  {(overview?.recentTenants ?? []).slice(0, 5).map((tenant) => (
+                    <button
+                      key={tenant.id}
+                      onClick={() => selectTenant(tenant)}
+                      className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:border-slate-700 dark:hover:bg-slate-700"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-gray-900 dark:text-white">{tenant.name}</span>
+                        <span className="block truncate text-xs text-gray-500">{tenant.slug} &middot; {new Date(tenant.createdAt).toLocaleDateString()}</span>
+                      </span>
+                      <span className={`ml-2 shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass(tenant.status)}`}>{tenant.status}</span>
+                    </button>
+                  ))}
+                  {(!overview || overview.recentTenants.length === 0) && (
+                    <p className="text-sm text-gray-500">No tenants onboarded yet.</p>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-slate-700">
@@ -1306,6 +1524,347 @@ const OpsDashboard = () => {
             </table>
           </div>
         </section>
+      ) : activeView === 'billing' ? (
+        <div className="space-y-6">
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Plan pricing</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Billed on ACTIVE students only — graduated/transferred/dropped-out students are excluded automatically.</p>
+            </div>
+            <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-4">
+              {pricingPlans.map((plan) => {
+                const draft = planDrafts[plan.plan] || {};
+                const value = <K extends keyof PlanPricing>(field: K) => (draft[field] !== undefined ? draft[field] : plan[field]) as PlanPricing[K];
+                const dirty = Boolean(planDrafts[plan.plan]);
+                return (
+                  <div key={plan.id} className={`rounded-xl border p-4 ${planClass(plan.plan)}`}>
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="font-semibold">{plan.plan}</span>
+                      {dirty && <span className="rounded-full bg-white/60 px-2 py-0.5 text-[10px] font-semibold dark:bg-black/20">Unsaved</span>}
+                    </div>
+                    <label className="mb-2 block text-xs font-medium">Price / active student
+                      <input type="number" step="0.01" className="mt-1 w-full rounded-md border border-black/10 bg-white/80 px-2 py-1 text-sm text-slate-900 dark:bg-slate-900/60 dark:text-white"
+                        value={value('pricePerActiveStudent')} onChange={(e) => updatePlanDraft(plan.plan, 'pricePerActiveStudent', e.target.value)} />
+                    </label>
+                    <label className="mb-2 block text-xs font-medium">Setup fee
+                      <input type="number" step="0.01" className="mt-1 w-full rounded-md border border-black/10 bg-white/80 px-2 py-1 text-sm text-slate-900 dark:bg-slate-900/60 dark:text-white"
+                        value={value('setupFeeAmount')} onChange={(e) => updatePlanDraft(plan.plan, 'setupFeeAmount', e.target.value)} />
+                    </label>
+                    <label className="mb-2 flex items-center gap-2 text-xs font-medium">
+                      <input type="checkbox" checked={Boolean(value('setupFeeWaivedOnAnnual'))} onChange={(e) => updatePlanDraft(plan.plan, 'setupFeeWaivedOnAnnual', e.target.checked)} />
+                      Waive setup fee on annual
+                    </label>
+                    <label className="mb-2 block text-xs font-medium">AI requests included / mo
+                      <input type="number" className="mt-1 w-full rounded-md border border-black/10 bg-white/80 px-2 py-1 text-sm text-slate-900 dark:bg-slate-900/60 dark:text-white"
+                        value={value('aiIncludedUnits')} onChange={(e) => updatePlanDraft(plan.plan, 'aiIncludedUnits', e.target.value)} />
+                    </label>
+                    <label className="mb-2 block text-xs font-medium">SMS/WhatsApp included / mo
+                      <input type="number" className="mt-1 w-full rounded-md border border-black/10 bg-white/80 px-2 py-1 text-sm text-slate-900 dark:bg-slate-900/60 dark:text-white"
+                        value={value('smsIncludedUnits')} onChange={(e) => updatePlanDraft(plan.plan, 'smsIncludedUnits', e.target.value)} />
+                    </label>
+                    <label className="mb-3 block text-xs font-medium">Minimum monthly bill
+                      <input type="number" step="0.01" className="mt-1 w-full rounded-md border border-black/10 bg-white/80 px-2 py-1 text-sm text-slate-900 dark:bg-slate-900/60 dark:text-white"
+                        value={value('minimumMonthlyBill')} onChange={(e) => updatePlanDraft(plan.plan, 'minimumMonthlyBill', e.target.value)} />
+                    </label>
+                    <button
+                      disabled={!dirty || saving}
+                      onClick={() => savePlanPricing(plan.plan)}
+                      className="w-full rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+                    >
+                      Save {plan.plan}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Global billing policy</h2>
+            </div>
+            {billingSettings && (
+              <div className="grid gap-4 p-4 md:grid-cols-4">
+                {[
+                  { key: 'supportFeeBasic', label: 'Support fee — Basic' },
+                  { key: 'supportFeePriority', label: 'Support fee — Priority' },
+                  { key: 'supportFeeDedicated', label: 'Support fee — Dedicated' },
+                  { key: 'aiOverageRatePerUnit', label: 'AI overage rate / request' },
+                  { key: 'smsOverageRatePerUnit', label: 'SMS overage rate / message' },
+                  { key: 'annualDiscountPercent', label: 'Annual discount %' },
+                  { key: 'trialAiIncludedUnits', label: 'Trial AI requests / mo' },
+                  { key: 'trialSmsIncludedUnits', label: 'Trial SMS / mo' },
+                ].map((item) => (
+                  <label key={item.key} className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {item.label}
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      value={(settingsDraft as any)[item.key] !== undefined ? (settingsDraft as any)[item.key] : (billingSettings as any)[item.key]}
+                      onChange={(e) => setSettingsDraft((current) => ({ ...current, [item.key]: e.target.value }))}
+                    />
+                  </label>
+                ))}
+                <button
+                  disabled={Object.keys(settingsDraft).length === 0 || saving}
+                  onClick={saveBillingSettings}
+                  className="h-fit self-end rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+                >
+                  Save policy
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Invoices</h2>
+              <button
+                onClick={generateInvoicesForCurrentPeriod}
+                disabled={generatingInvoices}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+              >
+                <CreditCard size={14} />
+                {generatingInvoices ? 'Generating…' : "Generate this month's invoices"}
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
+                <thead className="bg-gray-50 dark:bg-slate-900">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Tenant</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Period</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Active students</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Total</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Status</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                  {invoices.map((invoice) => {
+                    const tenantName = tenants.find((t) => t.id === invoice.tenantId)?.name || invoice.tenantId;
+                    return (
+                      <tr key={invoice.id}>
+                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{tenantName}</td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{new Date(invoice.periodStart).toLocaleDateString()} – {new Date(invoice.periodEnd).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{invoice.activeStudentCount}</td>
+                        <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{money(invoice.totalAmount)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${invoiceStatusClass(invoice.status)}`}>{invoice.status}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            {invoice.status === 'DRAFT' && (
+                              <button onClick={() => issueInvoiceAction(invoice)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200">Issue</button>
+                            )}
+                            {invoice.status === 'ISSUED' && (
+                              <button onClick={() => markInvoicePaidAction(invoice)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200">Mark paid</button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {invoices.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-500">No invoices generated yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      ) : activeView === 'settings' ? (
+        <div className="space-y-6">
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Global SMS provider (fallback)</h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Used only when a tenant hasn't configured their own SMS provider under Settings. Tenants with their own provider always take priority.
+              </p>
+            </div>
+            {smsSettings && (
+              <div className="grid gap-4 p-4 md:grid-cols-4">
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300 md:col-span-4">
+                  <input
+                    type="checkbox"
+                    checked={smsSettingsDraft.enabled !== undefined ? Boolean(smsSettingsDraft.enabled) : smsSettings.enabled}
+                    onChange={(e) => setSmsSettingsDraft((current) => ({ ...current, enabled: e.target.checked }))}
+                  />
+                  Enable platform-wide fallback SMS provider
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Provider
+                  <select
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(smsSettingsDraft.provider !== undefined ? smsSettingsDraft.provider : smsSettings.provider) || ''}
+                    onChange={(e) => setSmsSettingsDraft((current) => ({ ...current, provider: e.target.value || null }))}
+                  >
+                    <option value="">Select provider…</option>
+                    <option value="MSHASTRA">mShastra</option>
+                    <option value="AFRICASTALKING">Africa's Talking</option>
+                    <option value="TWILIO">Twilio</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  API key / user
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(smsSettingsDraft.apiKey !== undefined ? smsSettingsDraft.apiKey : smsSettings.apiKey) || ''}
+                    onChange={(e) => setSmsSettingsDraft((current) => ({ ...current, apiKey: e.target.value || null }))}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  API secret / password
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(smsSettingsDraft.apiSecret !== undefined ? smsSettingsDraft.apiSecret : smsSettings.apiSecret) || ''}
+                    onChange={(e) => setSmsSettingsDraft((current) => ({ ...current, apiSecret: e.target.value || null }))}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Sender ID
+                  <input
+                    type="text"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(smsSettingsDraft.senderId !== undefined ? smsSettingsDraft.senderId : smsSettings.senderId) || ''}
+                    onChange={(e) => setSmsSettingsDraft((current) => ({ ...current, senderId: e.target.value || null }))}
+                  />
+                </label>
+                <button
+                  disabled={Object.keys(smsSettingsDraft).length === 0 || savingSms}
+                  onClick={saveSmsSettings}
+                  className="h-fit self-end rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+                >
+                  Save SMS settings
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Platform WhatsApp provider (fallback)</h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Used only when a tenant hasn't configured their own WhatsApp provider under Settings. Tenants with their own provider always take priority.
+              </p>
+            </div>
+            {whatsappSettings && (
+              <div className="grid gap-4 p-4 md:grid-cols-4">
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300 md:col-span-4">
+                  <input
+                    type="checkbox"
+                    checked={whatsappSettingsDraft.enabled !== undefined ? Boolean(whatsappSettingsDraft.enabled) : whatsappSettings.enabled}
+                    onChange={(e) => setWhatsappSettingsDraft((current) => ({ ...current, enabled: e.target.checked }))}
+                  />
+                  Enable platform-wide fallback WhatsApp provider
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Provider
+                  <select
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(whatsappSettingsDraft.provider !== undefined ? whatsappSettingsDraft.provider : whatsappSettings.provider) || ''}
+                    onChange={(e) => setWhatsappSettingsDraft((current) => ({ ...current, provider: e.target.value || null }))}
+                  >
+                    <option value="">Select provider…</option>
+                    <option value="META">Meta (Cloud API)</option>
+                    <option value="TWILIO_WHATSAPP">Twilio WhatsApp</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  API key / token
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(whatsappSettingsDraft.apiKey !== undefined ? whatsappSettingsDraft.apiKey : whatsappSettings.apiKey) || ''}
+                    onChange={(e) => setWhatsappSettingsDraft((current) => ({ ...current, apiKey: e.target.value || null }))}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Phone number ID
+                  <input
+                    type="text"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(whatsappSettingsDraft.phoneId !== undefined ? whatsappSettingsDraft.phoneId : whatsappSettings.phoneId) || ''}
+                    onChange={(e) => setWhatsappSettingsDraft((current) => ({ ...current, phoneId: e.target.value || null }))}
+                  />
+                </label>
+                <button
+                  disabled={Object.keys(whatsappSettingsDraft).length === 0 || savingWhatsapp}
+                  onClick={saveWhatsappSettings}
+                  className="h-fit self-end rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+                >
+                  Save WhatsApp settings
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <div className="border-b border-gray-200 p-4 dark:border-slate-700">
+              <h2 className="font-semibold text-gray-900 dark:text-white">Platform Lenco account (subscription billing)</h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                The platform's own Lenco merchant account, used exclusively to collect tenants' subscription/invoice payments (Settings → Subscription &amp; Billing). This is separate from — and never a fallback for — a tenant's own Lenco account used to collect fees from parents/students.
+              </p>
+            </div>
+            {lencoSettings && (
+              <div className="grid gap-4 p-4 md:grid-cols-4">
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-300 md:col-span-4">
+                  <input
+                    type="checkbox"
+                    checked={lencoSettingsDraft.enabled !== undefined ? Boolean(lencoSettingsDraft.enabled) : lencoSettings.enabled}
+                    onChange={(e) => setLencoSettingsDraft((current) => ({ ...current, enabled: e.target.checked }))}
+                  />
+                  Enable platform Lenco account for subscription billing
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  API key
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(lencoSettingsDraft.apiKey !== undefined ? lencoSettingsDraft.apiKey : lencoSettings.apiKey) || ''}
+                    onChange={(e) => setLencoSettingsDraft((current) => ({ ...current, apiKey: e.target.value || null }))}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Environment
+                  <select
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(lencoSettingsDraft.environment !== undefined ? lencoSettingsDraft.environment : lencoSettings.environment) || 'sandbox'}
+                    onChange={(e) => setLencoSettingsDraft((current) => ({ ...current, environment: e.target.value || null }))}
+                  >
+                    <option value="sandbox">Sandbox</option>
+                    <option value="production">Production</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  Default bearer (who pays fees)
+                  <select
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={(lencoSettingsDraft.defaultBearer !== undefined ? lencoSettingsDraft.defaultBearer : lencoSettings.defaultBearer) || 'merchant'}
+                    onChange={(e) => setLencoSettingsDraft((current) => ({ ...current, defaultBearer: e.target.value || null }))}
+                  >
+                    <option value="merchant">Merchant</option>
+                    <option value="customer">Customer</option>
+                  </select>
+                </label>
+                <button
+                  disabled={Object.keys(lencoSettingsDraft).length === 0 || savingLenco}
+                  onClick={saveLencoSettings}
+                  className="h-fit self-end rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+                >
+                  Save Lenco settings
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
       ) : (
         <section className="rounded-lg border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
           <div className="border-b border-gray-200 p-4 dark:border-slate-700">
@@ -1392,7 +1951,6 @@ const OpsDashboard = () => {
           </div>
         </div>
       )}
-    </main>
     </div>
   );
 };

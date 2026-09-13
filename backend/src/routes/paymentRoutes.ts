@@ -21,6 +21,7 @@ import {
     initiatePublicMobileMoneyPayment,
 } from '../controllers/paymentController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { requirePublicTenant } from '../middleware/publicTenantContext';
 
 const router = Router();
 
@@ -32,8 +33,8 @@ const router = Router();
 router.post('/webhook/lenco', handleLencoWebhook);
 
 // Public Student Lookup & Payment
-router.get('/public/students/:identifier', getStudentForPublicPayment);
-router.post('/public/mobile-money/initiate', initiatePublicMobileMoneyPayment);
+router.get('/public/students/:identifier', requirePublicTenant, getStudentForPublicPayment);
+router.post('/public/mobile-money/initiate', requirePublicTenant, initiatePublicMobileMoneyPayment);
 
 // ============================================
 // AUTHENTICATED ROUTES

@@ -6,6 +6,7 @@ import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
 import * as convoService from '../services/conversationService';
+import { validateAITenantReferences } from '../services/aiTenantBoundary';
 
 // ==========================================
 // Conversation Management
@@ -76,6 +77,11 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (!message?.trim()) {
       return res.status(400).json({ error: 'Message is required' });
     }
+
+    await validateAITenantReferences({
+      classId: context?.classId,
+      subjectId: context?.subjectId,
+    });
 
     // Get or create conversation — scoped to 'teaching-assistant' only
     let conversation: any;
@@ -192,6 +198,7 @@ export const handleSlashCommand = async (req: AuthRequest, res: Response) => {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { command, params, conversationId } = req.body;
+    await validateAITenantReferences(params || {});
 
     let prompt = '';
     let systemOverride = '';
@@ -406,6 +413,16 @@ export const saveArtifact = async (req: AuthRequest, res: Response) => {
 
     const { conversationId, type, title, content, metadata } = req.body;
 
+    const conversation = await prisma.aIConversation.findFirst({
+      where: {
+        id: conversationId,
+        userId,
+        context: { path: ['type'], equals: 'teaching-assistant' },
+      },
+      select: { id: true },
+    });
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+
     const artifact = await prisma.aIArtifact.create({
       data: {
         conversationId,
@@ -469,6 +486,8 @@ export const publishArtifactToHomework = async (req: AuthRequest, res: Response)
     });
 
     if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
+
+    await validateAITenantReferences({ classId, subjectId, termId });
 
     // Create an assessment from the artifact
     const assessment = await prisma.assessment.create({
@@ -774,6 +793,7 @@ export const getAIStatus = async (req: AuthRequest, res: Response) => {
 export const generateReportRemarks = async (req: AuthRequest, res: Response) => {
   try {
     const { studentId, termId } = req.body;
+    await validateAITenantReferences({ studentId, termId });
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },

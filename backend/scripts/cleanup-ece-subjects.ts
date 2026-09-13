@@ -20,8 +20,13 @@
  *   ECE-REL                     → ECE-RE
  */
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+import { prisma } from '../src/utils/prisma';
+import { runWithTenant } from '../src/middleware/tenantContext';
+
+const tenantId = process.env.TENANT_ID?.trim();
+if (!tenantId) {
+  throw new Error('TENANT_ID is required; this maintenance script never runs across all tenants');
+}
 
 // Merge map: oldCode → keepCode
 const MERGE_MAP: Record<string, string> = {
@@ -96,15 +101,15 @@ async function main() {
     // Move teacher assignments (ClassSubjectTeacher)
     // Delete old ones that would conflict (same classId+keepSubjectId already exists)
     try {
-      await prisma.$executeRawUnsafe(
-        `DELETE FROM "class_subject_teachers" WHERE "subjectId" = $1`,
-        oldId,
-      );
+      await prisma.$executeRaw`
+        DELETE FROM "class_subject_teachers"
+        WHERE "subjectId" = ${oldId} AND "tenantId" = ${tenantId}
+      `;
     } catch { /* table may not exist */ }
 
     // Move student grades (StudentGrade)
     try {
-      await prisma.studentGrade.updateMany({
+      await (prisma as any).studentGrade.updateMany({
         where: { subjectId: oldId },
         data: { subjectId: keepId },
       });
@@ -189,6 +194,6 @@ async function main() {
   console.log('\n✅ Done!');
 }
 
-main()
+runWithTenant(tenantId, main)
   .catch(e => { console.error('ERROR:', e); process.exit(1); })
   .finally(() => prisma.$disconnect());

@@ -2,6 +2,8 @@ import axios from 'axios';
 
 const AUTH_ERROR_MESSAGES = new Set(['Access token required', 'Invalid or expired token']);
 
+const DEFAULT_TENANT_SLUG = 'lyangend';
+
 const api = axios.create({
   baseURL: '/api/v1',
   headers: {
@@ -11,11 +13,15 @@ const api = axios.create({
 
 const getTenantSlug = () => {
   const storedSlug = localStorage.getItem('tenantSlug');
-  if (storedSlug) return storedSlug;
+  if (storedSlug && storedSlug.trim()) return storedSlug.trim();
 
   const host = window.location.hostname;
   const subdomain = host.includes('.') ? host.split('.')[0] : '';
-  return subdomain && !['www', 'localhost', '127'].includes(subdomain) ? subdomain : '';
+  if (subdomain && !['www', 'localhost', '127'].includes(subdomain)) {
+    return subdomain;
+  }
+
+  return DEFAULT_TENANT_SLUG;
 };
 
 // Add a request interceptor to add the auth token to every request

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Wallet, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Plus, Wallet, ArrowUpCircle, ArrowDownCircle, Loader2 } from 'lucide-react';
 import { pettyCashApi, PettyCashAccount, PettyCashTransaction } from '../../services/accountingService';
+import Modal from '../../components/ui/Modal';
 import toast from 'react-hot-toast';
 
 const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
@@ -96,53 +97,55 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
   const fmt = (n: number) => `K${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>;
+    return <div className="ds-page"><div role="status" className="ds-surface flex items-center justify-center gap-3 h-64"><Loader2 size={32} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /><span className="ds-helper">Loading petty cash accounts…</span></div></div>;
   }
 
   return (
-    <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         {!embedded && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Petty Cash</h1>
-            <p className="text-gray-500 dark:text-gray-400">Manage petty cash floats and transactions</p>
+          <div className="min-w-0">
+            <h1 className="ds-page-title">Petty Cash</h1>
+            <p className="ds-page-subtitle">Manage petty cash floats and transactions</p>
           </div>
         )}
-        <div className="flex space-x-2">
+        <div className="ds-actions">
           <button onClick={() => setShowAccountModal(true)}
-            className="flex items-center space-x-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 text-sm">
-            <Wallet size={16} /><span>New Account</span>
+            className="ds-button-secondary">
+            <Wallet size={16} aria-hidden="true" /><span>New Account</span>
           </button>
           {selectedAccountId && (
             <button onClick={() => { setTxForm({ ...txForm, accountId: selectedAccountId }); setShowTransactionModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
-              <Plus size={16} /><span>New Transaction</span>
+              className="ds-button-primary">
+              <Plus size={16} aria-hidden="true" /><span>New Transaction</span>
             </button>
           )}
         </div>
       </div>
 
       {accounts.length === 0 ? (
-        <div className="text-center text-gray-500 dark:text-gray-400 py-16">
-          <Wallet size={48} className="mx-auto mb-4 text-gray-300" />
+        <div className="ds-surface ds-empty">
+          <Wallet size={48} className="mx-auto mb-4" aria-hidden="true" />
           <p>No petty cash accounts yet. Create one to get started.</p>
         </div>
       ) : (
         <>
           {/* Account Selector */}
-          <div className="flex flex-wrap gap-3">
+          <div className="ds-surface p-4 flex flex-wrap gap-3" role="group" aria-label="Petty cash accounts">
             {accounts.map(acct => (
               <button key={acct.id} onClick={() => setSelectedAccountId(acct.id)}
-                className={`px-4 py-3 rounded-lg border-2 text-left transition-colors ${
+                aria-pressed={selectedAccountId === acct.id}
+                className={`min-w-0 max-w-full flex-col items-start text-left ${
                   selectedAccountId === acct.id
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                    ? 'ds-button-primary'
+                    : 'ds-button-outline'
                 }`}>
-                <p className="font-medium text-sm dark:text-white">{acct.name}</p>
-                <p className={`text-lg font-bold ${acct.balance < acct.floatAmount * 0.2 ? 'text-red-600' : 'text-green-600'}`}>
+                <span className="font-semibold text-sm break-words w-full">{acct.name}</span>
+                <span className={`ds-badge ${acct.balance < acct.floatAmount * 0.2 ? 'ds-badge-error' : 'ds-badge-success'}`}>
+                  <span>{acct.balance < acct.floatAmount * 0.2 ? 'Low balance: ' : 'Balance: '}</span>
                   {fmt(acct.balance)}
-                </p>
-                <p className="text-xs text-gray-400">Float: {fmt(acct.floatAmount)}</p>
+                </span>
+                <span className="text-sm">Float: {fmt(acct.floatAmount)}</span>
               </button>
             ))}
           </div>
@@ -150,35 +153,35 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
           {selectedAccount && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Float Amount</p>
-                  <p className="text-2xl font-bold text-blue-600">{fmt(selectedAccount.floatAmount)}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="ds-card">
+                  <p className="ds-helper">Float Amount</p>
+                  <p className="text-2xl font-bold break-words text-blue-700 dark:text-blue-300">{fmt(selectedAccount.floatAmount)}</p>
                 </div>
-                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Current Balance</p>
-                  <p className="text-2xl font-bold text-green-600">{fmt(selectedAccount.balance)}</p>
+                <div className="ds-card">
+                  <p className="ds-helper">Current Balance</p>
+                  <p className="text-2xl font-bold break-words text-green-700 dark:text-green-300">{fmt(selectedAccount.balance)}</p>
                 </div>
-                <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Total Disbursed</p>
-                  <p className="text-2xl font-bold text-red-600">{fmt(summary?.totalDisbursed || 0)}</p>
+                <div className="ds-card">
+                  <p className="ds-helper">Total Disbursed</p>
+                  <p className="text-2xl font-bold break-words text-red-700 dark:text-red-300">{fmt(summary?.totalDisbursed || 0)}</p>
                 </div>
-                <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Total Replenished</p>
-                  <p className="text-2xl font-bold text-purple-600">{fmt(summary?.totalReplenished || 0)}</p>
+                <div className="ds-card">
+                  <p className="ds-helper">Total Replenished</p>
+                  <p className="text-2xl font-bold break-words text-purple-700 dark:text-purple-300">{fmt(summary?.totalReplenished || 0)}</p>
                 </div>
               </div>
 
               {/* Summary by category */}
               {summary?.byCategory && summary.byCategory.length > 0 && (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Spending by Category</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="ds-card ds-section">
+                  <h3>Spending by Category</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                     {summary.byCategory.map((cat: any) => (
-                      <div key={cat.category || 'uncategorized'} className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
-                        <p className="text-xs text-gray-500">{(cat.category || 'Uncategorized').replace(/_/g, ' ')}</p>
-                        <p className="font-medium dark:text-white">{fmt(cat._sum?.amount || 0)}</p>
-                        <p className="text-xs text-gray-400">{cat._count} txn(s)</p>
+                      <div key={cat.category || 'uncategorized'} className="ds-surface-muted min-w-0 p-4 break-words">
+                        <p className="ds-helper">{(cat.category || 'Uncategorized').replace(/_/g, ' ')}</p>
+                        <p className="font-semibold">{fmt(cat._sum?.amount || 0)}</p>
+                        <p className="ds-helper">{cat._count} txn(s)</p>
                       </div>
                     ))}
                   </div>
@@ -186,42 +189,42 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
               )}
 
               {/* Transactions */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
-                <div className="p-4 border-b dark:border-gray-700">
-                  <h3 className="font-semibold text-gray-900 dark:text-white">Recent Transactions</h3>
-                </div>
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+              <div className="ds-card ds-section">
+                <h3>Recent Transactions</h3>
+                <div className="ds-table-container" role="region" aria-label="Recent petty cash transactions" tabIndex={0}>
+                <table className="ds-table">
+                  <thead>
                     <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Date</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Type</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Description</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Category</th>
-                      <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">Amount</th>
+                      <th scope="col">Date</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Description</th>
+                      <th scope="col">Category</th>
+                      <th scope="col" className="text-right">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  <tbody>
                     {transactions.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No transactions yet</td></tr>
+                      <tr><td colSpan={5} className="text-center"><span className="ds-helper">No transactions yet</span></td></tr>
                     ) : transactions.map(tx => (
-                      <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                        <td className="px-4 py-3">{new Date(tx.date).toLocaleDateString()}</td>
-                        <td className="px-4 py-3">
+                      <tr key={tx.id}>
+                        <td className="whitespace-nowrap">{new Date(tx.date).toLocaleDateString()}</td>
+                        <td>
                           {tx.type === 'DISBURSEMENT' ? (
-                            <span className="flex items-center space-x-1 text-red-600"><ArrowUpCircle size={14} /><span>Disbursement</span></span>
+                            <span className="ds-badge ds-badge-error"><ArrowUpCircle size={14} aria-hidden="true" /><span>Disbursement</span></span>
                           ) : (
-                            <span className="flex items-center space-x-1 text-green-600"><ArrowDownCircle size={14} /><span>Replenishment</span></span>
+                            <span className="ds-badge ds-badge-success"><ArrowDownCircle size={14} aria-hidden="true" /><span>Replenishment</span></span>
                           )}
                         </td>
-                        <td className="px-4 py-3 max-w-xs truncate dark:text-gray-200">{tx.description}</td>
-                        <td className="px-4 py-3 text-gray-500">{(tx.category || '—').replace(/_/g, ' ')}</td>
-                        <td className={`px-4 py-3 text-right font-medium ${tx.type === 'DISBURSEMENT' ? 'text-red-600' : 'text-green-600'}`}>
+                        <td className="max-w-xs truncate">{tx.description}</td>
+                        <td className="text-[var(--text-secondary)]">{(tx.category || '—').replace(/_/g, ' ')}</td>
+                        <td className={`text-right font-semibold whitespace-nowrap ${tx.type === 'DISBURSEMENT' ? 'text-red-700 dark:text-red-300' : 'text-green-700 dark:text-green-300'}`}>
                           {tx.type === 'DISBURSEMENT' ? '-' : '+'}{fmt(tx.amount)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </>
           )}
@@ -230,85 +233,69 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
 
       {/* ======== ACCOUNT MODAL ======== */}
       {showAccountModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">New Petty Cash Account</h2>
-              <button onClick={() => setShowAccountModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <Modal open={showAccountModal} onClose={() => setShowAccountModal(false)} title="New Petty Cash Account"
+          footer={<>
+            <button onClick={() => setShowAccountModal(false)} className="ds-button-outline">Cancel</button>
+            <button onClick={handleCreateAccount} className="ds-button-primary">Create Account</button>
+          </>}>
+          <div className="ds-section">
+            <div className="ds-field">
+              <label htmlFor="petty-cash-account-name" className="ds-label">Account Name</label>
+              <input id="petty-cash-account-name" type="text" value={accountForm.name} onChange={e => setAccountForm({ ...accountForm, name: e.target.value })}
+                className="ds-input" placeholder="e.g., Main Office Petty Cash" />
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Name</label>
-                <input type="text" value={accountForm.name} onChange={e => setAccountForm({ ...accountForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g., Main Office Petty Cash" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Float Amount (ZMW)</label>
-                <input type="number" step="0.01" value={accountForm.floatAmount} onChange={e => setAccountForm({ ...accountForm, floatAmount: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="0.00" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Custodian User ID</label>
-                <input type="text" value={accountForm.custodianId} onChange={e => setAccountForm({ ...accountForm, custodianId: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="User ID of the custodian" />
-              </div>
+            <div className="ds-field">
+              <label htmlFor="petty-cash-float-amount" className="ds-label">Float Amount (ZMW)</label>
+              <input id="petty-cash-float-amount" type="number" step="0.01" value={accountForm.floatAmount} onChange={e => setAccountForm({ ...accountForm, floatAmount: e.target.value })}
+                className="ds-input" placeholder="0.00" />
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
-              <button onClick={() => setShowAccountModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleCreateAccount}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Account</button>
+            <div className="ds-field">
+              <label htmlFor="petty-cash-custodian" className="ds-label">Custodian User ID</label>
+              <input id="petty-cash-custodian" type="text" value={accountForm.custodianId} onChange={e => setAccountForm({ ...accountForm, custodianId: e.target.value })}
+                className="ds-input" placeholder="User ID of the custodian" />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* ======== TRANSACTION MODAL ======== */}
       {showTransactionModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold dark:text-white">New Transaction</h2>
-              <button onClick={() => setShowTransactionModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <Modal open={showTransactionModal} onClose={() => setShowTransactionModal(false)} title="New Transaction"
+          footer={<>
+            <button onClick={() => setShowTransactionModal(false)} className="ds-button-outline">Cancel</button>
+            <button onClick={handleCreateTransaction} className="ds-button-primary">Record Transaction</button>
+          </>}>
+          <div className="ds-section">
+            <div className="ds-field">
+              <label htmlFor="petty-cash-transaction-type" className="ds-label">Type</label>
+              <select id="petty-cash-transaction-type" value={txForm.type} onChange={e => setTxForm({ ...txForm, type: e.target.value })}
+                className="ds-select">
+                <option value="DISBURSEMENT">Disbursement (Cash Out)</option>
+                <option value="REPLENISHMENT">Replenishment (Cash In)</option>
+              </select>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                <select value={txForm.type} onChange={e => setTxForm({ ...txForm, type: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                  <option value="DISBURSEMENT">Disbursement (Cash Out)</option>
-                  <option value="REPLENISHMENT">Replenishment (Cash In)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (ZMW)</label>
-                <input type="number" step="0.01" value={txForm.amount} onChange={e => setTxForm({ ...txForm, amount: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="0.00" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <input type="text" value={txForm.description} onChange={e => setTxForm({ ...txForm, description: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="What was this for?" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category (optional)</label>
-                <input type="text" value={txForm.category} onChange={e => setTxForm({ ...txForm, category: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g., Office Supplies" />
-              </div>
-              {selectedAccount && (
-                <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg text-sm">
-                  <p className="text-gray-500">Current Balance: <span className="font-bold text-green-600">{fmt(selectedAccount.balance)}</span></p>
-                </div>
-              )}
+            <div className="ds-field">
+              <label htmlFor="petty-cash-transaction-amount" className="ds-label">Amount (ZMW)</label>
+              <input id="petty-cash-transaction-amount" type="number" step="0.01" value={txForm.amount} onChange={e => setTxForm({ ...txForm, amount: e.target.value })}
+                className="ds-input" placeholder="0.00" />
             </div>
-            <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
-              <button onClick={() => setShowTransactionModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={handleCreateTransaction}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Record Transaction</button>
+            <div className="ds-field">
+              <label htmlFor="petty-cash-description" className="ds-label">Description</label>
+              <input id="petty-cash-description" type="text" value={txForm.description} onChange={e => setTxForm({ ...txForm, description: e.target.value })}
+                className="ds-input" placeholder="What was this for?" />
             </div>
+            <div className="ds-field">
+              <label htmlFor="petty-cash-category" className="ds-label">Category (optional)</label>
+              <input id="petty-cash-category" type="text" value={txForm.category} onChange={e => setTxForm({ ...txForm, category: e.target.value })}
+                className="ds-input" placeholder="e.g., Office Supplies" />
+            </div>
+            {selectedAccount && (
+              <div className="ds-surface-muted p-4">
+                <p className="ds-helper">Current Balance: <span className="font-bold text-green-700 dark:text-green-300">{fmt(selectedAccount.balance)}</span></p>
+              </div>
+            )}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

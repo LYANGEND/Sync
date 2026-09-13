@@ -4,6 +4,7 @@ import { whatsappService } from './whatsappService';
 import { sendEmail } from './emailService';
 import { generateFeeReminderEmail } from './notificationService';
 import aiService from './aiService';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 interface PaymentPrediction {
   studentId: string;
@@ -311,6 +312,14 @@ class SmartFeeService {
         include: { schedules: { orderBy: { dueDate: 'asc' } } },
       });
     });
+
+    if (plan) {
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: plan.tenantId,
+        scope: 'tenant',
+        source: 'payment-plan.created',
+      });
+    }
 
     return plan;
   }

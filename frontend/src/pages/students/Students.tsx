@@ -337,25 +337,25 @@ const Students = () => {
   }, [searchTerm, classFilter, statusFilter, genderFilter]);
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Students</h1>
-          <p className="text-gray-500 dark:text-gray-400">Manage student records and admissions</p>
+          <h1 className="ds-page-title">Students</h1>
+          <p className="ds-page-subtitle">Manage student records and admissions</p>
         </div>
-        <div className="flex space-x-2 w-full md:w-auto">
+        <div className="ds-actions">
           {canManage && (
             <>
               <button
                 onClick={() => setShowImportModal(true)}
-                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+                className="ds-button-outline"
               >
                 <Upload size={20} />
                 <span>Import</span>
               </button>
               <button
                 onClick={openAddModal}
-                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                className="ds-button-primary"
               >
                 <Plus size={20} />
                 <span>Add Student</span>
@@ -367,7 +367,7 @@ const Students = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+        <div className="ds-surface p-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Total</div>
@@ -378,7 +378,7 @@ const Students = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-green-500">
+        <div className="ds-surface p-4 border-l-4 border-l-green-500">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-green-600 dark:text-green-400 uppercase font-medium">Active</div>
@@ -389,7 +389,7 @@ const Students = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+        <div className="ds-surface p-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Male</div>
@@ -400,7 +400,7 @@ const Students = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+        <div className="ds-surface p-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Female</div>
@@ -411,7 +411,7 @@ const Students = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+        <div className="ds-surface p-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-purple-600 dark:text-purple-400 uppercase font-medium">Graduated</div>
@@ -422,7 +422,7 @@ const Students = () => {
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+        <div className="ds-surface p-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-orange-600 dark:text-orange-400 uppercase font-medium">Transferred</div>
@@ -435,17 +435,17 @@ const Students = () => {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+      <div className="ds-surface overflow-hidden">
         {/* Toolbar */}
         <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
             <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by name or admission number..."
+              aria-label="Search by name or admission number..." placeholder="Search by name or admission number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+              className="ds-input pl-10"
             />
           </div>
           <div className="flex items-center space-x-2">
@@ -520,7 +520,7 @@ const Students = () => {
                   <select
                     value={classFilter}
                     onChange={(e) => setClassFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">All Classes</option>
                     {classes.map(cls => (
@@ -533,7 +533,7 @@ const Students = () => {
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">All Statuses</option>
                     <option value="ACTIVE">Active</option>
@@ -547,7 +547,7 @@ const Students = () => {
                   <select
                     value={genderFilter}
                     onChange={(e) => setGenderFilter(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">All Genders</option>
                     <option value="MALE">Male</option>
@@ -568,7 +568,7 @@ const Students = () => {
                 </button>
                 <button
                   onClick={() => setShowFilters(false)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="ds-button-primary"
                 >
                   Apply Filters
                 </button>
@@ -579,10 +579,10 @@ const Students = () => {
 
         {/* Desktop Table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-600">
+          <table className="ds-table">
             <thead className="bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-medium">
               <tr>
-                <th className="px-6 py-3 w-10">
+                <th scope="col">
                   <button onClick={toggleAll} className="text-gray-500 hover:text-gray-700">
                     {selectedIds.length === filteredStudents.length && filteredStudents.length > 0 ? (
                       <CheckSquare size={20} className="text-blue-600" />
@@ -591,13 +591,13 @@ const Students = () => {
                     )}
                   </button>
                 </th>
-                <th className="px-6 py-3">Admission #</th>
-                <th className="px-6 py-3">Name</th>
-                <th className="px-6 py-3">Class</th>
-                <th className="px-6 py-3">Guardian</th>
-                <th className="px-6 py-3">Branch</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3 text-right">Actions</th>
+                <th scope="col">Admission #</th>
+                <th scope="col">Name</th>
+                <th scope="col">Class</th>
+                <th scope="col">Guardian</th>
+                <th scope="col">Branch</th>
+                <th scope="col">Status</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
@@ -864,11 +864,11 @@ const Students = () => {
                 <div>
                   <h3 className="font-medium text-gray-800 dark:text-white mb-2">Preview ({importPreview.length} students)</h3>
                   <div className="border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="ds-table text-xs">
                       <thead className="bg-gray-50 dark:bg-slate-700 font-medium text-gray-600 dark:text-gray-300">
                         <tr>
                           {Object.keys(importPreview[0]).slice(0, 5).map(key => (
-                            <th key={key} className="px-3 py-2">{key}</th>
+                            <th key={key} className="">{key}</th>
                           ))}
                         </tr>
                       </thead>
@@ -901,7 +901,7 @@ const Students = () => {
                 <button
                   onClick={handleImport}
                   disabled={!importFile || isImporting}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+                  className="ds-button-primary"
                 >
                   {isImporting ? (
                     <><span>Importing...</span></>
@@ -936,7 +936,7 @@ const Students = () => {
                     required
                     value={formData.firstName}
                     onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
                 <div>
@@ -946,7 +946,7 @@ const Students = () => {
                     required
                     value={formData.lastName}
                     onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
                 {editingStudent && (
@@ -968,7 +968,7 @@ const Students = () => {
                     required
                     value={formData.dateOfBirth}
                     onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
                 <div>
@@ -976,7 +976,7 @@ const Students = () => {
                   <select
                     value={formData.gender}
                     onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
@@ -988,7 +988,7 @@ const Students = () => {
                     required
                     value={formData.classId}
                     onChange={(e) => setFormData({ ...formData, classId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">Select a class</option>
                     {classes.map(cls => (
@@ -1003,7 +1003,7 @@ const Students = () => {
                     <select
                       value={formData.branchId || ''}
                       onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                      className="ds-input"
                     >
                       <option value="">Select Branch (Optional)</option>
                       {branches.map(branch => (
@@ -1019,7 +1019,7 @@ const Students = () => {
                     type="text"
                     value={formData.guardianName}
                     onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
                 <div>
@@ -1028,7 +1028,7 @@ const Students = () => {
                     type="tel"
                     value={formData.guardianPhone}
                     onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   />
                 </div>
                 <div>
@@ -1037,7 +1037,7 @@ const Students = () => {
                     type="email"
                     value={formData.guardianEmail}
                     onChange={(e) => setFormData({ ...formData, guardianEmail: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                     placeholder="Optional - creates parent account"
                   />
                 </div>
@@ -1046,7 +1046,7 @@ const Students = () => {
                   <textarea
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                     rows={3}
                   />
                 </div>
@@ -1056,7 +1056,7 @@ const Students = () => {
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                      className="ds-input"
                     >
                       <option value="ACTIVE">Active</option>
                       <option value="TRANSFERRED">Transferred</option>
@@ -1077,7 +1077,7 @@ const Students = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   {editingStudent ? 'Update Student' : 'Create Student'}
                 </button>

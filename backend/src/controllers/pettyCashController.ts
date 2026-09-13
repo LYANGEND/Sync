@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { logFinancialAction } from '../services/accountingService';
 import { onPettyCashTransaction } from '../services/accountingBridge';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // PETTY CASH MANAGEMENT
@@ -46,6 +47,12 @@ export const createPettyCashAccount = async (req: Request, res: Response) => {
         custodianId,
         branchId: user?.branchId,
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: account.tenantId,
+      branchId: account.branchId,
+      source: 'petty-cash.account-created',
     });
 
     res.status(201).json({ ...account, floatAmount: Number(account.floatAmount), balance: Number(account.balance) });
@@ -146,6 +153,12 @@ export const createPettyCashTransaction = async (req: Request, res: Response) =>
         data: { balance: newBalance },
       }),
     ]);
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: transaction.tenantId,
+      scope: 'tenant',
+      source: 'petty-cash.transaction-created',
+    });
 
     await logFinancialAction({
       userId: user.userId,

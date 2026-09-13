@@ -1,6 +1,0 @@
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/sync_db?schema=public"
-JWT_SECRET="supersecretkey"
-PORT=3000
-VAPID_PUBLIC_KEY="BE2-OUTXmwT7zc2m2efNQCecKxbJcl5-cFJ4qDnHaSArZtYllkYnn65VkGA2AaXgbCR6m9gUGIFkOjdBhTsWtJw"
-VAPID_PRIVATE_KEY="muvACc1JV7e5S_CgsPt0ggutORsJf8K8pQiNdh_twRM"
-VAPID_EMAIL="mailto:admin@sync.com"

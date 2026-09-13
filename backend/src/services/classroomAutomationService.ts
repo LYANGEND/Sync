@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { forEachActiveTenant } from '../utils/tenantJobRunner';
 import { aiTutorService, LESSON_PHASES } from './aiTutorService';
 import { syncClassroomAttendance } from './classroomAttendanceService';
 import { emitClassroomUpdated } from './classroomRealtimeService';
@@ -398,7 +399,7 @@ export function initClassroomAutomationScheduler() {
   }
 
   schedulerHandle = setInterval(() => {
-    runClassroomAutomationCycle().catch((error) => {
+    forEachActiveTenant('ClassroomAutomation', async () => runClassroomAutomationCycle()).catch((error) => {
       console.error('[ClassroomAutomation] Scheduler cycle failed:', error);
     });
   }, CLASSROOM_CHECK_INTERVAL_MS);
@@ -408,7 +409,7 @@ export function initClassroomAutomationScheduler() {
     `with wrap-up prompts in the last ${WRAP_UP_WINDOW_MS / 60_000} minutes`
   );
 
-  runClassroomAutomationCycle().catch((error) => {
+  forEachActiveTenant('ClassroomAutomation', async () => runClassroomAutomationCycle()).catch((error) => {
     console.error('[ClassroomAutomation] Initial scheduler cycle failed:', error);
   });
 }

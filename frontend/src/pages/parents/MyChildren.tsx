@@ -319,50 +319,54 @@ const MyChildren = () => {
   };
 
   if (loading) {
-    return <div className="p-6 dark:text-gray-400">Loading...</div>;
+    return <div className="ds-page ds-empty">Loading...</div>;
   }
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">My Children</h1>
+    <div className="ds-page max-w-7xl mx-auto">
+      <div className="ds-page-header">
+        <div>
+          <p className="ds-page-kicker">Parent portal</p>
+          <h1 className="ds-page-title">My Children</h1>
+        </div>
+      </div>
 
       <div className="space-y-8">
         {children.map((child) => (
-          <div key={child.id} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-            {/* Enhanced Header - Same as before */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-6 text-white">
+          <div key={child.id} className="ds-surface overflow-hidden">
+            <div className="border-b border-[var(--border-color)] bg-[var(--surface-muted)] p-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="flex items-center space-x-4">
-                  <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center text-white font-bold text-2xl border-2 border-white/30">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--surface)] text-2xl font-bold text-[var(--text-primary)]">
                     {child.firstName[0]}
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold">{child.firstName} {child.lastName}</h2>
-                    <div className="flex items-center space-x-3 text-blue-100 text-sm mt-1">
-                      <span className="bg-white/20 px-2 py-0.5 rounded">{child.admissionNumber}</span>
+                    <h2 className="text-2xl font-bold text-[var(--text-primary)]">{child.firstName} {child.lastName}</h2>
+                    <div className="mt-1 flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+                      <span className="rounded-full border border-[var(--border-color)] bg-[var(--surface)] px-2 py-0.5">{child.admissionNumber}</span>
                       <span>•</span>
                       <span>{child.class?.name}</span>
                     </div>
                   </div>
                 </div>
                 <div className="flex flex-col gap-2 min-w-[200px]">
-                  <div className="bg-white/10 backdrop-blur-md rounded-lg p-3">
-                    <p className="text-xs text-blue-100 uppercase font-semibold mb-1">Outstanding Balance</p>
-                    <p className={`text-2xl font-bold ${child.balance > 0 ? 'text-red-200' : 'text-green-200'}`}>
+                  <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface)] p-3">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Outstanding Balance</p>
+                    <p className={`text-2xl font-bold ${child.balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                       ZMW {child.balance.toLocaleString()}
                     </p>
                   </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleOpenPaymentModal(child)}
-                      className="bg-green-500 hover:bg-green-600 text-white text-xs font-semibold py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+                      className="ds-button-primary text-xs"
                     >
                       <CreditCard size={14} />
                       Pay Fees
                     </button>
                     <button
                       onClick={() => handleDownloadStatement(child.id)}
-                      className="bg-white/10 hover:bg-white/20 text-white text-xs font-semibold py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-colors border border-white/20"
+                      className="ds-button-outline text-xs"
                     >
                       <Download size={14} />
                       Statement

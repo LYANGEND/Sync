@@ -1,340 +1,262 @@
-import React, { useState, useEffect } from 'react';
-import { Save, Filter, TrendingUp, AlertCircle, Check } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Save, Search, Undo2, Users, ClipboardList, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
+import { Alert, Badge, Button, EmptyState, FormField, Select, StatCard } from '../../components/ui/DesignSystem';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import { toast } from 'react-hot-toast';
+import { scoreKey, validateScore, updateScoreEdit, studentProgress, saveScoreEdits, type GradebookAssessment, type GradebookResult, type ScoreEdit } from '../../utils/gradebook';
 
-interface Student {
-    id: string;
-    firstName: string;
-    lastName: string;
-    admissionNumber: string;
-}
+interface Student { id: string; firstName: string; lastName: string; admissionNumber: string }
+interface SubjectOption { id: string; name: string; code?: string }
+interface ClassOption { id: string; name: string; subjects?: SubjectOption[] }
+interface TermOption { id: string; name: string; isActive: boolean }
+interface GradebookData { students: Student[]; assessments: GradebookAssessment[]; results: GradebookResult[] }
+export interface GradebookEditState { dirty: boolean; saving: boolean }
 
-interface Assessment {
-    id: string;
-    title: string;
-    type: string;
-    totalMarks: number;
-    weight: number;
-    date: string;
-}
+const TeacherGradebook = ({ embedded = false, onEditStateChange }: {
+  embedded?: boolean; onEditStateChange?: (state: GradebookEditState) => void;
+}) => {
+  const { user } = useAuth();
+  const { confirm } = useAppDialog();
+  const canEdit = user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER';
+  const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+  const [terms, setTerms] = useState<TermOption[]>([]);
+  const [selection, setSelection] = useState({ classId: '', subjectId: '', termId: '' });
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialError, setInitialError] = useState(false);
+  const [initialRetry, setInitialRetry] = useState(0);
+  const [reload, setReload] = useState(0);
+  const [data, setData] = useState<GradebookData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [edits, setEdits] = useState<Record<string, ScoreEdit>>({});
+  const [search, setSearch] = useState('');
+  const [missingOnly, setMissingOnly] = useState(false);
+  const savingRef = useRef(false);
+  const inputRefs = useRef(new Map<string, HTMLInputElement>());
+  const dirtyCount = Object.keys(edits).length;
+  const dirty = dirtyCount > 0;
+  const filtersLocked = initialLoading || dirty || saving;
+  const selectedClass = classes.find(item => item.id === selection.classId);
+  const availableSubjects = selectedClass?.subjects?.length ? selectedClass.subjects : subjects;
+  const selectedSubject = availableSubjects.find(item => item.id === selection.subjectId);
+  const Heading = embedded ? 'h2' : 'h1';
 
-interface ClassOption {
-    id: string;
-    name: string;
-    gradeLevel?: number;
-    subjects?: Array<{ id: string; name: string; code?: string }>;
-}
-
-interface SubjectOption {
-    id: string;
-    name: string;
-    code?: string;
-}
-
-interface GradebookData {
-    students: Student[];
-    assessments: Assessment[];
-    results: any[]; // List of assessment results
-}
-
-const TeacherGradebook = () => {
-    const [classes, setClasses] = useState<ClassOption[]>([]);
-    const [subjects, setSubjects] = useState<SubjectOption[]>([]);
-    const [terms, setTerms] = useState<any[]>([]);
-
-    const [selectedClassId, setSelectedClassId] = useState('');
-    const [selectedSubjectId, setSelectedSubjectId] = useState('');
-    const [selectedTermId, setSelectedTermId] = useState('');
-
-    const [data, setData] = useState<GradebookData | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-
-    const selectedClass = classes.find((item) => item.id === selectedClassId);
-    const availableSubjects = selectedClassId
-        ? (selectedClass?.subjects?.length ? selectedClass.subjects : subjects)
-        : subjects;
-
-    // Local edits: { [assessmentId_studentId]: score }
-    const [edits, setEdits] = useState<Record<string, number>>({});
-
-    useEffect(() => {
-        fetchInitialData();
-    }, []);
-
-    useEffect(() => {
-        if (selectedClassId && selectedSubjectId && selectedTermId) {
-            fetchGradebook();
-        }
-    }, [selectedClassId, selectedSubjectId, selectedTermId]);
-
-    useEffect(() => {
-        if (!selectedClassId) {
-            return;
-        }
-
-        if (availableSubjects.length === 0) {
-            setSelectedSubjectId('');
-            return;
-        }
-
-        const subjectStillValid = availableSubjects.some((subject) => subject.id === selectedSubjectId);
-        if (!subjectStillValid) {
-            setSelectedSubjectId(availableSubjects[0].id);
-        }
-    }, [selectedClassId, selectedSubjectId, availableSubjects]);
-
-    const fetchInitialData = async () => {
-        try {
-            const [classRes, subjectRes, termRes] = await Promise.all([
-                api.get('/classes'),
-                api.get('/subjects'),
-                api.get('/academic-terms')
-            ]);
-            setClasses(classRes.data);
-            setSubjects(subjectRes.data);
-            setTerms(termRes.data);
-
-            const activeTerm = termRes.data.find((t: any) => t.isActive);
-            if (activeTerm) setSelectedTermId(activeTerm.id);
-            if (classRes.data.length > 0) setSelectedClassId(classRes.data[0].id);
-            const firstClass = classRes.data[0];
-            const firstClassSubjects = firstClass?.subjects || [];
-            if (firstClassSubjects.length > 0) setSelectedSubjectId(firstClassSubjects[0].id);
-            else if (subjectRes.data.length > 0) setSelectedSubjectId(subjectRes.data[0].id);
-
-        } catch (error) {
-            console.error('Initial data fetch error:', error);
-            toast.error('Failed to load filters');
-        }
+  useEffect(() => {
+    const controller = new AbortController();
+    setInitialLoading(true);
+    setInitialError(false);
+    const load = async () => {
+      try {
+        const [classRes, subjectRes, termRes] = await Promise.all([
+          api.get<ClassOption[]>('/classes', { signal: controller.signal }),
+          api.get<SubjectOption[]>('/subjects', { signal: controller.signal }),
+          api.get<TermOption[]>('/academic-terms', { signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted) return;
+        setClasses(classRes.data); setSubjects(subjectRes.data); setTerms(termRes.data);
+        const firstClass = classRes.data[0];
+        setSelection({
+          classId: firstClass?.id || '',
+          subjectId: firstClass?.subjects?.[0]?.id || subjectRes.data[0]?.id || '',
+          termId: (termRes.data.find(term => term.isActive) || termRes.data[0])?.id || '',
+        });
+      } catch {
+        if (!controller.signal.aborted) setInitialError(true);
+      } finally {
+        if (!controller.signal.aborted) setInitialLoading(false);
+      }
     };
+    void load();
+    return () => controller.abort();
+  }, [initialRetry]);
 
-    const fetchGradebook = async () => {
-        setLoading(true);
-        try {
-            const response = await api.get('/assessments/gradebook', {
-                params: {
-                    classId: selectedClassId,
-                    subjectId: selectedSubjectId,
-                    termId: selectedTermId
-                }
-            });
-            setData(response.data);
-            setEdits({}); // Clear edits on refresh
-        } catch (error) {
-            console.error('Gradebook fetch error:', error);
-            toast.error('Failed to load gradebook');
-        } finally {
-            setLoading(false);
-        }
+  useEffect(() => {
+    const controller = new AbortController();
+    setData(null); setLoadError(false); setSaveError(''); setEdits({});
+    if (!selection.classId || !selection.subjectId || !selection.termId) { setLoading(false); return; }
+    setLoading(true);
+    const load = async () => {
+      try {
+        const response = await api.get<GradebookData>('/assessments/gradebook', { params: selection, signal: controller.signal });
+        if (!controller.signal.aborted) setData(response.data);
+      } catch {
+        if (!controller.signal.aborted) setLoadError(true);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
     };
+    void load();
+    return () => controller.abort();
+  }, [selection, reload]);
 
-    const getScore = (studentId: string, assessmentId: string) => {
-        // Check local edits first
-        const editKey = `${assessmentId}_${studentId}`;
-        if (editKey in edits) {
-            return edits[editKey];
-        }
-        // Then db data
-        const result = data?.results.find(r => r.studentId === studentId && r.assessmentId === assessmentId);
-        return result ? Number(result.score) : '';
-    };
+  useEffect(() => { onEditStateChange?.({ dirty, saving }); }, [dirty, saving, onEditStateChange]);
+  useEffect(() => () => onEditStateChange?.({ dirty: false, saving: false }), [onEditStateChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
-    const handleScoreChange = (studentId: string, assessmentId: string, value: string) => {
-        const numValue = value === '' ? 0 : parseFloat(value);
+  const savedScores = useMemo(() => new Map((data?.results || []).map(result =>
+    [scoreKey(result.studentId, result.assessmentId), String(result.score)])), [data]);
+  const savedScore = (studentId: string, assessmentId: string) => savedScores.get(scoreKey(studentId, assessmentId)) ?? '';
+  const getScore = (studentId: string, assessmentId: string) => edits[scoreKey(studentId, assessmentId)]?.value ?? savedScore(studentId, assessmentId);
+  const errors = Object.fromEntries(Object.entries(edits).flatMap(([key, edit]) => {
+    const assessment = data?.assessments.find(item => item.id === edit.assessmentId);
+    const error = validateScore(edit.value, assessment?.totalMarks ?? 0);
+    return error ? [[key, error]] : [];
+  }));
+  const invalidCount = Object.keys(errors).length;
+  const progress = new Map((data?.students || []).map(student => [student.id,
+    studentProgress(data?.assessments || [], assessmentId => getScore(student.id, assessmentId))]));
+  const recorded = [...progress.values()].reduce((total, item) => total + item.recorded, 0);
+  const totalCells = (data?.students.length || 0) * (data?.assessments.length || 0);
+  const query = search.trim().toLowerCase();
+  // Keep incomplete rows visible while entering marks; this filter updates after saving.
+  const visibleStudents = (data?.students || []).filter(student =>
+    `${student.firstName} ${student.lastName} ${student.admissionNumber}`.toLowerCase().includes(query) &&
+    (!missingOnly || data!.assessments.some(assessment => validateScore(savedScore(student.id, assessment.id), assessment.totalMarks))),
+  );
 
-        // Validate Max Marks
-        const assessment = data?.assessments.find(a => a.id === assessmentId);
-        if (assessment && numValue > assessment.totalMarks) {
-            toast.error(`Max marks for this assessment is ${assessment.totalMarks}`);
-            return;
-        }
+  const discardChanges = async () => {
+    if (savingRef.current || !await confirm({ title: 'Discard unsaved scores?', message: `Discard ${dirtyCount} unsaved score changes and restore the saved marks?`, confirmText: 'Discard changes', destructive: true })) return;
+    setEdits({}); setSaveError('');
+  };
 
-        setEdits(prev => ({
-            ...prev,
-            [`${assessmentId}_${studentId}`]: numValue
-        }));
-    };
+  const handleSave = async () => {
+    if (!canEdit || !data || !dirty || invalidCount || savingRef.current) return;
+    savingRef.current = true; setSaving(true); setSaveError('');
+    const snapshot = edits;
+    try {
+      const result = await saveScoreEdits(snapshot, data.assessments, (assessmentId, results) =>
+        api.post('/assessments/results', { assessmentId, results }));
+      const saved = new Set(result.savedKeys);
+      setData(current => current ? { ...current,
+        results: [...current.results.filter(item => !saved.has(scoreKey(item.studentId, item.assessmentId))),
+          ...result.savedKeys.map(key => ({ assessmentId: snapshot[key].assessmentId, studentId: snapshot[key].studentId, score: Number(snapshot[key].value) }))],
+      } : current);
+      setEdits(current => Object.fromEntries(Object.entries(current).filter(([key]) => !saved.has(key))));
+      if (result.failedAssessments) setSaveError(`${result.savedKeys.length} scores saved. Changes for ${result.failedAssessments} assessments could not be saved. Your remaining edits are retained; try Save changes again.`);
+      else toast.success(`${result.savedKeys.length} scores saved`);
+    } catch {
+      setSaveError('Unable to save scores. Your edits are retained. Please try again.');
+    } finally {
+      savingRef.current = false; setSaving(false);
+    }
+  };
 
-    const handleSave = async () => {
-        if (Object.keys(edits).length === 0) return;
-        setSaving(true);
+  return <div className="ds-page">
+    <div className="ds-page-header">
+      <div><Heading className={embedded ? 'text-xl font-bold tracking-tight' : 'ds-page-title'}>Gradebook</Heading>
+        <p className="ds-page-subtitle">Review class progress and enter assessment scores in one place.</p></div>
+      <div className="ds-actions">
+        {dirty && <Button variant="outline" onClick={discardChanges} disabled={saving}><Undo2 size={16} aria-hidden="true" />Discard changes</Button>}
+        {canEdit ? <Button onClick={handleSave} loading={saving} disabled={!dirty || loading || invalidCount > 0}>
+          {!saving && <Save size={16} aria-hidden="true" />}Save changes{dirty ? ` (${dirtyCount})` : ''}
+        </Button> : <Badge>View only</Badge>}
+      </div>
+    </div>
 
-        try {
-            // Group edits by Assessment ID
-            const updatesByAssessment: Record<string, any[]> = {};
-
-            Object.entries(edits).forEach(([key, score]) => {
-                const [assessmentId, studentId] = key.split('_');
-                if (!updatesByAssessment[assessmentId]) {
-                    updatesByAssessment[assessmentId] = [];
-                }
-                updatesByAssessment[assessmentId].push({ studentId, score });
-            });
-
-            // Execute sequential updates (to avoid overwhelming server or if backend logic requires distinct calls)
-            // Usually parallel is fine but let's be safe.
-            const promises = Object.entries(updatesByAssessment).map(([assessmentId, results]) =>
-                api.post('/assessments/results', {
-                    assessmentId,
-                    results
-                })
-            );
-
-            await Promise.all(promises);
-            toast.success('Grades saved successfully');
-            fetchGradebook(); // Refresh to clear edits and sync
-
-        } catch (error) {
-            console.error('Save error:', error);
-            toast.error('Failed to save grades');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-[1600px] mx-auto">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                        <TrendingUp className="text-blue-600" />
-                        Teacher Gradebook
-                    </h1>
-                    <p className="text-gray-500 dark:text-gray-400">Manage assessment scores for your classes</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-gray-200 dark:border-slate-700">
-                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 px-2">
-                        <Filter size={16} />
-                        <span className="text-sm font-medium">Filters:</span>
-                    </div>
-                    <select
-                        value={selectedTermId}
-                        onChange={(e) => setSelectedTermId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
-                    >
-                        {terms.map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={selectedClassId}
-                        onChange={(e) => setSelectedClassId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
-                    >
-                        {classes.map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={selectedSubjectId}
-                        onChange={(e) => setSelectedSubjectId(e.target.value)}
-                        className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white"
-                    >
-                        {availableSubjects.map(s => (
-                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                        ))}
-                    </select>
-                </div>
-            </div>
-
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col min-h-[500px]">
-                {loading ? (
-                    <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">Loading gradebook...</div>
-                ) : !data || data.students.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
-                        <AlertCircle size={48} className="text-gray-300 dark:text-gray-600 mb-4" />
-                        <p>No students or data found for this selection.</p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto flex-1">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 dark:bg-slate-700 z-10 sticky top-0">
-                                <tr>
-                                    <th className="sticky left-0 bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider w-12 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">#</th>
-                                    <th className="sticky left-12 bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[200px] z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Student</th>
-
-                                    {data.assessments.map(assessment => (
-                                        <th key={assessment.id} className="px-4 py-3 border-b border-gray-200 dark:border-slate-600 min-w-[120px] text-center">
-                                            <div className="text-xs font-bold text-gray-800 dark:text-white">{assessment.title}</div>
-                                            <div className="text-[10px] text-gray-500 dark:text-gray-400 font-normal">
-                                                Max: {assessment.totalMarks} • {assessment.weight}%
-                                            </div>
-                                        </th>
-                                    ))}
-
-                                    <th className="px-4 py-3 border-b border-gray-200 dark:border-slate-600 text-center font-semibold text-xs text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[100px] bg-blue-50/50 dark:bg-blue-900/30">Average</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
-                                {data.students.map((student, idx) => {
-                                    // Calculate quick average based on available results + edits
-                                    // This is 'simple' client side calc for display
-                                    let totalObtained = 0;
-                                    let totalMax = 0;
-
-                                    data.assessments.forEach(ass => {
-                                        const s = getScore(student.id, ass.id);
-                                        if (s !== '' && s !== 0) {
-                                            totalObtained += (Number(s) / ass.totalMarks) * 100 * (ass.weight / 100);
-                                            // Simple weighted average logic is tricky without full backend logic.
-                                            // Let's just sum Percentage * Weight if defined.
-                                            // If weight is not perfectly distributed, this might be off.
-                                            // For visual aid only.
-                                        }
-                                    });
-
-                                    return (
-                                        <tr key={student.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-700/50 transition-colors group">
-                                            <td className="sticky left-0 bg-white dark:bg-slate-800 group-hover:bg-gray-50 dark:group-hover:bg-slate-700 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 border-r border-gray-100 dark:border-slate-700 z-10">{idx + 1}</td>
-                                            <td className="sticky left-12 bg-white dark:bg-slate-800 group-hover:bg-gray-50 dark:group-hover:bg-slate-700 px-4 py-3 border-r border-gray-100 dark:border-slate-700 z-10">
-                                                <div className="text-sm font-medium text-gray-900 dark:text-white">{student.firstName} {student.lastName}</div>
-                                                <div className="text-xs text-gray-400">{student.admissionNumber}</div>
-                                            </td>
-
-                                            {data.assessments.map(assessment => (
-                                                <td key={assessment.id} className="p-0 border-r border-gray-100 dark:border-slate-700 relative">
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max={assessment.totalMarks}
-                                                        value={getScore(student.id, assessment.id)}
-                                                        onChange={(e) => handleScoreChange(student.id, assessment.id, e.target.value)}
-                                                        className={`w-full h-full min-h-[48px] px-2 text-center text-sm outline-none focus:bg-blue-50 dark:focus:bg-blue-900/30 focus:ring-2 focus:ring-blue-500 inset-0 transition-all dark:text-white ${`${assessment.id}_${student.id}` in edits ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-300 font-semibold' : 'bg-transparent'
-                                                            }`}
-                                                        placeholder="-"
-                                                    />
-                                                </td>
-                                            ))}
-
-                                            <td className="px-4 py-3 text-center text-sm font-bold text-gray-700 dark:text-gray-300 bg-blue-50/30 dark:bg-blue-900/20">
-                                                {/* Placeholder for calculated Total */}
-                                                -
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-
-            <div className="fixed bottom-6 right-6 z-30">
-                <button
-                    onClick={handleSave}
-                    disabled={saving || loading || Object.keys(edits).length === 0}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium transform active:scale-95"
-                >
-                    {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={20} />}
-                    {saving ? 'Saving...' : `Save ${Object.keys(edits).length > 0 ? `(${Object.keys(edits).length})` : ''} Changes`}
-                </button>
-            </div>
-
+    {initialError ? <Alert tone="error"><p>Unable to load gradebook filters.</p><Button variant="outline" className="mt-3" onClick={() => setInitialRetry(value => value + 1)}>Try again</Button></Alert> :
+      <div className="ds-card space-y-3">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Academic term" htmlFor="gradebook-term"><Select id="gradebook-term" value={selection.termId} disabled={filtersLocked} onChange={event => setSelection({ ...selection, termId: event.target.value })}>
+            {!terms.length && <option value="">{initialLoading ? 'Loading terms...' : 'No terms available'}</option>}
+            {terms.map(term => <option key={term.id} value={term.id}>{term.name}{term.isActive ? ' (active)' : ''}</option>)}
+          </Select></FormField>
+          <FormField label="Class" htmlFor="gradebook-class"><Select id="gradebook-class" value={selection.classId} disabled={filtersLocked} onChange={event => {
+            const nextClass = classes.find(item => item.id === event.target.value);
+            const nextSubjects = nextClass?.subjects?.length ? nextClass.subjects : subjects;
+            setSelection({ ...selection, classId: event.target.value, subjectId: nextSubjects.some(item => item.id === selection.subjectId) ? selection.subjectId : nextSubjects[0]?.id || '' });
+          }}>
+            {!classes.length && <option value="">{initialLoading ? 'Loading classes...' : 'No classes available'}</option>}
+            {classes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </Select></FormField>
+          <FormField label="Subject" htmlFor="gradebook-subject"><Select id="gradebook-subject" value={selection.subjectId} disabled={filtersLocked} onChange={event => setSelection({ ...selection, subjectId: event.target.value })}>
+            {!availableSubjects.length && <option value="">{initialLoading ? 'Loading subjects...' : 'No subjects available'}</option>}
+            {availableSubjects.map(item => <option key={item.id} value={item.id}>{item.name}{item.code ? ` (${item.code})` : ''}</option>)}
+          </Select></FormField>
         </div>
-    );
+        {dirty && <p className="ds-helper">Save or discard your changes before switching class, subject, or term.</p>}
+      </div>}
+
+    {saveError && <Alert tone="error">{saveError}</Alert>}
+    {invalidCount > 0 && <Alert tone="error">Correct {invalidCount} highlighted {invalidCount === 1 ? 'score' : 'scores'} before saving. Scores must be between zero and the assessment maximum.</Alert>}
+
+    {data && !loading && <section aria-label="Gradebook summary" className="grid gap-4 sm:grid-cols-3">
+      <StatCard label="Students" value={data.students.length} icon={Users} detail={selectedClass?.name} />
+      <StatCard label="Assessments" value={data.assessments.length} icon={ClipboardList} detail={selectedSubject?.name} />
+      <StatCard label="Scores entered" value={totalCells ? `${Math.round(recorded / totalCells * 100)}%` : '?'} icon={CheckCircle2} tone={totalCells > 0 && recorded === totalCells ? 'success' : 'info'} detail={`${recorded} of ${totalCells} scores${dirty ? ' ? includes unsaved edits' : ''}`} />
+    </section>}
+
+    <section className="ds-surface overflow-hidden" aria-label="Assessment scores" aria-busy={loading || initialLoading}>
+      {initialLoading || loading ? <div role="status" className="ds-empty flex items-center justify-center gap-3"><Loader2 size={20} className="animate-spin" aria-hidden="true" />Loading gradebook...</div> : loadError ?
+        <EmptyState title="Unable to load scores" description="Please retry. No scores from a previous selection are shown." action={<Button variant="outline" onClick={() => setReload(value => value + 1)}><RefreshCw size={16} aria-hidden="true" />Try again</Button>} /> : !data ?
+        <EmptyState title={initialError ? 'Gradebook unavailable' : 'Select a class, subject, and term'} description={initialError ? 'Retry loading the filters above to continue.' : 'All three selections are needed to open the gradebook.'} /> : !data.students.length ?
+        <EmptyState title="No students in this class" description="Choose another class or add students through the Students page." /> : !data.assessments.length ?
+        <EmptyState title="No assessments for this selection" description="Choose another subject or term. Scores can be entered once an assessment has been created for this class." /> : <>
+          <div className="ds-card-header">
+            <div className="relative w-full sm:max-w-sm"><Search size={18} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input type="search" className="ds-input pl-10" aria-label="Search students" placeholder="Search name or admission number..." value={search} onChange={event => setSearch(event.target.value)} disabled={saving} />
+            </div>
+            <label className="flex min-h-11 items-center gap-2 text-sm text-muted"><input type="checkbox" className="ds-choice" checked={missingOnly} onChange={event => setMissingOnly(event.target.checked)} disabled={saving} />Missing saved scores only</label>
+          </div>
+          {visibleStudents.length === 0 ? <EmptyState title="No matching students" description="Try a different name or clear the missing scores filter." action={<Button variant="outline" onClick={() => { setSearch(''); setMissingOnly(false); }}>Clear search and filter</Button>} /> :
+            <div className="gradebook-scroll" role="region" aria-label="Student assessment score matrix" tabIndex={0}>
+              <table className="gradebook-table">
+                <thead><tr><th scope="col" className="gradebook-student">Student</th>
+                  {data.assessments.map(assessment => <th scope="col" key={assessment.id}><span className="block font-semibold text-ink">{assessment.title}</span><span className="mt-1 block text-xs font-normal">Out of {assessment.totalMarks} ? Weight {assessment.weight}%</span></th>)}
+                  <th scope="col">Weighted average<span className="mt-1 block text-xs font-normal">Entered scores only</span></th><th scope="col">Completion</th>
+                </tr></thead>
+                <tbody>{visibleStudents.map((student, rowIndex) => {
+                  const studentStats = progress.get(student.id)!;
+                  return <tr key={student.id}>
+                    <th scope="row" className="gradebook-student"><span className="block break-words font-semibold">{student.firstName} {student.lastName}</span><span className="mt-1 block text-xs font-normal text-muted">{student.admissionNumber}</span></th>
+                    {data.assessments.map((assessment, columnIndex) => {
+                      const key = scoreKey(student.id, assessment.id);
+                      const value = getScore(student.id, assessment.id);
+                      const error = errors[key];
+                      const errorId = `gradebook-error-${rowIndex}-${columnIndex}`;
+                      return <td key={assessment.id} className="gradebook-score-cell">
+                        {canEdit ? <><input type="text" inputMode="decimal" autoComplete="off" spellCheck={false}
+                          ref={node => { if (node) inputRefs.current.set(key, node); else inputRefs.current.delete(key); }}
+                          aria-label={`${student.firstName} ${student.lastName} (${student.admissionNumber}), ${assessment.title}, out of ${assessment.totalMarks}${edits[key] ? ', unsaved' : ''}`}
+                          aria-invalid={Boolean(error)} aria-describedby={error ? errorId : 'gradebook-entry-help'}
+                          disabled={saving} value={value} placeholder="?" className={`gradebook-score ${edits[key] ? 'gradebook-score-edited' : ''}`}
+                          onChange={event => { setSaveError(''); setEdits(current => updateScoreEdit(current, student.id, assessment.id, event.target.value, savedScore(student.id, assessment.id))); }}
+                          onKeyDown={event => {
+                            if (event.key !== 'Enter') return;
+                            event.preventDefault();
+                            const nextStudent = visibleStudents[rowIndex + (event.shiftKey ? -1 : 1)];
+                            if (nextStudent) { const input = inputRefs.current.get(scoreKey(nextStudent.id, assessment.id)); input?.focus(); input?.select(); }
+                          }} />
+                          {error && <p id={errorId} className="ds-field-error px-2 pb-2 text-xs">{error}</p>}
+                        </> : <span className="block px-3 py-4 text-center tabular-nums">{value || '?'}</span>}
+                      </td>;
+                    })}
+                    <td className="text-center font-semibold tabular-nums">{studentStats.average === null ? '?' : `${studentStats.average.toFixed(1)}%`}</td>
+                    <td className="text-center"><Badge tone={studentStats.recorded === data.assessments.length ? 'success' : 'neutral'}>{studentStats.recorded} / {data.assessments.length}</Badge></td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>}
+          <div className="ds-card-header border-b-0 border-t text-sm text-muted">
+            <p>Showing {visibleStudents.length} of {data.students.length} students</p>
+            <p role="status" aria-live="polite">{saving ? 'Saving scores...' : dirty ? `${dirtyCount} unsaved changes` : 'No unsaved changes'}</p>
+          </div>
+        </>}
+    </section>
+    <div className="space-y-1">
+      {canEdit && <p id="gradebook-entry-help" className="ds-helper text-xs">Tab moves across scores. Enter moves down; Shift + Enter moves up. Highlighted cells have unsaved changes. Save before leaving this page.</p>}
+      <p className="ds-helper text-xs">Weighted averages use entered scores and their assessment weights. Missing scores are excluded; zero is a recorded score. These are progress averages, not final report grades.</p>
+    </div>
+  </div>;
 };
 
 export default TeacherGradebook;

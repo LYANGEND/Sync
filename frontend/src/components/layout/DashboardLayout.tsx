@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import BottomNav from './BottomNav';
@@ -16,44 +15,44 @@ const DashboardLayout = () => {
   const showFAB = !hideFABPaths.includes(location.pathname);
 
   return (
-    <div className="min-h-screen bg-gray-50/50 dark:bg-slate-900">
+    <div className="app-shell min-h-screen">
+      <a id="dashboard-skip-link" href="#main-content" className="ds-skip-link"
+        onClick={() => document.getElementById('main-content')?.focus()}>
+        Skip to main content
+      </a>
       {/* Sidebar - Hidden on mobile */}
       <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 
-      {/* Header */}
-      <Header />
+      <div id="dashboard-content">
+        {/* Header */}
+        <Header />
 
-      {/* Main Content */}
-      <main
-        className="md:pl-64 min-h-screen transition-all duration-300"
-        style={{
-          paddingTop: 'calc(4rem + env(safe-area-inset-top))',
-          paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))',
-        }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
-            >
+        {/* Main Content */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="app-main md:pl-[17.5rem] min-h-screen"
+          style={{
+            paddingTop: 'calc(4rem + env(safe-area-inset-top))',
+            paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))',
+          }}
+        >
+          <div className="ds-shell py-4 sm:py-6 lg:py-8">
+            <div key={location.pathname} className="route-enter">
               <Outlet />
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </main>
+            </div>
+          </div>
+        </main>
 
-      {/* Floating Action Button - Mobile only, context-aware */}
-      {showFAB && <FloatingActionButton />}
+        {/* Floating Action Button - Mobile only, context-aware */}
+        {showFAB && <FloatingActionButton />}
 
-      {/* Global Voice Command - available on all pages */}
-      <GlobalVoiceCommand />
+        {/* Global Voice Command - available on all pages */}
+        <GlobalVoiceCommand />
 
-      {/* Bottom Navigation - Mobile only */}
-      <BottomNav onMenuClick={() => setIsMobileMenuOpen(true)} />
+        {/* Bottom Navigation - Mobile only */}
+        <BottomNav isMenuOpen={isMobileMenuOpen} onMenuClick={() => setIsMobileMenuOpen(true)} />
+      </div>
     </div>
   );
 };

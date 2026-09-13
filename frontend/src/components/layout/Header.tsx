@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Check, X, BellRing, Trash2, ShieldCheck } from 'lucide-react';
+import { Bell, Check, X, BellRing, Trash2, ShieldCheck } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { subscribeToPushNotifications } from '../../utils/push';
-import { ThemeToggle, VoiceSearchButton } from '../mobile';
-import { hapticLight } from '../../utils/haptic';
+import { ThemeToggle } from '../mobile';
+import { Button } from '../ui/DesignSystem';
+import { useNavigate } from 'react-router-dom';
 
 interface Notification {
   id: string;
@@ -17,15 +18,15 @@ interface Notification {
 }
 
 const Header = () => {
+  const navigate = useNavigate();
   const { user, isAuthenticated, isLoading } = useAuth();
   const { settings: themeSettings } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const notificationRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const notificationButtonRef = useRef<HTMLButtonElement>(null);
+  const notificationPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isLoading || !isAuthenticated) {
@@ -56,11 +57,27 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const closeNotifications = () => {
+    setShowNotifications(false);
+    notificationButtonRef.current?.focus();
+  };
+
   useEffect(() => {
-    if (showSearch && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [showSearch]);
+    if (!showNotifications) return;
+    notificationPanelRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
+        event.preventDefault();
+        closeNotifications();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showNotifications]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('app:notifications-count', { detail: unreadCount }));
+  }, [unreadCount]);
 
   const fetchNotifications = async () => {
     if (!isAuthenticated || user?.role === 'PLATFORM_ADMIN') return;
@@ -164,325 +181,182 @@ const Header = () => {
 
   return (
     <header
-      className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-b border-gray-200/50 dark:border-slate-700/50 fixed top-0 right-0 left-0 md:left-64 z-40 transition-all duration-300"
+      className="ds-header fixed top-0 right-0 left-0 md:left-[17.5rem] z-40 border-b text-[var(--text-primary)]"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
       }}
     >
-      <div className="h-16 px-4 flex items-center justify-between gap-4">
+      <div className="ds-shell flex h-16 min-w-0 items-center justify-between gap-2 lg:gap-4">
         {/* Mobile: Logo & Greeting */}
         <div className="md:hidden flex items-center gap-3 flex-1 min-w-0">
           {/* School Logo */}
           {themeSettings.logoUrl ? (
             <img
               src={themeSettings.logoUrl.startsWith('http') ? themeSettings.logoUrl : themeSettings.logoUrl}
-              alt="Logo"
-              className="w-9 h-9 rounded-xl object-contain bg-white/80 dark:bg-slate-800 p-0.5 shadow-sm flex-shrink-0"
+              alt={`${themeSettings.schoolName} logo`}
+              className="w-9 h-9 rounded-xl object-contain bg-[var(--surface-muted)] p-0.5 flex-shrink-0"
             />
           ) : (
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center text-white font-bold text-lg shadow-sm flex-shrink-0">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[var(--action-color)] text-[var(--action-foreground)] font-bold text-lg flex-shrink-0">
               {themeSettings.schoolName?.charAt(0) || 'S'}
             </div>
           )}
 
           {/* Greeting */}
           <div className="min-w-0">
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium truncate">{getGreeting()}</p>
-            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{user?.fullName?.split(' ')[0] || 'User'}</p>
+            <p className="text-xs text-[var(--text-secondary)] font-medium truncate">{getGreeting()}</p>
+            <p className="text-sm font-semibold truncate">{user?.fullName?.split(' ')[0] || 'User'}</p>
           </div>
         </div>
 
-        {/* Desktop: Search Bar */}
-        <div className="hidden md:flex items-center bg-gray-100 dark:bg-slate-800 rounded-xl px-4 py-2.5 w-full max-w-sm">
-          <Search size={18} className="text-gray-400 dark:text-gray-500 flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search students, payments..."
-            className="bg-transparent border-none focus:outline-none ml-3 w-full text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
-          />
-          <VoiceSearchButton onResult={(text) => console.log('Voice search:', text)} size={18} />
+        <div className="hidden md:block min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{themeSettings.schoolName}</p>
+          <p className="text-xs text-muted">School workspace</p>
         </div>
-
-        {/* Mobile: Expandable Search */}
-        {showSearch && (
-          <div className="md:hidden absolute inset-x-0 top-0 h-full bg-white z-50 px-4 flex items-center gap-3 animate-fade-in"
-            style={{ paddingTop: 'env(safe-area-inset-top)' }}
-          >
-            <div className="flex-1 flex items-center bg-gray-100 rounded-xl px-4 py-2.5">
-              <Search size={18} className="text-gray-400" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search..."
-                className="bg-transparent border-none focus:outline-none ml-3 w-full text-sm text-gray-700"
-              />
-            </div>
-            <button
-              onClick={() => {
-                setShowSearch(false);
-                setSearchQuery('');
-              }}
-              className="p-2 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-          </div>
-        )}
 
         {/* Right Actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0">
           {isImpersonating && (
             <>
-              <button
+              <Button variant="secondary"
                 onClick={returnToOps}
-                className="hidden md:inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                className="hidden xl:inline-flex gap-1.5"
               >
-                <ShieldCheck size={14} />
+                <ShieldCheck size={18} aria-hidden="true" />
                 Return to Ops
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost"
                 onClick={returnToOps}
-                className="md:hidden p-2.5 text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors"
+                className="xl:hidden px-2"
+                aria-label="Return to Ops"
                 title="Return to Ops"
               >
-                <ShieldCheck size={20} />
-              </button>
+                <ShieldCheck size={20} aria-hidden="true" />
+              </Button>
             </>
           )}
 
-          {/* Mobile Search Toggle */}
-          <button
-            onClick={() => {
-              hapticLight();
-              setShowSearch(true);
-            }}
-            className="md:hidden p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
-          >
-            <Search size={20} />
-          </button>
-
           {/* Theme Toggle */}
-          <ThemeToggle />
+          <ThemeToggle className="min-h-11 min-w-11" />
 
           {/* Push Notification Button - Desktop Only */}
-          <button
+          <Button variant="secondary"
             onClick={handleEnablePush}
-            className="hidden md:flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-xl transition-colors"
+            className="hidden md:flex gap-1.5 px-2 lg:px-3"
+            aria-label="Enable push notifications"
             title="Enable Push Notifications"
           >
-            <BellRing size={14} />
-            <span>Enable Push</span>
-          </button>
+            <BellRing size={18} aria-hidden="true" />
+            <span className="hidden xl:inline">Enable Push</span>
+          </Button>
 
           {/* Notifications */}
-          <div className="relative" ref={notificationRef}>
-            <button
+          <div className="relative" ref={notificationRef}
+            onBlur={event => {
+              if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setShowNotifications(false);
+            }}>
+            <Button variant="ghost"
+              ref={notificationButtonRef}
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2.5 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+              className="relative px-2"
+              aria-label={`Notifications, ${unreadCount} unread`}
+              aria-expanded={showNotifications}
+              aria-controls="header-notifications"
             >
-              <Bell size={20} />
+              <Bell size={20} aria-hidden="true" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                <span aria-hidden="true" className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
-            </button>
+            </Button>
 
-            {/* Notification Dropdown/Sheet */}
+            {/* One non-modal disclosure on every viewport; Tab may leave it and Escape restores the trigger. */}
             {showNotifications && (
-              <>
-                {/* Mobile: Full-width bottom sheet style */}
-                <div className="md:hidden fixed inset-x-0 bottom-0 top-auto bg-white rounded-t-3xl shadow-2xl z-50 animate-slide-up max-h-[80vh] flex flex-col">
-                  {/* Handle */}
-                  <div className="flex justify-center py-3">
-                    <div className="w-10 h-1 bg-gray-300 rounded-full" />
+              <div id="header-notifications" ref={notificationPanelRef} role="region" tabIndex={-1}
+                aria-labelledby="header-notifications-title"
+                className="ds-surface fixed inset-x-4 top-[calc(4rem+env(safe-area-inset-top))] md:inset-x-auto md:absolute md:right-0 md:top-full mt-2 md:w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-10rem)] flex flex-col overflow-hidden z-50">
+                <div className="shrink-0 p-4 border-b border-[var(--border-color)] bg-[var(--surface-muted)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 id="header-notifications-title" className="text-lg font-semibold">Notifications</h2>
+                    <Button variant="ghost" onClick={closeNotifications} aria-label="Close notifications" className="px-2">
+                      <X size={20} aria-hidden="true" />
+                    </Button>
                   </div>
-
-                  {/* Header */}
-                  <div className="px-5 pb-3 flex justify-between items-center border-b border-gray-100">
-                    <h3 className="text-lg font-bold text-gray-900">Notifications</h3>
-                    <div className="flex items-center gap-2">
-                      {notifications.some(n => n.isRead) && (
-                        <button
-                          onClick={clearReadNotifications}
-                          className="text-sm text-red-500 font-medium"
-                        >
-                          Clear read
-                        </button>
-                      )}
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={markAllAsRead}
-                          className="text-sm text-blue-600 font-medium"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setShowNotifications(false)}
-                        className="p-2 text-gray-400 hover:text-gray-600"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* List */}
-                  <div className="flex-1 overflow-y-auto overscroll-contain">
-                    {notifications.length === 0 ? (
-                      <div className="p-12 text-center">
-                        <Bell size={40} className="mx-auto text-gray-300 mb-3" />
-                        <p className="text-gray-500">No notifications yet</p>
-                      </div>
-                    ) : (
-                      notifications.map(notification => (
-                        <div
-                          key={notification.id}
-                          className={`px-5 py-4 border-b border-gray-50 active:bg-gray-50 ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
-                        >
-                          <div className="flex justify-between items-start gap-2">
-                            <div className="flex-1 min-w-0">
-                              <h4 className={`text-sm font-semibold ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
-                                {notification.title}
-                              </h4>
-                              <p className="text-sm text-gray-500 mt-1 line-clamp-2">{notification.message}</p>
-                              <span className="text-xs text-gray-400 mt-2 block">
-                                {new Date(notification.createdAt).toLocaleString()}
-                              </span>
-                            </div>
-                            {!notification.isRead && (
-                              <button
-                                onClick={() => markAsRead(notification.id)}
-                                className="p-2 text-gray-400 hover:text-blue-600 flex-shrink-0"
-                              >
-                                <Check size={16} />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => deleteNotification(notification.id)}
-                              className="p-2 text-gray-300 hover:text-red-500 flex-shrink-0"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                  <div className="flex flex-wrap gap-2">
+                    {notifications.some(n => n.isRead) && (
+                      <Button variant="outline" onClick={clearReadNotifications}>Clear read</Button>
                     )}
-                  </div>
-
-                  {/* Safe area padding */}
-                  <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} />
-                </div>
-
-                {/* Overlay */}
-                <div
-                  className="md:hidden fixed inset-0 bg-black/30 z-40"
-                  onClick={() => setShowNotifications(false)}
-                />
-
-                {/* Desktop: Traditional dropdown */}
-                <div className="hidden md:block absolute right-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden z-50 animate-scale-in">
-                  <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-700/50">
-                    <h3 className="font-semibold text-gray-700 dark:text-white">Notifications</h3>
-                    <div className="flex items-center gap-2">
-                      {notifications.some(n => n.isRead) && (
-                        <button
-                          onClick={clearReadNotifications}
-                          className="text-xs text-red-500 hover:text-red-700 font-medium"
-                        >
-                          Clear read
-                        </button>
-                      )}
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={markAllAsRead}
-                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {notifications.length === 0 ? (
-                      <div className="p-8 text-center text-gray-500 text-sm">
-                        No notifications
-                      </div>
-                    ) : (
-                      notifications.map(notification => (
-                        <div
-                          key={notification.id}
-                          className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
-                        >
-                          <div className="flex justify-between items-start">
-                            <h4 className={`text-sm font-medium ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
-                              {notification.title}
-                            </h4>
-                            <div className="flex items-center gap-1">
-                              {!notification.isRead && (
-                                <button
-                                  onClick={() => markAsRead(notification.id)}
-                                  className="text-gray-400 hover:text-blue-600"
-                                  title="Mark as read"
-                                >
-                                  <Check size={14} />
-                                </button>
-                              )}
-                              <button
-                                onClick={() => deleteNotification(notification.id)}
-                                className="text-gray-300 hover:text-red-500"
-                                title="Delete"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-xs text-gray-500 mt-1">{notification.message}</p>
-                          <span className="text-[10px] text-gray-400 mt-2 block">
-                            {new Date(notification.createdAt).toLocaleString()}
-                          </span>
-                        </div>
-                      ))
+                    {unreadCount > 0 && (
+                      <Button variant="outline" onClick={markAllAsRead}>Mark all read</Button>
                     )}
                   </div>
                 </div>
-              </>
+                <div className="min-h-0 overflow-y-auto overscroll-contain">
+                  {notifications.length === 0 ? (
+                    <p className="p-8 text-center text-sm text-[var(--text-secondary)]">No notifications yet</p>
+                  ) : notifications.map(notification => (
+                    <div key={notification.id}
+                      className={`p-4 border-b border-[var(--border-color)] ${!notification.isRead ? 'bg-[var(--surface-muted)]' : ''}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h3 className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm font-semibold">{notification.title}</h3>
+                        <div className="flex shrink-0 gap-1">
+                          {!notification.isRead && (
+                            <Button variant="ghost" onClick={() => markAsRead(notification.id)}
+                              aria-label={`Mark as read: ${notification.title}`} className="px-2">
+                              <Check size={18} aria-hidden="true" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" onClick={() => deleteNotification(notification.id)}
+                            aria-label={`Delete notification: ${notification.title}`} className="px-2">
+                            <Trash2 size={18} aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </div>
+                      {!notification.isRead && <span className="ds-badge ds-badge-info">Unread</span>}
+                      <p className="text-sm text-[var(--text-secondary)] mt-1 break-words [overflow-wrap:anywhere]">{notification.message}</p>
+                      <span className="text-xs text-[var(--text-secondary)] mt-2 block">{new Date(notification.createdAt).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
           {/* Profile - Desktop */}
-          <div
-            className="hidden md:flex items-center gap-3 pl-4 border-l border-gray-200 cursor-pointer hover:bg-gray-50 rounded-xl py-2 pr-3 -mr-3 transition-colors"
-            onClick={() => window.location.href = '/profile'}
+          <Button variant="ghost"
+            aria-label={`Open profile for ${user?.fullName || 'User'}`}
+            className="hidden md:flex items-center gap-3 px-2"
+            onClick={() => navigate('/profile')}
           >
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user?.fullName || 'User'}</p>
-              <p className="text-xs text-gray-500">{user?.role?.replace('_', ' ') || 'Role'}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl overflow-hidden bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-sm">
+            <span className="hidden lg:block max-w-40 text-right">
+              <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{user?.fullName || 'User'}</span>
+              <span className="block truncate text-xs text-[var(--text-secondary)]">{user?.role?.replace('_', ' ') || 'Role'}</span>
+            </span>
+            <span className="ds-avatar overflow-hidden" aria-hidden="true">
               {user?.profilePictureUrl ? (
                 <img
                   src={user.profilePictureUrl.startsWith('http') ? user.profilePictureUrl : `${import.meta.env.VITE_API_URL || ''}${user.profilePictureUrl}`}
-                  alt={user.fullName}
+                  alt=""
                   className="w-full h-full object-cover"
                 />
               ) : (
                 user?.fullName?.charAt(0) || 'U'
               )}
-            </div>
-          </div>
+            </span>
+          </Button>
 
           {/* Profile Avatar - Mobile (clickable) */}
           <button
-            onClick={() => window.location.href = '/profile'}
-            className="md:hidden w-9 h-9 rounded-xl overflow-hidden bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-sm"
+            type="button"
+            onClick={() => navigate('/profile')}
+            aria-label="Open profile"
+            className="ds-avatar md:hidden overflow-hidden"
           >
             {user?.profilePictureUrl ? (
               <img
                 src={user.profilePictureUrl.startsWith('http') ? user.profilePictureUrl : `${import.meta.env.VITE_API_URL || ''}${user.profilePictureUrl}`}
-                alt={user?.fullName || 'User'}
+                alt=""
                 className="w-full h-full object-cover"
               />
             ) : (

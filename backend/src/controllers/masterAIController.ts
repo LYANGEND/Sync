@@ -123,10 +123,10 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     );
 
     // Save user message
-    await convoService.saveMessage(convoId, 'user', message);
+    await convoService.saveMessage(convoId, userId, 'user', message);
 
     // Load conversation history for AI context
-    const previousMessages = await convoService.getMessageHistory(convoId, 20);
+    const previousMessages = await convoService.getMessageHistory(convoId, userId, 20);
     const conversationHistory = previousMessages.slice(0, -1).map((m: any) => ({
       role: m.role,
       content: m.content,
@@ -145,7 +145,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }
 
     // Save assistant message (shared service also touches updatedAt)
-    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+    await convoService.saveMessage(convoId, userId, 'assistant', assistantContent);
 
     res.json({
       ...result,
@@ -327,10 +327,10 @@ export const voiceExecute = async (req: AuthRequest, res: Response) => {
     );
 
     // Save user message
-    await convoService.saveMessage(convoId, 'user', message);
+    await convoService.saveMessage(convoId, userId, 'user', message);
 
     // Load history
-    const previousMessages = await convoService.getMessageHistory(convoId, 20);
+    const previousMessages = await convoService.getMessageHistory(convoId, userId, 20);
     const conversationHistory = previousMessages.slice(0, -1).map((m: any) => ({
       role: m.role,
       content: m.content,
@@ -349,7 +349,7 @@ export const voiceExecute = async (req: AuthRequest, res: Response) => {
     }
 
     // Save assistant message
-    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+    await convoService.saveMessage(convoId, userId, 'assistant', assistantContent);
 
     if (aborted) return;
 
@@ -446,9 +446,9 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
     const { id: convoId, isNew: isNewConvo } = await convoService.getOrCreateConversation(
       userId, CTX, conversationId, autoTitle,
     );
-    await convoService.saveMessage(convoId, 'user', message);
+    await convoService.saveMessage(convoId, userId, 'user', message);
 
-    const previousMessages = await convoService.getMessageHistory(convoId, 20);
+    const previousMessages = await convoService.getMessageHistory(convoId, userId, 20);
     const conversationHistory = previousMessages.slice(0, -1).map((m: any) => ({
       role: m.role,
       content: m.content,
@@ -488,7 +488,7 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
       assistantContent += '\n\n---\n';
       for (const action of result.actions) assistantContent += `\n${action.summary}`;
     }
-    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+    await convoService.saveMessage(convoId, userId, 'assistant', assistantContent);
 
     if (!aborted) {
       res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

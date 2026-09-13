@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, User, Plus, Trash2, Users, Download, Printer } from 'lucide-react';
+import { User, Plus, Trash2, Users, Download, Printer } from 'lucide-react';
 import api from '../../utils/api';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { PageHeader } from '../../components/ui/DesignSystem';
 
 interface TimetablePeriod {
   id: string;
@@ -273,7 +274,7 @@ const Timetable = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Print timetable
+  // Print timetable: intentionally preserve the standalone print document and its styling.
   const printTimetable = () => {
     const selectedClass = classes.find(c => c.id === selectedClassId);
     const selectedTeacher = teachers.find(t => t.id === selectedTeacherId);
@@ -622,33 +623,23 @@ const Timetable = () => {
   };
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-            <Calendar className="text-blue-600" />
-            Class Timetable
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400">
-            {currentTerm ? `${currentTerm.name} Schedule` : 'Loading term...'}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+    <div className="ds-page">
+      <PageHeader title="Class Timetable" description={currentTerm ? `${currentTerm.name} Schedule` : 'Loading term...'} />
+        <div className="ds-card ds-toolbar">
           {/* View Toggles - Only for Admin/Teachers/Staff */}
           {['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'].includes(user?.role || '') && (
-            <div className="bg-gray-100 dark:bg-slate-700 p-1 rounded-lg flex">
+            <div className="ds-actions" role="group" aria-label="Timetable view">
               <button
                 onClick={() => setViewMode('CLASS')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'CLASS' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                  }`}
+                aria-pressed={viewMode === 'CLASS'}
+                className={viewMode === 'CLASS' ? 'ds-button-primary' : 'ds-button-secondary'}
               >
                 Class View
               </button>
               <button
                 onClick={() => setViewMode('TEACHER')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'TEACHER' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                  }`}
+                aria-pressed={viewMode === 'TEACHER'}
+                className={viewMode === 'TEACHER' ? 'ds-button-primary' : 'ds-button-secondary'}
               >
                 Teacher View
               </button>
@@ -659,7 +650,8 @@ const Timetable = () => {
               <select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                aria-label="Timetable class"
+                className="ds-select w-full sm:w-auto"
               >
                 <option value="">Select Class</option>
                 {classes.map(c => (
@@ -670,7 +662,8 @@ const Timetable = () => {
             <select
               value={selectedTeacherId}
               onChange={(e) => setSelectedTeacherId(e.target.value)}
-              className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+              aria-label="Timetable teacher"
+              className="ds-select w-full sm:w-auto"
             >
               <option value="">Select Teacher</option>
               {teachers.map(t => (
@@ -682,10 +675,10 @@ const Timetable = () => {
           {(user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER') && (
             <button
               onClick={() => setShowAddModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              className="ds-button-primary"
               disabled={!selectedClassId && !selectedTeacherId}
             >
-              <Plus size={20} />
+              <Plus size={20} aria-hidden="true" />
               Add Period
             </button>
           )}
@@ -695,71 +688,75 @@ const Timetable = () => {
             <>
               <button
                 onClick={exportToCSV}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                className="ds-button-outline"
+                aria-label="Export timetable to CSV"
                 title="Export to CSV"
               >
-                <Download size={18} />
+                <Download size={18} aria-hidden="true" />
                 CSV
               </button>
               <button
                 onClick={printTimetable}
-                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                className="ds-button-outline"
+                aria-label="Print timetable or save as PDF"
                 title="Print / Save as PDF"
               >
-                <Printer size={18} />
+                <Printer size={18} aria-hidden="true" />
                 Print
               </button>
             </>
           )}
         </div>
-      </div>
 
       {/* Timetable Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* Retain the responsive day-card grid; this schedule is not a tabular data table. */}
+      {loading && <p role="status" className="ds-helper">Loading timetable...</p>}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4" aria-busy={loading}>
         {DAYS.map(day => (
-          <div key={day} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col h-full">
-            <div className="bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-gray-700 dark:text-gray-200 text-center">
+          <div key={day} className="ds-surface min-w-0 overflow-hidden flex flex-col h-full">
+            <h2 className="bg-[var(--surface-muted)] px-4 py-3 border-b border-[var(--border-color)] text-sm text-center">
               {day}
-            </div>
+            </h2>
             <div className="p-2 space-y-2 flex-1 min-h-[200px]">
               {getPeriodsForDay(day).length === 0 ? (
-                <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm italic">
+                <div className="h-full flex items-center justify-center ds-helper">
                   No classes
                 </div>
               ) : (
                 getPeriodsForDay(day).map(period => (
-                  <div key={period.id} className="bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 rounded-lg p-3 hover:shadow-md transition-shadow relative group">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="text-xs font-bold text-blue-800 dark:text-blue-300 bg-blue-100 dark:bg-blue-800/50 px-2 py-0.5 rounded">
+                  <div key={period.id} className="ds-surface p-3 relative">
+                    <div className="flex flex-wrap justify-between items-start gap-1 mb-1">
+                      <span className="ds-badge ds-badge-neutral">
                         {period.startTime} - {period.endTime}
                       </span>
                       {(user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER') && (
                         <button
                           onClick={() => handleDeletePeriod(period.id)}
-                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="ds-button-ghost"
+                          aria-label={`Delete ${period.subject.name} on ${day}, ${period.startTime} to ${period.endTime}`}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={16} aria-hidden="true" />
                         </button>
                       )}
                     </div>
-                    <h4 className="font-bold text-gray-800 dark:text-white text-sm mb-1">{period.subject.name}</h4>
-                    <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                    <h3 className="text-sm mb-1 break-words">{period.subject.name}</h3>
+                    <div className="text-xs text-[var(--text-secondary)] flex flex-wrap items-center gap-1 break-words">
                       {viewMode === 'CLASS' ? (
                         <>
-                          <User size={12} />
+                          <User size={12} aria-hidden="true" />
                           {period.teacher?.fullName || 'No Teacher'}
                           {period.isCombined && (
-                            <span className="ml-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-xs">
+                            <span className="ds-badge ds-badge-info">
                               Combined: {period.classNames?.join(', ')}
                             </span>
                           )}
                         </>
                       ) : (
                         <>
-                          <Users size={12} />
+                          <Users size={12} aria-hidden="true" />
                           {period.classNames?.join(', ') || 'No Classes'}
                           {period.isCombined && (
-                            <span className="ml-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-xs">
+                            <span className="ds-badge ds-badge-info">
                               Combined
                             </span>
                           )}
@@ -776,16 +773,17 @@ const Timetable = () => {
 
       {/* Add Period Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Add Timetable Period</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+          <div role="dialog" aria-labelledby="timetable-period-title" className="ds-card w-full max-w-md max-h-[90dvh] overflow-y-auto">
+            <h2 id="timetable-period-title" className="mb-4">Add Timetable Period</h2>
             <form onSubmit={handleAddPeriod} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>
+                  <label htmlFor="period-day" className="ds-label mb-1">Day (required)</label>
                   <select
+                    id="period-day"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-select"
                     value={newPeriod.dayOfWeek}
                     onChange={(e) => setNewPeriod({ ...newPeriod, dayOfWeek: e.target.value })}
                   >
@@ -795,10 +793,11 @@ const Timetable = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                  <label htmlFor="period-subject" className="ds-label mb-1">Subject (required)</label>
                   <select
+                    id="period-subject"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-select"
                     value={newPeriod.subjectId}
                     onChange={(e) => setNewPeriod({ ...newPeriod, subjectId: e.target.value })}
                   >
@@ -812,21 +811,23 @@ const Timetable = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Time</label>
+                  <label htmlFor="period-start" className="ds-label mb-1">Start Time (required)</label>
                   <input
+                    id="period-start"
                     type="time"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                     value={newPeriod.startTime}
                     onChange={(e) => setNewPeriod({ ...newPeriod, startTime: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Time</label>
+                  <label htmlFor="period-end" className="ds-label mb-1">End Time (required)</label>
                   <input
+                    id="period-end"
                     type="time"
                     required
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                     value={newPeriod.endTime}
                     onChange={(e) => setNewPeriod({ ...newPeriod, endTime: e.target.value })}
                   />
@@ -835,26 +836,26 @@ const Timetable = () => {
 
               {viewMode === 'CLASS' ? (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teacher</label>
+                  <p className="ds-label mb-1">Teacher</p>
                   {!newPeriod.subjectId ? (
-                    <div className="px-3 py-2 border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 rounded-lg text-gray-500 dark:text-gray-400 text-sm italic">
+                    <div className="ds-alert ds-badge-neutral">
                       Select a subject first
                     </div>
                   ) : (
-                    <div className="px-3 py-2 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-800 dark:text-blue-300 text-sm flex items-center gap-2">
+                    <div className="ds-alert ds-badge-info">
                       <User size={16} />
                       Teacher will be auto-assigned from Subject Allocation
                     </div>
                   )}
                 </div>
               ) : (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Classes <span className="text-gray-400 dark:text-gray-500 text-xs">(Select one or more for combined sessions)</span>
-                  </label>
-                  <div className="border border-gray-300 dark:border-slate-600 rounded-lg max-h-40 overflow-y-auto p-2 space-y-1 bg-white dark:bg-slate-700">
+                <fieldset className="min-w-0">
+                  <legend className="ds-label mb-1">
+                    Classes <span className="ds-helper">(Select one or more for combined sessions)</span>
+                  </legend>
+                  <div className="ds-surface max-h-40 overflow-y-auto p-2 space-y-1" role="region" aria-label="Classes for this period" tabIndex={0}>
                     {classes.map(c => (
-                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
+                      <label key={c.id} className="flex min-h-11 items-center gap-2 p-2 hover:bg-[var(--surface-muted)] rounded-xl cursor-pointer">
                         <input
                           type="checkbox"
                           checked={newPeriod.classIds.includes(c.id)}
@@ -865,32 +866,32 @@ const Timetable = () => {
                               setNewPeriod({ ...newPeriod, classIds: newPeriod.classIds.filter(id => id !== c.id) });
                             }
                           }}
-                          className="h-4 w-4 rounded border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500"
+                          className="ds-choice"
                         />
                         <span className="text-sm text-gray-700 dark:text-gray-200">{c.name}</span>
                       </label>
                     ))}
                   </div>
                   {newPeriod.classIds.length > 1 && (
-                    <p className="text-xs text-purple-600 mt-1 flex items-center gap-1">
+                    <p className="ds-helper mt-1 flex items-center gap-1">
                       <Users size={12} />
                       Combined session: {newPeriod.classIds.length} classes selected
                     </p>
                   )}
-                </div>
+                </fieldset>
               )}
 
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-outline"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   Add Period
                 </button>

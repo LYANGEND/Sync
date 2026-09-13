@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import prisma from '../utils/prisma';
+import { systemPrisma as prisma } from '../utils/prisma';
 import { comparePassword, generateToken, hashPassword } from '../utils/auth';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { AVAILABLE_FEATURES, getEnabledFeatures } from '../services/tenantFeatureService';
@@ -10,6 +10,36 @@ import {
   checkTenantDomainVerification,
   getPlatformCustomDomainTarget,
 } from '../services/domainVerificationService';
+import { getQueueMetricsSnapshot } from '../queues/queueRuntime';
+import { signTenantFileUrl } from '../services/tenantFileService';
+import { getApiRateLimitRuntimeStatus } from '../middleware/rateLimiter';
+import { getFinancialSnapshotCacheStatus } from '../cache/financialSnapshotCache';
+import { getSmsRateLimitRuntimeStatus } from '../services/smsRateLimitService';
+import {
+  getPricingConfigs,
+  updatePlanPricing,
+  updateBillingSettings as updateBillingSettingsService,
+  getOrCreateTenantBillingProfile,
+  updateTenantBillingProfile,
+  computeTenantInvoicePreview,
+  generateInvoicesForPeriod,
+  listInvoices,
+  issueInvoice,
+  markInvoicePaid,
+  voidInvoice,
+} from '../services/platformBillingService';
+import {
+  getPlatformSmsSettings,
+  updatePlatformSmsSettings as updatePlatformSmsSettingsService,
+} from '../services/platformSmsSettingsService';
+import {
+  getPlatformWhatsappSettings,
+  updatePlatformWhatsappSettings as updatePlatformWhatsappSettingsService,
+} from '../services/platformWhatsappSettingsService';
+import {
+  getPlatformLencoSettings,
+  updatePlatformLencoSettings as updatePlatformLencoSettingsService,
+} from '../services/platformLencoSettingsService';
 
 const tenantPlanSchema = z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']);
 const tenantStatusSchema = z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']);
@@ -428,7 +458,7 @@ export const getPlatformHealth = async (_req: AuthRequest, res: Response) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     const dbLatencyMs = Date.now() - started;
-    const [recentAudit, aiFailures24h] = await Promise.all([
+    const [recentAudit, aiFailures24h, queue] = await Promise.all([
       prisma.auditLog.count({ where: { createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } }),
       prisma.aIUsageLog.count({
         where: {
@@ -436,6 +466,7 @@ export const getPlatformHealth = async (_req: AuthRequest, res: Response) => {
           createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
         },
       }),
+      getQueueMetricsSnapshot(),
     ]);
 
     res.json({
@@ -444,6 +475,10 @@ export const getPlatformHealth = async (_req: AuthRequest, res: Response) => {
       memory: process.memoryUsage(),
       auditEvents24h: recentAudit,
       aiFailures24h,
+      queue,
+      rateLimit: getApiRateLimitRuntimeStatus(),
+      financialSnapshotCache: getFinancialSnapshotCacheStatus(),
+      smsRateLimit: getSmsRateLimitRuntimeStatus(),
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
@@ -656,7 +691,14 @@ export const getTenant = async (req: Request, res: Response) => {
         };
       }),
       admins,
-      settings,
+      settings: settings
+        ? {
+            ...settings,
+            logoUrl: settings.logoUrl
+              ? signTenantFileUrl(settings.logoUrl, tenant.id)
+              : null,
+          }
+        : null,
       recentAudit,
       recentAiUsage,
     });
@@ -1201,5 +1243,285 @@ export const resetPlatformUserPassword = async (req: AuthRequest, res: Response)
       return res.status(400).json({ error: error.errors });
     }
     res.status(500).json({ error: error.message || 'Failed to reset password' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Platform billing — pricing config, tenant billing profiles, invoices.
+// ---------------------------------------------------------------------------
+
+const planPricingUpdateSchema = z.object({
+  pricePerActiveStudent: z.number().min(0).optional(),
+  setupFeeAmount: z.number().min(0).optional(),
+  setupFeeWaivedOnAnnual: z.boolean().optional(),
+  aiIncludedUnits: z.number().int().min(0).optional(),
+  smsIncludedUnits: z.number().int().min(0).optional(),
+  minimumMonthlyBill: z.number().min(0).optional(),
+});
+
+const billingSettingsUpdateSchema = z.object({
+  supportFeeBasic: z.number().min(0).optional(),
+  supportFeePriority: z.number().min(0).optional(),
+  supportFeeDedicated: z.number().min(0).optional(),
+  aiOverageRatePerUnit: z.number().min(0).optional(),
+  smsOverageRatePerUnit: z.number().min(0).optional(),
+  annualDiscountPercent: z.number().min(0).max(100).optional(),
+  trialAiIncludedUnits: z.number().int().min(0).optional(),
+  trialSmsIncludedUnits: z.number().int().min(0).optional(),
+});
+
+const tenantBillingProfileUpdateSchema = z.object({
+  billingCycle: z.enum(['MONTHLY', 'ANNUAL']).optional(),
+  supportTier: z.enum(['BASIC', 'PRIORITY', 'DEDICATED']).optional(),
+  customPricePerStudent: z.number().min(0).nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+const platformSmsSettingsUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.enum(['MSHASTRA', 'TWILIO', 'AFRICASTALKING']).nullable().optional(),
+  apiKey: z.string().max(255).nullable().optional(),
+  apiSecret: z.string().max(255).nullable().optional(),
+  senderId: z.string().max(32).nullable().optional(),
+});
+
+const platformWhatsappSettingsUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.enum(['META', 'TWILIO_WHATSAPP']).nullable().optional(),
+  apiKey: z.string().max(255).nullable().optional(),
+  phoneId: z.string().max(64).nullable().optional(),
+});
+
+const platformLencoSettingsUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  apiKey: z.string().max(255).nullable().optional(),
+  environment: z.enum(['sandbox', 'production']).nullable().optional(),
+  defaultBearer: z.enum(['merchant', 'customer']).nullable().optional(),
+});
+
+const currentBillingPeriod = () => {
+  const now = new Date();
+  const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return { periodStart, periodEnd };
+};
+
+export const listPlatformPricing = async (_req: Request, res: Response) => {
+  try {
+    const config = await getPricingConfigs();
+    res.json(config);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load pricing config' });
+  }
+};
+
+export const updatePlatformPlanPricing = async (req: AuthRequest, res: Response) => {
+  try {
+    const plan = tenantPlanSchema.parse(req.params.plan);
+    const data = planPricingUpdateSchema.parse(req.body);
+    const updated = await updatePlanPricing(plan, data);
+    await logPlatformEvent(req, 'UPDATE_PLAN_PRICING', 'PlatformPlanPricing', updated.id, { plan, data });
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update plan pricing' });
+  }
+};
+
+export const updatePlatformBillingSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = billingSettingsUpdateSchema.parse(req.body);
+    const updated = await updateBillingSettingsService(data);
+    await logPlatformEvent(req, 'UPDATE_BILLING_SETTINGS', 'PlatformBillingSettings', updated.id, data);
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update billing settings' });
+  }
+};
+
+export const getTenantBillingProfileHandler = async (req: Request, res: Response) => {
+  try {
+    const profile = await getOrCreateTenantBillingProfile(req.params.id);
+    res.json(profile);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load billing profile' });
+  }
+};
+
+export const updateTenantBillingProfileHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = tenantBillingProfileUpdateSchema.parse(req.body);
+    const updated = await updateTenantBillingProfile(req.params.id, data);
+    await logPlatformEvent(req, 'UPDATE_TENANT_BILLING_PROFILE', 'TenantBillingProfile', updated.id, {
+      tenantId: req.params.id,
+      data,
+    });
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update billing profile' });
+  }
+};
+
+export const previewTenantBilling = async (req: Request, res: Response) => {
+  try {
+    const { periodStart, periodEnd } = currentBillingPeriod();
+    const preview = await computeTenantInvoicePreview(req.params.id, periodStart, periodEnd);
+    res.json(preview);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to compute billing preview' });
+  }
+};
+
+export const listPlatformInvoicesHandler = async (req: Request, res: Response) => {
+  try {
+    const tenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId : undefined;
+    const status = typeof req.query.status === 'string' ? (req.query.status as any) : undefined;
+    const invoices = await listInvoices({ tenantId, status, take: 200 });
+    res.json(invoices);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load invoices' });
+  }
+};
+
+export const generatePlatformInvoicesHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const { periodStart, periodEnd } = currentBillingPeriod();
+    const invoices = await generateInvoicesForPeriod(periodStart, periodEnd);
+    await logPlatformEvent(req, 'GENERATE_INVOICES', 'PlatformInvoice', null, {
+      periodStart,
+      periodEnd,
+      count: invoices.length,
+    });
+    res.json({ periodStart, periodEnd, count: invoices.length, invoices });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to generate invoices' });
+  }
+};
+
+export const issuePlatformInvoiceHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const invoice = await issueInvoice(req.params.id);
+    await logPlatformEvent(req, 'ISSUE_INVOICE', 'PlatformInvoice', invoice.id, { tenantId: invoice.tenantId });
+    res.json(invoice);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to issue invoice' });
+  }
+};
+
+export const markPlatformInvoicePaidHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const invoice = await markInvoicePaid(req.params.id);
+    await logPlatformEvent(req, 'MARK_INVOICE_PAID', 'PlatformInvoice', invoice.id, { tenantId: invoice.tenantId });
+    res.json(invoice);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to mark invoice paid' });
+  }
+};
+
+export const voidPlatformInvoiceHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const invoice = await voidInvoice(req.params.id);
+    await logPlatformEvent(req, 'VOID_INVOICE', 'PlatformInvoice', invoice.id, { tenantId: invoice.tenantId });
+    res.json(invoice);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to void invoice' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Platform-wide fallback SMS provider settings.
+// ---------------------------------------------------------------------------
+
+export const getPlatformSmsSettingsHandler = async (_req: Request, res: Response) => {
+  try {
+    const settings = await getPlatformSmsSettings();
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load SMS settings' });
+  }
+};
+
+export const updatePlatformSmsSettingsHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = platformSmsSettingsUpdateSchema.parse(req.body);
+    const updated = await updatePlatformSmsSettingsService(data);
+    await logPlatformEvent(req, 'UPDATE_PLATFORM_SMS_SETTINGS', 'PlatformSmsSettings', updated.id, {
+      enabled: updated.enabled,
+      provider: updated.provider,
+    });
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update SMS settings' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Platform-wide fallback WhatsApp provider settings.
+// ---------------------------------------------------------------------------
+
+export const getPlatformWhatsappSettingsHandler = async (_req: Request, res: Response) => {
+  try {
+    const settings = await getPlatformWhatsappSettings();
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load WhatsApp settings' });
+  }
+};
+
+export const updatePlatformWhatsappSettingsHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = platformWhatsappSettingsUpdateSchema.parse(req.body);
+    const updated = await updatePlatformWhatsappSettingsService(data);
+    await logPlatformEvent(req, 'UPDATE_PLATFORM_WHATSAPP_SETTINGS', 'PlatformWhatsappSettings', updated.id, {
+      enabled: updated.enabled,
+      provider: updated.provider,
+    });
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update WhatsApp settings' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Platform-wide fallback Lenco payment gateway settings.
+// ---------------------------------------------------------------------------
+
+export const getPlatformLencoSettingsHandler = async (_req: Request, res: Response) => {
+  try {
+    const settings = await getPlatformLencoSettings();
+    res.json(settings);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load Lenco settings' });
+  }
+};
+
+export const updatePlatformLencoSettingsHandler = async (req: AuthRequest, res: Response) => {
+  try {
+    const data = platformLencoSettingsUpdateSchema.parse(req.body);
+    const updated = await updatePlatformLencoSettingsService(data);
+    await logPlatformEvent(req, 'UPDATE_PLATFORM_LENCO_SETTINGS', 'PlatformLencoSettings', updated.id, {
+      enabled: updated.enabled,
+      environment: updated.environment,
+    });
+    res.json(updated);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update Lenco settings' });
   }
 };

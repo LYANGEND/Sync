@@ -1,6 +1,18 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { getCurrentTenantId } from '../middleware/tenantContext';
+import { signTenantFileUrl } from '../services/tenantFileService';
+
+const withSignedSchoolLogo = <T extends { logoUrl: string | null }>(settings: T | null): T | null => {
+  if (!settings?.logoUrl) return settings;
+  const tenantId = getCurrentTenantId();
+  if (!tenantId) throw new Error('Tenant context required for school logo access');
+  return {
+    ...settings,
+    logoUrl: signTenantFileUrl(settings.logoUrl, tenantId),
+  };
+};
 
 export const generateStudentReport = async (req: Request, res: Response) => {
   try {
@@ -49,7 +61,7 @@ export const generateStudentReport = async (req: Request, res: Response) => {
       })),
       totalScore,
       averageScore,
-      school: settings
+      school: withSignedSchoolLogo(settings)
     });
 
   } catch (error) {
@@ -109,7 +121,7 @@ export const getStudentReport = async (req: Request, res: Response) => {
       })),
       totalScore,
       averageScore,
-      school: settings
+      school: withSignedSchoolLogo(settings)
     });
 
   } catch (error) {

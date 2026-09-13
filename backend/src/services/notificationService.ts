@@ -508,12 +508,189 @@ ${schoolName}
   return { subject, text, html, sms };
 }
 
+// ─── Platform (SaaS) billing notifications — sent to tenant admins, not parents ───
+
+// Platform Invoice Issued Email Template
+export function generatePlatformInvoiceIssuedEmail(
+  tenantName: string,
+  periodStart: Date,
+  periodEnd: Date,
+  activeStudentCount: number,
+  totalAmount: number,
+  dueDate: Date,
+  currency: string = 'ZMW'
+): { subject: string; text: string; html: string } {
+  const formattedTotal = totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const period = `${periodStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} – ${periodEnd.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  const formattedDueDate = dueDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const subject = `Your Sync invoice for ${period} — ${currency} ${formattedTotal} due`;
+
+  const text = `
+Hello ${tenantName} team,
+
+Your Sync School OS invoice for the billing period ${period} has been issued.
+
+Active students billed: ${activeStudentCount}
+Total due: ${currency} ${formattedTotal}
+Due date: ${formattedDueDate}
+
+Please arrange payment before the due date to keep your workspace in good standing.
+
+Best regards,
+The Sync Team
+  `.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice Issued</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f1f5f9; line-height: 1.6;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f1f5f9;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #334155 100%); padding: 40px 40px 30px;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">Sync School OS</h1>
+              <p style="margin: 8px 0 0; color: rgba(255,255,255,0.85); font-size: 15px;">Invoice issued for ${tenantName}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #2563eb; padding: 25px; text-align: center;">
+              <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Amount Due</p>
+              <p style="margin: 8px 0 0; color: #ffffff; font-size: 42px; font-weight: 700;">${currency} ${formattedTotal}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <p style="margin: 0 0 20px; color: #334155; font-size: 16px;">Hello ${tenantName} team,</p>
+              <p style="margin: 0 0 30px; color: #475569; font-size: 15px;">Your Sync School OS invoice for the billing period below has been issued.</p>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Billing period</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #1e293b; font-size: 14px;">${period}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0;"><span style="color: #64748b; font-size: 14px;">Active students billed</span></td>
+                        <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: right;"><strong style="color: #1e293b; font-size: 14px;">${activeStudentCount}</strong></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 12px 0;"><span style="color: #64748b; font-size: 14px;">Due date</span></td>
+                        <td style="padding: 12px 0; text-align: right;"><strong style="color: #b91c1c; font-size: 15px;">${formattedDueDate}</strong></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 30px 0 0; color: #475569; font-size: 15px;">Please arrange payment before the due date to keep your workspace in good standing. Reply to this email if you have any billing questions.</p>
+              <p style="margin: 20px 0 0; color: #475569; font-size: 15px;">Best regards,<br><strong style="color: #1e293b;">The Sync Team</strong></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; color: #94a3b8; font-size: 12px;">This is an automated billing notice.</p>
+              <p style="margin: 8px 0 0; color: #94a3b8; font-size: 12px;">© ${new Date().getFullYear()} Sync School OS. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  return { subject, text, html };
+}
+
+// Platform Invoice Paid Email Template
+export function generatePlatformInvoicePaidEmail(
+  tenantName: string,
+  periodStart: Date,
+  periodEnd: Date,
+  totalAmount: number,
+  currency: string = 'ZMW'
+): { subject: string; text: string; html: string } {
+  const formattedTotal = totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 });
+  const period = `${periodStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} – ${periodEnd.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+
+  const subject = `✅ Payment received — ${currency} ${formattedTotal}`;
+
+  const text = `
+Hello ${tenantName} team,
+
+We've received your payment of ${currency} ${formattedTotal} for the billing period ${period}. Thank you!
+
+Best regards,
+The Sync Team
+  `.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Received</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f1f5f9; line-height: 1.6;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f1f5f9;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #334155 100%); padding: 40px 40px 30px;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">Sync School OS</h1>
+              <p style="margin: 8px 0 0; color: rgba(255,255,255,0.85); font-size: 15px;">Payment confirmation for ${tenantName}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #10b981; padding: 25px; text-align: center;">
+              <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Amount Received</p>
+              <p style="margin: 8px 0 0; color: #ffffff; font-size: 42px; font-weight: 700;">${currency} ${formattedTotal}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <p style="margin: 0 0 20px; color: #334155; font-size: 16px;">Hello ${tenantName} team,</p>
+              <p style="margin: 0 0 20px; color: #475569; font-size: 15px;">We've received your payment for the billing period <strong style="color: #1e293b;">${period}</strong>. Thank you for keeping your account current!</p>
+              <p style="margin: 20px 0 0; color: #475569; font-size: 15px;">Best regards,<br><strong style="color: #1e293b;">The Sync Team</strong></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0; color: #94a3b8; font-size: 12px;">This is an automated billing notice.</p>
+              <p style="margin: 8px 0 0; color: #94a3b8; font-size: 12px;">© ${new Date().getFullYear()} Sync School OS. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  return { subject, text, html };
+}
+
 // Create a single notification in the database + auto-fire push
 export async function createNotification(
   userId: string,
   title: string,
   message: string,
-  type: 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR' = 'INFO'
+  type: 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR' = 'INFO',
+  options?: { awaitPush?: boolean; pushSource?: string },
 ): Promise<boolean> {
   try {
     await prisma.notification.create({
@@ -526,9 +703,15 @@ export async function createNotification(
       },
     });
 
-    // Auto-fire web push notification in background
-    sendPushToUser(userId, title, message, { source: 'notification_auto_push' })
-      .catch(err => console.error('Auto-push failed:', err));
+    const push = sendPushToUser(userId, title, message, {
+      source: options?.pushSource || 'notification_auto_push',
+    });
+    if (options?.awaitPush) {
+      await push;
+    } else {
+      // Existing request paths remain non-blocking; queue workers opt in to awaiting it.
+      push.catch(err => console.error('Auto-push failed:', err));
+    }
 
     return true;
   } catch (error) {
@@ -573,4 +756,6 @@ export default {
   generatePaymentReceiptEmail,
   generateFeeReminderEmail,
   generateInvoiceIssuedEmail,
+  generatePlatformInvoiceIssuedEmail,
+  generatePlatformInvoicePaidEmail,
 };

@@ -4,6 +4,18 @@ import { BranchStatus, TransferEntityType } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { getCurrentTenantId } from '../middleware/tenantContext';
+import { signTenantFileUrl } from '../services/tenantFileService';
+
+const withSignedBranchLogo = <T extends { logoUrl?: string | null }>(branch: T): T => {
+    if (!branch.logoUrl) return branch;
+    const tenantId = getCurrentTenantId();
+    if (!tenantId) throw new Error('Tenant context required for branch logo access');
+    return {
+        ...branch,
+        logoUrl: signTenantFileUrl(branch.logoUrl, tenantId)
+    };
+};
 
 // Schemas
 const createBranchSchema = z.object({
@@ -54,7 +66,7 @@ export const createBranch = async (req: Request, res: Response) => {
             data: { name, code, address, phone, email, isMain, status, capacity, parentBranchId }
         });
 
-        res.status(201).json(branch);
+        res.status(201).json(withSignedBranchLogo(branch));
     } catch (error) {
         console.error('Create branch error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -85,7 +97,7 @@ export const getAllBranches = async (req: AuthRequest, res: Response) => {
                 }
             }
         });
-        res.json(branches);
+        res.json(branches.map(withSignedBranchLogo));
     } catch (error) {
         console.error('Get branches error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -114,7 +126,7 @@ export const getBranchById = async (req: Request, res: Response) => {
             return res.status(404).json({ message: 'Branch not found' });
         }
 
-        res.json(branch);
+        res.json(withSignedBranchLogo(branch));
     } catch (error) {
         console.error('Get branch error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -145,7 +157,7 @@ export const updateBranch = async (req: Request, res: Response) => {
             data
         });
 
-        res.json(branch);
+        res.json(withSignedBranchLogo(branch));
     } catch (error) {
         console.error('Update branch error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -240,7 +252,7 @@ export const getBranchAnalytics = async (req: Request, res: Response) => {
             : null;
 
         res.json({
-            branch,
+            branch: withSignedBranchLogo(branch),
             stats: {
                 students: studentCount,
                 users: userCount,
@@ -261,6 +273,8 @@ export const getBranchAnalytics = async (req: Request, res: Response) => {
 export const getBranchFinancialSummary = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const tenantId = (req as AuthRequest).user?.tenantId;
+        if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
         const { startDate, endDate } = req.query;
 
         const branch = await prisma.branch.findUnique({ where: { id } });
@@ -312,6 +326,7 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
                     COUNT(*) as count
                 FROM payments
                 WHERE "branchId" = ${id}
+                AND "tenantId" = ${tenantId}
                 AND status = 'COMPLETED'
                 AND "paymentDate" >= NOW() - INTERVAL '12 months'
                 GROUP BY DATE_TRUNC('month', "paymentDate")

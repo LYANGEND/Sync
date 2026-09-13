@@ -16,6 +16,7 @@ import {
   markMessageRead,
   searchUsers,
   subscribeToPush,
+  unsubscribeFromPush,
   getSentCommunications,
   getCommunicationStatsHandler,
   getAnnouncementHistory,
@@ -37,6 +38,7 @@ router.use(authenticateToken);
 
 // Push Notification routes
 router.post('/push/subscribe', subscribeToPush);
+router.delete('/push/subscribe', unsubscribeFromPush);
 
 // Notification routes
 router.get('/notifications', getMyNotifications);

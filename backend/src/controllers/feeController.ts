@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { syncClassFeesToStudents } from '../services/classFeeAssignmentService';
+import { getCurrentTenantId } from '../middleware/tenantContext';
+import { signTenantFileUrl } from '../services/tenantFileService';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 const feeTemplateSchema = z.object({
   name: z.string().min(2),
@@ -47,6 +50,12 @@ export const createFeeTemplate = async (req: Request, res: Response) => {
         categoryId,
         applicableGrade,
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: template.tenantId,
+      scope: 'tenant',
+      source: 'fee-template.created',
     });
 
     res.status(201).json(template);
@@ -205,6 +214,12 @@ export const updateFeeTemplate = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: template.tenantId,
+      scope: 'tenant',
+      source: 'fee-template.updated',
+    });
+
     res.json(template);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -233,8 +248,14 @@ export const deleteFeeTemplate = async (req: Request, res: Response) => {
       });
     }
 
-    await prisma.feeTemplate.delete({
+    const template = await prisma.feeTemplate.delete({
       where: { id },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: template.tenantId,
+      scope: 'tenant',
+      source: 'fee-template.deleted',
     });
 
     res.status(204).send();
@@ -275,6 +296,16 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
       data: dataToCreate,
       skipDuplicates: true,
     });
+
+    if (result.count > 0) {
+      const tenantId = getCurrentTenantId();
+      if (!tenantId) throw new Error('Tenant context required for fee template import');
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId,
+        scope: 'tenant',
+        source: 'fee-template.bulk-created',
+      });
+    }
 
     res.status(201).json({
       message: `Successfully imported ${result.count} fee templates`,
@@ -361,12 +392,15 @@ export const getStudentStatement = async (req: Request, res: Response) => {
       }))
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+    const tenantId = getCurrentTenantId();
+    if (!tenantId) return res.status(401).json({ error: 'Tenant context required' });
+
     res.json({
       school: {
         name: settings?.schoolName || 'School Name',
         address: settings?.schoolAddress || '',
         email: settings?.schoolEmail || '',
-        logoUrl: settings?.logoUrl || ''
+        logoUrl: settings?.logoUrl ? signTenantFileUrl(settings.logoUrl, tenantId) : ''
       },
       student: {
         name: `${student.firstName} ${student.lastName}`,

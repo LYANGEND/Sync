@@ -1,0 +1,141 @@
+name: Backend Remediation Task
+description: Create a traceable remediation issue linked to finding, task, tests, and milestone.
+title: "[T-XXX] <short task title>"
+labels:
+  - remediation
+  - backend
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for tasks from docs/backend-remediation-traceable-plan.md.
+
+        Required traceability:
+        - Task ID (T-XXX)
+        - Finding IDs (F-XXX)
+        - Test IDs (TV-XXX)
+        - Milestone (M-X)
+
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: Traceable task ID from the plan.
+      placeholder: T-001
+    validations:
+      required: true
+
+  - type: input
+    id: title_short
+    attributes:
+      label: Task Title
+      description: One line action-oriented title.
+      placeholder: Add unique constraint for class identity per tenant and term
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      options:
+        - WS-1 Correctness and Bug Fixes
+        - WS-2 Query and Endpoint Performance
+        - WS-3 Queue and Async Reliability
+        - WS-4 Tenant Isolation Hardening
+    validations:
+      required: true
+
+  - type: input
+    id: finding_ids
+    attributes:
+      label: Finding IDs
+      description: Comma-separated list.
+      placeholder: F-001, F-004
+    validations:
+      required: true
+
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone
+      description: Milestone in the trace plan.
+      placeholder: M-1
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem Statement
+      description: What issue does this task solve and why it matters.
+      placeholder: Explain current behavior and risk.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation_plan
+    attributes:
+      label: Implementation Plan
+      description: Concrete steps to implement.
+      placeholder: |
+        1. Update schema
+        2. Add migration
+        3. Refactor controller
+        4. Add tests
+    validations:
+      required: true
+
+  - type: input
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Upstream task IDs that must complete first.
+      placeholder: T-001
+
+  - type: input
+    id: test_ids
+    attributes:
+      label: Verification Test IDs
+      description: Comma-separated test IDs from plan.
+      placeholder: TV-001, TV-002
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Checklist of measurable completion criteria.
+      value: |
+        - [ ] Code changes implemented
+        - [ ] Automated tests added or updated
+        - [ ] Acceptance criteria met
+        - [ ] Observability/metrics updated if applicable
+        - [ ] Rollback note documented
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of Scope
+      description: Explicitly list what this issue will not cover.
+
+  - type: textarea
+    id: rollout_notes
+    attributes:
+      label: Rollout and Risk Notes
+      description: Flag rollout strategy, feature flags, and rollback plan.
+
+  - type: checkboxes
+    id: governance
+    attributes:
+      label: Governance Checks
+      options:
+        - label: PR description includes trace tags (finding/task/test IDs)
+          required: true
+        - label: Before and after behavior documented
+          required: true
+        - label: Tenant isolation impact assessed
+          required: true

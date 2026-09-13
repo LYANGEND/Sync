@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // BUDGET MANAGEMENT
@@ -126,6 +127,12 @@ export const createBudget = async (req: Request, res: Response) => {
       include: { items: true },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: budget.tenantId,
+      branchId: budget.branchId,
+      source: 'budget.created',
+    });
+
     res.status(201).json(budget);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -147,29 +154,37 @@ export const updateBudget = async (req: Request, res: Response) => {
 
     if (data.items) {
       // Delete old items and create new ones
-      await prisma.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
       const totalBudget = data.items.reduce((sum, item) => sum + item.allocated, 0);
 
-      const budget = await prisma.budget.update({
-        where: { id: req.params.id },
-        data: {
-          name: data.name,
-          period: data.period,
-          year: data.year,
-          startDate: data.startDate,
-          endDate: data.endDate,
-          totalBudget,
-          notes: data.notes,
-          items: {
-            create: data.items.map(item => ({
-              category: item.category,
-              description: item.description,
-              allocated: item.allocated,
-              remaining: item.allocated,
-            })),
+      const budget = await prisma.$transaction(async transaction => {
+        await transaction.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
+        return transaction.budget.update({
+          where: { id: req.params.id },
+          data: {
+            name: data.name,
+            period: data.period,
+            year: data.year,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            totalBudget,
+            notes: data.notes,
+            items: {
+              create: data.items!.map(item => ({
+                category: item.category,
+                description: item.description,
+                allocated: item.allocated,
+                remaining: item.allocated,
+              })),
+            },
           },
-        },
-        include: { items: true },
+          include: { items: true },
+        });
+      });
+
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: budget.tenantId,
+        branchId: budget.branchId,
+        source: 'budget.updated',
       });
       return res.json(budget);
     }
@@ -178,6 +193,12 @@ export const updateBudget = async (req: Request, res: Response) => {
       where: { id: req.params.id },
       data: { name: data.name, period: data.period, year: data.year, notes: data.notes },
       include: { items: true },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: budget.tenantId,
+      branchId: budget.branchId,
+      source: 'budget.updated',
     });
 
     res.json(budget);
@@ -196,6 +217,11 @@ export const activateBudget = async (req: Request, res: Response) => {
       where: { id: req.params.id },
       data: { status: 'ACTIVE', approvedBy: user.userId, approvedAt: new Date() },
     });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: budget.tenantId,
+      branchId: budget.branchId,
+      source: 'budget.activated',
+    });
     res.json(budget);
   } catch (error) {
     res.status(500).json({ error: 'Failed to activate budget' });
@@ -207,6 +233,11 @@ export const closeBudget = async (req: Request, res: Response) => {
     const budget = await prisma.budget.update({
       where: { id: req.params.id },
       data: { status: 'CLOSED' },
+    });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: budget.tenantId,
+      branchId: budget.branchId,
+      source: 'budget.closed',
     });
     res.json(budget);
   } catch (error) {
@@ -222,8 +253,16 @@ export const deleteBudget = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Can only delete draft budgets' });
     }
 
-    await prisma.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
-    await prisma.budget.delete({ where: { id: req.params.id } });
+    await prisma.$transaction([
+      prisma.budgetItem.deleteMany({ where: { budgetId: req.params.id } }),
+      prisma.budget.delete({ where: { id: req.params.id } }),
+    ]);
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: existing.tenantId,
+      branchId: existing.branchId,
+      source: 'budget.deleted',
+    });
 
     res.json({ message: 'Budget deleted' });
   } catch (error) {

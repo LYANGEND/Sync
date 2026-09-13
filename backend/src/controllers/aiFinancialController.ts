@@ -1,9 +1,15 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { getCurrentTenantId } from '../middleware/tenantContext';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import * as convoService from '../services/conversationService';
+import { validateAITenantReferences } from '../services/aiTenantBoundary';
+import {
+  getOrBuildFinancialSnapshot,
+  invalidateFinancialSnapshotAfterMutation,
+} from '../cache/financialSnapshotCache';
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -11,6 +17,10 @@ import {
   getAgedReceivables,
   getBalanceSheet,
 } from '../services/accountingService';
+import {
+  getFinanceOverviewAggregates,
+  getRecentMonthlyRevenueTrend,
+} from '../services/financialAggregationService';
 
 // ========================================
 // AI FINANCIAL ADVISOR
@@ -21,6 +31,8 @@ import {
  * so the AI can answer any question about the school's financial state.
  */
 async function gatherFinancialSnapshot(branchId?: string) {
+  const tenantId = getCurrentTenantId();
+  if (!tenantId) throw new Error('Tenant context required for financial snapshot');
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -65,10 +77,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
       where: { status: 'COMPLETED', paymentDate: { gte: thisYearStart }, ...branchFilter },
       _sum: { amount: true }, _count: true,
     }),
-    prisma.payment.findMany({
-      where: { status: 'COMPLETED', paymentDate: { gte: new Date(currentYear, currentMonth - 6, 1) }, ...branchFilter },
-      select: { paymentDate: true, amount: true },
-    }),
+    getRecentMonthlyRevenueTrend(new Date(currentYear, currentMonth - 6, 1), branchId),
     // Recent 30 individual payments
     prisma.payment.findMany({
       where: { ...branchFilter },
@@ -82,7 +91,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
     }),
     prisma.student.count({ where: branchFilter }),
     prisma.student.count({ where: { status: 'ACTIVE', ...branchFilter } }),
-    prisma.studentFeeStructure.aggregate({ _sum: { amountDue: true, amountPaid: true } }),
+    getFinanceOverviewAggregates(branchId),
     getAgedReceivables(branchId).catch(() => null),
   ]);
 
@@ -201,7 +210,11 @@ async function gatherFinancialSnapshot(branchId?: string) {
     JOIN students s ON sf."studentId" = s.id
     JOIN classes c ON s."classId" = c.id
     JOIN fee_templates ft ON sf."feeTemplateId" = ft.id
-    WHERE sf."amountPaid" < sf."amountDue"
+    WHERE sf."tenantId" = ${tenantId}
+      AND s."tenantId" = ${tenantId}
+      AND c."tenantId" = ${tenantId}
+      AND ft."tenantId" = ${tenantId}
+      AND sf."amountPaid" < sf."amountDue"
     ORDER BY (sf."amountDue" - sf."amountPaid") DESC
     LIMIT 50
   `.catch(() => []);
@@ -433,13 +446,6 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // BUILD THE COMPLETE SNAPSHOT
   // ================================================================
 
-  // Monthly revenue trend
-  const monthlyTrend: Record<string, number> = {};
-  for (const p of monthlyRevenueTrend) {
-    const key = `${p.paymentDate.getFullYear()}-${String(p.paymentDate.getMonth() + 1).padStart(2, '0')}`;
-    monthlyTrend[key] = (monthlyTrend[key] || 0) + Number(p.amount);
-  }
-
   // Fee template collection map
   const templateCollectionMap: Record<string, any> = {};
   for (const fc of feeCollectionByTemplate) {
@@ -456,8 +462,8 @@ async function gatherFinancialSnapshot(branchId?: string) {
   const expensesThisMonth = Number(totalExpensesThisMonth._sum.totalAmount || 0);
   const expensesLastMonth = Number(totalExpensesLastMonth._sum.totalAmount || 0);
   const expensesYTD = Number(totalExpensesThisYear._sum.totalAmount || 0);
-  const totalFeesDue = Number(totalFeesAssigned._sum.amountDue || 0);
-  const totalFeesPaid = Number(totalFeesAssigned._sum.amountPaid || 0);
+  const totalFeesDue = totalFeesAssigned.totalFeesAssigned;
+  const totalFeesPaid = totalFeesAssigned.totalFeeAmountPaid;
   const collectionRate = totalFeesDue > 0 ? ((totalFeesPaid / totalFeesDue) * 100).toFixed(1) : '0';
   const revenueGrowth = revenueLastMonth > 0
     ? (((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100).toFixed(1)
@@ -483,9 +489,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
       byMethod: revenueByMethod.map((r: any) => ({
         method: r.method, total: Number(r._sum.amount), count: r._count,
       })),
-      monthlyTrend: Object.entries(monthlyTrend)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([month, total]) => ({ month, total })),
+      monthlyTrend: monthlyRevenueTrend,
     },
 
     // ---- RECENT PAYMENTS (individual records) ----
@@ -768,6 +772,16 @@ async function gatherFinancialSnapshot(branchId?: string) {
   };
 }
 
+const getCachedFinancialSnapshot = async (branchId?: string) => {
+  const tenantId = getCurrentTenantId();
+  if (!tenantId) throw new Error('Tenant context required for financial snapshot cache');
+  return getOrBuildFinancialSnapshot(
+    tenantId,
+    branchId,
+    () => gatherFinancialSnapshot(branchId),
+  );
+};
+
 /**
  * Build the financial advisor system prompt — comprehensive with all data sections
  */
@@ -915,7 +929,8 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { question, conversationHistory } = req.body;
+    const { question } = req.body;
+    let conversationId: string | null = req.body.conversationId || null;
 
     if (!question?.trim()) {
       return res.status(400).json({ error: 'Question is required' });
@@ -929,9 +944,27 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
       });
     }
 
+    // Conversation context must come from an owned server-side conversation,
+    // never from client-supplied role/content history.
+    let conversationHistory: Array<{ role: string; content: string }> = [];
+    if (conversationId) {
+      const existingConversation = await convoService.getConversation(
+        conversationId,
+        user.userId,
+        'financial-advisor',
+      );
+      if (!existingConversation) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+      conversationHistory = existingConversation.messages.slice(-10).map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+    }
+
     // Gather financial data
     const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
-    const snapshot = await gatherFinancialSnapshot(branchId);
+    const snapshot = await getCachedFinancialSnapshot(branchId);
 
     // Build messages
     const systemPrompt = buildFinancialAdvisorPrompt(snapshot);
@@ -940,9 +973,8 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
     ];
 
     // Add conversation history (last 10 messages)
-    if (conversationHistory && Array.isArray(conversationHistory)) {
-      const recentHistory = conversationHistory.slice(-10);
-      for (const msg of recentHistory) {
+    if (conversationHistory.length) {
+      for (const msg of conversationHistory) {
         messages.push({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
@@ -973,12 +1005,11 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
     });
 
     // Auto-save to conversation if conversationId provided, or create new one
-    let conversationId = req.body.conversationId || null;
     try {
       if (conversationId) {
         // Append to existing conversation
-        await convoService.saveMessage(conversationId, 'user', question);
-        await convoService.saveMessage(conversationId, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
+        await convoService.saveMessage(conversationId, user.userId, 'user', question);
+        await convoService.saveMessage(conversationId, user.userId, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
         // Update title if this is the first real exchange (title is still default)
         const convoData = await prisma.aIConversation.findUnique({ where: { id: conversationId } });
         if (convoData && convoData.title === 'New Conversation') {
@@ -989,8 +1020,8 @@ export const getAIFinancialAdvice = async (req: Request, res: Response) => {
         // Create a new conversation with initial messages
         const shortTitle = question.length > 60 ? question.slice(0, 57) + '...' : question;
         const convo = await convoService.createConversation(user.userId, 'financial-advisor', shortTitle);
-        await convoService.saveMessage(convo.id, 'user', question);
-        await convoService.saveMessage(convo.id, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
+        await convoService.saveMessage(convo.id, user.userId, 'user', question);
+        await convoService.saveMessage(convo.id, user.userId, 'assistant', aiResponse.content, aiResponse.tokensUsed || undefined);
         conversationId = convo.id;
       }
     } catch (saveErr: any) {
@@ -1047,7 +1078,7 @@ export const getFinancialSnapshot = async (req: Request, res: Response) => {
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
     const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
-    const snapshot = await gatherFinancialSnapshot(branchId);
+    const snapshot = await getCachedFinancialSnapshot(branchId);
 
     res.json(snapshot);
   } catch (error: any) {
@@ -1073,7 +1104,7 @@ export const getQuickInsights = async (req: Request, res: Response) => {
     }
 
     const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
-    const snapshot = await gatherFinancialSnapshot(branchId);
+    const snapshot = await getCachedFinancialSnapshot(branchId);
     const systemPrompt = buildFinancialAdvisorPrompt(snapshot);
 
     const startTime = Date.now();
@@ -1154,7 +1185,7 @@ export const getConversation = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    const result = await convoService.getConversation(req.params.id, user.userId);
+    const result = await convoService.getConversation(req.params.id, user.userId, 'financial-advisor');
     if (!result) return res.status(404).json({ error: 'Conversation not found' });
     res.json(result);
   } catch (error: any) {
@@ -1173,7 +1204,7 @@ export const updateConversation = async (req: Request, res: Response) => {
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
     const { title } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
-    const updated = await convoService.updateConversation(req.params.id, user.userId, title);
+    const updated = await convoService.updateConversation(req.params.id, user.userId, title, 'financial-advisor');
     if (!updated) return res.status(404).json({ error: 'Conversation not found' });
     res.json(updated);
   } catch (error: any) {
@@ -1190,7 +1221,7 @@ export const deleteConversation = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    const deleted = await convoService.deleteConversation(req.params.id, user.userId);
+    const deleted = await convoService.deleteConversation(req.params.id, user.userId, 'financial-advisor');
     if (!deleted) return res.status(404).json({ error: 'Conversation not found' });
     res.json({ message: 'Conversation deleted' });
   } catch (error: any) {
@@ -1216,6 +1247,7 @@ export const executeAIAction = async (req: Request, res: Response) => {
 
     const { type, params } = req.body;
     if (!type) return res.status(400).json({ error: 'Action type is required' });
+    await validateAITenantReferences(params || {});
 
     const branchId = user.branchId || undefined;
 
@@ -1240,6 +1272,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
             notes: notes || null,
             branchId: branchId || null,
           },
+        });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: vendor.tenantId,
+          branchId: vendor.branchId,
+          source: 'ai-action.vendor-created',
         });
         return res.json({ success: true, message: `Vendor "${vendor.name}" created successfully`, created: 'vendor', data: vendor });
       }
@@ -1279,6 +1316,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
             branchId: branchId || null,
           },
         });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: expense.tenantId,
+          branchId: expense.branchId,
+          source: 'ai-action.expense-created',
+        });
         return res.json({ success: true, message: `Expense ${expense.expenseNumber} created (ZMW ${total.toFixed(2)}) — pending approval`, created: 'expense', data: expense });
       }
 
@@ -1308,6 +1350,7 @@ export const executeAIAction = async (req: Request, res: Response) => {
         const subtotal = items.reduce((sum: number, i: any) => sum + (Number(i.quantity || 1) * Number(i.unitPrice)), 0);
         const totalAmount = subtotal - disc;
         const invoiceNumber = await generateSequenceNumber('INV', branchId);
+        const invoiceBranchId = branchId || student.branchId || undefined;
 
         const invoice = await prisma.invoice.create({
           data: {
@@ -1323,7 +1366,7 @@ export const executeAIAction = async (req: Request, res: Response) => {
             balanceDue: totalAmount,
             status: 'SENT',
             notes: invNotes || null,
-            branchId: branchId || null,
+            branchId: invoiceBranchId || null,
             items: {
               create: items.map((i: any) => ({
                 description: i.description,
@@ -1333,6 +1376,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
               })),
             },
           },
+        });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: invoice.tenantId,
+          branchId: invoice.branchId,
+          source: 'ai-action.invoice-created',
         });
         return res.json({ success: true, message: `Invoice ${invoice.invoiceNumber} created for ${studentName} — ZMW ${totalAmount.toFixed(2)}`, created: 'invoice', data: invoice });
       }
@@ -1356,6 +1404,7 @@ export const executeAIAction = async (req: Request, res: Response) => {
         if (!payStudent) return res.status(404).json({ error: `Student "${payStudentName}" not found` });
 
         const txnId = `TXN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        const paymentBranchId = branchId || payStudent.branchId || undefined;
         const payment = await prisma.payment.create({
           data: {
             transactionId: txnId,
@@ -1365,8 +1414,13 @@ export const executeAIAction = async (req: Request, res: Response) => {
             notes: payNotes || `AI-recorded payment`,
             status: 'COMPLETED',
             recordedByUserId: user.userId,
-            branchId: branchId || null,
+            branchId: paymentBranchId || null,
           },
+        });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: payment.tenantId,
+          branchId: payment.branchId,
+          source: 'ai-action.payment-created',
         });
         return res.json({ success: true, message: `Payment ${txnId} recorded — ZMW ${Number(payAmt).toFixed(2)} from ${payStudentName} (${method})`, created: 'payment', data: payment });
       }
@@ -1401,6 +1455,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
               })),
             },
           },
+        });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: budget.tenantId,
+          branchId: budget.branchId,
+          source: 'ai-action.budget-created',
         });
         return res.json({ success: true, message: `Budget "${budget.name}" created — ZMW ${totalBudget.toFixed(2)} total (${budgetItems.length} categories)`, created: 'budget', data: budget });
       }
@@ -1438,6 +1497,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
             data: { balance: { increment: balanceChange } },
           }),
         ]);
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: txn.tenantId,
+          scope: 'tenant',
+          source: 'ai-action.petty-cash-recorded',
+        });
         return res.json({ success: true, message: `Petty cash ${pcType.toLowerCase()} of ZMW ${Number(pcAmt).toFixed(2)} recorded for "${account.name}"`, created: 'petty_cash_transaction', data: txn });
       }
 
@@ -1468,6 +1532,11 @@ export const executeAIAction = async (req: Request, res: Response) => {
             academicTermId: term.id,
             categoryId,
           },
+        });
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: feeTemplate.tenantId,
+          scope: 'tenant',
+          source: 'ai-action.fee-template-created',
         });
         return res.json({ success: true, message: `Fee template "${feeTemplate.name}" created — ZMW ${Number(feeAmt).toFixed(2)} for grade ${applicableGrade}`, created: 'fee_template', data: feeTemplate });
       }
@@ -1769,6 +1838,16 @@ export const autoAllocatePayments = async (req: Request, res: Response) => {
           amount: amt,
         });
       }
+    }
+
+    if (paymentsProcessed > 0) {
+      const tenantId = getCurrentTenantId();
+      if (!tenantId) throw new Error('Tenant context required for payment allocation');
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId,
+        scope: 'tenant',
+        source: 'payment.allocations-created',
+      });
     }
 
     res.json({

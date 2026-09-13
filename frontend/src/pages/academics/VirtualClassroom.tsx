@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { PageHeader } from '../../components/ui/DesignSystem';
 import { io, Socket } from 'socket.io-client';
 
 interface ChatMessage {
@@ -345,7 +346,10 @@ export default function VirtualClassroom() {
   useEffect(() => {
     if (!id) return;
 
-    const socket = io(SOCKET_BASE, { transports: ['websocket', 'polling'] });
+    const socket = io(SOCKET_BASE, {
+      transports: ['websocket', 'polling'],
+      auth: { token: localStorage.getItem('token') },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -800,20 +804,23 @@ export default function VirtualClassroom() {
   // ==========================================
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-900">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      <div className="ds-page flex items-center justify-center min-h-[400px]" role="status" aria-label="Loading virtual classroom">
+        <Loader2 className="w-8 h-8 text-[var(--action-color)] animate-spin" aria-hidden="true" />
       </div>
     );
   }
 
   if (error || !classroom) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
-        <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-        <p className="text-lg">{error || 'Classroom not found'}</p>
-        <button onClick={() => navigate('/virtual-classroom')} className="mt-4 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700">
+      <div className="ds-page">
+        <PageHeader title="Virtual Classroom" />
+        <div className="ds-card flex flex-col items-center justify-center min-h-[400px]">
+        <AlertCircle className="w-12 h-12 text-red-600 dark:text-red-300 mb-4" aria-hidden="true" />
+        <p className="text-lg" role="alert">{error || 'Classroom not found'}</p>
+        <button onClick={() => navigate('/virtual-classroom')} className="ds-button-primary mt-4">
           Back to Classrooms
         </button>
+        </div>
       </div>
     );
   }
@@ -828,56 +835,51 @@ export default function VirtualClassroom() {
     : null;
 
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-gray-900 text-white overflow-hidden">
+    <div className="ds-page">
+    {/* Keep the live media workspace dark independently of the surrounding app theme. */}
+    <div className="dark flex h-[calc(100vh-64px)] bg-gray-900 text-white overflow-hidden">
       {/* ==========================================
           MAIN CONTENT — Jitsi Video
           ========================================== */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/virtual-classroom')} className="p-1 hover:bg-gray-700 rounded">
-              <ArrowLeft size={20} />
-            </button>
-            <div>
-              <h1 className="font-semibold text-sm">{classroom.title}</h1>
-              <p className="text-xs text-gray-400">
+        <div className="p-4 bg-[var(--surface)] border-b border-[var(--border-color)]">
+          <PageHeader title={classroom.title}
+            breadcrumb={<button onClick={() => navigate('/virtual-classroom')} className="ds-button-ghost">
+              <ArrowLeft size={20} aria-hidden="true" /> Classrooms
+            </button>}
+            description={<>
                 {classroom.subjectName && `${classroom.subjectName} • `}
                 {classroom.className && `${classroom.className} • `}
-                <span className={`${classroom.status === 'LIVE' ? 'text-green-400' : 'text-yellow-400'}`}>
+                <span className={`ds-badge ${classroom.status === 'LIVE' ? 'ds-badge-success' : 'ds-badge-neutral'}`}>
                   {classroom.status}
                 </span>
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
+            </>}
+            actions={<>
             {/* AI Tutor indicator */}
             {tutor.active && (
-              <div className="flex items-center gap-1 px-2 py-1 bg-purple-900/50 rounded-full text-xs">
-                <Brain size={14} className="text-purple-400" />
-                <span className="text-purple-300">{classroom.aiTutorName}</span>
-                <span className="text-purple-500">• {phaseLabel}</span>
-                <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${
-                  tutor.mode === 'LEAD_TEACHER' ? 'bg-purple-700 text-purple-200' : 'bg-blue-700 text-blue-200'
-                }`}>
+              <div className="ds-badge ds-badge-info flex-wrap">
+                <Brain size={14} aria-hidden="true" />
+                <span>{classroom.aiTutorName}</span>
+                <span>• {phaseLabel}</span>
+                <span className="ds-badge ds-badge-neutral ml-1">
                   {tutor.mode === 'LEAD_TEACHER' ? 'Lead' : 'Co-teach'}
                 </span>
               </div>
             )}
 
             {lessonRuntime && currentSegment && (
-              <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-blue-900/40 rounded-full text-xs border border-blue-800/50">
-                <span className="text-blue-300 font-medium">{currentSegment.title}</span>
-                <span className="text-blue-500">â€¢</span>
-                <span className="text-blue-200">{lessonRuntime.currentSegmentRemainingMinutes}m left</span>
+              <div className="ds-badge ds-badge-info hidden lg:flex">
+                <span>{currentSegment.title}</span>
+                <span aria-hidden="true">•</span>
+                <span>{lessonRuntime.currentSegmentRemainingMinutes}m left</span>
               </div>
             )}
 
             {audioPlaying && (
-              <div className="flex items-center gap-1 px-2 py-1 bg-green-900/50 rounded-full text-xs">
-                <Volume2 size={14} className="text-green-400 animate-pulse" />
-                <span className="text-green-300">Speaking...</span>
+              <div className="ds-badge ds-badge-success" role="status">
+                <Volume2 size={14} className="animate-pulse" aria-hidden="true" />
+                <span>Speaking...</span>
               </div>
             )}
 
@@ -885,7 +887,8 @@ export default function VirtualClassroom() {
               <button
                 onClick={endClassSession}
                 disabled={endingClass}
-                className="flex items-center gap-2 px-3 py-2 bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+                className="ds-button-destructive"
+                aria-busy={endingClass || undefined}
               >
                 {endingClass ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
                 End Class
@@ -895,42 +898,52 @@ export default function VirtualClassroom() {
             {/* Panel toggles */}
             <button
               onClick={() => setActivePanel(activePanel === 'chat' ? null : 'chat')}
-              className={`p-2 rounded-lg transition ${activePanel === 'chat' ? 'bg-blue-600' : 'hover:bg-gray-700'}`}
+              className={activePanel === 'chat' ? 'ds-button-primary' : 'ds-button-secondary'}
+              aria-label="AI tutor chat"
+              aria-expanded={activePanel === 'chat'}
+              aria-controls={activePanel === 'chat' ? 'classroom-side-panel' : undefined}
             >
               <MessageSquare size={18} />
             </button>
             <button
               onClick={() => setActivePanel(activePanel === 'tutor' ? null : 'tutor')}
-              className={`p-2 rounded-lg transition ${activePanel === 'tutor' ? 'bg-purple-600' : 'hover:bg-gray-700'}`}
+              className={activePanel === 'tutor' ? 'ds-button-primary' : 'ds-button-secondary'}
+              aria-label="AI tutor controls"
+              aria-expanded={activePanel === 'tutor'}
+              aria-controls={activePanel === 'tutor' ? 'classroom-side-panel' : undefined}
             >
               <Bot size={18} />
             </button>
             <button
               onClick={() => setActivePanel(activePanel === 'participants' ? null : 'participants')}
-              className={`p-2 rounded-lg transition ${activePanel === 'participants' ? 'bg-green-600' : 'hover:bg-gray-700'}`}
+              className={activePanel === 'participants' ? 'ds-button-primary' : 'ds-button-secondary'}
+              aria-label="Participants"
+              aria-expanded={activePanel === 'participants'}
+              aria-controls={activePanel === 'participants' ? 'classroom-side-panel' : undefined}
             >
               <Users size={18} />
             </button>
-          </div>
+            </>}
+          />
         </div>
 
         {/* Jitsi Video Area */}
-        <div ref={jitsiContainerRef} className="flex-1 bg-black" />
+        <div ref={jitsiContainerRef} className="flex-1 min-h-0 bg-black" role="region" aria-label="Live classroom video" />
       </div>
 
       {/* ==========================================
           SIDE PANEL
           ========================================== */}
       {activePanel && (
-        <div className="w-80 lg:w-96 flex flex-col bg-gray-800 border-l border-gray-700">
+        <div id="classroom-side-panel" role="region" aria-labelledby="classroom-panel-title" className="w-80 lg:w-96 flex flex-col bg-[var(--surface)] border-l border-[var(--border-color)]">
           {/* Panel Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
+            <h2 id="classroom-panel-title" className="font-semibold text-sm flex items-center gap-2">
               {activePanel === 'chat' && <><MessageSquare size={16} /> AI Tutor Chat</>}
               {activePanel === 'tutor' && <><Brain size={16} className="text-purple-400" /> AI Tutor Controls</>}
               {activePanel === 'participants' && <><Users size={16} className="text-green-400" /> Participants</>}
             </h2>
-            <button onClick={() => setActivePanel(null)} className="p-1 hover:bg-gray-700 rounded">
+            <button onClick={() => setActivePanel(null)} className="ds-button-ghost" aria-label="Close classroom panel">
               <X size={16} />
             </button>
           </div>
@@ -941,7 +954,7 @@ export default function VirtualClassroom() {
           {activePanel === 'chat' && (
             <div className="flex-1 flex flex-col min-h-0">
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3" role="log" aria-label="AI tutor conversation" aria-live="polite" aria-relevant="additions" tabIndex={0}>
                 {chatMessages.length === 0 && (
                   <div className="text-center text-gray-500 py-8">
                     <Bot size={40} className="mx-auto mb-2 opacity-50" />
@@ -960,7 +973,8 @@ export default function VirtualClassroom() {
                           {msg.audio && (
                             <button
                               onClick={() => playAudio(msg.audio!, msg.audioContentType || 'audio/mpeg')}
-                              className="ml-1 underline hover:text-purple-300"
+                              className="ds-button-secondary ml-1"
+                              aria-label={`Replay voice message from ${msg.senderName}`}
                             >
                               Replay
                             </button>
@@ -990,7 +1004,8 @@ export default function VirtualClassroom() {
                         {msg.audio && (
                           <button
                             onClick={() => playAudio(msg.audio!, msg.audioContentType || 'audio/mpeg')}
-                            className="mt-1 text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1"
+                            className="ds-button-secondary mt-1"
+                            aria-label={`Play voice message from ${msg.senderName}`}
                           >
                             <Volume2 size={12} /> Play voice
                           </button>
@@ -1007,18 +1022,21 @@ export default function VirtualClassroom() {
                 <div className="p-3 border-t border-gray-700">
                   <div className="flex gap-2">
                     <input
+                      aria-label="Message to the AI teacher"
                       type="text"
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                       placeholder="Ask the AI teacher..."
-                      className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                      className="ds-input flex-1"
                       disabled={chatSending}
                     />
                     <button
                       onClick={sendMessage}
                       disabled={chatSending || !chatInput.trim()}
-                      className="p-2 bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="ds-button-primary"
+                      aria-label="Send message"
+                      aria-busy={chatSending || undefined}
                     >
                       {chatSending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                     </button>
@@ -1032,7 +1050,8 @@ export default function VirtualClassroom() {
                   <button
                     onClick={startAITutor}
                     disabled={tutor.loading}
-                    className="w-full flex items-center justify-center gap-2 py-2 bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm font-medium"
+                    className="ds-button-primary w-full"
+                    aria-busy={tutor.loading || undefined}
                   >
                     {tutor.loading ? (
                       <><Loader2 size={16} className="animate-spin" /> Starting AI Tutor...</>
@@ -1051,18 +1070,14 @@ export default function VirtualClassroom() {
           {activePanel === 'tutor' && (
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Status */}
-              <div className={`p-3 rounded-xl border ${
-                tutor.active
-                  ? 'bg-purple-900/30 border-purple-700'
-                  : 'bg-gray-700/50 border-gray-600'
-              }`}>
+              <div className="ds-card">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-medium flex items-center gap-2">
                     <GraduationCap size={16} className={tutor.active ? 'text-purple-400' : 'text-gray-400'} />
                     {classroom.aiTutorName}
                   </h3>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    tutor.active ? 'bg-green-900 text-green-300' : 'bg-gray-600 text-gray-300'
+                  <span className={`ds-badge ${
+                    tutor.active ? 'ds-badge-success' : 'ds-badge-neutral'
                   }`}>
                     {tutor.active ? 'Active' : 'Inactive'}
                   </span>
@@ -1082,30 +1097,24 @@ export default function VirtualClassroom() {
                       {/* Mode selector */}
                       <div>
                         <h4 className="text-xs text-gray-400 mb-2 uppercase">Teaching Mode</h4>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-2" role="group" aria-label="Teaching mode">
                           <button
                             onClick={() => setSelectedMode('LEAD_TEACHER')}
-                            className={`p-2 rounded-lg text-xs font-medium border transition ${
-                              selectedMode === 'LEAD_TEACHER'
-                                ? 'bg-purple-600 border-purple-500 text-white'
-                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
-                            }`}
+                            className={`${selectedMode === 'LEAD_TEACHER' ? 'ds-button-primary' : 'ds-button-outline'} flex-col`}
+                            aria-pressed={selectedMode === 'LEAD_TEACHER'}
                           >
                             <GraduationCap size={16} className="mx-auto mb-1" />
                             Lead Teacher
-                            <p className="text-[10px] opacity-70 mt-0.5">AI runs the whole class</p>
+                            <span className="text-xs mt-1">AI runs the whole class</span>
                           </button>
                           <button
                             onClick={() => setSelectedMode('CO_TEACHER')}
-                            className={`p-2 rounded-lg text-xs font-medium border transition ${
-                              selectedMode === 'CO_TEACHER'
-                                ? 'bg-blue-600 border-blue-500 text-white'
-                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
-                            }`}
+                            className={`${selectedMode === 'CO_TEACHER' ? 'ds-button-primary' : 'ds-button-outline'} flex-col`}
+                            aria-pressed={selectedMode === 'CO_TEACHER'}
                           >
                             <Users size={16} className="mx-auto mb-1" />
                             Co-Teacher
-                            <p className="text-[10px] opacity-70 mt-0.5">AI assists you</p>
+                            <span className="text-xs mt-1">AI assists you</span>
                           </button>
                         </div>
                       </div>
@@ -1113,7 +1122,8 @@ export default function VirtualClassroom() {
                       <button
                         onClick={startAITutor}
                         disabled={tutor.loading}
-                        className="w-full flex items-center justify-center gap-2 py-3 bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 font-medium"
+                        className="ds-button-primary w-full"
+                        aria-busy={tutor.loading || undefined}
                       >
                         {tutor.loading ? (
                           <><Loader2 size={18} className="animate-spin" /> Starting...</>
@@ -1125,12 +1135,8 @@ export default function VirtualClassroom() {
                   ) : (
                     <div className="space-y-2">
                       {/* Mode badge */}
-                      <div className={`text-center text-xs px-3 py-1.5 rounded-lg ${
-                        tutor.mode === 'LEAD_TEACHER'
-                          ? 'bg-purple-900/50 text-purple-300 border border-purple-700'
-                          : 'bg-blue-900/50 text-blue-300 border border-blue-700'
-                      }`}>
-                        {tutor.mode === 'LEAD_TEACHER' ? '🎓 Leading class autonomously' : '🤝 Co-teaching with you'}
+                      <div className="ds-badge ds-badge-info w-full justify-center">
+                        {tutor.mode === 'LEAD_TEACHER' ? 'Leading class autonomously' : 'Co-teaching with you'}
                       </div>
 
                       {/* Only show manual controls in CO_TEACHER mode */}
@@ -1138,7 +1144,7 @@ export default function VirtualClassroom() {
                         <button
                           onClick={advancePhase}
                           disabled={tutor.loading}
-                          className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                          className="ds-button-primary w-full"
                         >
                           <SkipForward size={16} /> Next Phase
                         </button>
@@ -1146,7 +1152,7 @@ export default function VirtualClassroom() {
 
                       <button
                         onClick={launchQuiz}
-                        className="w-full flex items-center justify-center gap-2 py-2 bg-amber-600 rounded-lg hover:bg-amber-700 text-sm"
+                        className="ds-button-outline w-full"
                       >
                         <HelpCircle size={16} /> Quick Quiz
                       </button>
@@ -1154,7 +1160,7 @@ export default function VirtualClassroom() {
                       <button
                         onClick={stopAITutor}
                         disabled={tutor.loading}
-                        className="w-full flex items-center justify-center gap-2 py-2 bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm"
+                        className="ds-button-destructive w-full"
                       >
                         <Square size={16} /> End AI Tutor
                       </button>
@@ -1162,7 +1168,8 @@ export default function VirtualClassroom() {
                       <button
                         onClick={endClassSession}
                         disabled={endingClass}
-                        className="w-full flex items-center justify-center gap-2 py-2 bg-rose-700 rounded-lg hover:bg-rose-800 disabled:opacity-50 text-sm"
+                        className="ds-button-destructive w-full"
+                        aria-busy={endingClass || undefined}
                       >
                         {endingClass ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
                         End Class
@@ -1184,7 +1191,7 @@ export default function VirtualClassroom() {
                           if (action.includes('Quiz')) launchQuiz();
                           else if (action.includes('Next') || action.includes('Continue') || action.includes('Start') || action.includes('Skip') || action.includes('Open') || action.includes('Wrap') || action.includes('Back')) advancePhase();
                         }}
-                        className="w-full text-left flex items-center gap-2 px-3 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 text-sm transition"
+                        className="ds-button-secondary w-full justify-start text-left"
                       >
                         <ChevronRight size={14} className="text-purple-400" />
                         {action}
@@ -1195,7 +1202,7 @@ export default function VirtualClassroom() {
               )}
 
               {lessonRuntime && currentSegment && (
-                <div className="rounded-xl border border-blue-800/60 bg-blue-950/20 p-3 space-y-3">
+                <div className="ds-card space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h4 className="text-xs text-blue-300 uppercase tracking-wide">Current Segment</h4>
@@ -1217,7 +1224,7 @@ export default function VirtualClassroom() {
                     </div>
                     <div className="h-2 rounded-full bg-blue-950/70 overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-blue-400 to-cyan-300"
+                        className="h-full bg-blue-400"
                         style={{ width: `${Math.round(lessonRuntime.currentSegmentProgress * 100)}%` }}
                       />
                     </div>
@@ -1237,7 +1244,7 @@ export default function VirtualClassroom() {
                   </div>
 
                   {nextSegment && (
-                    <div className="rounded-lg bg-black/20 px-3 py-2">
+                    <div className="ds-surface-muted px-3 py-2">
                       <p className="text-[11px] text-gray-400 uppercase">Next Up</p>
                       <p className="text-sm text-gray-200 mt-1">{nextSegment.title}</p>
                     </div>
@@ -1271,6 +1278,7 @@ export default function VirtualClassroom() {
                             isCurrent ? 'bg-purple-400 animate-pulse' : isCompleted ? 'bg-green-400' : 'bg-gray-600'
                           }`} />
                           {phase.replace(/_/g, ' ')}
+                          <span className="sr-only">{isCurrent ? ' — Current phase' : isCompleted ? ' — Completed' : ' — Upcoming'}</span>
                         </div>
                       );
                     })}
@@ -1279,8 +1287,8 @@ export default function VirtualClassroom() {
               )}
 
               {/* Info */}
-              <div className="bg-gray-700/30 rounded-xl p-3 text-xs text-gray-400">
-                <p className="mb-1">💡 The AI Tutor speaks aloud to the class. Voice responses are not shown as chat text.</p>
+              <div className="ds-surface-muted p-3 ds-helper">
+                <p className="mb-1">The AI Tutor speaks aloud to the class. Voice responses are not shown as chat text.</p>
                 <p className="mb-1">Students can type questions in chat — the tutor will reply with both text and voice.</p>
                 <p>In <span className="text-purple-300">Lead</span> mode the tutor runs the full lesson. In <span className="text-blue-300">Co-teach</span> mode you control the pace.</p>
               </div>
@@ -1297,13 +1305,13 @@ export default function VirtualClassroom() {
                   <p className="text-center text-gray-500 py-8 text-sm">No participants yet</p>
                 ) : (
                   classroom.participants.filter(p => !p.leftAt).map((p) => (
-                    <div key={p.id} className="flex items-center gap-3 p-2 bg-gray-700/50 rounded-lg">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-sm font-bold">
+                    <div key={p.id} className="ds-surface-muted flex items-center gap-3 p-3">
+                      <div className="ds-avatar" aria-hidden="true">
                         {p.displayName.charAt(0).toUpperCase()}
                       </div>
                       <div>
                         <p className="text-sm font-medium">{p.displayName}</p>
-                        <p className="text-xs text-gray-400">{p.role}</p>
+                        <p><span className="ds-badge ds-badge-neutral">{p.role}</span></p>
                       </div>
                     </div>
                   ))
@@ -1313,6 +1321,7 @@ export default function VirtualClassroom() {
           )}
         </div>
       )}
+    </div>
     </div>
   );
 }

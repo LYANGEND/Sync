@@ -842,25 +842,25 @@ const Finance = () => {
   const overdueDebtors = debtors.filter(d => d.isOverdue);
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Finance & Payments</h1>
-          <p className="text-slate-500 dark:text-gray-400">Manage school fees and transactions</p>
+          <h1 className="ds-page-title">Finance & Payments</h1>
+          <p className="ds-page-subtitle">Manage school fees and transactions</p>
         </div>
-        <div className="flex space-x-3">
+        <div className="ds-actions">
           {activeTab === 'fees' && (
             <>
               <button
                 onClick={() => setShowFeeCategoryModal(true)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                className="ds-button-outline"
               >
                 <ClipboardList size={20} />
                 <span>Fee Categories</span>
               </button>
               <button
                 onClick={() => setShowImportModal(true)}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
+                className="ds-button-outline"
               >
                 <Upload size={20} />
                 <span>Import Fee Templates</span>
@@ -871,7 +871,7 @@ const Finance = () => {
                   setNewFee({ name: '', amount: '', academicTermId: '', categoryId: '', applicableGrade: '' });
                   setShowCreateFeeModal(true);
                 }}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+                className="ds-button-primary"
               >
                 <Plus size={20} />
                 <span>Create Fee Template</span>
@@ -881,7 +881,7 @@ const Finance = () => {
           {activeTab === 'payments' && (
             <button
               onClick={() => setShowAddModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+              className="ds-button-primary"
             >
               <Plus size={20} />
               <span>Record Payment</span>
@@ -891,25 +891,19 @@ const Finance = () => {
       </div>
 
       {/* Section Switcher */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="ds-actions" role="group" aria-label="Finance section">
         <button
           onClick={() => { setActiveSection('revenue'); setActiveTab('payments'); }}
-          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
-            activeSection === 'revenue'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-          }`}
+          aria-pressed={activeSection === 'revenue'}
+          className={activeSection === 'revenue' ? 'ds-button-primary' : 'ds-button-secondary'}
         >
           <CreditCard size={16} />
           Revenue & Collections
         </button>
         <button
           onClick={() => { setActiveSection('accounting'); setActiveTab('expenses'); }}
-          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
-            activeSection === 'accounting'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-          }`}
+          aria-pressed={activeSection === 'accounting'}
+          className={activeSection === 'accounting' ? 'ds-button-primary' : 'ds-button-secondary'}
         >
           <BarChart3 size={16} />
           Accounting & Reports
@@ -917,45 +911,39 @@ const Finance = () => {
       </div>
 
       {/* Sub-tabs */}
-      <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg w-full md:w-fit mb-6 overflow-x-auto scrollbar-hide">
+      <div className="ds-actions" role="group" aria-label="Finance views">
         {activeSection === 'revenue' ? (
           <>
             <button onClick={() => setActiveTab('payments')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'payments'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'payments'}
+              className={activeTab === 'payments' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               Payments
             </button>
             <button onClick={() => setActiveTab('mobile-money')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'mobile-money'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'mobile-money'}
+              className={activeTab === 'mobile-money' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Smartphone size={16} />
               Mobile Money
             </button>
             <button onClick={() => setActiveTab('fees')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'fees'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'fees'}
+              className={activeTab === 'fees' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               Fee Structures
             </button>
             <button onClick={() => setActiveTab('scholarships')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'scholarships'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'scholarships'}
+              className={activeTab === 'scholarships' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               Scholarships
             </button>
             <button onClick={() => setActiveTab('reports')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reports'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'reports'}
+              className={activeTab === 'reports' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <TrendingUp size={16} />
               Reports
             </button>
             <button onClick={() => { setActiveTab('reminders'); fetchDebtors(); }}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'reminders'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'reminders'}
+              className={activeTab === 'reminders' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Bell size={16} />
               Reminders
             </button>
@@ -963,65 +951,56 @@ const Finance = () => {
         ) : (
           <>
             <button onClick={() => setActiveTab('expenses')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'expenses'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'expenses'}
+              className={activeTab === 'expenses' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Receipt size={16} />
               Expenses
             </button>
             <button onClick={() => setActiveTab('invoices')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'invoices'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'invoices'}
+              className={activeTab === 'invoices' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <FileText size={16} />
               Invoices
             </button>
             <button onClick={() => setActiveTab('payroll')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'payroll'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'payroll'}
+              className={activeTab === 'payroll' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Calculator size={16} />
               Payroll
             </button>
             <button onClick={() => setActiveTab('budgets')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'budgets'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'budgets'}
+              className={activeTab === 'budgets' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <PiggyBank size={16} />
               Budgets
             </button>
             <button onClick={() => setActiveTab('petty-cash')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'petty-cash'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'petty-cash'}
+              className={activeTab === 'petty-cash' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Wallet size={16} />
               Petty Cash
             </button>
             <button onClick={() => setActiveTab('bank-reconciliation')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'bank-reconciliation'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'bank-reconciliation'}
+              className={activeTab === 'bank-reconciliation' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <ShieldCheck size={16} />
               Reconciliation
             </button>
             <button onClick={() => setActiveTab('financial-reports')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'financial-reports'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'financial-reports'}
+              className={activeTab === 'financial-reports' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <ClipboardList size={16} />
               Statements
             </button>
             <button onClick={() => setActiveTab('ai-advisor')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'ai-advisor'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'ai-advisor'}
+              className={activeTab === 'ai-advisor' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Sparkles size={16} />
               Finance AI
             </button>
             <button onClick={() => setActiveTab('debt-collection')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'debt-collection'
-                ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm'
-                : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'}`}>
+              aria-pressed={activeTab === 'debt-collection'}
+              className={activeTab === 'debt-collection' ? 'ds-button-secondary' : 'ds-button-ghost'}>
               <Target size={16} />
               Debt Collection
             </button>
@@ -1042,17 +1021,17 @@ const Finance = () => {
         /* Fee Reminders Tab */
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex justify-between items-center">
+          <div className="ds-page-header">
             <div>
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">Fee Reminders</h2>
               <p className="text-slate-500 dark:text-gray-400">Send payment reminders to parents with outstanding fees</p>
             </div>
-            <div className="flex gap-3">
+            <div className="ds-actions">
               {selectedDebtors.length > 0 && (
                 <button
                   onClick={() => sendFeeReminders()}
                   disabled={sendingReminders}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="ds-button-primary"
                 >
                   <Send size={18} />
                   Send Reminder ({selectedDebtors.length})
@@ -1061,7 +1040,7 @@ const Finance = () => {
               <button
                 onClick={() => sendFeeReminders(overdueDebtors.map(d => d.id), true)}
                 disabled={sendingReminders || overdueDebtors.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                className="ds-button-secondary"
               >
                 <Bell size={18} />
                 Send to All Overdue ({overdueDebtors.length})
@@ -1070,25 +1049,28 @@ const Finance = () => {
           </div>
 
           {/* Debtors Table */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600">
+          <div className="ds-surface overflow-hidden">
+            <div className="overflow-x-auto" role="region" aria-label="Students with outstanding fees" tabIndex={0}>
+              <table className="ds-table">
+                <thead>
                   <tr>
-                    <th className="px-6 py-4 w-12">
-                      <input
-                        type="checkbox"
-                        checked={selectedDebtors.length === debtors.length && debtors.length > 0}
-                        onChange={toggleAllDebtors}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
+                    <th className="w-12 px-4 py-3">
+                      <label className="inline-flex min-h-11 min-w-11 items-center justify-center">
+                        <span className="sr-only">Select all students with outstanding fees</span>
+                        <input
+                          type="checkbox"
+                          checked={selectedDebtors.length === debtors.length && debtors.length > 0}
+                          onChange={toggleAllDebtors}
+                          className="ds-choice"
+                        />
+                      </label>
                     </th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Student</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Class</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Guardian</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Outstanding</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Status</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300 text-right">Actions</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Student</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Class</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Guardian</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Outstanding</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Status</th>
+                    <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -1100,7 +1082,7 @@ const Finance = () => {
                     <tr>
                       <td colSpan={7} className="px-6 py-8 text-center text-slate-500 dark:text-gray-400">
                         <div className="flex flex-col items-center">
-                          <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-3">
+                          <div className="w-12 h-12 flex items-center justify-center mb-3">
                             <DollarSign className="text-green-600 dark:text-green-400" size={24} />
                           </div>
                           <p className="font-medium text-slate-700 dark:text-white">All fees are paid!</p>
@@ -1110,46 +1092,49 @@ const Finance = () => {
                     </tr>
                   ) : (
                     debtors.map((debtor) => (
-                      <tr key={debtor.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedDebtors.includes(debtor.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
-                        <td className="px-6 py-4">
-                          <input
-                            type="checkbox"
-                            checked={selectedDebtors.includes(debtor.id)}
-                            onChange={() => toggleDebtorSelection(debtor.id)}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
+                      <tr key={debtor.id} className={selectedDebtors.includes(debtor.id) ? 'bg-[var(--surface-muted)]' : ''}>
+                        <td className="px-4 py-3 align-middle">
+                          <label className="inline-flex min-h-11 min-w-11 items-center justify-center">
+                            <span className="sr-only">Select {debtor.firstName} {debtor.lastName}</span>
+                            <input
+                              type="checkbox"
+                              checked={selectedDebtors.includes(debtor.id)}
+                              onChange={() => toggleDebtorSelection(debtor.id)}
+                              className="ds-choice"
+                            />
+                          </label>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-slate-800 dark:text-white">{debtor.firstName} {debtor.lastName}</div>
-                          <div className="text-xs text-slate-500 dark:text-gray-400">{debtor.admissionNumber}</div>
+                        <td className="px-4 py-3 align-middle">
+                          <div className="font-semibold text-slate-800 dark:text-white">{debtor.firstName} {debtor.lastName}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{debtor.admissionNumber}</div>
                         </td>
-                        <td className="px-6 py-4 text-slate-600 dark:text-gray-300">{debtor.className || 'N/A'}</td>
-                        <td className="px-6 py-4">
-                          <div className="text-slate-800 dark:text-white">{debtor.guardianName || 'N/A'}</div>
-                          <div className="text-xs text-slate-500 dark:text-gray-400">{debtor.guardianPhone || 'No phone'}</div>
+                        <td className="px-4 py-3 align-middle text-slate-600 dark:text-slate-300">{debtor.className || 'N/A'}</td>
+                        <td className="px-4 py-3 align-middle">
+                          <div className="font-medium text-slate-700 dark:text-slate-200">{debtor.guardianName || 'N/A'}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{debtor.guardianPhone || 'No phone'}</div>
                           {debtor.guardianEmail && (
-                            <div className="text-xs text-blue-600">{debtor.guardianEmail}</div>
+                            <div className="text-xs text-blue-600 dark:text-blue-400">{debtor.guardianEmail}</div>
                           )}
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="text-lg font-bold text-red-600">ZMW {Number(debtor.outstandingAmount).toLocaleString()}</span>
+                        <td className="px-4 py-3 align-middle">
+                          <span className="text-base font-bold text-red-600 dark:text-red-400">ZMW {Number(debtor.outstandingAmount).toLocaleString()}</span>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3 align-middle">
                           {debtor.isOverdue ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <span className="ds-badge ds-badge-error">
                               Overdue
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <span className="ds-badge ds-badge-warning">
                               Pending
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 py-3 text-right align-middle">
                           <button
                             onClick={() => sendFeeReminders([debtor.id], debtor.isOverdue)}
                             disabled={sendingReminders}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50"
+                            className="ds-button-secondary"
                           >
                             <Send size={14} />
                             Send
@@ -1165,7 +1150,7 @@ const Finance = () => {
 
           {/* Summary */}
           {debtors.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+            <div className="ds-card">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                   <p className="text-sm text-slate-500 dark:text-gray-400">Total Students</p>
@@ -1207,9 +1192,9 @@ const Finance = () => {
         <>
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg">
+                <div className="p-3 text-green-600 dark:text-green-400">
                   <DollarSign size={24} />
                 </div>
                 <span className="text-sm text-slate-500 dark:text-gray-400">Total Revenue</span>
@@ -1218,9 +1203,9 @@ const Finance = () => {
               <p className="text-sm text-green-600 mt-1">All time revenue</p>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
+                <div className="p-3 text-blue-600 dark:text-blue-400">
                   <CreditCard size={24} />
                 </div>
                 <span className="text-sm text-slate-500 dark:text-gray-400">Transactions</span>
@@ -1229,9 +1214,9 @@ const Finance = () => {
               <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">Total transactions</p>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-lg">
+                <div className="p-3 text-orange-600 dark:text-orange-400">
                   <Calendar size={24} />
                 </div>
                 <span className="text-sm text-slate-500 dark:text-gray-400">Pending Fees</span>
@@ -1241,20 +1226,20 @@ const Finance = () => {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
+          <div className="ds-card mb-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
-                <div className="rounded-lg bg-orange-50 dark:bg-orange-900/20 p-4">
+                <div className="ds-surface-muted p-4">
                   <p className="text-sm text-slate-500 dark:text-gray-400">Unreconciled receipts</p>
                   <p className="text-xl font-bold text-orange-600">{paymentControlLoading ? '…' : paymentControlSummary.unreconciledPayments}</p>
                   <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unreconciledAmount || 0)}</p>
                 </div>
-                <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-4">
+                <div className="ds-surface-muted p-4">
                   <p className="text-sm text-slate-500 dark:text-gray-400">Unallocated payments</p>
                   <p className="text-xl font-bold text-purple-600">{paymentControlLoading ? '…' : paymentControlSummary.unallocatedPayments}</p>
                   <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unallocatedAmount || 0)}</p>
                 </div>
-                <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+                <div className="ds-surface-muted p-4">
                   <p className="text-sm text-slate-500 dark:text-gray-400">Missing bank refs</p>
                   <p className="text-xl font-bold text-red-600">{paymentControlLoading ? '…' : paymentControlSummary.missingBankReference}</p>
                   <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">Bank deposits need statement evidence</p>
@@ -1263,13 +1248,13 @@ const Finance = () => {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleAutoAllocatePayments}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  className="ds-button-primary"
                 >
                   Auto-allocate open payments
                 </button>
                 <button
                   onClick={() => setActiveTab('bank-reconciliation')}
-                  className="px-4 py-2 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+                  className="ds-button-outline"
                 >
                   Open reconciliation queue
                 </button>
@@ -1278,49 +1263,50 @@ const Finance = () => {
           </div>
 
           {/* Tabs */}
-          <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg mb-6 w-fit">
+          <div className="ds-actions mb-6" role="group" aria-label="Payment status">
             <button
               onClick={() => setPaymentTab('completed')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'completed' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-                }`}
+              aria-pressed={paymentTab === 'completed'}
+              className={paymentTab === 'completed' ? 'ds-button-secondary' : 'ds-button-ghost'}
             >
               Valid Payments
             </button>
             <button
               onClick={() => setPaymentTab('voided')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'voided' ? 'bg-white dark:bg-slate-800 text-red-600 shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-                }`}
+              aria-pressed={paymentTab === 'voided'}
+              className={paymentTab === 'voided' ? 'ds-button-secondary' : 'ds-button-ghost'}
             >
               Voided Transactions
             </button>
           </div>
 
           {/* Search and Action Bar */}
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
-            <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
+          <div className="ds-card mb-6">
+            <div className="ds-toolbar">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
                 <input
                   type="text"
                   placeholder="Search by student name, ID, or reference..."
-                  className="w-full pl-10 pr-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+                  className="ds-input pl-10"
+                  aria-label="Search payments by student name, ID, or reference"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="ds-actions">
                 <button
                   onClick={() => setShowFilterModal(true)}
-                  className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors border ${(classFilter !== 'ALL' || methodFilter !== 'ALL' || dateRange.start || dateRange.end)
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  className={`${(classFilter !== 'ALL' || methodFilter !== 'ALL' || dateRange.start || dateRange.end)
+                    ? 'ds-button-secondary'
+                    : 'ds-button-outline'
                     }`}
                 >
                   <Filter size={18} />
                   <span>Filter</span>
                   {(classFilter !== 'ALL' || methodFilter !== 'ALL' || dateRange.start || dateRange.end) && (
-                    <span className="ml-1 px-1.5 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                    <span className="ds-badge ds-badge-info">
                       {[classFilter !== 'ALL', methodFilter !== 'ALL', dateRange.start || dateRange.end].filter(Boolean).length}
                     </span>
                   )}
@@ -1359,29 +1345,29 @@ const Finance = () => {
           </div>
 
           {/* Payments Table */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600">
+          <div className="ds-surface overflow-hidden">
+            <div className="overflow-x-auto" role="region" aria-label="Payment transactions" tabIndex={0}>
+              <table className="ds-table">
+                <thead>
                   <tr>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Date</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Student</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Class</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Amount (ZMW)</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Method</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Transaction ID</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Date</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Student</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Class</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Amount (ZMW)</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Method</th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Transaction ID</th>
                     {paymentTab === 'voided' ? (
                       <>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Void Reason</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Voided By</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Void Reason</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Voided By</th>
                       </>
                     ) : (
                       <>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Allocation</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Reconciliation</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Notes</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Recorded By</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300 text-right">Actions</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Allocation</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Reconciliation</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Notes</th>
+                        <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Recorded By</th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Actions</th>
                       </>
                     )}
                   </tr>
@@ -1397,7 +1383,7 @@ const Finance = () => {
                     </tr>
                   ) : (
                     filteredPayments.map((payment) => (
-                      <tr key={payment.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      <tr key={payment.id}>
                         <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
                           {new Date(payment.paymentDate).toLocaleDateString()}
                         </td>
@@ -1416,7 +1402,7 @@ const Finance = () => {
                           {Number(payment.amount).toLocaleString()}
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                          <span className={`ds-badge
                             ${payment.method === 'CASH' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
                               payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
                                 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'}`}>
@@ -1449,7 +1435,7 @@ const Finance = () => {
                             </td>
                             <td className="px-6 py-4">
                               <div className="text-sm">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${payment.isReconciled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'}`}>
+                                <span className={`ds-badge ${payment.isReconciled ? 'ds-badge-success' : 'ds-badge-warning'}`}>
                                   {payment.isReconciled ? 'Reconciled' : 'Open'}
                                 </span>
                                 <div className="text-xs text-slate-500 dark:text-gray-400 mt-1">
@@ -1467,7 +1453,7 @@ const Finance = () => {
                               <div className="flex items-center justify-end gap-2">
                                 <button
                                   onClick={() => generatePaymentReceipt(payment)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                                  className="ds-button-secondary"
                                   title="Download Receipt"
                                 >
                                   <FileText size={14} />
@@ -1476,7 +1462,7 @@ const Finance = () => {
                                 <button
                                   onClick={() => handleResendReceipt(payment.id)}
                                   disabled={resendingReceiptId === payment.id}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                  className="ds-button-outline"
                                   title="Resend receipt to parent"
                                 >
                                   <Send size={14} />
@@ -1484,7 +1470,7 @@ const Finance = () => {
                                 </button>
                                 <button
                                   onClick={() => handleVoidPayment(payment.id)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                                  className="ds-button-destructive"
                                   title="Void this payment"
                                 >
                                   <X size={14} />
@@ -1505,24 +1491,26 @@ const Finance = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {feeTemplates.map((template) => (
-            <div key={template.id} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+            <div key={template.id} className="ds-card">
               <div className="flex justify-between items-start mb-4">
                 <div className="flex-1">
                   <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1">{template.name}</h3>
-                  <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300">
+                  <span className="ds-badge ds-badge-neutral">
                     {getGradeLabel(template.applicableGrade)}
                   </span>
                 </div>
                 <div className="flex space-x-2">
                   <button
                     onClick={() => handleEditClick(template)}
-                    className="p-1 text-slate-400 hover:text-blue-600 transition-colors"
+                    className="ds-button-ghost"
+                    aria-label={`Edit ${template.name}`}
                   >
                     <Edit2 size={16} />
                   </button>
                   <button
                     onClick={() => handleDeleteTemplate(template.id)}
-                    className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+                    className="ds-button-destructive"
+                    aria-label={`Delete ${template.name}`}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -1539,7 +1527,7 @@ const Finance = () => {
                   setSelectedTemplateId(template.id);
                   setShowAssignFeeModal(true);
                 }}
-                className="w-full py-2 px-4 bg-white border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center space-x-2"
+                className="ds-button-outline w-full"
               >
                 <Users size={18} />
                 <span>Assign to Class</span>
@@ -1548,8 +1536,8 @@ const Finance = () => {
           ))}
 
           {feeTemplates.length === 0 && (
-            <div className="col-span-full text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-300 dark:border-slate-600">
-              <div className="mx-auto w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4">
+            <div className="ds-surface ds-empty col-span-full">
+              <div className="mx-auto w-12 h-12 flex items-center justify-center mb-4">
                 <BookOpen className="text-slate-400 dark:text-gray-500" size={24} />
               </div>
               <h3 className="text-lg font-medium text-slate-900 dark:text-white">No fee templates</h3>
@@ -1562,22 +1550,24 @@ const Finance = () => {
       {/* Filter Modal */}
       {
         showFilterModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="ds-card w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="finance-filter-title">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold dark:text-white">Filter Payments</h2>
+                <h2 id="finance-filter-title" className="text-xl font-bold">Filter Payments</h2>
                 <button
                   onClick={() => setShowFilterModal(false)}
-                  className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="ds-button-ghost"
+                  aria-label="Close payment filters"
                 >
                   <X size={20} className="text-slate-500" />
                 </button>
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Class</label>
+                  <label htmlFor="finance-filter-class" className="ds-label mb-1">Class</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-filter-class"
+                    className="ds-select"
                     value={classFilter}
                     onChange={(e) => setClassFilter(e.target.value)}
                   >
@@ -1588,9 +1578,10 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Payment Method</label>
+                  <label htmlFor="finance-filter-method" className="ds-label mb-1">Payment Method</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-filter-method"
+                    className="ds-select"
                     value={methodFilter}
                     onChange={(e) => setMethodFilter(e.target.value)}
                   >
@@ -1601,38 +1592,40 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Date Range</label>
-                  <div className="flex items-center space-x-2">
+                  <p className="ds-label mb-1">Date Range</p>
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                     <input
                       type="date"
-                      className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                      className="ds-input flex-1"
+                      aria-label="Payment date range start"
                       value={dateRange.start}
                       onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                     />
                     <span className="text-slate-400">to</span>
                     <input
                       type="date"
-                      className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                      className="ds-input flex-1"
+                      aria-label="Payment date range end"
                       value={dateRange.end}
                       onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                     />
                   </div>
                 </div>
               </div>
-              <div className="flex justify-between mt-6">
+              <div className="ds-form-actions">
                 <button
                   onClick={() => {
                     setClassFilter('ALL');
                     setMethodFilter('ALL');
                     setDateRange({ start: '', end: '' });
                   }}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="ds-button-secondary"
                 >
                   Clear All
                 </button>
                 <button
                   onClick={() => setShowFilterModal(false)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="ds-button-primary"
                 >
                   Apply Filters
                 </button>
@@ -1645,16 +1638,17 @@ const Finance = () => {
       {/* Fee Category Modal */}
       {
         showFeeCategoryModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="ds-card w-full max-w-2xl max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="finance-categories-title">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-xl font-bold dark:text-white">Fee Categories</h2>
+                  <h2 id="finance-categories-title" className="text-xl font-bold">Fee Categories</h2>
                   <p className="text-sm text-slate-500 dark:text-gray-400">Create categories once, then reuse them across fee templates.</p>
                 </div>
                 <button
                   onClick={() => setShowFeeCategoryModal(false)}
-                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="ds-button-ghost"
+                  aria-label="Close fee categories"
                 >
                   <X size={20} className="text-slate-500" />
                 </button>
@@ -1663,15 +1657,15 @@ const Finance = () => {
               <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3">Existing Categories</h3>
-                  <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1" role="region" aria-label="Existing fee categories" tabIndex={0}>
                     {feeCategories.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-sm text-slate-500 dark:text-gray-400">
+                      <div className="ds-surface ds-empty">
                         No fee categories yet.
                       </div>
                     ) : (
                       feeCategories.map((category) => (
-                        <div key={category.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-4">
-                          <div className="flex items-center justify-between gap-3">
+                        <div key={category.id} className="ds-surface p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                               <p className="font-medium text-slate-800 dark:text-white">{category.name}</p>
                               <p className="text-xs text-slate-500 dark:text-gray-400">Code: {category.code}</p>
@@ -1681,7 +1675,7 @@ const Finance = () => {
                                 setNewFee((current) => ({ ...current, categoryId: category.id }));
                                 setShowFeeCategoryModal(false);
                               }}
-                              className="px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                              className="ds-button-secondary"
                             >
                               Use in template
                             </button>
@@ -1695,43 +1689,46 @@ const Finance = () => {
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 p-4 h-fit">
+                <div className="ds-surface-muted p-4 h-fit">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3">Create New Category</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Category Name</label>
+                      <label htmlFor="finance-category-name" className="ds-label mb-1">Category Name</label>
                       <input
+                        id="finance-category-name"
                         type="text"
                         value={feeCategoryForm.name}
                         onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, name: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        className="ds-input"
                         placeholder="e.g. Tuition"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Code</label>
+                      <label htmlFor="finance-category-code" className="ds-label mb-1">Code</label>
                       <input
+                        id="finance-category-code"
                         type="text"
                         value={feeCategoryForm.code}
                         onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, code: e.target.value.toUpperCase() })}
-                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        className="ds-input"
                         placeholder="e.g. TUITION"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Description</label>
+                      <label htmlFor="finance-category-description" className="ds-label mb-1">Description</label>
                       <textarea
+                        id="finance-category-description"
                         rows={3}
                         value={feeCategoryForm.description}
                         onChange={(e) => setFeeCategoryForm({ ...feeCategoryForm, description: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                        className="ds-textarea"
                         placeholder="Optional description"
                       />
                     </div>
                     <button
                       onClick={handleCreateFeeCategory}
                       disabled={creatingFeeCategory}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="ds-button-primary w-full"
                     >
                       {creatingFeeCategory ? 'Creating...' : 'Create Category'}
                     </button>
@@ -1746,12 +1743,12 @@ const Finance = () => {
       {/* Add Payment Modal */}
       {
         showAddModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4 dark:text-white">Record New Payment</h2>
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="ds-card w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="finance-payment-title">
+              <h2 id="finance-payment-title" className="text-xl font-bold mb-4">Record New Payment</h2>
               <form onSubmit={handleRecordPayment} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-2">Find Student</label>
+                <div role="group" aria-labelledby="finance-payment-student-label">
+                  <p id="finance-payment-student-label" className="ds-label mb-2">Find Student</p>
                   <StudentSelector
                     students={students}
                     classes={classes}
@@ -1760,22 +1757,24 @@ const Finance = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Amount (ZMW)</label>
+                  <label htmlFor="finance-payment-amount" className="ds-label mb-1">Amount (ZMW)</label>
                   <input
+                    id="finance-payment-amount"
                     type="number"
                     required
                     min="0"
                     step="0.01"
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    className="ds-input"
                     placeholder="0.00"
                     value={paymentForm.amount}
                     onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Payment Method</label>
+                  <label htmlFor="finance-payment-method" className="ds-label mb-1">Payment Method</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-payment-method"
+                    className="ds-select"
                     value={paymentForm.method}
                     onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
                   >
@@ -1785,27 +1784,28 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Notes</label>
+                  <label htmlFor="finance-payment-notes" className="ds-label mb-1">Notes</label>
                   <textarea
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-payment-notes"
+                    className="ds-textarea"
                     placeholder="Optional notes about this payment"
                     rows={2}
                     value={paymentForm.notes}
                     onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                   />
                 </div>
-                <div className="flex justify-end space-x-3 mt-6">
+                <div className="ds-form-actions">
                   <button
                     type="button"
                     onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                    className="ds-button-secondary"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submitting}
-                    className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className="ds-button-primary"
                   >
                     {submitting ? 'Saving...' : 'Save Payment'}
                   </button>
@@ -1819,34 +1819,37 @@ const Finance = () => {
       {/* Create Fee Template Modal */}
       {
         showCreateFeeModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4 dark:text-white">{editingTemplate ? 'Edit Fee Template' : 'Create Fee Template'}</h2>
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="ds-card w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="finance-template-title">
+              <h2 id="finance-template-title" className="text-xl font-bold mb-4">{editingTemplate ? 'Edit Fee Template' : 'Create Fee Template'}</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Fee Name</label>
+                  <label htmlFor="finance-template-name" className="ds-label mb-1">Fee Name</label>
                   <input
+                    id="finance-template-name"
                     type="text"
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    className="ds-input"
                     placeholder="e.g. Term 1 Tuition"
                     value={newFee.name}
                     onChange={(e) => setNewFee({ ...newFee, name: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Amount (ZMW)</label>
+                  <label htmlFor="finance-template-amount" className="ds-label mb-1">Amount (ZMW)</label>
                   <input
+                    id="finance-template-amount"
                     type="number"
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    className="ds-input"
                     placeholder="0.00"
                     value={newFee.amount}
                     onChange={(e) => setNewFee({ ...newFee, amount: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Academic Term</label>
+                  <label htmlFor="finance-template-term" className="ds-label mb-1">Academic Term</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-template-term"
+                    className="ds-select"
                     value={newFee.academicTermId}
                     onChange={(e) => setNewFee({ ...newFee, academicTermId: e.target.value })}
                   >
@@ -1857,9 +1860,10 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Fee Category</label>
+                  <label htmlFor="finance-template-category" className="ds-label mb-1">Fee Category</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-template-category"
+                    className="ds-select"
                     value={newFee.categoryId}
                     onChange={(e) => setNewFee({ ...newFee, categoryId: e.target.value })}
                   >
@@ -1871,15 +1875,16 @@ const Finance = () => {
                   <button
                     type="button"
                     onClick={() => setShowFeeCategoryModal(true)}
-                    className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+                    className="ds-button-ghost mt-2"
                   >
                     + Create or review fee categories
                   </button>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Applicable Grade</label>
+                  <label htmlFor="finance-template-grade" className="ds-label mb-1">Applicable Grade</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-template-grade"
+                    className="ds-select"
                     value={newFee.applicableGrade}
                     onChange={(e) => setNewFee({ ...newFee, applicableGrade: e.target.value })}
                   >
@@ -1891,16 +1896,16 @@ const Finance = () => {
                   </select>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   onClick={() => setShowCreateFeeModal(false)}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSaveFee}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   {editingTemplate ? 'Update Template' : 'Create Template'}
                 </button>
@@ -1913,18 +1918,19 @@ const Finance = () => {
       {/* Assign Fee Modal */}
       {
         showAssignFeeModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4 dark:text-white">Assign Fee to Class</h2>
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="ds-card w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="finance-assign-title">
+              <h2 id="finance-assign-title" className="text-xl font-bold mb-4">Assign Fee to Class</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400 mb-4">
                 This will assign the selected fee to all active students in the selected class and keep the class fee rule available for future student sync.
                 Scholarship discounts will be applied automatically.
               </p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Select Class</label>
+                  <label htmlFor="finance-assign-class" className="ds-label mb-1">Select Class</label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    id="finance-assign-class"
+                    className="ds-select"
                     value={assignClassId}
                     onChange={(e) => setAssignClassId(e.target.value)}
                   >
@@ -1935,15 +1941,16 @@ const Finance = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    <div className="flex items-center space-x-2">
+                  <label htmlFor="finance-assign-due-date" className="ds-label mb-1">
+                    <span className="flex items-center gap-2">
                       <Calendar size={16} />
                       <span>Payment Due Date (Optional)</span>
-                    </div>
+                    </span>
                   </label>
                   <input
+                    id="finance-assign-due-date"
                     type="date"
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    className="ds-input"
                     value={assignDueDate}
                     onChange={(e) => setAssignDueDate(e.target.value)}
                   />
@@ -1952,19 +1959,19 @@ const Finance = () => {
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="ds-form-actions">
                 <button
                   onClick={() => {
                     setShowAssignFeeModal(false);
                     setAssignDueDate('');
                   }}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="ds-button-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAssignFee}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   Assign Fee
                 </button>

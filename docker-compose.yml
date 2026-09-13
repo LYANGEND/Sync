@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,12 +5,27 @@ services:
     restart: always
     environment:
       POSTGRES_USER: sync_user
-      POSTGRES_PASSWORD: sync_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: sync_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: sync_redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   backend:
     build: ./backend
@@ -20,14 +33,71 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgresql://sync_user:sync_password@postgres:5432/sync_db?schema=public
+      - DATABASE_URL=postgresql://sync_user:${POSTGRES_PASSWORD}@postgres:5432/sync_db?schema=public
       - PORT=3000
-      - JWT_SECRET=supersecretkeychangeinproduction
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - LENCO_WEBHOOK_SECRET=${LENCO_WEBHOOK_SECRET:?LENCO_WEBHOOK_SECRET is required}
+      - QUEUE_ENABLED=true
+      - QUEUE_REQUIRED=true
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_PREFIX=sync
+      - API_RATE_LIMIT_ENABLED=true
+      - API_RATE_LIMIT_REQUIRED=true
+      - AI_FINANCIAL_SNAPSHOT_CACHE_ENABLED=true
+      - AI_FINANCIAL_SNAPSHOT_CACHE_TTL_SECONDS=300
+      - SMS_RATE_LIMIT_ENABLED=true
+      - SMS_RATE_LIMIT_REQUIRED=true
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=900000
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
     volumes:
       - ./backend:/app
       - /app/node_modules
+
+  communication-worker:
+    build: ./backend
+    container_name: sync_communication_worker
+    restart: always
+    command: npm run worker:communications
+    environment:
+      - DATABASE_URL=postgresql://sync_user:${POSTGRES_PASSWORD}@postgres:5432/sync_db?schema=public
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - QUEUE_ENABLED=true
+      - QUEUE_REQUIRED=true
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_PREFIX=sync
+      - SMS_RATE_LIMIT_ENABLED=true
+      - SMS_RATE_LIMIT_REQUIRED=true
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=900000
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  payment-worker:
+    build: ./backend
+    container_name: sync_payment_worker
+    restart: always
+    command: npm run worker:payments
+    environment:
+      - DATABASE_URL=postgresql://sync_user:${POSTGRES_PASSWORD}@postgres:5432/sync_db?schema=public
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - QUEUE_ENABLED=true
+      - QUEUE_REQUIRED=true
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_PREFIX=sync
+      - SMS_RATE_LIMIT_ENABLED=true
+      - SMS_RATE_LIMIT_REQUIRED=true
+      - SMS_RATE_LIMIT_RECONCILE_INTERVAL_MS=900000
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -43,3 +113,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

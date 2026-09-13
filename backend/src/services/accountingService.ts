@@ -1,5 +1,11 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
+import {
+  getAgedReceivablesAggregates,
+  getBalanceSheetAggregates,
+  getIncomeStatementAggregates,
+  getTrialBalanceAggregates,
+} from './financialAggregationService';
 // ========================================
 // RECEIPT SEQUENCE
 // ========================================
@@ -90,7 +96,7 @@ export const createJournalEntry = async (data: {
     }
   }
 
-  return prisma.journalEntry.create({
+  const entry = await prisma.journalEntry.create({
     data: {
       entryNumber,
       date: data.date,
@@ -113,6 +119,13 @@ export const createJournalEntry = async (data: {
       lines: { include: { account: true } },
     },
   });
+
+  await invalidateFinancialSnapshotAfterMutation({
+    tenantId: entry.tenantId,
+    branchId: entry.branchId,
+    source: 'journal-entry.created',
+  });
+  return entry;
 };
 
 // ========================================
@@ -131,7 +144,7 @@ export const logFinancialAction = async (data: {
   ipAddress?: string;
   branchId?: string;
 }) => {
-  return prisma.financialAuditLog.create({
+  const auditLog = await prisma.financialAuditLog.create({
     data: {
       userId: data.userId,
       action: data.action,
@@ -145,6 +158,13 @@ export const logFinancialAction = async (data: {
       branchId: data.branchId,
     },
   });
+
+  await invalidateFinancialSnapshotAfterMutation({
+    tenantId: auditLog.tenantId,
+    scope: 'tenant',
+    source: 'financial-audit-log.created',
+  });
+  return auditLog;
 };
 
 // ========================================
@@ -208,162 +228,21 @@ export const calculateNHIMA = (monthlyGross: number): { employee: number; employ
  * Generate Trial Balance
  */
 export const getTrialBalance = async (startDate: Date, endDate: Date, branchId?: string) => {
-  const branchFilter = branchId ? { branchId } : {};
-
-  const accounts = await prisma.chartOfAccount.findMany({
-    where: { isActive: true, ...branchFilter },
-    include: {
-      journalEntryLines: {
-        where: {
-          journal: {
-            isPosted: true,
-            date: { gte: startDate, lte: endDate },
-            ...branchFilter,
-          },
-        },
-      },
-    },
-    orderBy: { code: 'asc' },
-  });
-
-  return accounts.map(account => {
-    const totalDebit = account.journalEntryLines.reduce(
-      (sum, line) => sum + Number(line.debit),
-      0
-    );
-    const totalCredit = account.journalEntryLines.reduce(
-      (sum, line) => sum + Number(line.credit),
-      0
-    );
-    return {
-      accountCode: account.code,
-      accountName: account.name,
-      accountType: account.type,
-      debit: totalDebit,
-      credit: totalCredit,
-      balance: totalDebit - totalCredit,
-    };
-  }).filter(a => a.debit !== 0 || a.credit !== 0);
+  return getTrialBalanceAggregates(startDate, endDate, branchId);
 };
 
 /**
  * Generate Income Statement (Profit & Loss)
  */
 export const getIncomeStatement = async (startDate: Date, endDate: Date, branchId?: string) => {
-  const branchFilter = branchId ? { branchId } : {};
-
-  // Get INCOME accounts
-  const incomeAccounts = await prisma.chartOfAccount.findMany({
-    where: { type: 'INCOME', isActive: true, ...branchFilter },
-    include: {
-      journalEntryLines: {
-        where: {
-          journal: {
-            isPosted: true,
-            date: { gte: startDate, lte: endDate },
-            ...branchFilter,
-          },
-        },
-      },
-    },
-  });
-
-  // Get EXPENSE accounts
-  const expenseAccounts = await prisma.chartOfAccount.findMany({
-    where: { type: 'EXPENSE', isActive: true, ...branchFilter },
-    include: {
-      journalEntryLines: {
-        where: {
-          journal: {
-            isPosted: true,
-            date: { gte: startDate, lte: endDate },
-            ...branchFilter,
-          },
-        },
-      },
-    },
-  });
-
-  const income = incomeAccounts.map(account => ({
-    code: account.code,
-    name: account.name,
-    amount: account.journalEntryLines.reduce(
-      (sum, line) => sum + Number(line.credit) - Number(line.debit),
-      0
-    ),
-  }));
-
-  const expenses = expenseAccounts.map(account => ({
-    code: account.code,
-    name: account.name,
-    amount: account.journalEntryLines.reduce(
-      (sum, line) => sum + Number(line.debit) - Number(line.credit),
-      0
-    ),
-  }));
-
-  const totalIncome = income.reduce((sum, i) => sum + i.amount, 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-
-  return {
-    period: { startDate, endDate },
-    income: income.filter(i => i.amount !== 0),
-    totalIncome,
-    expenses: expenses.filter(e => e.amount !== 0),
-    totalExpenses,
-    netIncome: totalIncome - totalExpenses,
-  };
+  return getIncomeStatementAggregates(startDate, endDate, branchId);
 };
 
 /**
  * Generate Balance Sheet
  */
 export const getBalanceSheet = async (asOfDate: Date, branchId?: string) => {
-  const branchFilter = branchId ? { branchId } : {};
-
-  const allAccounts = await prisma.chartOfAccount.findMany({
-    where: { isActive: true, ...branchFilter },
-    include: {
-      journalEntryLines: {
-        where: {
-          journal: {
-            isPosted: true,
-            date: { lte: asOfDate },
-            ...branchFilter,
-          },
-        },
-      },
-    },
-    orderBy: { code: 'asc' },
-  });
-
-  const categorize = (type: string) =>
-    allAccounts
-      .filter(a => a.type === type)
-      .map(account => {
-        const balance = account.journalEntryLines.reduce((sum, line) => {
-          if (type === 'ASSET' || type === 'EXPENSE') {
-            return sum + Number(line.debit) - Number(line.credit);
-          }
-          return sum + Number(line.credit) - Number(line.debit);
-        }, 0);
-        return { code: account.code, name: account.name, balance };
-      })
-      .filter(a => a.balance !== 0);
-
-  const assets = categorize('ASSET');
-  const liabilities = categorize('LIABILITY');
-  const equity = categorize('EQUITY');
-
-  return {
-    asOfDate,
-    assets,
-    totalAssets: assets.reduce((sum, a) => sum + a.balance, 0),
-    liabilities,
-    totalLiabilities: liabilities.reduce((sum, l) => sum + l.balance, 0),
-    equity,
-    totalEquity: equity.reduce((sum, e) => sum + e.balance, 0),
-  };
+  return getBalanceSheetAggregates(asOfDate, branchId);
 };
 
 /**
@@ -429,97 +308,5 @@ export const getCashFlowSummary = async (startDate: Date, endDate: Date, branchI
  * Generate Aged Receivables Report
  */
 export const getAgedReceivables = async (branchId?: string) => {
-  const now = new Date();
-  const days30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const days60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-  const days90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-
-  const branchFilter = branchId ? { branchId } : {};
-
-  const students = await prisma.student.findMany({
-    where: {
-      status: 'ACTIVE',
-      ...branchFilter,
-    },
-    include: {
-      class: true,
-      feeStructures: {
-        include: { feeTemplate: true },
-      },
-      payments: {
-        where: { status: 'COMPLETED' },
-      },
-    },
-  });
-
-  const receivables = students.map(student => {
-    const totalDue = student.feeStructures.reduce(
-      (sum, fs) => sum + Number(fs.amountDue),
-      0
-    );
-    const totalPaid = student.payments.reduce(
-      (sum, p) => sum + Number(p.amount),
-      0
-    );
-    const balance = totalDue - totalPaid;
-
-    if (balance <= 0) return null;
-
-    // Categorize by age based on earliest unpaid fee due date
-    const earliestDue = student.feeStructures
-      .filter(fs => Number(fs.amountDue) > Number(fs.amountPaid))
-      .sort((a, b) => {
-        const dateA = a.dueDate || a.createdAt;
-        const dateB = b.dueDate || b.createdAt;
-        return dateA.getTime() - dateB.getTime();
-      })[0];
-
-    const dueDate = earliestDue?.dueDate || earliestDue?.createdAt || now;
-    const ageDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-
-    let bucket: string;
-    if (ageDays <= 0) bucket = 'current';
-    else if (ageDays <= 30) bucket = '1-30';
-    else if (ageDays <= 60) bucket = '31-60';
-    else if (ageDays <= 90) bucket = '61-90';
-    else bucket = '90+';
-
-    return {
-      studentId: student.id,
-      studentName: `${student.firstName} ${student.lastName}`,
-      admissionNumber: student.admissionNumber,
-      className: student.class?.name || 'N/A',
-      totalDue,
-      totalPaid,
-      balance,
-      ageDays,
-      bucket,
-      guardianPhone: student.guardianPhone,
-      guardianEmail: student.guardianEmail,
-    };
-  }).filter(Boolean);
-
-  // Summary by bucket
-  const summary = {
-    current: 0,
-    '1-30': 0,
-    '31-60': 0,
-    '61-90': 0,
-    '90+': 0,
-    total: 0,
-  };
-
-  receivables.forEach(r => {
-    if (r) {
-      summary[r.bucket as keyof typeof summary] += r.balance;
-      summary.total += r.balance;
-    }
-  });
-
-  return {
-    receivables: receivables.sort((a, b) => (b?.balance || 0) - (a?.balance || 0)),
-    summary,
-    studentCount: receivables.length,
-    generatedAt: new Date(),
-  };
+  return getAgedReceivablesAggregates(branchId);
 };

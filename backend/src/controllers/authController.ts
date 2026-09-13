@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { prisma } from '../utils/prisma';
+import { prisma, systemPrisma } from '../utils/prisma';
+import { runWithTenant } from '../middleware/tenantContext';
 import { z } from 'zod';
 import { comparePassword, generateToken, hashPassword } from '../utils/auth';
 
@@ -31,13 +32,13 @@ async function resolveTenant(req: Request): Promise<{
 } | null> {
   const slug = req.headers['x-tenant-slug'] as string;
   if (slug) {
-    const tenant = await prisma.tenant.findUnique({ where: { slug } });
+    const tenant = await systemPrisma.tenant.findUnique({ where: { slug } });
     if (tenant && tenant.status !== 'SUSPENDED') return tenant;
     return null;
   }
   const tid = req.headers['x-tenant-id'] as string;
   if (tid) {
-    const tenant = await prisma.tenant.findUnique({ where: { id: tid } });
+    const tenant = await systemPrisma.tenant.findUnique({ where: { id: tid } });
     if (tenant && tenant.status !== 'SUSPENDED') return tenant;
     return null;
   }
@@ -51,7 +52,7 @@ const logAuthEvent = async (
   userId?: string | null,
   details?: Record<string, unknown>
 ) => {
-  await prisma.auditLog.create({
+  const writeAudit = (client: typeof prisma) => client.auditLog.create({
     data: {
       tenantId,
       userId: userId || null,
@@ -62,7 +63,13 @@ const logAuthEvent = async (
       ipAddress: req.ip || req.socket.remoteAddress || null,
       userAgent: req.get('User-Agent') || null,
     },
-  }).catch(() => undefined);
+  });
+
+  if (tenantId === 'SYSTEM') {
+    await writeAudit(systemPrisma).catch(() => undefined);
+  } else {
+    await runWithTenant(tenantId, () => writeAudit(prisma)).catch(() => undefined);
+  }
 };
 
 export const login = async (req: Request, res: Response) => {
@@ -78,9 +85,9 @@ export const login = async (req: Request, res: Response) => {
     }
 
     // Find user scoped to this tenant
-    const user = await prisma.user.findFirst({
-      where: { email: normalizedEmail, tenantId: tenant.id },
-    });
+    const user = await runWithTenant(tenant.id, () => prisma.user.findFirst({
+      where: { email: normalizedEmail },
+    }));
 
     if (!user || !user.isActive) {
       await logAuthEvent(req, tenant.id, 'LOGIN_FAILED', user?.id, {
@@ -148,16 +155,14 @@ export const register = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing or invalid tenant. Provide x-tenant-slug or x-tenant-id header.' });
     }
 
-    const existingUser = await prisma.user.findFirst({
-      where: { email, tenantId: tenant.id },
-    });
+    const existingUser = await runWithTenant(tenant.id, () => prisma.user.findFirst({ where: { email } }));
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists in this tenant' });
     }
 
     const passwordHash = await hashPassword(password);
 
-    const user = await prisma.user.create({
+    const user = await runWithTenant(tenant.id, () => prisma.user.create({
       data: {
         email,
         passwordHash,
@@ -165,7 +170,7 @@ export const register = async (req: Request, res: Response) => {
         role,
         tenantId: tenant.id,
       },
-    });
+    }));
 
     const token = generateToken(user.id, user.role, user.tenantId, user.branchId);
 

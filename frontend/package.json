@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
+    "test:gradebook": "node --test tests/gradebook.test.mjs",
     "generate-pwa-assets": "node scripts/generate-pwa-assets.cjs"
   },
   "dependencies": {

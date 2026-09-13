@@ -246,100 +246,97 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
   };
 
   return (
-    <PullToRefresh onRefresh={handleRefresh} className="min-h-screen bg-gray-50/50 dark:bg-slate-900/50">
-      <div className="p-4 md:p-6 max-w-7xl mx-auto pb-24">
+    <PullToRefresh onRefresh={handleRefresh}>
+      <div className="ds-page">
         
         {/* Header & Quick Context */}
-        <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="ds-page-header">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">Teacher Workspace</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Welcome back, {user?.fullName?.split(' ')[0]}. Here is your instructional intelligence.</p>
+            <h1 className="ds-page-title">Teacher Workspace</h1>
+            <p className="ds-page-subtitle">Welcome back, {user?.fullName?.split(' ')[0]}. Here is your instructional overview.</p>
           </div>
-          
-          {/* Quick Stats Base Layer */}
-          <div className="flex gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
-             <div className="px-3 py-1 flex flex-col items-center border-r border-gray-100 dark:border-slate-700">
-               <span className="text-[10px] text-gray-500 font-medium tracking-wider uppercase">Students</span>
-               <span className="font-bold text-gray-900 dark:text-white">{stats.totalStudents}</span>
-             </div>
-             <div className="px-3 py-1 flex flex-col items-center border-r border-gray-100 dark:border-slate-700">
-               <span className="text-[10px] text-gray-500 font-medium tracking-wider uppercase">Classes</span>
-               <span className="font-bold text-gray-900 dark:text-white">{stats.totalClasses}</span>
-             </div>
-             <div className="px-3 py-1 flex flex-col items-center">
-               <span className="text-[10px] text-gray-500 font-medium tracking-wider uppercase">Today</span>
-               <span className="font-bold text-orange-600">{stats.todayScheduleCount}</span>
-             </div>
+
+          <div className="flex gap-2 rounded-xl border border-[var(--border-color)] bg-[var(--surface)] p-1.5 shadow-[var(--shadow-sm)]">
+            <div className="flex flex-col items-center border-r border-[var(--border-color)] px-3 py-1">
+              <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">Students</span>
+              <span className="text-base font-bold text-[var(--text-primary)]">{stats.totalStudents}</span>
+            </div>
+            <div className="flex flex-col items-center border-r border-[var(--border-color)] px-3 py-1">
+              <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">Classes</span>
+              <span className="text-base font-bold text-[var(--text-primary)]">{stats.totalClasses}</span>
+            </div>
+            <div className="flex flex-col items-center px-3 py-1">
+              <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--text-secondary)]">Today</span>
+              <span className="text-base font-bold text-[var(--text-primary)]">{stats.todayScheduleCount}</span>
+            </div>
           </div>
         </div>
 
-        <div className="mb-6 grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] gap-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 md:p-5">
-            <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[1.7fr_1fr]">
+          <div className="ds-card">
+            <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-base font-bold text-gray-900 dark:text-white">Today’s Teaching Runway</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Your next class, preparation blockers, and follow-up items in one place.</p>
+                <h2 className="text-base font-bold text-[var(--text-primary)]">Today’s teaching runway</h2>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">Your next class, preparation blockers, and follow-up items in one place.</p>
               </div>
               {nextLesson && (
-                <div className="rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 px-3 py-2 text-right">
-                  <p className="text-[10px] uppercase tracking-wide font-bold text-blue-600 dark:text-blue-400">Next Class</p>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white">{nextLesson.subject?.name}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{nextLesson.class?.name} • {nextLesson.startTime}</p>
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-muted)] px-3 py-2 text-right">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Next class</p>
+                  <p className="text-sm font-bold text-[var(--text-primary)]">{nextLesson.subject?.name}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">{nextLesson.class?.name} • {nextLesson.startTime}</p>
                 </div>
               )}
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <button onClick={() => setActiveTab('INSIGHTS')} className="text-left rounded-xl border border-red-100 dark:border-red-900/30 bg-red-50/70 dark:bg-red-900/10 p-3 hover:bg-red-100/70 dark:hover:bg-red-900/20 transition-colors">
-                <p className="text-[10px] uppercase tracking-wide font-bold text-red-600 dark:text-red-400">Urgent Learners</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">{urgentLearnersCount}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Across {supportQueueCount} support cases</p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <button onClick={() => setActiveTab('INSIGHTS')} className="cursor-pointer rounded-xl border border-red-100 bg-red-50 p-3 text-left transition-colors hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-red-600">Urgent learners</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{urgentLearnersCount}</p>
+                <p className="mt-1 text-xs text-slate-500">Across {supportQueueCount} support cases</p>
               </button>
-              <button onClick={() => setActiveTab('INSIGHTS')} className="text-left rounded-xl border border-purple-100 dark:border-purple-900/30 bg-purple-50/70 dark:bg-purple-900/10 p-3 hover:bg-purple-100/70 dark:hover:bg-purple-900/20 transition-colors">
-                <p className="text-[10px] uppercase tracking-wide font-bold text-purple-600 dark:text-purple-400">AI Drafts</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">{pendingActions.length}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Waiting for review</p>
+              <button onClick={() => setActiveTab('INSIGHTS')} className="cursor-pointer rounded-xl border border-violet-100 bg-violet-50 p-3 text-left transition-colors hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-violet-600">AI drafts</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{pendingActions.length}</p>
+                <p className="mt-1 text-xs text-slate-500">Waiting for review</p>
               </button>
-              <button onClick={() => { setActiveTab('PLAN'); setLessonStatusFilter('DRAFT'); }} className="text-left rounded-xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/70 dark:bg-amber-900/10 p-3 hover:bg-amber-100/70 dark:hover:bg-amber-900/20 transition-colors">
-                <p className="text-[10px] uppercase tracking-wide font-bold text-amber-600 dark:text-amber-400">Draft Lessons</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">{draftLessonsCount}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Need review or AI activities</p>
+              <button onClick={() => { setActiveTab('PLAN'); setLessonStatusFilter('DRAFT'); }} className="cursor-pointer rounded-xl border border-amber-100 bg-amber-50 p-3 text-left transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600">Draft lessons</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{draftLessonsCount}</p>
+                <p className="mt-1 text-xs text-slate-500">Need review or AI activities</p>
               </button>
-              <button onClick={() => setActiveTab('ASSESS')} className="text-left rounded-xl border border-blue-100 dark:border-blue-900/30 bg-blue-50/70 dark:bg-blue-900/10 p-3 hover:bg-blue-100/70 dark:hover:bg-blue-900/20 transition-colors">
-                <p className="text-[10px] uppercase tracking-wide font-bold text-blue-600 dark:text-blue-400">Assessment Flow</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">{data.recentAssessments.length}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{totalRecentResults} results recorded</p>
+              <button onClick={() => setActiveTab('ASSESS')} className="cursor-pointer rounded-xl border border-blue-100 bg-blue-50 p-3 text-left transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-600">Assessment flow</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{data.recentAssessments.length}</p>
+                <p className="mt-1 text-xs text-slate-500">{totalRecentResults} results recorded</p>
               </button>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 md:p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-bold text-gray-900 dark:text-white">Quick Actions</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Jump straight into the most common teacher tasks.</p>
-              </div>
+          <div className="ds-card">
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-[var(--text-primary)]">Quick actions</h2>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">Jump straight into the most common teacher tasks.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Link to="/academics/attendance" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
-                <ClipboardCheck size={18} className="text-blue-600 dark:text-blue-400 mb-2" />
-                <p className="text-sm font-bold text-gray-900 dark:text-white">Mark Attendance</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Open today’s register</p>
+              <Link to="/academics/attendance" className="cursor-pointer rounded-xl border border-[var(--border-color)] p-3 transition-colors hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--action-color)]">
+                <ClipboardCheck size={18} className="mb-2 text-blue-600" />
+                <p className="text-sm font-bold text-[var(--text-primary)]">Mark attendance</p>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Open today’s register</p>
               </Link>
-              <Link to="/academics/gradebook" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
-                <BookOpen size={18} className="text-emerald-600 dark:text-emerald-400 mb-2" />
-                <p className="text-sm font-bold text-gray-900 dark:text-white">Open Gradebook</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Enter or review scores</p>
+              <Link to="/academics/gradebook" className="cursor-pointer rounded-xl border border-[var(--border-color)] p-3 transition-colors hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--action-color)]">
+                <BookOpen size={18} className="mb-2 text-emerald-600" />
+                <p className="text-sm font-bold text-[var(--text-primary)]">Open gradebook</p>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Enter or review scores</p>
               </Link>
-              <Link to="/students" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
-                <Search size={18} className="text-purple-600 dark:text-purple-400 mb-2" />
-                <p className="text-sm font-bold text-gray-900 dark:text-white">Find Student</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Open learner profiles</p>
+              <Link to="/students" className="cursor-pointer rounded-xl border border-[var(--border-color)] p-3 transition-colors hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--action-color)]">
+                <Search size={18} className="mb-2 text-violet-600" />
+                <p className="text-sm font-bold text-[var(--text-primary)]">Find student</p>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Open learner profiles</p>
               </Link>
-              <button onClick={() => setActiveTab('PLAN')} className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 text-left hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
-                <BrainCircuit size={18} className="text-amber-600 dark:text-amber-400 mb-2" />
-                <p className="text-sm font-bold text-gray-900 dark:text-white">Continue Planning</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{readyLessonsCount} ready • {draftLessonsCount} draft</p>
+              <button onClick={() => setActiveTab('PLAN')} className="cursor-pointer rounded-xl border border-[var(--border-color)] p-3 text-left transition-colors hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--action-color)]">
+                <BrainCircuit size={18} className="mb-2 text-amber-600" />
+                <p className="text-sm font-bold text-[var(--text-primary)]">Continue planning</p>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{readyLessonsCount} ready • {draftLessonsCount} draft</p>
               </button>
             </div>
           </div>

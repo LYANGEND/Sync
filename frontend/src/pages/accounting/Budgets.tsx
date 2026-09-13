@@ -341,7 +341,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
               <button onClick={() => setShowDetailModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
                   <p className="text-xs text-gray-500">Total Budget</p>
                   <p className="font-bold text-blue-600">{fmt(selectedBudget.totalBudget)}</p>
@@ -397,7 +397,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
                 <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g., Term 1 2025 Budget" />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Period</label>
                   <select value={form.period} onChange={e => setForm({ ...form, period: e.target.value })}

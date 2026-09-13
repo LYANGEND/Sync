@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Video, Plus, Calendar, Users, Bot, Play, Trash2, Edit,
   Search, Loader2, GraduationCap, Brain, Sparkles,
-  Monitor, BookOpen, X, Volume2, CheckSquare,
-  Square, Wand2, ListTree
+  Monitor, BookOpen, X, Volume2,
+  Wand2, ListTree
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { PageHeader } from '../../components/ui/DesignSystem';
 import syllabusService, {
   StructuredLessonPlan,
   Topic,
@@ -360,11 +361,11 @@ export default function VirtualClassrooms() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'LIVE': return 'bg-green-500/20 text-green-400 border-green-500/30';
-      case 'SCHEDULED': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-      case 'ENDED': return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-      case 'CANCELLED': return 'bg-red-500/20 text-red-400 border-red-500/30';
-      default: return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+      case 'LIVE': return 'ds-badge-success';
+      case 'SCHEDULED': return 'ds-badge-info';
+      case 'ENDED': return 'ds-badge-neutral';
+      case 'CANCELLED': return 'ds-badge-error';
+      default: return 'ds-badge-neutral';
     }
   };
 
@@ -372,55 +373,42 @@ export default function VirtualClassrooms() {
   // RENDER
   // ==========================================
   return (
-    <div className="p-6">
+    <div className="ds-page">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <div className="p-2 bg-purple-100 dark:bg-purple-900/50 rounded-xl">
-              <Video className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-            </div>
-            Virtual Classrooms
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Live classes powered by Jitsi Meet with AI teaching assistant
-          </p>
-        </div>
-
-        {canCreate && (
+      <PageHeader title="Virtual Classrooms" description="Live classes powered by Jitsi Meet with AI teaching assistant" actions={canCreate && (
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition font-medium"
+            className="ds-button-primary"
           >
             <Plus size={18} />
             New Classroom
           </button>
-        )}
-      </div>
+        )} />
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+      <div className="ds-card ds-toolbar">
+        <div className="ds-field w-full sm:max-w-sm">
+          <label htmlFor="classroom-search" className="ds-label">Search classrooms</label>
+          <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" aria-hidden="true" />
           <input
+            id="classroom-search"
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search classrooms..."
-            className="w-full pl-9 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            className="ds-input pl-9"
           />
+          </div>
         </div>
 
-        <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+        <div className="ds-actions" role="group" aria-label="Filter classrooms by status">
           {(['all', 'SCHEDULED', 'LIVE', 'ENDED'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                filter === f
-                  ? 'bg-white dark:bg-gray-700 text-purple-600 dark:text-purple-400 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
+              className={filter === f ? 'ds-button-primary' : 'ds-button-outline'}
+              aria-pressed={filter === f}
             >
               {f === 'all' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()}
             </button>
@@ -430,16 +418,16 @@ export default function VirtualClassrooms() {
 
       {/* Classrooms Grid */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+        <div className="ds-card flex items-center justify-center py-20" role="status" aria-label="Loading virtual classrooms">
+          <Loader2 className="w-8 h-8 text-[var(--action-color)] animate-spin" aria-hidden="true" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-20">
-          <Monitor className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+        <div className="ds-card ds-empty">
+          <Monitor className="w-12 h-12 mx-auto mb-4" aria-hidden="true" />
           <h3 className="text-lg font-medium text-gray-600 dark:text-gray-400 mb-1">
             No virtual classrooms
           </h3>
-          <p className="text-gray-400 dark:text-gray-500 text-sm">
+          <p className="ds-helper">
             {canCreate ? 'Create your first virtual classroom to get started' : 'No classrooms available'}
           </p>
         </div>
@@ -448,11 +436,11 @@ export default function VirtualClassrooms() {
           {filtered.map((classroom) => (
             <div
               key={classroom.id}
-              className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-lg transition group"
+              className="ds-surface min-w-0 overflow-hidden"
             >
               {/* Card header */}
-              <div className="p-5">
-                <div className="flex items-start justify-between mb-3">
+              <div className="p-4 sm:p-6">
+                <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-900 dark:text-white truncate">
                       {classroom.title}
@@ -462,8 +450,7 @@ export default function VirtualClassrooms() {
                       {classroom.className && ` • ${classroom.className}`}
                     </p>
                   </div>
-                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${getStatusColor(classroom.status)}`}>
-                    {classroom.status === 'LIVE' && '🔴 '}
+                  <span className={`ds-badge shrink-0 ${getStatusColor(classroom.status)}`}>
                     {classroom.status}
                   </span>
                 </div>
@@ -476,17 +463,17 @@ export default function VirtualClassrooms() {
 
                 {/* AI Tutor badge */}
                 {classroom.aiTutorEnabled && (
-                  <div className="flex items-center gap-1.5 mb-3 px-2.5 py-1.5 bg-purple-50 dark:bg-purple-900/30 rounded-lg w-fit">
-                    <Brain size={14} className="text-purple-500" />
-                    <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
+                  <div className="ds-badge ds-badge-info mb-3 w-fit">
+                    <Brain size={14} aria-hidden="true" />
+                    <span>
                       AI Tutor: {classroom.aiTutorName}
                     </span>
-                    <Volume2 size={12} className="text-purple-400 ml-1" />
+                    <Volume2 size={12} className="ml-1" aria-hidden="true" />
                   </div>
                 )}
 
                 {/* Stats */}
-                <div className="flex items-center gap-4 text-xs text-gray-400">
+                <div className="flex flex-wrap items-center gap-4 ds-helper">
                   <span className="flex items-center gap-1">
                     <Users size={12} /> {classroom._count.participants} joined
                   </span>
@@ -497,7 +484,7 @@ export default function VirtualClassrooms() {
 
                 {/* Teacher */}
                 {classroom.teacherName && (
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="ds-helper mt-2">
                     <GraduationCap size={12} className="inline mr-1" />
                     {classroom.teacherName}
                   </p>
@@ -505,11 +492,11 @@ export default function VirtualClassrooms() {
               </div>
 
               {/* Card footer actions */}
-              <div className="px-5 py-3 bg-gray-50 dark:bg-gray-750 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <div className="px-4 sm:px-6 py-3 bg-[var(--surface-muted)] border-t border-[var(--border-color)] ds-actions">
                 {classroom.status === 'LIVE' && (
                   <button
                     onClick={() => navigate(`/virtual-classroom/${classroom.id}`)}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
+                    className="ds-button-primary flex-1"
                   >
                     <Video size={14} /> Join Class
                   </button>
@@ -522,13 +509,14 @@ export default function VirtualClassrooms() {
                         startClassroom(classroom.id);
                         navigate(`/virtual-classroom/${classroom.id}`);
                       }}
-                      className="flex-1 flex items-center justify-center gap-2 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                      className="ds-button-primary flex-1"
                     >
                       <Play size={14} /> Start Class
                     </button>
                     <button
                       onClick={() => navigate(`/virtual-classroom/${classroom.id}`)}
-                      className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      className="ds-button-ghost"
+                      aria-label={`Open classroom: ${classroom.title}`}
                     >
                       <Edit size={14} />
                     </button>
@@ -538,7 +526,7 @@ export default function VirtualClassrooms() {
                 {classroom.status === 'ENDED' && (
                   <button
                     onClick={() => navigate(`/virtual-classroom/${classroom.id}`)}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 text-sm"
+                    className="ds-button-secondary flex-1"
                   >
                     <BookOpen size={14} /> View Summary
                   </button>
@@ -547,7 +535,8 @@ export default function VirtualClassrooms() {
                 {isAdmin && (
                   <button
                     onClick={() => deleteClassroom(classroom.id)}
-                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
+                    className="ds-button-destructive"
+                    aria-label={`Delete classroom: ${classroom.title}`}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -562,55 +551,58 @@ export default function VirtualClassrooms() {
           CREATE CLASSROOM MODAL
           ========================================== */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="ds-surface w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-labelledby="create-classroom-title">
             {/* Modal header */}
             <div className="flex items-center justify-between p-6 border-b dark:border-gray-700">
-              <h2 className="text-lg font-semibold flex items-center gap-2 dark:text-white">
-                <Sparkles className="text-purple-500" size={20} />
+              <h2 id="create-classroom-title" className="flex items-center gap-2">
+                <Video className="text-[var(--text-secondary)]" size={20} aria-hidden="true" />
                 Create Virtual Classroom
               </h2>
-              <button onClick={() => { setShowCreate(false); resetForm(); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <button onClick={() => { setShowCreate(false); resetForm(); }} className="ds-button-ghost" aria-label="Close create classroom">
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
 
             {/* Modal form */}
-            <form onSubmit={handleCreate} className="p-6 space-y-5">
+            <form onSubmit={handleCreate} className="p-4 sm:p-6 space-y-6">
               {/* Basic Info */}
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Class Details</h3>
 
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Title *</label>
+                  <label htmlFor="classroom-title" className="ds-label mb-2">Title (required)</label>
                   <input
+                    id="classroom-title"
                     type="text"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     placeholder="e.g. Grade 7 Mathematics - Algebra"
-                    className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                    className="ds-input"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Description</label>
+                  <label htmlFor="classroom-description" className="ds-label mb-2">Description</label>
                   <textarea
+                    id="classroom-description"
                     value={form.description}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
                     placeholder="Brief description of the class..."
                     rows={2}
-                    className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white resize-none"
+                    className="ds-textarea"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Class</label>
+                    <label htmlFor="classroom-class" className="ds-label mb-2">Class</label>
                     <select
+                      id="classroom-class"
                       value={form.classId}
                       onChange={(e) => setForm({ ...form, classId: e.target.value })}
-                      className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                      className="ds-select"
                     >
                       <option value="">Select class...</option>
                       {classes.map(c => (
@@ -619,11 +611,12 @@ export default function VirtualClassrooms() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject</label>
+                    <label htmlFor="classroom-subject" className="ds-label mb-2">Subject</label>
                     <select
+                      id="classroom-subject"
                       value={form.subjectId}
                       onChange={(e) => setForm({ ...form, subjectId: e.target.value })}
-                      className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                      className="ds-select"
                     >
                       <option value="">Select subject...</option>
                       {availableFormSubjects.map(s => (
@@ -633,24 +626,26 @@ export default function VirtualClassrooms() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start Time *</label>
+                    <label htmlFor="classroom-start" className="ds-label mb-2">Start Time (required)</label>
                     <input
+                      id="classroom-start"
                       type="datetime-local"
                       value={form.scheduledStart}
                       onChange={(e) => setForm({ ...form, scheduledStart: e.target.value })}
-                      className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                      className="ds-input"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">End Time *</label>
+                    <label htmlFor="classroom-end" className="ds-label mb-2">End Time (required)</label>
                     <input
+                      id="classroom-end"
                       type="datetime-local"
                       value={form.scheduledEnd}
                       onChange={(e) => setForm({ ...form, scheduledEnd: e.target.value })}
-                      className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                      className="ds-input"
                       required
                     />
                   </div>
@@ -659,34 +654,35 @@ export default function VirtualClassrooms() {
 
               {/* Syllabus Topic Picker — shown when subject + class selected */}
               {form.subjectId && form.classId && (
-                <div className="space-y-3 pt-3 border-t dark:border-gray-700">
+                <div className="space-y-4 pt-6 border-t border-[var(--border-color)]">
                   <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
                     <ListTree size={16} className="text-indigo-500" />
                     Syllabus Topic
-                    <span className="text-xs font-normal text-gray-400">(from curriculum)</span>
+                    <span className="ds-helper">(from curriculum)</span>
                   </h3>
 
                   {loadingTopics ? (
-                    <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+                    <div className="flex items-center gap-2 ds-helper py-2" role="status">
                       <Loader2 size={14} className="animate-spin" /> Loading topics...
                     </div>
                   ) : topics.length === 0 ? (
-                    <p className="text-xs text-gray-400 py-2">
+                    <p className="ds-helper py-2">
                       No syllabus topics found for this subject + grade. You can still write a lesson plan manually below.
                     </p>
                   ) : (
                     <>
                       {/* Topic dropdown */}
                       <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Select Topic</label>
+                        <label htmlFor="classroom-topic" className="ds-label mb-2">Select Topic</label>
                         <select
+                          id="classroom-topic"
                           value={selectedTopicId}
                           onChange={(e) => {
                             setSelectedTopicId(e.target.value);
                             setSelectedSubTopicIds([]);
                             setGeneratedStructuredPlan(null);
                           }}
-                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                          className="ds-select"
                         >
                           <option value="">Choose a topic from the syllabus...</option>
                           {topics.map(t => (
@@ -705,7 +701,7 @@ export default function VirtualClassrooms() {
 
                         if (subtopics.length === 0) {
                           return (
-                            <p className="text-xs text-gray-400 pl-1">
+                            <p className="ds-helper pl-1">
                               No subtopics defined for this topic yet.
                             </p>
                           );
@@ -713,54 +709,44 @@ export default function VirtualClassrooms() {
 
                         return (
                           <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs text-gray-500 dark:text-gray-400">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p id="classroom-subtopics-label" className="ds-label">
                                 Select subtopics to cover ({selectedSubTopicIds.length}/{subtopics.length})
-                              </label>
+                              </p>
                               <button
                                 type="button"
                                 onClick={selectAllSubTopics}
-                                className="text-xs text-indigo-500 hover:text-indigo-600 font-medium"
+                                className="ds-button-ghost"
                               >
                                 Select all
                               </button>
                             </div>
 
-                            <div className="max-h-40 overflow-y-auto space-y-1 rounded-xl border dark:border-gray-600 p-2 bg-gray-50 dark:bg-gray-750">
+                            <div className="ds-surface-muted max-h-40 overflow-y-auto space-y-1 p-2" role="group" aria-labelledby="classroom-subtopics-label" tabIndex={0}>
                               {subtopics.map(st => {
                                 const isSelected = selectedSubTopicIds.includes(st.id);
                                 const objectives = parseLearningObjectives(st.learningObjectives);
 
                                 return (
-                                  <button
+                                  <label
                                     key={st.id}
-                                    type="button"
-                                    onClick={() => toggleSubTopic(st.id)}
-                                    className={`w-full text-left flex items-start gap-2 p-2 rounded-lg transition text-sm ${
-                                      isSelected
-                                        ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700'
-                                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
-                                    }`}
+                                    className="flex min-h-11 items-start gap-3 p-2 rounded-xl cursor-pointer"
                                   >
-                                    {isSelected ? (
-                                      <CheckSquare size={16} className="text-indigo-500 mt-0.5 flex-shrink-0" />
-                                    ) : (
-                                      <Square size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                                    )}
-                                    <div className="min-w-0">
+                                    <input type="checkbox" className="ds-choice mt-0.5" checked={isSelected} onChange={() => toggleSubTopic(st.id)} aria-label={st.title} />
+                                    <span className="min-w-0">
                                       <span className="font-medium text-gray-800 dark:text-gray-200 text-xs">
                                         {st.title}
                                       </span>
                                       {st.duration && (
-                                        <span className="text-[10px] text-gray-400 ml-1">~{st.duration}min</span>
+                                        <span className="text-xs text-[var(--text-secondary)] ml-1">~{st.duration}min</span>
                                       )}
                                       {objectives.length > 0 && (
-                                        <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                                        <span className="block text-xs text-[var(--text-secondary)] mt-1">
                                           {objectives[0]}{objectives.length > 1 ? ` +${objectives.length - 1} more` : ''}
-                                        </p>
+                                        </span>
                                       )}
-                                    </div>
-                                  </button>
+                                    </span>
+                                  </label>
                                 );
                               })}
                             </div>
@@ -775,7 +761,8 @@ export default function VirtualClassrooms() {
                             type="button"
                             onClick={handleGenerateLessonPlan}
                             disabled={generatingPlan}
-                            className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-xl hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 text-xs font-medium transition w-full justify-center"
+                            className="ds-button-primary w-full"
+                            aria-busy={generatingPlan || undefined}
                           >
                             {generatingPlan ? (
                               <><Loader2 size={14} className="animate-spin" /> Generating lesson plan with AI...</>
@@ -785,37 +772,37 @@ export default function VirtualClassrooms() {
                           </button>
 
                           {generatedStructuredPlan && (
-                            <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 p-3 space-y-2">
+                            <div className="ds-card space-y-3">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                                  <p className="ds-label">
                                     Timed Lesson Flow
                                   </p>
-                                  <p className="text-[11px] text-indigo-600/80 dark:text-indigo-300/70">
+                                  <p className="ds-helper">
                                     {generatedStructuredPlan.totalDurationMinutes} minutes • {generatedStructuredPlan.segments.length} segments
                                   </p>
                                 </div>
-                                <span className="text-[10px] px-2 py-1 rounded-full bg-white/80 dark:bg-slate-900/60 text-indigo-700 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700">
+                                <span className="ds-badge ds-badge-info">
                                   {generatedStructuredPlan.source}
                                 </span>
                               </div>
 
-                              <div className="max-h-48 overflow-y-auto space-y-2">
+                              <div className="max-h-48 overflow-y-auto space-y-2" role="region" aria-label="Generated lesson segments" tabIndex={0}>
                                 {generatedStructuredPlan.segments.map(segment => (
                                   <div
                                     key={`${segment.phase}-${segment.index}-${segment.title}`}
-                                    className="rounded-lg bg-white/80 dark:bg-slate-900/40 border border-indigo-100 dark:border-indigo-900 px-3 py-2"
+                                    className="ds-surface-muted px-3 py-2"
                                   >
                                     <div className="flex items-center justify-between gap-3">
                                       <p className="text-xs font-medium text-slate-800 dark:text-slate-100">
                                         {segment.index + 1}. {segment.title}
                                       </p>
-                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                      <span className="text-xs text-[var(--text-secondary)] whitespace-nowrap">
                                         {segment.phase} • {segment.durationMinutes}m
                                       </span>
                                     </div>
                                     {segment.objectives.length > 0 && (
-                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                      <p className="text-xs text-[var(--text-secondary)] mt-1">
                                         {segment.objectives[0]}
                                         {segment.objectives.length > 1 ? ` +${segment.objectives.length - 1} more objective${segment.objectives.length > 2 ? 's' : ''}` : ''}
                                       </p>
@@ -833,42 +820,44 @@ export default function VirtualClassrooms() {
               )}
 
               {/* AI Tutor Settings */}
-              <div className="space-y-3 pt-3 border-t dark:border-gray-700">
-                <div className="flex items-center justify-between">
+              <div className="space-y-4 pt-6 border-t border-[var(--border-color)]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
                     <Brain size={16} className="text-purple-500" />
                     AI Tutor Settings
                   </h3>
-                  <label className="relative inline-flex items-center cursor-pointer">
+                  <label className="flex min-h-11 items-center gap-3 cursor-pointer ds-label">
                     <input
                       type="checkbox"
                       checked={form.aiTutorEnabled}
                       onChange={(e) => setForm({ ...form, aiTutorEnabled: e.target.checked })}
-                      className="sr-only peer"
+                      className="ds-choice"
                     />
-                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    Enable AI tutor
                   </label>
                 </div>
 
                 {form.aiTutorEnabled && (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">AI Teacher Name</label>
+                        <label htmlFor="classroom-tutor-name" className="ds-label mb-2">AI Teacher Name</label>
                         <input
+                          id="classroom-tutor-name"
                           type="text"
                           value={form.aiTutorName}
                           onChange={(e) => setForm({ ...form, aiTutorName: e.target.value })}
                           placeholder="e.g. Ms. Moyo"
-                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                          className="ds-input"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Voice (ElevenLabs)</label>
+                        <label htmlFor="classroom-voice" className="ds-label mb-2">Voice (ElevenLabs)</label>
                         <select
+                          id="classroom-voice"
                           value={form.aiTutorVoiceId}
                           onChange={(e) => setForm({ ...form, aiTutorVoiceId: e.target.value })}
-                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                          className="ds-select"
                         >
                           <option value="">Default voice</option>
                           {voices.map(v => (
@@ -881,32 +870,34 @@ export default function VirtualClassrooms() {
                     </div>
 
                     <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <label htmlFor="classroom-persona" className="ds-label mb-2">
                         Teacher Persona (optional)
                       </label>
                       <textarea
+                        id="classroom-persona"
                         value={form.aiTutorPersona}
                         onChange={(e) => setForm({ ...form, aiTutorPersona: e.target.value })}
                         placeholder="e.g. You are Ms. Moyo, a warm and patient Mathematics teacher who loves using real-world examples..."
                         rows={3}
-                        className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white resize-none"
+                        className="ds-textarea"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <label htmlFor="classroom-lesson-plan" className="ds-label mb-2">
                         Lesson Plan {selectedTopicId ? '(auto-generated from syllabus — edit if needed)' : '(optional)'}
                       </label>
                       {savedLessonPlans.length > 0 && (
                         <div className="mb-2">
                           <select
+                            aria-label="Load a saved lesson plan"
                             onChange={(e) => {
                               const plan = savedLessonPlans.find(p => p.id === e.target.value);
                               if (plan) {
                                 setForm(prev => ({ ...prev, lessonPlanContent: `📋 ${plan.title}\n\n${plan.content}` }));
                               }
                             }}
-                            className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                            className="ds-select"
                             defaultValue=""
                           >
                             <option value="" disabled>📂 Load from saved lesson plan ({savedLessonPlans.length} available)...</option>
@@ -919,19 +910,20 @@ export default function VirtualClassrooms() {
                         </div>
                       )}
                       <textarea
+                        id="classroom-lesson-plan"
                         value={form.lessonPlanContent}
                         onChange={(e) => setForm({ ...form, lessonPlanContent: e.target.value })}
                         placeholder={selectedTopicId
                           ? 'Click "Generate Lesson Plan from Syllabus" above, or write your own...'
                           : 'Paste or type the lesson plan here. The AI tutor will follow this plan during the class...'}
                         rows={5}
-                        className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white resize-none"
+                        className="ds-textarea"
                       />
                     </div>
 
-                    <div className="flex items-start gap-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl">
-                      <Sparkles size={14} className="text-purple-500 mt-0.5 flex-shrink-0" />
-                      <p className="text-xs text-purple-700 dark:text-purple-300">
+                    <div className="ds-alert ds-badge-info">
+                      <Sparkles size={18} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <p>
                         The AI tutor will join the class, greet students, follow the lesson plan, answer questions with natural voice (ElevenLabs),
                         and conduct quizzes — just like a real teacher.
                       </p>
@@ -941,18 +933,19 @@ export default function VirtualClassrooms() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t dark:border-gray-700">
+              <div className="ds-form-actions border-t border-[var(--border-color)]">
                 <button
                   type="button"
                   onClick={() => { setShowCreate(false); resetForm(); }}
-                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"
+                  className="ds-button-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creating || !form.title || !form.scheduledStart || !form.scheduledEnd}
-                  className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 text-sm font-medium"
+                  className="ds-button-primary"
+                  aria-busy={creating || undefined}
                 >
                   {creating ? (
                     <><Loader2 size={14} className="animate-spin" /> Creating...</>

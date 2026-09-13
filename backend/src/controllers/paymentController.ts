@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PaymentStatus } from '@prisma/client';
-import { prisma } from '../utils/prisma';
+import { prisma, systemPrisma } from '../utils/prisma';
+import { runWithTenant } from '../middleware/tenantContext';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { sendNotification, generatePaymentReceiptEmail, createNotification } from '../services/notificationService';
@@ -10,7 +11,20 @@ import {
   getCollectionById,
   MobileMoneyCollectionRequest
 } from '../services/lencoService';
+import { verifyWebhookSignature } from '../services/lencoService';
+import { applyInvoiceCollectionWebhookUpdate } from '../services/platformInvoicePaymentService';
 import { onPaymentCreated, onPaymentVoided } from '../services/accountingBridge';
+import {
+  enqueuePaymentReceipt,
+  PaymentReceiptChannel,
+} from '../queues/paymentQueueService';
+import { getQueueRuntimeStatus } from '../queues/queueRuntime';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
+import {
+  getClassCollectionAggregates,
+  getFinanceOverviewAggregates,
+  getMonthlyRevenueAggregates,
+} from '../services/financialAggregationService';
 
 const createPaymentSchema = z.object({
   studentId: z.string().uuid(),
@@ -27,6 +41,28 @@ const generateTransactionId = (): string => {
     result += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   return result;
+};
+
+const tryQueuePaymentReceipt = async (
+  paymentId: string,
+  channels: PaymentReceiptChannel[],
+  actorUserId?: string,
+): Promise<boolean> => {
+  if (getQueueRuntimeStatus().state !== 'ready') return false;
+
+  try {
+    const queued = await enqueuePaymentReceipt({ paymentId, channels, actorUserId });
+    console.log(JSON.stringify({
+      event: 'payment.receipt.queued',
+      paymentId,
+      jobId: queued.jobId,
+      correlationId: queued.correlationId,
+    }));
+    return true;
+  } catch (error) {
+    console.error('Failed to enqueue payment receipt; using fallback delivery:', error);
+    return false;
+  }
 };
 
 export const createPayment = async (req: Request, res: Response) => {
@@ -129,13 +165,25 @@ export const createPayment = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: payment.tenantId,
+      branchId: payment.branchId,
+      source: 'payment.created',
+    });
+
     // Create accounting journal entry (double-entry bookkeeping)
     onPaymentCreated(payment.id, userId).catch(err =>
       console.error('Background journal entry creation failed:', err)
     );
 
-    // Send Notification (Email & SMS) via Notification Service
-    try {
+    const notificationQueued = await tryQueuePaymentReceipt(
+      payment.id,
+      ['email', 'sms', 'inApp'],
+      userId,
+    );
+
+    // Preserve synchronous behavior when the queue is disabled or degraded.
+    if (!notificationQueued) try {
       // Fetch school settings for the name
       const settings = await prisma.schoolSettings.findFirst();
       const schoolName = settings?.schoolName || 'School';
@@ -345,94 +393,57 @@ export const getFinanceStats = async (req: Request, res: Response) => {
 
     const whereStatus: any = { status: 'COMPLETED' };
     if (branchId) whereStatus.branchId = branchId;
-
-    // 1. Total Revenue (Sum of COMPLETED payments only)
-    const totalRevenueAgg = await prisma.payment.aggregate({
-      where: whereStatus,
-      _sum: { amount: true },
-      _count: { id: true },
-    });
-    const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
-    const totalTransactions = totalRevenueAgg._count.id;
-
-    // 2. Total Fees Assigned (Sum of all fee structures)
-    const totalFeesAgg = await prisma.studentFeeStructure.aggregate({
-      _sum: { amountDue: true },
-    });
-    const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
-
-    // 3. Pending Fees
-    // 3. Pending Fees
-    const pendingFees = Math.max(0, totalFeesAssigned - totalRevenue);
-
-    // 4. Overdue Students Count
-    // Get total due per student
-    // Note: This logic needs to be branch-aware if strict branch separation is needed. 
-    // For now, it calculates globally or we can filter by branchId if passed.
-
-    // 5. Total Revenue per Branch
-    // Only fetch breakdown if SUPER_ADMIN and no specific branch filter applied
-    let revenueByBranch: any[] = [];
-    if (user?.role === 'SUPER_ADMIN' && !branchId) {
-      revenueByBranch = await prisma.payment.groupBy({
-        by: ['branchId'],
-        where: { status: 'COMPLETED' },
-        _sum: { amount: true },
-      } as any);
-    }
-
-    // Enrich branch names
-    const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
-    const revenueByBranchWithNames = revenueByBranch.map(r => ({
-      branchId: r.branchId,
-      branchName: branches.find(b => b.id === r.branchId)?.name || 'Unknown Branch',
-      amount: Number(r._sum.amount || 0)
-    }));
-
-    // 4. Overdue Students Count
-    // Get total due per student
-    const feesByStudent = await prisma.studentFeeStructure.groupBy({
-      by: ['studentId'],
-      _sum: { amountDue: true },
-    });
-
-    // Get total paid per student (COMPLETED only)
-    const paymentsByStudent = await prisma.payment.groupBy({
-      by: ['studentId'],
-      where: { status: 'COMPLETED' },
-      _sum: { amount: true },
-    });
-
-    const paymentMap = new Map();
-    paymentsByStudent.forEach(p => {
-      paymentMap.set(p.studentId, Number(p._sum.amount || 0));
-    });
-
-    let overdueCount = 0;
-    feesByStudent.forEach(f => {
-      const due = Number(f._sum.amountDue || 0);
-      const paid = paymentMap.get(f.studentId) || 0;
-      if (due > paid) overdueCount++;
-    });
-
-    // 5. Recent Activity (Show voided ones too, with status)
     const whereRecent: any = {};
     if (branchId) whereRecent.branchId = branchId;
+    const includeRevenueByBranch = user?.role === 'SUPER_ADMIN' && !branchId;
 
-    const recentActivity = await prisma.payment.findMany({
-      where: whereRecent,
-      take: 5,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        student: { select: { firstName: true, lastName: true } }
-      }
-    });
+    const [
+      totalRevenueAgg,
+      financeOverview,
+      revenueByBranch,
+      branches,
+      recentActivity,
+    ] = await Promise.all([
+      prisma.payment.aggregate({
+        where: whereStatus,
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      getFinanceOverviewAggregates(branchId),
+      includeRevenueByBranch
+        ? prisma.payment.groupBy({
+          by: ['branchId'],
+          where: { status: 'COMPLETED' },
+          _sum: { amount: true },
+        } as any)
+        : Promise.resolve([] as any[]),
+      includeRevenueByBranch
+        ? prisma.branch.findMany({ select: { id: true, name: true } })
+        : Promise.resolve([]),
+      prisma.payment.findMany({
+        where: whereRecent,
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          student: { select: { firstName: true, lastName: true } }
+        }
+      }),
+    ]);
+
+    const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
+    const totalTransactions = totalRevenueAgg._count.id;
+    const pendingFees = Math.max(0, financeOverview.totalFeesAssigned - totalRevenue);
+    const revenueByBranchWithNames = revenueByBranch.map((row: any) => ({
+      branchId: row.branchId,
+      branchName: branches.find(branch => branch.id === row.branchId)?.name || 'Unknown Branch',
+      amount: Number(row._sum.amount || 0),
+    }));
 
     res.json({
       totalRevenue,
       totalTransactions,
       pendingFees,
-      overdueCount,
+      overdueCount: financeOverview.overdueCount,
       revenueByBranch: revenueByBranchWithNames, // New breakdown
       recentActivity: recentActivity.map(p => ({
         id: p.id,
@@ -451,6 +462,12 @@ export const getFinanceStats = async (req: Request, res: Response) => {
 export const getReconciliationDashboard = async (req: Request, res: Response) => {
   try {
     const { status = 'all', method = 'ALL', startDate, endDate, branchId } = req.query;
+    const parsedPage = Number(req.query.page);
+    const parsedLimit = Number(req.query.limit);
+    const page = Number.isFinite(parsedPage) ? Math.max(1, Math.floor(parsedPage)) : 1;
+    const requestedLimit = Number.isFinite(parsedLimit) ? Math.floor(parsedLimit) : 50;
+    const limit = Math.max(1, Math.min(200, requestedLimit));
+    const skip = (page - 1) * limit;
     const user = (req as any).user;
 
     const where: any = {
@@ -466,54 +483,91 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
       where.method = method;
     }
 
-    if (status === 'reconciled') {
-      where.isReconciled = true;
-    } else if (status === 'unreconciled') {
-      where.isReconciled = false;
-    }
-
     if (startDate || endDate) {
       where.paymentDate = {};
       if (startDate) where.paymentDate.gte = new Date(startDate as string);
       if (endDate) where.paymentDate.lte = new Date(endDate as string);
     }
 
-    const payments = await prisma.payment.findMany({
-      where,
-      include: {
-        student: {
-          select: {
-            firstName: true,
-            lastName: true,
-            admissionNumber: true,
-            class: { select: { id: true, name: true } },
+    // Summary cards cover the complete filtered period/method/branch. The status
+    // filter applies only to the paginated result set and its total.
+    const summaryWhere = { ...where };
+    if (status === 'reconciled') {
+      where.isReconciled = true;
+    } else if (status === 'unreconciled') {
+      where.isReconciled = false;
+    }
+
+    const [
+      payments,
+      total,
+      totals,
+      reconciledTotals,
+      unreconciledTotals,
+      missingBankReference,
+    ] = await Promise.all([
+      prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              admissionNumber: true,
+              class: { select: { id: true, name: true } },
+            },
           },
-        },
-        recordedBy: { select: { fullName: true } },
-        allocations: {
-          select: {
-            amount: true,
-            studentFee: {
-              select: {
-                dueDate: true,
-                feeTemplate: { select: { name: true } },
+          recordedBy: { select: { fullName: true } },
+          allocations: {
+            select: {
+              amount: true,
+              studentFee: {
+                select: {
+                  dueDate: true,
+                  feeTemplate: { select: { name: true } },
+                },
               },
             },
           },
-        },
-        mobileMoneyCollection: {
-          select: {
-            reference: true,
-            operatorTransactionId: true,
-            status: true,
+          mobileMoneyCollection: {
+            select: {
+              reference: true,
+              operatorTransactionId: true,
+              status: true,
+            },
           },
         },
-      },
-      orderBy: [
-        { isReconciled: 'asc' },
-        { paymentDate: 'desc' },
-      ],
-    });
+        orderBy: [
+          { isReconciled: 'asc' },
+          { paymentDate: 'desc' },
+        ],
+      }),
+      prisma.payment.count({ where }),
+      prisma.payment.aggregate({
+        where: summaryWhere,
+        _count: { id: true },
+        _sum: { amount: true },
+      }),
+      prisma.payment.aggregate({
+        where: { ...summaryWhere, isReconciled: true },
+        _count: { id: true },
+        _sum: { amount: true },
+      }),
+      prisma.payment.aggregate({
+        where: { ...summaryWhere, isReconciled: false },
+        _count: { id: true },
+        _sum: { amount: true },
+      }),
+      prisma.payment.count({
+        where: {
+          ...summaryWhere,
+          method: 'BANK_DEPOSIT',
+          OR: [{ bankReference: null }, { bankReference: '' }],
+        },
+      }),
+    ]);
 
     const normalizedPayments = payments.map(payment => {
       const allocatedAmount = payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
@@ -530,41 +584,39 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
       };
     });
 
-    const summary = normalizedPayments.reduce((acc, payment) => {
-      acc.totalPayments += 1;
-      acc.totalAmount += payment.amount;
-
-      if (payment.isReconciled) {
-        acc.reconciledPayments += 1;
-        acc.reconciledAmount += payment.amount;
-      } else {
-        acc.unreconciledPayments += 1;
-        acc.unreconciledAmount += payment.amount;
-      }
-
+    const pageUnallocated = normalizedPayments.reduce((acc, payment) => {
       if (payment.unallocatedAmount > 0.009) {
-        acc.unallocatedPayments += 1;
-        acc.unallocatedAmount += payment.unallocatedAmount;
+        acc.count += 1;
+        acc.amount += payment.unallocatedAmount;
       }
-
-      if (payment.method === 'BANK_DEPOSIT' && !payment.bankReference) {
-        acc.missingBankReference += 1;
-      }
-
       return acc;
     }, {
-      totalPayments: 0,
-      totalAmount: 0,
-      reconciledPayments: 0,
-      reconciledAmount: 0,
-      unreconciledPayments: 0,
-      unreconciledAmount: 0,
-      unallocatedPayments: 0,
-      unallocatedAmount: 0,
-      missingBankReference: 0,
+      count: 0,
+      amount: 0,
     });
 
-    res.json({ summary, payments: normalizedPayments });
+    const summary = {
+      totalPayments: totals._count.id,
+      totalAmount: Number(totals._sum.amount || 0),
+      reconciledPayments: reconciledTotals._count.id,
+      reconciledAmount: Number(reconciledTotals._sum.amount || 0),
+      unreconciledPayments: unreconciledTotals._count.id,
+      unreconciledAmount: Number(unreconciledTotals._sum.amount || 0),
+      missingBankReference,
+      pageUnallocatedPayments: pageUnallocated.count,
+      pageUnallocatedAmount: pageUnallocated.amount,
+    };
+
+    res.json({
+      summary,
+      payments: normalizedPayments,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
     console.error('Reconciliation dashboard error:', error);
     res.status(500).json({ message: 'Failed to load reconciliation dashboard' });
@@ -574,10 +626,12 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
 export const getFinancialReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, branchId } = req.query;
+    const reportStartDate = startDate ? new Date(startDate as string) : undefined;
+    const reportEndDate = endDate ? new Date(endDate as string) : undefined;
 
     const dateFilter: any = {};
-    if (startDate) dateFilter.gte = new Date(startDate as string);
-    if (endDate) dateFilter.lte = new Date(endDate as string);
+    if (reportStartDate) dateFilter.gte = reportStartDate;
+    if (reportEndDate) dateFilter.lte = reportEndDate;
 
     const paymentWhere: any = {
       paymentDate: dateFilter,
@@ -592,70 +646,16 @@ export const getFinancialReport = async (req: Request, res: Response) => {
       paymentWhere.branchId = effectiveBranchId;
     }
 
-    // Monthly Revenue (COMPLETED only)
-    const payments = await prisma.payment.findMany({
-      where: paymentWhere,
-      select: {
-        amount: true,
-        paymentDate: true
-      }
-    });
-
-    const monthlyRevenue = new Array(12).fill(0);
-    payments.forEach(p => {
-      const month = new Date(p.paymentDate).getMonth();
-      monthlyRevenue[month] += Number(p.amount);
-    });
-
-    // Payment Methods Stats (COMPLETED only)
-    const methodsStats = await prisma.payment.groupBy({
-      by: ['method'],
-      where: paymentWhere,
-      _count: { id: true },
-      _sum: { amount: true }
-    });
-
-    // 3. Collection by Class
-    const classWhere: any = {};
-    if (effectiveBranchId) {
-      classWhere.branchId = effectiveBranchId;
-    }
-
-    const classes = await prisma.class.findMany({
-      where: classWhere,
-      select: {
-        id: true,
-        name: true,
-        students: {
-          select: {
-            feeStructures: {
-              select: { amountDue: true }
-            },
-            payments: {
-              where: { status: 'COMPLETED' }, // Ensure we only count completed payments
-              select: { amount: true }
-            }
-          }
-        }
-      }
-    });
-
-    const classCollection = classes.map(cls => {
-      let totalDue = 0;
-      let totalCollected = 0;
-
-      cls.students.forEach(student => {
-        student.feeStructures.forEach(fee => totalDue += Number(fee.amountDue));
-        student.payments.forEach(pay => totalCollected += Number(pay.amount));
-      });
-
-      return {
-        className: cls.name,
-        totalDue,
-        totalCollected,
-        percentage: totalDue > 0 ? Math.round((totalCollected / totalDue) * 100) : 0
-      };
-    }).sort((a, b) => b.percentage - a.percentage); // Best performing first
+    const [monthlyRevenue, methodsStats, classCollection] = await Promise.all([
+      getMonthlyRevenueAggregates(reportStartDate, reportEndDate, effectiveBranchId),
+      prisma.payment.groupBy({
+        by: ['method'],
+        where: paymentWhere,
+        _count: { id: true },
+        _sum: { amount: true }
+      }),
+      getClassCollectionAggregates(effectiveBranchId),
+    ]);
 
     res.json({
       monthlyRevenue,
@@ -838,6 +838,12 @@ export const voidPayment = async (req: Request, res: Response) => {
       }
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: voidedPayment.tenantId,
+      branchId: voidedPayment.branchId,
+      source: 'payment.voided',
+    });
+
     console.log(`Payment ${paymentId} voided by user ${userId}. Reason: ${reason}`);
 
     // Create reversal journal entry
@@ -1010,6 +1016,7 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
         admissionNumber: true,
         guardianPhone: true,
         parentId: true,
+        branchId: true,
       }
     });
 
@@ -1030,37 +1037,44 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
     // Generate transaction ID for the payment
     const transactionId = generateTransactionId();
 
-    // Create the collection record and pending payment in our database first
-    const collection = await prisma.mobileMoneyCollection.create({
-      data: {
-        reference,
-        studentId,
-        amount: totalCharge,
-        phone,
-        country,
-        operator,
-        initiatedByUserId: userId,
-        status: 'PENDING',
-      },
+    // Persist the collection and linked pending payment atomically before the provider call.
+    const { collection, pendingPayment } = await prisma.$transaction(async transaction => {
+      const createdCollection = await transaction.mobileMoneyCollection.create({
+        data: {
+          reference,
+          studentId,
+          amount: totalCharge,
+          phone,
+          country,
+          operator,
+          initiatedByUserId: userId,
+          status: 'PENDING',
+          branchId: student.branchId,
+        },
+      });
+      const createdPayment = await transaction.payment.create({
+        data: {
+          transactionId,
+          studentId,
+          amount: Number(totalCharge) / 1.025,
+          method: 'MOBILE_MONEY',
+          notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
+          status: 'PENDING',
+          recordedByUserId: userId,
+          branchId: student.branchId,
+        },
+      });
+      const linkedCollection = await transaction.mobileMoneyCollection.update({
+        where: { id: createdCollection.id },
+        data: { paymentId: createdPayment.id },
+      });
+      return { collection: linkedCollection, pendingPayment: createdPayment };
     });
 
-    // Create Payment record with PENDING status
-    const pendingPayment = await prisma.payment.create({
-      data: {
-        transactionId,
-        studentId,
-        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
-        method: 'MOBILE_MONEY',
-        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
-        status: 'PENDING',
-        recordedByUserId: userId,
-      },
-    });
-
-    // Link the payment to the collection
-    await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: { paymentId: pendingPayment.id },
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: pendingPayment.tenantId,
+      scope: 'tenant',
+      source: 'payment.mobile-money-pending',
     });
 
     // Call Lenco API to initiate the collection
@@ -1074,13 +1088,22 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
 
     if (!lencoResult.success) {
       // Update collection status to FAILED
-      await prisma.mobileMoneyCollection.update({
+      const failedCollection = await prisma.mobileMoneyCollection.update({
         where: { id: collection.id },
         data: {
           status: 'FAILED',
           reasonForFailure: lencoResult.error,
         },
       });
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: failedCollection.tenantId,
+        scope: 'tenant',
+        source: 'mobile-money.collection-failed',
+      });
+      await updatePaymentFromCollection(
+        { ...collection, paymentId: pendingPayment.id, branchId: student.branchId },
+        'FAILED',
+      );
 
       return res.status(400).json({
         message: 'Failed to initiate mobile money collection',
@@ -1107,6 +1130,12 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
           }
         }
       }
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updatedCollection.tenantId,
+      scope: 'tenant',
+      source: 'mobile-money.collection-updated',
     });
 
     console.log(`Mobile money collection initiated: ${reference} for student ${studentId}`);
@@ -1224,6 +1253,12 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
         },
       });
 
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: updatedCollection.tenantId,
+        scope: 'tenant',
+        source: 'mobile-money.collection-status-changed',
+      });
+
       // Update payment status based on collection result
       if (newStatus === 'SUCCESSFUL' && collection.paymentId) {
         await updatePaymentFromCollection({ ...collection, paymentId: collection.paymentId }, 'COMPLETED');
@@ -1277,13 +1312,24 @@ async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETE
       return null;
     }
 
-    // Update payment status
     const paymentStatus = newStatus === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
-    const payment = await prisma.payment.update({
-      where: { id: collection.paymentId },
+    const transition = await prisma.payment.updateMany({
+      where: { id: collection.paymentId, status: { not: paymentStatus as PaymentStatus } },
       data: {
         status: paymentStatus as PaymentStatus,
       },
+    });
+
+    const payment = await prisma.payment.findUnique({ where: { id: collection.paymentId } });
+    if (!payment) throw new Error(`Payment ${collection.paymentId} not found`);
+    if (transition.count === 0) return payment;
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: payment.tenantId,
+      scope: 'tenant',
+      source: newStatus === 'COMPLETED'
+        ? 'payment.mobile-money-completed'
+        : 'payment.mobile-money-failed',
     });
 
     console.log(`Payment ${payment.transactionId} updated to ${newStatus} from collection ${collection.reference}`);
@@ -1295,8 +1341,16 @@ async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETE
       );
     }
 
-    // Send notification to parent on successful payment
+    // Send notification to parent on successful payment.
     if (newStatus === 'COMPLETED') {
+      const notificationQueued = await tryQueuePaymentReceipt(
+        payment.id,
+        ['email', 'sms'],
+        collection.initiatedByUserId || payment.recordedByUserId || undefined,
+      );
+
+      if (notificationQueued) return payment;
+
       // Fetch student with parent info for notification
       const student = await prisma.student.findUnique({
         where: { id: payment.studentId },
@@ -1340,7 +1394,7 @@ async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETE
     return payment;
   } catch (error) {
     console.error('Error updating payment from collection:', error);
-    return null;
+    throw error;
   }
 }
 
@@ -1349,27 +1403,57 @@ async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETE
  */
 export const handleLencoWebhook = async (req: Request, res: Response) => {
   try {
-    const payload = req.body;
+    const signature = String(req.headers['x-lenco-signature'] || req.headers['x-webhook-signature'] || '');
+    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody?.toString('utf8') || JSON.stringify(req.body);
+    if (!verifyWebhookSignature(rawBody, signature)) {
+      return res.status(401).json({ message: 'Invalid webhook signature' });
+    }
 
-    console.log('Lenco webhook received:', JSON.stringify(payload, null, 2));
+    const payload = req.body;
 
     // Extract relevant data from webhook
     const { reference, status, reasonForFailure, mobileMoneyDetails } = payload.data || {};
+
+    console.log('Lenco webhook received', { reference, status });
 
     if (!reference) {
       console.log('Webhook missing reference');
       return res.status(400).json({ message: 'Missing reference' });
     }
 
-    // Find the collection
-    const collection = await prisma.mobileMoneyCollection.findFirst({
+    // Resolve the tenant using the unrestricted control-plane client, then perform
+    // every mutation under that tenant's context. References must be unambiguous.
+    const collections = await systemPrisma.mobileMoneyCollection.findMany({
       where: { reference },
+      take: 2,
     });
 
-    if (!collection) {
+    if (collections.length === 0) {
+      // Not a school-fee collection — check whether it's a platform subscription
+      // invoice payment instead (always paid via the platform's own Lenco account).
+      if (reference.startsWith('SUB-')) {
+        let mappedStatus: 'SUCCESSFUL' | 'FAILED' | 'PAY_OFFLINE' | null = null;
+        if (status === 'successful') mappedStatus = 'SUCCESSFUL';
+        else if (status === 'failed') mappedStatus = 'FAILED';
+        else if (status === 'pay-offline') mappedStatus = 'PAY_OFFLINE';
+
+        if (mappedStatus) {
+          const updated = await applyInvoiceCollectionWebhookUpdate(reference, mappedStatus, reasonForFailure);
+          if (updated) {
+            console.log(`Webhook processed for platform invoice collection ${reference}: ${mappedStatus}`);
+            return res.status(200).json({ received: true });
+          }
+        }
+      }
       console.log(`Collection not found for reference: ${reference}`);
       return res.status(404).json({ message: 'Collection not found' });
     }
+    if (collections.length > 1) {
+      console.error(`Ambiguous collection reference received: ${reference}`);
+      return res.status(409).json({ message: 'Ambiguous collection reference' });
+    }
+
+    const collection = collections[0];
 
     // Map Lenco status to our status
     let newStatus: 'PENDING' | 'PAY_OFFLINE' | 'SUCCESSFUL' | 'FAILED' = collection.status;
@@ -1381,9 +1465,22 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
       newStatus = 'PAY_OFFLINE';
     }
 
+    if (newStatus === collection.status) {
+      if (collection.paymentId && newStatus === 'SUCCESSFUL') {
+        await runWithTenant(collection.tenantId, () => updatePaymentFromCollection(collection, 'COMPLETED'));
+      } else if (collection.paymentId && newStatus === 'FAILED') {
+        await runWithTenant(collection.tenantId, () => updatePaymentFromCollection(collection, 'FAILED'));
+      }
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    if (collection.status === 'SUCCESSFUL') {
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
     // Update collection status
-    const updatedCollection = await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
+    const transition = await runWithTenant(collection.tenantId, () => prisma.mobileMoneyCollection.updateMany({
+      where: { id: collection.id, status: collection.status },
       data: {
         status: newStatus,
         completedAt: newStatus === 'SUCCESSFUL' ? new Date() : null,
@@ -1391,13 +1488,29 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
         operatorTransactionId: mobileMoneyDetails?.operatorTransactionId,
         accountName: mobileMoneyDetails?.accountName,
       },
+    }));
+    if (transition.count === 0) {
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    const updatedCollection = await runWithTenant(collection.tenantId, () => prisma.mobileMoneyCollection.findUnique({
+      where: { id: collection.id },
+    }));
+    if (!updatedCollection) {
+      throw new Error('Collection disappeared after webhook transition');
+    }
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updatedCollection.tenantId,
+      scope: 'tenant',
+      source: 'mobile-money.webhook-status-changed',
     });
 
     // Update payment status based on collection result
     if (newStatus === 'SUCCESSFUL' && updatedCollection.paymentId) {
-      await updatePaymentFromCollection(updatedCollection, 'COMPLETED');
+      await runWithTenant(collection.tenantId, () => updatePaymentFromCollection(updatedCollection, 'COMPLETED'));
     } else if (newStatus === 'FAILED' && updatedCollection.paymentId) {
-      await updatePaymentFromCollection(updatedCollection, 'FAILED');
+      await runWithTenant(collection.tenantId, () => updatePaymentFromCollection(updatedCollection, 'FAILED'));
     }
 
     console.log(`Webhook processed for collection ${reference}: ${newStatus}`);
@@ -1634,35 +1747,42 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     const reference = generateMobileMoneyReference();
     const transactionId = generateTransactionId();
 
-    const collection = await prisma.mobileMoneyCollection.create({
-      data: {
-        reference,
-        studentId,
-        amount: totalCharge,
-        phone,
-        country,
-        operator,
-        status: 'PENDING',
-      },
+    const { collection, pendingPayment } = await prisma.$transaction(async transaction => {
+      const createdCollection = await transaction.mobileMoneyCollection.create({
+        data: {
+          reference,
+          studentId,
+          amount: totalCharge,
+          phone,
+          country,
+          operator,
+          status: 'PENDING',
+          branchId: student.branchId,
+        },
+      });
+      const createdPayment = await transaction.payment.create({
+        data: {
+          transactionId,
+          studentId,
+          amount: Number(totalCharge) / 1.025,
+          method: 'MOBILE_MONEY',
+          notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
+          status: 'PENDING',
+          recordedByUserId: null,
+          branchId: student.branchId,
+        },
+      });
+      const linkedCollection = await transaction.mobileMoneyCollection.update({
+        where: { id: createdCollection.id },
+        data: { paymentId: createdPayment.id },
+      });
+      return { collection: linkedCollection, pendingPayment: createdPayment };
     });
 
-    // Create Payment record with PENDING status
-    const pendingPayment = await prisma.payment.create({
-      data: {
-        transactionId,
-        studentId,
-        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
-        method: 'MOBILE_MONEY',
-        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
-        status: 'PENDING',
-        recordedByUserId: null, // Public payment has no recorded user
-      },
-    });
-
-    // Link the payment to the collection
-    await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: { paymentId: pendingPayment.id },
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: pendingPayment.tenantId,
+      scope: 'tenant',
+      source: 'payment.public-mobile-money-pending',
     });
 
     const lencoResult = await initiateMobileMoneyCollection({
@@ -1674,13 +1794,22 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     });
 
     if (!lencoResult.success) {
-      await prisma.mobileMoneyCollection.update({
+      const failedCollection = await prisma.mobileMoneyCollection.update({
         where: { id: collection.id },
         data: {
           status: 'FAILED',
           reasonForFailure: lencoResult.error,
         },
       });
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: failedCollection.tenantId,
+        scope: 'tenant',
+        source: 'mobile-money.public-collection-failed',
+      });
+      await updatePaymentFromCollection(
+        { ...collection, paymentId: pendingPayment.id, branchId: student.branchId },
+        'FAILED',
+      );
 
       return res.status(400).json({
         message: 'Failed to initiate mobile money collection',
@@ -1697,6 +1826,12 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
         fee: lencoResult.data?.fee ? parseFloat(lencoResult.data.fee) : null,
         accountName: lencoResult.data?.mobileMoneyDetails?.accountName,
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updatedCollection.tenantId,
+      scope: 'tenant',
+      source: 'mobile-money.public-collection-updated',
     });
 
     res.status(201).json({

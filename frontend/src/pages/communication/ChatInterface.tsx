@@ -57,7 +57,10 @@ const ChatInterface = () => {
 
   // Initialize Socket.io
   useEffect(() => {
-    const socket = io(API_BASE, { transports: ['websocket', 'polling'] });
+    const socket = io(API_BASE, {
+      transports: ['websocket', 'polling'],
+      auth: { token: localStorage.getItem('token') },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {

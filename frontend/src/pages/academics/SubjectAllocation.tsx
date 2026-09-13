@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
-import { Save, User, BookOpen, Check } from 'lucide-react';
+import { Save, User, BookOpen } from 'lucide-react';
+import { PageHeader } from '../../components/ui/DesignSystem';
 
 interface Class {
     id: string;
@@ -104,56 +105,56 @@ const SubjectAllocation = () => {
     const selectedClass = classes.find(c => c.id === selectedClassId);
 
     return (
-        <div className="p-4 md:p-6 pb-24 md:pb-6">
-            <div className="mb-6">
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Subject Teacher Allocation</h2>
-                <p className="text-slate-500 dark:text-slate-400">Assign teachers to subjects for each class.</p>
-            </div>
+        <div className="ds-page">
+            <PageHeader title="Subject Teacher Allocation" description="Assign teachers to subjects for each class." />
 
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Select Class</label>
+            <div className="ds-card ds-field" aria-busy={loading}>
+                <label htmlFor="allocation-class" className="ds-label">Select Class</label>
                 <select
+                    id="allocation-class"
                     value={selectedClassId}
                     onChange={(e) => setSelectedClassId(e.target.value)}
-                    className="w-full md:w-1/3 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-select md:w-1/3"
                 >
                     <option value="">-- Choose a Class --</option>
                     {classes.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                 </select>
+                {loading && <p role="status" className="ds-helper">Loading classes and teachers...</p>}
             </div>
 
             {selectedClass && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600">
+                <div className="ds-surface overflow-hidden">
+                    <div className="overflow-x-auto" role="region" aria-label={`Subject teacher allocation for ${selectedClass.name}`} tabIndex={0}>
+                        <table className="ds-table">
+                            <thead>
                                 <tr>
-                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Subject Name</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Code</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300">Assigned Teacher</th>
-                                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-300 text-right">Action</th>
+                                    <th scope="col">Subject Name</th>
+                                    <th scope="col">Code</th>
+                                    <th scope="col">Assigned Teacher</th>
+                                    <th scope="col" className="text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                            <tbody>
                                 {selectedClass.subjects && selectedClass.subjects.length > 0 ? (
                                     selectedClass.subjects.map((subject) => (
-                                        <tr key={subject.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                            <td className="px-6 py-4 font-medium text-slate-800 dark:text-white">
+                                        <tr key={subject.id}>
+                                            <td className="font-medium">
                                                 <div className="flex items-center gap-2">
-                                                    <BookOpen size={16} className="text-blue-500" />
+                                                    <BookOpen size={16} aria-hidden="true" className="shrink-0 text-[var(--text-secondary)]" />
                                                     {subject.name}
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-mono text-sm">{subject.code}</td>
-                                            <td className="px-6 py-4">
+                                            <td><span className="ds-badge ds-badge-neutral font-mono">{subject.code}</span></td>
+                                            <td>
                                                 <div className="flex items-center gap-2">
-                                                    <User size={16} className="text-slate-400 dark:text-slate-500" />
+                                                    <User size={16} aria-hidden="true" className="shrink-0 text-[var(--text-secondary)]" />
                                                     <select
+                                                        aria-label={`Assigned teacher for ${subject.name} (${subject.code})`}
                                                         value={assignments[subject.id] || ''}
                                                         onChange={(e) => handleAssignmentChange(subject.id, e.target.value)}
-                                                        className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[200px] bg-white dark:bg-slate-700 dark:text-white"
+                                                        className="ds-select min-w-[200px]"
                                                     >
                                                         <option value="">Select Teacher...</option>
                                                         {teachers.map(t => (
@@ -162,20 +163,19 @@ const SubjectAllocation = () => {
                                                     </select>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-right">
+                                            <td className="text-right">
                                                 <button
                                                     onClick={() => saveAssignment(subject.id)}
                                                     disabled={saving[subject.id]}
-                                                    className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm transition-colors
-                          ${saving[subject.id]
-                                                            ? 'bg-blue-50 text-blue-400 cursor-not-allowed'
-                                                            : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'}`}
+                                                    aria-label={`Save teacher assignment for ${subject.name}`}
+                                                    aria-busy={saving[subject.id] || false}
+                                                    className="ds-button-primary"
                                                 >
                                                     {saving[subject.id] ? (
                                                         'Saving...'
                                                     ) : (
                                                         <>
-                                                            <Save size={14} />
+                                                            <Save size={16} aria-hidden="true" />
                                                             Save
                                                         </>
                                                     )}
@@ -185,7 +185,7 @@ const SubjectAllocation = () => {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={4} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                        <td colSpan={4} className="text-center text-[var(--text-secondary)]">
                                             No subjects found for this class. Please go to Classes to add subjects.
                                         </td>
                                     </tr>

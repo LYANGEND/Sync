@@ -4,8 +4,12 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { sendEmail } from '../services/emailService';
 import { syncStudentClassFees } from '../services/classFeeAssignmentService';
+import {
+  classIdentityKey,
+  ensureClassExistsForTerm,
+} from '../services/classResolutionService';
 import { AcademicScopeError, ensureStudentRecordAccess } from '../utils/academicScope';
-import { AuthRequest } from '../middleware/authMiddleware';
+import type { AuthRequest } from '../middleware/authMiddleware';
 
 const baseStudentSchema = z.object({
   firstName: z.string().min(2),
@@ -228,64 +232,20 @@ export const createStudent = async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'No academic term found. Please create an academic term first.' });
       }
 
-      // Try to find the class by name
-      const existingClass = await prisma.class.findFirst({
-        where: {
-          name: {
-            equals: data.className.trim(),
-            mode: 'insensitive'
-          },
-          academicTermId: currentTerm.id
-        }
+      const defaultTeacher = await prisma.user.findFirst({
+        where: { role: { in: ['TEACHER', 'SUPER_ADMIN'] } }
       });
 
-      if (existingClass) {
-        finalClassId = existingClass.id;
-      } else {
-        // Get a default teacher for the new class
-        const defaultTeacher = await prisma.user.findFirst({
-          where: { role: { in: ['TEACHER', 'SUPER_ADMIN'] } }
-        });
-
-        if (!defaultTeacher) {
-          return res.status(400).json({ error: 'No teacher found. Please create at least one teacher or admin user first.' });
-        }
-
-        // Determine grade level from class name
-        const normalizedName = data.className.trim();
-        let gradeLevel = 0;
-        if (normalizedName.toLowerCase().includes('baby')) gradeLevel = -2;
-        else if (normalizedName.toLowerCase().includes('middle')) gradeLevel = -1;
-        else if (normalizedName.toLowerCase().includes('day care') || normalizedName.toLowerCase().includes('reception')) gradeLevel = 0;
-        else {
-          const gradeMatch = normalizedName.match(/grade\s+(\w+)/i);
-          if (gradeMatch) {
-            const gradeWord = gradeMatch[1].toLowerCase();
-            const gradeNumbers: { [key: string]: number } = {
-              'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-              'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-              'eleven': 11, 'twelve': 12,
-              '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-              '7': 7, '8': 8, '9': 9, '10': 10, '11': 11, '12': 12
-            };
-            gradeLevel = gradeNumbers[gradeWord] || 0;
-          }
-        }
-
-        // Create the class
-        const newClass = await prisma.class.create({
-          data: {
-            name: normalizedName,
-            gradeLevel,
-            teacherId: defaultTeacher.id,
-            academicTermId: currentTerm.id,
-            branchId: branchId // Assign new class to the same branch
-          }
-        });
-
-        finalClassId = newClass.id;
-        console.log(`✅ Created new class: ${normalizedName} (Grade Level: ${gradeLevel})`);
+      if (!defaultTeacher) {
+        return res.status(400).json({ error: 'No teacher found. Please create at least one teacher or admin user first.' });
       }
+
+      finalClassId = await ensureClassExistsForTerm(
+        data.className,
+        currentTerm.id,
+        defaultTeacher.id,
+        branchId,
+      );
     }
 
     if (!finalClassId) {
@@ -321,6 +281,24 @@ export const createStudent = async (req: Request, res: Response) => {
 export const bulkCreateStudents = async (req: Request, res: Response) => {
   try {
     const studentsData = z.array(createStudentSchema).parse(req.body);
+    const user = (req as AuthRequest).user;
+
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (user.role !== 'SUPER_ADMIN' && !user.branchId) {
+      return res.status(403).json({
+        error: 'User does not belong to a branch and cannot import students.',
+      });
+    }
+
+    const studentsWithBranches = studentsData.map(student => ({
+      ...student,
+      branchId: user.role === 'SUPER_ADMIN'
+        ? (student.branchId || user.branchId)
+        : user.branchId,
+    }));
 
     // Get current academic term (most recent or active)
     const currentTerm = await prisma.academicTerm.findFirst({
@@ -345,64 +323,45 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
       where: { academicTermId: currentTerm.id }
     });
 
-    const classMap = new Map(existingClasses.map(c => [c.name.toLowerCase(), c.id]));
-    const classIdMap = new Map(existingClasses.map(c => [c.id, c]));
-
-    // Resolve classNames to classIds and create missing classes
-    const studentsWithClassIds = await Promise.all(
-      studentsData.map(async (student) => {
-        let classId = student.classId;
-
-        // If className is provided, try to find or create the class
-        if (student.className && !classId) {
-          const normalizedName = student.className.trim();
-          classId = classMap.get(normalizedName.toLowerCase());
-
-          // If class doesn't exist, create it
-          if (!classId) {
-            // Determine grade level from class name
-            let gradeLevel = 0;
-            if (normalizedName.toLowerCase().includes('baby')) gradeLevel = -2;
-            else if (normalizedName.toLowerCase().includes('middle')) gradeLevel = -1;
-            else if (normalizedName.toLowerCase().includes('day care') || normalizedName.toLowerCase().includes('reception')) gradeLevel = 0;
-            else {
-              const gradeMatch = normalizedName.match(/grade\s+(\w+)/i);
-              if (gradeMatch) {
-                const gradeWord = gradeMatch[1].toLowerCase();
-                const gradeNumbers: { [key: string]: number } = {
-                  'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-                  'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-                  'eleven': 11, 'twelve': 12,
-                  '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-                  '7': 7, '8': 8, '9': 9, '10': 10, '11': 11, '12': 12
-                };
-                gradeLevel = gradeNumbers[gradeWord] || 0;
-              }
-            }
-
-            const newClass = await prisma.class.create({
-              data: {
-                name: normalizedName,
-                gradeLevel,
-                teacherId: defaultTeacher.id,
-                academicTermId: currentTerm.id,
-              }
-            });
-
-            classId = newClass.id;
-            classMap.set(normalizedName.toLowerCase(), classId);
-            console.log(`✅ Created new class: ${normalizedName} (Grade Level: ${gradeLevel})`);
-          }
-        }
-
-        // Validate that we have a classId
-        if (!classId) {
-          throw new Error(`No valid class found for student: ${student.firstName} ${student.lastName}`);
-        }
-
-        return { ...student, classId };
-      })
+    const classMap = new Map(
+      existingClasses.map(c => [classIdentityKey(c.name, c.branchId), c.id]),
     );
+
+    // Pre-resolve and create missing classes once to avoid concurrent duplicates.
+    const requestedClasses = new Map<string, { name: string; branchId?: string }>();
+    for (const student of studentsWithBranches) {
+      if (!student.classId && student.className) {
+        const key = classIdentityKey(student.className, student.branchId);
+        requestedClasses.set(key, { name: student.className, branchId: student.branchId });
+      }
+    }
+
+    for (const [key, requestedClass] of requestedClasses) {
+      if (classMap.has(key)) continue;
+
+      const classId = await ensureClassExistsForTerm(
+        requestedClass.name,
+        currentTerm.id,
+        defaultTeacher.id,
+        requestedClass.branchId,
+      );
+      classMap.set(key, classId);
+      console.log(`✅ Ensured class exists: ${requestedClass.name}`);
+    }
+
+    // Resolve classNames to classIds without creating classes in parallel loops.
+    const studentsWithClassIds = studentsWithBranches.map((student) => {
+      let classId = student.classId;
+      if (student.className && !classId) {
+        classId = classMap.get(classIdentityKey(student.className, student.branchId));
+      }
+
+      if (!classId) {
+        throw new Error(`No valid class found for student: ${student.firstName} ${student.lastName}`);
+      }
+
+      return { ...student, classId };
+    });
 
     // Generate admission numbers for those missing
     const year = new Date().getFullYear();
@@ -679,6 +638,77 @@ export const getMyChildren = async (req: Request, res: Response) => {
     const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
     const todayName = days[new Date().getDay()];
 
+    const studentIds = students.map(student => student.id);
+    const classIds = [...new Set(students.map(student => student.classId))];
+    const pendingAssessmentsByStudent = new Map<string, any[]>();
+    const todaysClassesByClass = new Map<string, any[]>();
+
+    if (activeTerm && classIds.length > 0 && studentIds.length > 0) {
+      const assessmentWindowStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const assessments = await prisma.assessment.findMany({
+        where: {
+          classId: { in: classIds },
+          termId: activeTerm.id,
+          date: { gte: assessmentWindowStart },
+        },
+        include: { subject: true },
+        orderBy: { date: 'asc' },
+      });
+
+      const assessmentsByClass = new Map<string, any[]>();
+      for (const assessment of assessments) {
+        const current = assessmentsByClass.get(assessment.classId) || [];
+        current.push(assessment);
+        assessmentsByClass.set(assessment.classId, current);
+      }
+
+      const assessmentIds = assessments.map(a => a.id);
+      const gradedRows = assessmentIds.length > 0
+        ? await prisma.assessmentResult.findMany({
+            where: {
+              assessmentId: { in: assessmentIds },
+              studentId: { in: studentIds },
+            },
+            select: { assessmentId: true, studentId: true },
+          })
+        : [];
+
+      const gradedSet = new Set(gradedRows.map(r => `${r.assessmentId}:${r.studentId}`));
+      for (const student of students) {
+        const classAssessments = assessmentsByClass.get(student.classId) || [];
+        pendingAssessmentsByStudent.set(
+          student.id,
+          classAssessments.filter((assessment: any) => !gradedSet.has(`${assessment.id}:${student.id}`))
+        );
+      }
+
+      if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(todayName)) {
+        const periodLinks = await prisma.timetablePeriodClass.findMany({
+          where: {
+            classId: { in: classIds },
+            timetablePeriod: {
+              academicTermId: activeTerm.id,
+              dayOfWeek: todayName as any,
+            },
+          },
+          include: {
+            timetablePeriod: {
+              include: { subject: true },
+            },
+          },
+          orderBy: {
+            timetablePeriod: { startTime: 'asc' },
+          },
+        });
+
+        for (const link of periodLinks) {
+          const current = todaysClassesByClass.get(link.classId) || [];
+          current.push(link.timetablePeriod);
+          todaysClassesByClass.set(link.classId, current);
+        }
+      }
+    }
+
     const studentsWithExtras = await Promise.all(students.map(async (student) => {
       // 1. Balance Calculation
       const totalFees = student.feeStructures.reduce((sum, fee) => sum + Number(fee.amountDue), 0);
@@ -686,55 +716,8 @@ export const getMyChildren = async (req: Request, res: Response) => {
       const balance = totalFees - totalPaid;
 
       // 2. Pending/Upcoming Assessments (Last 7 days to Future)
-      let pendingAssessments: any[] = [];
-      let todaysClasses: any[] = [];
-
-      if (activeTerm) {
-        // Find assessments for the class
-        const assessments = await prisma.assessment.findMany({
-          where: {
-            classId: student.classId,
-            termId: activeTerm.id,
-            date: {
-              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Include recent ones
-            }
-          },
-          include: { subject: true },
-          orderBy: { date: 'asc' }
-        });
-
-        // Filter out those already graded (present in assessmentResults)
-        // Note: This matches "Pending Grading" or "Pending Submission"
-        for (const assessment of assessments) {
-          // Check if result exists (Graded)
-          const result = await prisma.assessmentResult.findUnique({
-            where: { assessmentId_studentId: { assessmentId: assessment.id, studentId: student.id } }
-          });
-
-          if (!result) {
-            // Check if submitted but not graded? (Schema has AssessmentSubmission)
-            // For now, simpler: if no Result, show it as Pending/Upcoming
-            pendingAssessments.push(assessment);
-          }
-        }
-
-        // 3. Timetable for Today
-        if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(todayName)) {
-          todaysClasses = await prisma.timetablePeriod.findMany({
-            where: {
-              academicTermId: activeTerm.id,
-              dayOfWeek: todayName as any,
-              classes: {
-                some: {
-                  classId: student.classId
-                }
-              }
-            },
-            include: { subject: true },
-            orderBy: { startTime: 'asc' }
-          });
-        }
-      }
+      const pendingAssessments = pendingAssessmentsByStudent.get(student.id) || [];
+      const todaysClasses = todaysClassesByClass.get(student.classId) || [];
 
       // We only want to send the last 5 payments
       const recentPayments = student.payments.slice(0, 5);

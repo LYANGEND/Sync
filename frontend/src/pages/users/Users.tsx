@@ -234,23 +234,23 @@ const Users = () => {
   const allFilteredSelected = filteredUsers.length > 0 && filteredSelectedCount === filteredUsers.length;
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">User Management</h1>
-          <p className="text-gray-500 dark:text-gray-400">Manage system access and roles</p>
+          <h1 className="ds-page-title">User Management</h1>
+          <p className="ds-page-subtitle">Manage system access and roles</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+        <div className="ds-actions">
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+            className="ds-button-outline"
           >
             <Upload size={20} />
             <span>Import Users</span>
           </button>
           <button
             onClick={openAddModal}
-            className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="ds-button-primary"
           >
             <Plus size={20} />
             <span>Add User</span>
@@ -258,22 +258,23 @@ const Users = () => {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+      <div className="ds-surface overflow-hidden">
         <div className="p-4 border-b border-gray-100 dark:border-slate-700 flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search users..."
+              aria-label="Search users..." placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+              className="ds-input pl-10"
             />
           </div>
           <select
+            aria-label="Filter by role"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+            className="ds-input w-auto"
           >
             <option value="">All Roles</option>
             {ROLES.map(role => (
@@ -291,7 +292,7 @@ const Users = () => {
               <select
                 value={bulkRole}
                 onChange={(e) => setBulkRole(e.target.value)}
-                className="px-3 py-2 border border-blue-200 dark:border-blue-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white text-sm"
+                className="ds-input w-auto"
                 disabled={bulkSaving}
               >
                 <option value="">Keep role</option>
@@ -302,7 +303,7 @@ const Users = () => {
               <select
                 value={bulkBranchId}
                 onChange={(e) => setBulkBranchId(e.target.value)}
-                className="px-3 py-2 border border-blue-200 dark:border-blue-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white text-sm"
+                className="ds-input w-auto"
                 disabled={bulkSaving}
               >
                 <option value={KEEP_BRANCH}>Keep branch</option>
@@ -314,7 +315,7 @@ const Users = () => {
               <button
                 onClick={handleApplyBulkAccess}
                 disabled={bulkSaving}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors text-sm"
+                className="ds-button-primary"
               >
                 Apply
               </button>
@@ -342,10 +343,10 @@ const Users = () => {
           <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading users...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="ds-table">
               <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-100 dark:border-slate-600">
                 <tr>
-                  <th className="px-6 py-3 w-12">
+                  <th className="w-12">
                     <input
                       type="checkbox"
                       checked={allFilteredSelected}
@@ -354,11 +355,11 @@ const Users = () => {
                       className="rounded text-blue-600 focus:ring-blue-500"
                     />
                   </th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">User</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Role</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Status</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Created</th>
-                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase">Actions</th>
+                  <th scope="col">User</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
@@ -448,7 +449,7 @@ const Users = () => {
                     required
                     value={formData.fullName}
                     onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input pl-10"
                     placeholder="John Doe"
                   />
                 </div>
@@ -463,7 +464,7 @@ const Users = () => {
                     required
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input pl-10"
                     placeholder="john@example.com"
                   />
                 </div>
@@ -476,7 +477,7 @@ const Users = () => {
                   <select
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input pl-10"
                   >
                     {ROLES.map(role => (
                       <option key={role} value={role}>{role.replace('_', ' ')}</option>
@@ -492,7 +493,7 @@ const Users = () => {
                   <select
                     value={formData.branchId}
                     onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input pl-10"
                   >
                     <option value="">No Branch (Global Access)</option>
                     {branches.map((branch) => (
@@ -515,7 +516,7 @@ const Users = () => {
                     minLength={6}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input pl-10"
                     placeholder={editingUser ? '••••••••' : 'Enter password'}
                   />
                 </div>
@@ -531,7 +532,7 @@ const Users = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   {editingUser ? 'Update User' : 'Create User'}
                 </button>

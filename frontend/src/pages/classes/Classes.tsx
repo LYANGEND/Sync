@@ -316,25 +316,31 @@ const Classes = () => {
   );
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div className="ds-page">
+      <div className="ds-page-header">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Class Sections</h2>
-        <div className="flex space-x-3">
+        <div className="ds-actions">
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+            className="ds-button-outline"
           >
             <Upload size={20} />
             <span>Import Classes</span>
           </button>
           <button
             onClick={openAddModal}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="ds-button-primary"
           >
             <Plus size={20} />
             <span>Add Class</span>
           </button>
         </div>
+      </div>
+
+      <div className="relative max-w-md">
+        <Search size={18} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+        <input type="search" aria-label="Search classes" placeholder="Search classes..."
+          value={searchTerm} onChange={event => setSearchTerm(event.target.value)} className="ds-input pl-10" />
       </div>
 
       {loading ? (
@@ -343,12 +349,12 @@ const Classes = () => {
         </div>
       ) : filteredClasses.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
-          <p className="text-gray-400 dark:text-gray-500 mb-2">No classes defined. Create one to start adding students.</p>
+          <p className="ds-helper">{searchTerm ? 'No classes match your search. Try a different name.' : 'No classes defined. Create one to start adding students.'}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredClasses.map((cls) => (
-            <div key={cls.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 hover:shadow-md transition-shadow">
+            <div key={cls.id} className="ds-card">
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">{cls.name}</h3>
@@ -414,7 +420,7 @@ const Classes = () => {
               <select
                 value={syllabusSubjectId}
                 onChange={(e) => setSyllabusSubjectId(e.target.value)}
-                className="w-full md:w-1/3 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                className="ds-input md:w-1/3"
               >
                 {syllabusClass.subjects.length === 0 && <option value="">No subjects assigned</option>}
                 {syllabusClass.subjects.map(subject => (
@@ -491,10 +497,10 @@ const Classes = () => {
                     <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                     <input
                       type="text"
-                      placeholder="Search students..."
+                      aria-label="Search students..." placeholder="Search students..."
                       value={studentSearchTerm}
                       onChange={(e) => setStudentSearchTerm(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                      className="ds-input pl-9"
                     />
                   </div>
                 </div>
@@ -539,7 +545,7 @@ const Classes = () => {
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                     placeholder="e.g. Grade 10A"
                   />
                 </div>
@@ -555,7 +561,7 @@ const Classes = () => {
                       const recommended = subjects.filter(s => codes.includes(s.code)).map(s => s.id);
                       setFormData({ ...formData, gradeLevel: gl, subjectIds: recommended });
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">Select Grade</option>
                     {GRADE_OPTIONS.map(opt => (
@@ -569,7 +575,7 @@ const Classes = () => {
                     required
                     value={formData.teacherId}
                     onChange={(e) => setFormData({ ...formData, teacherId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">Select a teacher</option>
                     {teachers.map(teacher => (
@@ -588,7 +594,7 @@ const Classes = () => {
                     required
                     value={formData.academicTermId}
                     onChange={(e) => setFormData({ ...formData, academicTermId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
+                    className="ds-input"
                   >
                     <option value="">Select a term</option>
                     {terms.map(term => (
@@ -670,7 +676,7 @@ const Classes = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="ds-button-primary"
                 >
                   {editingClass ? 'Update Class' : 'Create Class'}
                 </button>

@@ -191,18 +191,18 @@ const FinanceReports = () => {
             .reduce((sum, refund) => sum + Number(refund.amount || 0), 0),
     }));
 
-    if (loading) return <div className="p-8 text-center text-gray-600 dark:text-gray-400">Loading analytics...</div>;
+    if (loading) return <div className="ds-page ds-empty" role="status">Loading analytics...</div>;
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="ds-page">
+            <div className="ds-page-header">
                 <div>
-                    <h2 className="text-xl font-semibold text-slate-800 dark:text-white">Finance Management Pack</h2>
-                    <p className="text-sm text-slate-500 dark:text-gray-400">Collections, arrears, cash health, and reporting exceptions in one view.</p>
+                    <h2 className="ds-page-title">Finance Management Pack</h2>
+                    <p className="ds-page-subtitle">Collections, arrears, cash health, and reporting exceptions in one view.</p>
                 </div>
                 <button
                     onClick={fetchReport}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200 dark:hover:bg-slate-700"
+                    className="ds-button-outline"
                 >
                     <RefreshCw className="h-4 w-4" />
                     Refresh pack
@@ -260,22 +260,22 @@ const FinanceReports = () => {
                         bg: 'bg-slate-100 dark:bg-slate-800',
                     },
                 ].map(card => (
-                    <div key={card.label} className={`rounded-xl border border-slate-200 p-5 shadow-sm dark:border-slate-700 ${card.bg}`}>
+                    <div key={card.label} className="ds-card">
                         <div className="flex items-start justify-between gap-4">
                             <div>
                                 <p className="text-sm text-slate-500 dark:text-gray-400">{card.label}</p>
                                 <p className={`mt-2 text-2xl font-bold ${card.tone}`}>{card.value}</p>
                                 <p className="mt-2 text-xs text-slate-500 dark:text-gray-400">{card.detail}</p>
                             </div>
-                            <card.icon className={`h-5 w-5 ${card.tone}`} />
+                            <card.icon className={`h-5 w-5 ${card.tone}`} aria-hidden="true" />
                         </div>
                     </div>
                 ))}
             </div>
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800 xl:col-span-2">
-                    <div className="mb-6 flex items-center justify-between">
+                <div className="ds-card xl:col-span-2">
+                    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800 dark:text-white">
                             <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                             Monthly Revenue ({new Date().getFullYear()})
@@ -295,7 +295,7 @@ const FinanceReports = () => {
                                 />
                                 <Tooltip
                                     formatter={(value: number) => [`ZMW ${value.toLocaleString()}`, 'Revenue']}
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                    contentStyle={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'var(--surface)', color: 'var(--text-primary)', boxShadow: 'var(--shadow-md)' }}
                                 />
                                 <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                             </BarChart>
@@ -303,8 +303,8 @@ const FinanceReports = () => {
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
+                <div className="ds-card">
+                    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800 dark:text-white">
                             <PieChartIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                             Payment Mix
@@ -319,7 +319,7 @@ const FinanceReports = () => {
                                         <Cell key={`cell-${entry.name}`} fill={COLORS[index % COLORS.length]} />
                                     ))}
                                 </Pie>
-                                <Tooltip formatter={(value: number) => [`ZMW ${value.toLocaleString()}`, 'Amount']} />
+                                <Tooltip formatter={(value: number | string) => [`ZMW ${Number(value ?? 0).toLocaleString()}`, 'Amount']} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
@@ -329,7 +329,7 @@ const FinanceReports = () => {
                         ) : methodData.map((method, index) => {
                             const share = totalRevenue > 0 ? (method.value / totalRevenue) * 100 : 0;
                             return (
-                                <div key={method.name} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-700/50">
+                                <div key={method.name} className="flex flex-wrap items-center justify-between gap-3 bg-[var(--surface-muted)] px-3 py-2 text-sm">
                                     <div className="flex items-center gap-2">
                                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
                                         <span className="font-medium text-slate-700 dark:text-gray-200">{method.name}</span>
@@ -346,31 +346,31 @@ const FinanceReports = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-5 flex items-center justify-between">
+                <div className="ds-card">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Collections Health</h3>
                         <span className="text-sm text-slate-500 dark:text-gray-400">Cash and accrual snapshot</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="ds-surface-muted p-4">
                             <p className="text-sm text-slate-500 dark:text-gray-400">Collected</p>
                             <p className="mt-1 text-xl font-bold text-emerald-600">{fmt(totalCollected)}</p>
                         </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                        <div className="ds-surface-muted p-4">
                             <p className="text-sm text-slate-500 dark:text-gray-400">Collection Rate</p>
                             <p className="mt-1 text-xl font-bold text-blue-600">{pct(collectionRate)}</p>
                         </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                        <div className="ds-surface-muted p-4">
                             <p className="text-sm text-slate-500 dark:text-gray-400">Cash Inflow</p>
                             <p className="mt-1 text-xl font-bold text-emerald-600">{fmt(data.cashFlow.totalInflows)}</p>
                         </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                        <div className="ds-surface-muted p-4">
                             <p className="text-sm text-slate-500 dark:text-gray-400">Cash Outflow</p>
                             <p className="mt-1 text-xl font-bold text-red-600">{fmt(data.cashFlow.totalOutflows)}</p>
                         </div>
                     </div>
-                    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-700/30">
-                        <div className="flex items-center justify-between">
+                    <div className="ds-surface-muted mt-4 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
                             <span className="text-sm font-medium text-slate-600 dark:text-gray-300">Net cash position</span>
                             <span className={`text-lg font-bold ${data.cashFlow.netCashFlow >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>{fmt(data.cashFlow.netCashFlow)}</span>
                         </div>
@@ -380,21 +380,21 @@ const FinanceReports = () => {
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-5 flex items-center justify-between">
+                <div className="ds-card">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Refund Control Watch</h3>
                         <span className="text-sm text-slate-500 dark:text-gray-400">Approval pipeline</span>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         {refundByStatus.map(item => (
-                            <div key={item.status} className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                            <div key={item.status} className="ds-surface-muted p-4">
                                 <p className="text-sm text-slate-500 dark:text-gray-400">{item.status}</p>
                                 <p className="mt-1 text-xl font-bold text-slate-800 dark:text-white">{item.count}</p>
                                 <p className="text-xs text-slate-500 dark:text-gray-400">{fmt(item.amount)}</p>
                             </div>
                         ))}
                     </div>
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
+                    <div className="ds-alert ds-badge-warning mt-4 block">
                         <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Control note</p>
                         <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
                             Pending refunds should be reviewed daily to prevent unapproved credits from aging in the ledger.
@@ -404,21 +404,21 @@ const FinanceReports = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
+                <div className="ds-card">
+                    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Aged Receivables</h3>
                         <span className="text-sm text-slate-500 dark:text-gray-400">By aging bucket</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {receivableBuckets.map(bucket => (
-                            <div key={bucket.bucket} className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
+                            <div key={bucket.bucket} className="ds-surface-muted p-4">
                                 <p className="text-sm text-slate-500 dark:text-gray-400">{bucket.bucket} days</p>
                                 <p className="mt-1 text-xl font-bold text-slate-800 dark:text-white">{fmt(bucket.balance)}</p>
                                 <p className="text-xs text-slate-500 dark:text-gray-400">{bucket.students} student(s)</p>
                             </div>
                         ))}
                     </div>
-                    <div className="mt-5 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="ds-surface mt-5">
                         <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
                             <p className="text-sm font-medium text-slate-700 dark:text-gray-200">Highest-risk debtor accounts</p>
                         </div>
@@ -426,7 +426,7 @@ const FinanceReports = () => {
                             {topDebtors.length === 0 ? (
                                 <p className="px-4 py-6 text-sm text-slate-500 dark:text-gray-400">No outstanding debtor balances.</p>
                             ) : topDebtors.map(debtor => (
-                                <div key={debtor.studentId} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                                <div key={debtor.studentId} className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 text-sm break-words">
                                     <div>
                                         <p className="font-medium text-slate-800 dark:text-white">{debtor.studentName}</p>
                                         <p className="text-xs text-slate-500 dark:text-gray-400">{debtor.className} • {debtor.bucket} days • {debtor.guardianPhone || debtor.guardianEmail || 'No contact'}</p>
@@ -438,8 +438,8 @@ const FinanceReports = () => {
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
+                <div className="ds-card">
+                    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Collection Rate per Class</h3>
                         <span className="text-sm text-slate-500 dark:text-gray-400">Weakest classes first</span>
                     </div>
@@ -448,7 +448,7 @@ const FinanceReports = () => {
                             <p className="text-sm text-slate-500 dark:text-gray-400">No class collection performance yet.</p>
                         ) : riskClasses.map((cls) => (
                             <div key={cls.className} className="space-y-2">
-                                <div className="flex justify-between text-sm">
+                                <div className="flex flex-wrap justify-between gap-2 text-sm">
                                     <span className="font-medium text-slate-700 dark:text-gray-200">{cls.className}</span>
                                     <span className="text-slate-500 dark:text-gray-400">
                                         {cls.percentage}% ({cls.totalCollected.toLocaleString()} / {cls.totalDue.toLocaleString()})
@@ -463,7 +463,7 @@ const FinanceReports = () => {
                             </div>
                         ))}
                     </div>
-                    <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-900/20">
+                    <div className="ds-alert ds-badge-error mt-5 block">
                         <p className="text-sm font-medium text-red-700 dark:text-red-300">Follow-up priority</p>
                         <p className="mt-1 text-xs text-red-600 dark:text-red-200">
                             Focus debt collection and bursar review on classes below 50% collection to reduce overdue spillover into future terms.

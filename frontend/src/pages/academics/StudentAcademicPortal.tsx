@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { PageHeader, Tabs, TabPanel } from '../../components/ui/DesignSystem';
 import {
   BookOpen, TrendingUp, Award, Calendar, BarChart2,
   CheckCircle, Users
@@ -99,8 +100,8 @@ const StudentAcademicPortal: React.FC = () => {
 
   if (loading && selectedChild) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+      <div className="ds-page flex items-center justify-center min-h-[400px]" role="status" aria-label="Loading pupil academic progress">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[var(--action-color)]" aria-hidden="true"></div>
       </div>
     );
   }
@@ -108,35 +109,36 @@ const StudentAcademicPortal: React.FC = () => {
   if (!dashboardData && !selectedChild) {
     // Teacher/admin needs to search for a student first
     return (
-      <div className="p-4 md:p-6 pb-24 md:pb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Pupil Academic Progress</h1>
-          <div className="relative">
+      <div className="ds-page">
+        <PageHeader title="Pupil Academic Progress" description="Find a pupil to review grades, attendance and assessments." actions={
+          <div className="relative w-full sm:w-64">
+            <label htmlFor="portal-initial-search" className="ds-label mb-2">Search pupils</label>
             <input
+              id="portal-initial-search"
               type="text"
               placeholder="Search pupil by name..."
               value={studentSearch}
               onChange={e => { setStudentSearch(e.target.value); searchStudents(e.target.value); }}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm w-64"
+              className="ds-input"
             />
             {searchResults.length > 0 && studentSearch.length >= 2 && (
-              <div className="absolute right-0 mt-1 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
+              <div className="ds-surface absolute right-0 mt-1 w-full sm:w-72 z-20 max-h-60 overflow-y-auto" role="region" aria-label="Pupil search results">
                 {searchResults.slice(0, 10).map((s: any) => (
                   <button key={s.id} onClick={() => { setSelectedChild(s.id); setStudentSearch(`${s.firstName} ${s.lastName}`); setSearchResults([]); }}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-700 text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
+                    className="ds-button-ghost w-full flex-col items-start text-left"
                   >
                     <span className="font-medium">{s.firstName} {s.lastName}</span>
-                    <span className="text-gray-400 ml-2">{s.admissionNumber} • {s.class?.name || ''}</span>
+                    <span className="ds-helper">{s.admissionNumber} • {s.class?.name || ''}</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-12 text-center">
-          <Users className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-          <p className="text-gray-500 dark:text-gray-400 text-lg">Search for a pupil to view their academic progress</p>
-          <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">Use the search box above to find a pupil by name</p>
+        } />
+        <div className="ds-card ds-empty">
+          <Users className="w-12 h-12 mx-auto mb-4" aria-hidden="true" />
+          <p>Search for a pupil to view their academic progress</p>
+          <p className="ds-helper mt-2">Use the search box above to find a pupil by name</p>
         </div>
       </div>
     );
@@ -144,9 +146,12 @@ const StudentAcademicPortal: React.FC = () => {
 
   if (!dashboardData) {
     return (
-      <div className="p-6 text-center text-gray-500 dark:text-gray-400">
-        <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
-        <p>No academic data available for this pupil</p>
+      <div className="ds-page">
+        <PageHeader title="Pupil Academic Progress" />
+        <div className="ds-card ds-empty">
+          <BookOpen className="w-12 h-12 mx-auto mb-3" aria-hidden="true" />
+          <p>No academic data available for this pupil</p>
+        </div>
       </div>
     );
   }
@@ -161,15 +166,15 @@ const StudentAcademicPortal: React.FC = () => {
   const getGradeColor = (score: number) => {
     if (score >= 80) return 'text-green-600 dark:text-green-400';
     if (score >= 60) return 'text-blue-600 dark:text-blue-400';
-    if (score >= 40) return 'text-yellow-600 dark:text-yellow-400';
+    if (score >= 40) return 'text-amber-700 dark:text-amber-300';
     return 'text-red-600 dark:text-red-400';
   };
 
   const getGradeBg = (score: number) => {
-    if (score >= 80) return 'bg-green-100 dark:bg-green-900/30';
-    if (score >= 60) return 'bg-blue-100 dark:bg-blue-900/30';
-    if (score >= 40) return 'bg-yellow-100 dark:bg-yellow-900/30';
-    return 'bg-red-100 dark:bg-red-900/30';
+    if (score >= 80) return 'ds-badge-success';
+    if (score >= 60) return 'ds-badge-info';
+    if (score >= 40) return 'ds-badge-warning';
+    return 'ds-badge-error';
   };
 
   const getGradeLetter = (score: number) => {
@@ -181,96 +186,83 @@ const StudentAcademicPortal: React.FC = () => {
   };
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6">
+    <div className="ds-page">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            {user?.role === 'PARENT' ? 'My Child\'s Academic Progress' : 'Pupil Academic Progress'}
-          </h1>
-          {dashboardData && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {student?.firstName} {student?.lastName} • {student?.class?.name}
-              {activeTerm && ` • ${activeTerm.name}`}
-            </p>
-          )}
-        </div>
-
+      <PageHeader
+        title={user?.role === 'PARENT' ? 'My Child\'s Academic Progress' : 'Pupil Academic Progress'}
+        description={<>{student?.firstName} {student?.lastName} • {student?.class?.name}{activeTerm && ` • ${activeTerm.name}`}</>}
+        actions={<>
         {/* Parent child selector */}
         {user?.role === 'PARENT' && children.length > 1 && (
+          <label className="ds-field w-full sm:w-64">
+          <span className="ds-label">Child</span>
           <select value={selectedChild} onChange={e => setSelectedChild(e.target.value)}
-            className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm"
+            className="ds-select"
           >
             {children.map((c: any) => (
               <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>
             ))}
           </select>
+          </label>
         )}
 
         {/* Teacher/Admin student search */}
         {(user?.role === 'TEACHER' || user?.role === 'SUPER_ADMIN' || user?.role === 'BRANCH_MANAGER') && (
-          <div className="relative">
+          <div className="relative w-full sm:w-64">
+            <label htmlFor="portal-search" className="ds-label mb-2">Search pupils</label>
             <input
+              id="portal-search"
               type="text"
               placeholder="Search pupil by name..."
               value={studentSearch}
               onChange={e => { setStudentSearch(e.target.value); searchStudents(e.target.value); }}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm w-64"
+              className="ds-input"
             />
             {searchResults.length > 0 && studentSearch.length >= 2 && (
-              <div className="absolute right-0 mt-1 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
+              <div className="ds-surface absolute right-0 mt-1 w-full sm:w-72 z-20 max-h-60 overflow-y-auto" role="region" aria-label="Pupil search results">
                 {searchResults.slice(0, 10).map((s: any) => (
                   <button key={s.id} onClick={() => { setSelectedChild(s.id); setStudentSearch(`${s.firstName} ${s.lastName}`); setSearchResults([]); }}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-700 text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
+                    className="ds-button-ghost w-full flex-col items-start text-left"
                   >
                     <span className="font-medium">{s.firstName} {s.lastName}</span>
-                    <span className="text-gray-400 ml-2">{s.admissionNumber} • {s.class?.name || ''}</span>
+                    <span className="ds-helper">{s.admissionNumber} • {s.class?.name || ''}</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
         )}
-      </div>
+        </>}
+      />
 
       {/* Tab Navigation */}
-      <div className="flex gap-1 bg-white dark:bg-slate-800 p-1 rounded-lg border border-gray-200 dark:border-slate-700 mb-6 overflow-x-auto">
-        {[
+      <Tabs id="student-academics" label="Pupil academic progress" value={activeTab}
+        onChange={value => setActiveTab(value as typeof activeTab)} items={[
           { id: 'overview', label: 'Overview', icon: BarChart2 },
           { id: 'grades', label: 'Grades', icon: Award },
           { id: 'trends', label: 'Trends', icon: TrendingUp },
           { id: 'assessments', label: 'Assessments', icon: Calendar },
-        ].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${
-              activeTab === tab.id
-                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+        ].map(tab => ({ id: tab.id, label: <span className="flex items-center gap-2"><tab.icon className="w-4 h-4" aria-hidden="true" />{tab.label}</span> }))}
+      />
 
+      <TabPanel id="student-academics" value={activeTab}>
       {activeTab === 'overview' && (
         <>
           {/* Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Average</span>
-                <Award className="w-5 h-5 text-yellow-500" />
+                <Award className="w-5 h-5 text-[var(--text-secondary)]" aria-hidden="true" />
               </div>
               <div className={`text-2xl font-bold ${getGradeColor(overallAverage)}`}>{overallAverage}%</div>
               <div className="text-xs text-gray-500 mt-1">Grade {getGradeLetter(overallAverage)}</div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Position</span>
-                <Users className="w-5 h-5 text-blue-500" />
+                <Users className="w-5 h-5 text-[var(--text-secondary)]" aria-hidden="true" />
               </div>
               <div className="text-2xl font-bold text-gray-800 dark:text-white">
                 {position ? `${position}` : '—'}
@@ -280,12 +272,12 @@ const StudentAcademicPortal: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Attendance</span>
-                <CheckCircle className="w-5 h-5 text-green-500" />
+                <CheckCircle className="w-5 h-5 text-[var(--text-secondary)]" aria-hidden="true" />
               </div>
-              <div className={`text-2xl font-bold ${attendanceSummary.percentage >= 90 ? 'text-green-600' : attendanceSummary.percentage >= 75 ? 'text-yellow-600' : 'text-red-600'}`}>
+              <div className={`text-2xl font-bold ${attendanceSummary.percentage >= 90 ? 'text-green-700 dark:text-green-300' : attendanceSummary.percentage >= 75 ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>
                 {attendanceSummary.percentage}%
               </div>
               <div className="text-xs text-gray-500 mt-1">
@@ -293,10 +285,10 @@ const StudentAcademicPortal: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+            <div className="ds-card">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Subjects</span>
-                <BookOpen className="w-5 h-5 text-purple-500" />
+                <BookOpen className="w-5 h-5 text-[var(--text-secondary)]" aria-hidden="true" />
               </div>
               <div className="text-2xl font-bold text-gray-800 dark:text-white">{currentGrades.length}</div>
               <div className="text-xs text-gray-500 mt-1">active subjects</div>
@@ -304,9 +296,9 @@ const StudentAcademicPortal: React.FC = () => {
           </div>
 
           {/* Attendance Breakdown */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 mb-6">
+          <div className="ds-card mb-6">
             <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Attendance Breakdown</h3>
-            <div className="flex gap-2 h-4 rounded-full overflow-hidden bg-gray-100 dark:bg-slate-700">
+            <div className="flex gap-2 h-4 rounded-full overflow-hidden bg-[var(--surface-muted)]" aria-hidden="true">
               {attendanceSummary.total > 0 && (
                 <>
                   <div className="bg-green-500 rounded-l-full" style={{ width: `${(attendanceSummary.present / attendanceSummary.total) * 100}%` }} />
@@ -315,7 +307,7 @@ const StudentAcademicPortal: React.FC = () => {
                 </>
               )}
             </div>
-            <div className="flex gap-4 mt-2 text-xs">
+            <div className="flex flex-wrap gap-4 mt-2 text-sm text-[var(--text-secondary)]">
               <span className="flex items-center gap-1"><span className="w-2 h-2 bg-green-500 rounded-full"></span> Present ({attendanceSummary.present})</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 bg-yellow-500 rounded-full"></span> Late ({attendanceSummary.late})</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500 rounded-full"></span> Absent ({attendanceSummary.absent})</span>
@@ -324,13 +316,13 @@ const StudentAcademicPortal: React.FC = () => {
 
           {/* Recent Results */}
           {recentResults.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 mb-6">
+            <div className="ds-card mb-6">
               <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Recent Results</h3>
               <div className="space-y-2">
                 {recentResults.slice(0, 5).map(r => {
                   const pct = Number(r.assessment?.totalMarks) > 0 ? Math.round((Number(r.score) / Number(r.assessment.totalMarks)) * 100) : 0;
                   return (
-                    <div key={r.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                    <div key={r.id} className="ds-surface-muted flex flex-wrap items-center justify-between gap-3 p-3">
                       <div>
                         <p className="font-medium text-sm text-gray-800 dark:text-white">{r.assessment?.title}</p>
                         <p className="text-xs text-gray-500">{r.assessment?.subject?.name} • {r.assessment?.type}</p>
@@ -348,11 +340,11 @@ const StudentAcademicPortal: React.FC = () => {
 
           {/* Upcoming Assessments */}
           {upcomingAssessments.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+            <div className="ds-card">
               <h3 className="font-semibold text-gray-800 dark:text-white mb-3">Upcoming Assessments</h3>
               <div className="space-y-2">
                 {upcomingAssessments.map(a => (
-                  <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                  <div key={a.id} className="ds-surface-muted flex flex-wrap items-center gap-3 p-3">
                     <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
                       <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
@@ -373,7 +365,7 @@ const StudentAcademicPortal: React.FC = () => {
       )}
 
       {activeTab === 'grades' && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+        <div className="ds-card">
           <h3 className="font-semibold text-gray-800 dark:text-white mb-4">Current Term Grades</h3>
           {currentGrades.length === 0 ? (
             <p className="text-gray-500 text-center py-8">No grades recorded for this term yet</p>
@@ -382,8 +374,8 @@ const StudentAcademicPortal: React.FC = () => {
               {currentGrades.map(g => {
                 const score = Number(g.totalScore);
                 return (
-                  <div key={g.id} className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-slate-700/50 rounded-xl">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold ${getGradeBg(score)} ${getGradeColor(score)}`}>
+                  <div key={g.id} className="ds-surface-muted flex flex-wrap items-center gap-4 p-4">
+                    <div className={`ds-badge justify-center ${getGradeBg(score)}`} aria-label={`Grade ${getGradeLetter(score)}`}>
                       {getGradeLetter(score)}
                     </div>
                     <div className="flex-1">
@@ -413,7 +405,7 @@ const StudentAcademicPortal: React.FC = () => {
       )}
 
       {activeTab === 'trends' && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+        <div className="ds-card">
           <h3 className="font-semibold text-gray-800 dark:text-white mb-4">Performance Trends</h3>
           {!trendData || trendData.trends.length === 0 ? (
             <p className="text-gray-500 text-center py-8">Not enough data for trend analysis yet</p>
@@ -436,7 +428,7 @@ const StudentAcademicPortal: React.FC = () => {
                             minHeight: '8px',
                           }}
                         />
-                        <span className="text-[10px] text-gray-500 text-center">{term.term}</span>
+                        <span className="text-xs text-[var(--text-secondary)] text-center">{term.term}</span>
                       </div>
                     );
                   })}
@@ -446,28 +438,28 @@ const StudentAcademicPortal: React.FC = () => {
               {/* Subject breakdown table */}
               <div>
                 <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Subject Scores per Term</h4>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="overflow-x-auto" role="region" aria-label="Subject scores per term" tabIndex={0}>
+                  <table className="ds-table">
                     <thead>
-                      <tr className="border-b border-gray-200 dark:border-slate-700">
-                        <th className="text-left py-2 pr-4 font-medium text-gray-600 dark:text-gray-400">Subject</th>
+                      <tr>
+                        <th scope="col">Subject</th>
                         {trendData.trends.map((t: any, i: number) => (
-                          <th key={i} className="text-center py-2 px-2 font-medium text-gray-600 dark:text-gray-400">{t.term}</th>
+                          <th key={i} scope="col" className="text-center">{t.term}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {trendData.subjects.map((subj, si) => (
-                        <tr key={subj} className="border-b border-gray-100 dark:border-slate-700/50">
-                          <td className="py-2 pr-4 font-medium text-gray-800 dark:text-white">{subj}</td>
+                        <tr key={subj}>
+                          <td className="font-medium">{subj}</td>
                           {trendData.trends.map((term: any, ti: number) => {
                             const score = term.subjects[subj];
                             return (
-                              <td key={ti} className="text-center py-2 px-2">
+                              <td key={ti} className="text-center">
                                 {score !== undefined ? (
                                   <span className={`font-medium ${getGradeColor(score)}`}>{Math.round(score)}%</span>
                                 ) : (
-                                  <span className="text-gray-400">—</span>
+                                  <span className="text-[var(--text-secondary)]" aria-label="No score recorded">—</span>
                                 )}
                               </td>
                             );
@@ -484,37 +476,37 @@ const StudentAcademicPortal: React.FC = () => {
       )}
 
       {activeTab === 'assessments' && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+        <div className="ds-card">
           <h3 className="font-semibold text-gray-800 dark:text-white mb-4">All Assessment Results</h3>
           {recentResults.length === 0 ? (
             <p className="text-gray-500 text-center py-8">No assessment results yet</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto" role="region" aria-label="All assessment results" tabIndex={0}>
+              <table className="ds-table">
                 <thead>
-                  <tr className="border-b border-gray-200 dark:border-slate-700">
-                    <th className="text-left py-2 font-medium text-gray-600 dark:text-gray-400">Assessment</th>
-                    <th className="text-left py-2 font-medium text-gray-600 dark:text-gray-400">Subject</th>
-                    <th className="text-center py-2 font-medium text-gray-600 dark:text-gray-400">Type</th>
-                    <th className="text-center py-2 font-medium text-gray-600 dark:text-gray-400">Score</th>
-                    <th className="text-center py-2 font-medium text-gray-600 dark:text-gray-400">%</th>
-                    <th className="text-center py-2 font-medium text-gray-600 dark:text-gray-400">Grade</th>
+                  <tr>
+                    <th scope="col">Assessment</th>
+                    <th scope="col">Subject</th>
+                    <th scope="col" className="text-center">Type</th>
+                    <th scope="col" className="text-center">Score</th>
+                    <th scope="col" className="text-center">%</th>
+                    <th scope="col" className="text-center">Grade</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recentResults.map(r => {
                     const pct = Number(r.assessment?.totalMarks) > 0 ? Math.round((Number(r.score) / Number(r.assessment.totalMarks)) * 100) : 0;
                     return (
-                      <tr key={r.id} className="border-b border-gray-100 dark:border-slate-700/50">
-                        <td className="py-2 font-medium text-gray-800 dark:text-white">{r.assessment?.title}</td>
-                        <td className="py-2 text-gray-600 dark:text-gray-400">{r.assessment?.subject?.name}</td>
-                        <td className="py-2 text-center">
-                          <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-slate-700 rounded-full">{r.assessment?.type}</span>
+                      <tr key={r.id}>
+                        <td className="font-medium">{r.assessment?.title}</td>
+                        <td>{r.assessment?.subject?.name}</td>
+                        <td className="text-center">
+                          <span className="ds-badge ds-badge-neutral">{r.assessment?.type}</span>
                         </td>
-                        <td className="py-2 text-center font-medium">{Number(r.score)}/{Number(r.assessment?.totalMarks)}</td>
-                        <td className={`py-2 text-center font-bold ${getGradeColor(pct)}`}>{pct}%</td>
-                        <td className="py-2 text-center">
-                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-sm font-bold ${getGradeBg(pct)} ${getGradeColor(pct)}`}>
+                        <td className="text-center font-medium">{Number(r.score)}/{Number(r.assessment?.totalMarks)}</td>
+                        <td className={`text-center font-bold ${getGradeColor(pct)}`}>{pct}%</td>
+                        <td className="text-center">
+                          <span className={`ds-badge justify-center ${getGradeBg(pct)}`}>
                             {getGradeLetter(pct)}
                           </span>
                         </td>
@@ -527,6 +519,7 @@ const StudentAcademicPortal: React.FC = () => {
           )}
         </div>
       )}
+      </TabPanel>
     </div>
   );
 };

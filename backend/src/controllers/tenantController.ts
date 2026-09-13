@@ -136,9 +136,11 @@ export const deleteCustomField = async (req: AuthRequest, res: Response) => {
 // ── GET /api/tenant/custom-fields/:entityId/values ── Get custom field values for an entity
 export const getCustomFieldValues = async (req: AuthRequest, res: Response) => {
   try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) return res.status(401).json({ error: 'Tenant context required' });
     const { entityId } = req.params;
     const values = await prisma.customFieldValue.findMany({
-      where: { entityId },
+      where: { entityId, tenantId },
     });
     res.json(values);
   } catch (err: any) {
@@ -149,14 +151,26 @@ export const getCustomFieldValues = async (req: AuthRequest, res: Response) => {
 // ── PUT /api/tenant/custom-fields/:entityId/values ── Bulk upsert custom field values
 export const saveCustomFieldValues = async (req: AuthRequest, res: Response) => {
   try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) return res.status(401).json({ error: 'Tenant context required' });
     const { entityId } = req.params;
     const { values } = req.body; // [{ customFieldId, value }]
+
+    if (!Array.isArray(values)) return res.status(400).json({ error: 'values must be an array' });
+    const requestedFieldIds = [...new Set(values.map((v: any) => v.customFieldId))] as string[];
+    const ownedFields = await prisma.tenantCustomField.findMany({
+      where: { id: { in: requestedFieldIds }, tenantId },
+      select: { id: true },
+    });
+    if (ownedFields.length !== requestedFieldIds.length) {
+      return res.status(400).json({ error: 'One or more custom fields do not belong to this tenant' });
+    }
 
     const results = await Promise.all(
       values.map((v: { customFieldId: string; value: string }) =>
         prisma.customFieldValue.upsert({
           where: { customFieldId_entityId: { customFieldId: v.customFieldId, entityId } },
-          create: { customFieldId: v.customFieldId, entityId, value: v.value },
+          create: { tenantId, customFieldId: v.customFieldId, entityId, value: v.value },
           update: { value: v.value },
         })
       )

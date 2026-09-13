@@ -250,22 +250,6 @@ const Communication = () => {
 
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-6xl mx-auto space-y-6">
-      {/* Enhanced Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden relative">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none stroke-current">
-          <Megaphone size={160} />
-        </div>
-        <div className="relative z-10">
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Megaphone className="w-8 h-8 text-blue-200" />
-            Communication Hub
-          </h1>
-          <p className="text-blue-100 mt-2 text-sm md:text-base max-w-2xl leading-relaxed">
-            Centralized platform for announcements, direct messaging, and multi-channel broadcasts to students, parents, and staff.
-          </p>
-        </div>
-      </div>
-
       {/* Status Banner */}
       <AnimatePresence>
         {status && activeTab !== 'sms' && (
@@ -334,19 +318,19 @@ const Communication = () => {
         // ===== SMS CENTER TAB =====
         <div className="space-y-6">
           {/* SMS Balance & Mode Selector */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-6 md:p-8">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                  <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg text-green-600 dark:text-green-400">
-                    <Phone size={24} />
-                  </div>
-                  SMS Command Center
-                </h2>
-                <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-sm text-sm">Send single or bulk text messages directly to parent and staff mobile numbers.</p>
+          <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
+                  <Phone size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">SMS Command Center</h2>
+                  <p className="mt-1 max-w-md text-sm text-slate-600">Send single or bulk text messages directly to parent and staff mobile numbers.</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                {/* Balance Check */}
+
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={async () => {
@@ -361,44 +345,47 @@ const Communication = () => {
                     }
                   }}
                   disabled={smsBalanceLoading}
-                  className="px-4 py-2.5 text-sm bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600 font-medium transition-colors shadow-sm flex items-center gap-2"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Wallet size={16} className="text-gray-400" />
+                  <Wallet size={16} className="text-slate-500" />
                   {smsBalanceLoading ? 'Checking...' : 'Check Credits'}
                 </button>
                 {smsBalance !== null && (
-                  <span className="text-sm font-semibold text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 px-4 py-2.5 rounded-xl shadow-sm">
+                  <span className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                     Credits: {smsBalance}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Mode Toggle */}
-            <div className="flex bg-gray-100/50 dark:bg-slate-700/30 p-1.5 rounded-xl mt-6">
+            <div className="mt-5 flex rounded-xl border border-slate-200 bg-slate-50 p-1">
               <button
                 type="button"
                 onClick={() => { setSmsMode('single'); setSmsStatus(null); }}
-                className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
                   smsMode === 'single'
-                    ? 'bg-white dark:bg-slate-800 text-green-600 dark:text-green-400 shadow shadow-green-600/10'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                    ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Smartphone size={18} />
-                Single Recipient
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Smartphone size={16} />
+                  Single Recipient
+                </span>
               </button>
               <button
                 type="button"
                 onClick={() => { setSmsMode('bulk'); setSmsStatus(null); }}
-                className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
                   smsMode === 'bulk'
-                    ? 'bg-white dark:bg-slate-800 text-green-600 dark:text-green-400 shadow shadow-green-600/10'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                    ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Users size={18} />
-                Bulk Broadcast
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Users size={16} />
+                  Bulk Broadcast
+                </span>
               </button>
             </div>
           </div>
@@ -860,10 +847,10 @@ const Communication = () => {
               <button
                 type="submit"
                 disabled={emergencySending || !emergencySubject || !emergencyMessage}
-                className="w-full flex justify-center items-center gap-3 px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg shadow-xl shadow-red-600/30 transition-all active:scale-[0.98]"
+                className="w-full flex justify-center items-center gap-3 rounded-xl bg-red-600 px-8 py-4 text-lg font-bold text-white shadow-xl shadow-red-600/30 transition-all hover:bg-red-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Zap size={24} />
-                {emergencySending ? 'BROADCASTING EMERGENCY...' : '🚨 INITIATE EMERGENCY BROADCAST'}
+                {emergencySending ? 'BROADCASTING EMERGENCY...' : 'INITIATE EMERGENCY BROADCAST'}
               </button>
             </div>
           </form>
@@ -1009,16 +996,23 @@ const Communication = () => {
                         key={p}
                         type="button"
                         onClick={() => setPriority(p)}
-                        className={`px-4 py-2.5 rounded-xl text-sm font-bold border transition-all text-left flex items-center justify-between ${
+                        className={`flex items-center justify-between rounded-xl border px-4 py-2.5 text-left text-sm font-bold transition-all ${
                           priority === p
-                            ? p === 'EMERGENCY' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800 ring-1 ring-red-500 shadow-sm'
-                              : p === 'URGENT' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800 ring-1 ring-amber-500 shadow-sm'
-                              : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800 ring-1 ring-blue-500 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
+                            ? p === 'EMERGENCY'
+                              ? 'border-red-200 bg-red-50 text-red-700 ring-1 ring-red-500 shadow-sm dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
+                              : p === 'URGENT'
+                                ? 'border-amber-200 bg-amber-50 text-amber-700 ring-1 ring-amber-500 shadow-sm dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                : 'border-blue-200 bg-blue-50 text-blue-700 ring-1 ring-blue-500 shadow-sm dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                         }`}
                       >
                         <span className="flex items-center gap-2">
-                          {p === 'EMERGENCY' ? '🚨 ' : p === 'URGENT' ? '⚡ ' : '📋 '} {p.charAt(0) + p.slice(1).toLowerCase()}
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              p === 'EMERGENCY' ? 'bg-red-500' : p === 'URGENT' ? 'bg-amber-500' : 'bg-blue-500'
+                            }`}
+                          />
+                          {p.charAt(0) + p.slice(1).toLowerCase()}
                         </span>
                         {priority === p && <CheckCircle size={16} />}
                       </button>

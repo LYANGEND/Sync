@@ -10,6 +10,7 @@ import {
   calculateNHIMA,
 } from '../services/accountingService';
 import { onPayrollCompleted } from '../services/accountingBridge';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // STAFF PAYROLL MANAGEMENT
@@ -107,6 +108,12 @@ export const createStaffPayroll = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: payroll.tenantId,
+      branchId: payroll.branchId,
+      source: 'staff-payroll.created',
+    });
+
     res.status(201).json({
       ...payroll,
       basicSalary: Number(payroll.basicSalary),
@@ -149,6 +156,12 @@ export const updateStaffPayroll = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: payroll.tenantId,
+      branchId: payroll.branchId,
+      source: 'staff-payroll.updated',
+    });
+
     res.json(payroll);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -158,9 +171,14 @@ export const updateStaffPayroll = async (req: Request, res: Response) => {
 
 export const deleteStaffPayroll = async (req: Request, res: Response) => {
   try {
-    await prisma.staffPayroll.update({
+    const payroll = await prisma.staffPayroll.update({
       where: { id: req.params.id },
       data: { isActive: false },
+    });
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: payroll.tenantId,
+      branchId: payroll.branchId,
+      source: 'staff-payroll.deactivated',
     });
     res.json({ message: 'Payroll record deactivated' });
   } catch (error) {
@@ -269,6 +287,12 @@ export const createPayrollRun = async (req: Request, res: Response) => {
       include: { payslips: true },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: run.tenantId,
+      branchId: run.branchId,
+      source: 'payroll.created',
+    });
+
     await logFinancialAction({
       userId: user.userId,
       action: 'PAYROLL_CREATED',
@@ -350,6 +374,12 @@ export const approvePayrollRun = async (req: Request, res: Response) => {
       data: { status: 'APPROVED', approvedBy: user.userId, approvedAt: new Date() },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'payroll.approved',
+    });
+
     await logFinancialAction({
       userId: user.userId,
       action: 'PAYROLL_APPROVED',
@@ -378,15 +408,22 @@ export const markPayrollPaid = async (req: Request, res: Response) => {
     if (!run) return res.status(404).json({ error: 'Payroll run not found' });
     if (run.status !== 'APPROVED') return res.status(400).json({ error: 'Payroll must be approved first' });
 
-    // Mark all payslips as paid
-    await prisma.payslip.updateMany({
-      where: { payrollRunId: run.id },
-      data: { isPaid: true, paidAt: new Date() },
+    const paidAt = new Date();
+    const updated = await prisma.$transaction(async transaction => {
+      await transaction.payslip.updateMany({
+        where: { payrollRunId: run.id },
+        data: { isPaid: true, paidAt },
+      });
+      return transaction.payrollRun.update({
+        where: { id: req.params.id },
+        data: { status: 'PAID', paidAt },
+      });
     });
 
-    const updated = await prisma.payrollRun.update({
-      where: { id: req.params.id },
-      data: { status: 'PAID', paidAt: new Date() },
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'payroll.paid',
     });
 
     await logFinancialAction({

@@ -3,6 +3,17 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildTenantDomainStatusSummary, checkTenantDomainVerification } from '../services/domainVerificationService';
+import { promises as fs } from 'fs';
+import { getCurrentTenantId } from '../middleware/tenantContext';
+import {
+  buildTenantFileStorageUrl,
+  resolveStoredTenantFileReference,
+  resolveTenantFilePath,
+  signTenantFileUrl,
+} from '../services/tenantFileService';
+
+const signedLogoUrl = (logoUrl: string | null | undefined, tenantId: string) =>
+  logoUrl ? signTenantFileUrl(logoUrl, tenantId) : logoUrl;
 
 const updateSettingsSchema = z.object({
   schoolName: z.string().min(2),
@@ -62,6 +73,9 @@ const updateSettingsSchema = z.object({
 
 export const getSettings = async (req: Request, res: Response) => {
   try {
+    const tenantId = (req as AuthRequest).user?.tenantId;
+    if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
+
     let settings = await prisma.schoolSettings.findFirst({
       include: {
         currentTerm: true
@@ -87,6 +101,7 @@ export const getSettings = async (req: Request, res: Response) => {
         masked[field] = '••••' + masked[field].slice(-4);
       }
     }
+    masked.logoUrl = signedLogoUrl(masked.logoUrl, tenantId);
 
     res.json(masked);
   } catch (error) {
@@ -97,6 +112,8 @@ export const getSettings = async (req: Request, res: Response) => {
 
 export const updateSettings = async (req: Request, res: Response) => {
   try {
+    const tenantId = (req as AuthRequest).user?.tenantId;
+    if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
     const data = updateSettingsSchema.parse(req.body);
 
     const existing = await prisma.schoolSettings.findFirst();
@@ -113,7 +130,10 @@ export const updateSettings = async (req: Request, res: Response) => {
       });
     }
 
-    res.json(settings);
+    res.json({
+      ...settings,
+      logoUrl: signedLogoUrl(settings.logoUrl, tenantId),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
@@ -125,7 +145,20 @@ export const updateSettings = async (req: Request, res: Response) => {
 
 export const getPublicSettings = async (req: Request, res: Response) => {
   try {
+    const defaultBranding = {
+      schoolName: 'My School',
+      primaryColor: '#2563eb',
+      secondaryColor: '#475569',
+      accentColor: '#f59e0b',
+    };
+
+    const tenantId = getCurrentTenantId();
+    if (!tenantId) {
+      return res.json(defaultBranding);
+    }
+
     const settings = await prisma.schoolSettings.findFirst({
+      where: { tenantId },
       select: {
         schoolName: true,
         logoUrl: true,
@@ -136,28 +169,34 @@ export const getPublicSettings = async (req: Request, res: Response) => {
     });
 
     if (!settings) {
-      return res.json({
-        schoolName: 'My School',
-        primaryColor: '#2563eb',
-        secondaryColor: '#475569',
-        accentColor: '#f59e0b',
-      });
+      return res.json(defaultBranding);
     }
 
-    res.json(settings);
+    res.json({
+      ...defaultBranding,
+      ...settings,
+      logoUrl: signedLogoUrl(settings.logoUrl, tenantId),
+    });
   } catch (error) {
     console.error('Get public settings error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.json({
+      schoolName: 'My School',
+      primaryColor: '#2563eb',
+      secondaryColor: '#475569',
+      accentColor: '#f59e0b',
+    });
   }
 };
 
 export const uploadLogo = async (req: Request, res: Response) => {
   try {
+    const tenantId = (req as AuthRequest).user?.tenantId;
+    if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const logoUrl = `/uploads/logos/${req.file.filename}`;
+    const logoUrl = buildTenantFileStorageUrl(tenantId, 'logos', req.file.filename);
 
     const existing = await prisma.schoolSettings.findFirst();
 
@@ -176,7 +215,10 @@ export const uploadLogo = async (req: Request, res: Response) => {
       });
     }
 
-    res.json({ logoUrl, message: 'Logo uploaded successfully' });
+    res.json({
+      logoUrl: signTenantFileUrl(logoUrl, tenantId),
+      message: 'Logo uploaded successfully',
+    });
   } catch (error) {
     console.error('Upload logo error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -185,22 +227,25 @@ export const uploadLogo = async (req: Request, res: Response) => {
 
 export const deleteLogo = async (req: Request, res: Response) => {
   try {
+    const tenantId = (req as AuthRequest).user?.tenantId;
+    if (!tenantId) return res.status(401).json({ message: 'Tenant context required' });
     const existing = await prisma.schoolSettings.findFirst();
 
     if (existing && existing.logoUrl) {
-      // Update settings to remove logo URL
+      const reference = resolveStoredTenantFileReference(existing.logoUrl, tenantId);
+      if (reference) {
+        if (reference.tenantId !== tenantId || reference.category !== 'logos') {
+          return res.status(403).json({ message: 'Stored logo does not belong to this tenant' });
+        }
+        await fs.unlink(resolveTenantFilePath(reference)).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+      }
+
       await prisma.schoolSettings.update({
         where: { id: existing.id },
         data: { logoUrl: null },
       });
-
-      // Optionally delete the file from disk
-      const fs = require('fs');
-      const path = require('path');
-      const filePath = path.join(__dirname, '../../', existing.logoUrl);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
     }
 
     res.json({ message: 'Logo deleted successfully' });

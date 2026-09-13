@@ -2,10 +2,18 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import {
+  buildTenantFileStorageUrl,
+  signTenantFileUrl,
+} from '../services/tenantFileService';
 
 export const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
+    const tenantId = (req as any).user?.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ message: 'Tenant context required' });
+    }
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -22,7 +30,12 @@ export const getProfile = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json(user);
+    res.json({
+      ...user,
+      profilePictureUrl: user.profilePictureUrl
+        ? signTenantFileUrl(user.profilePictureUrl, tenantId)
+        : null,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch profile' });
   }
@@ -31,14 +44,13 @@ export const getProfile = async (req: Request, res: Response) => {
 export const updateProfilePicture = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
+    const tenantId = (req as any).user?.tenantId;
     
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // In a real app, you'd upload to S3/Cloudinary here and get a URL.
-    // For local dev, we'll serve from the static uploads folder.
-    const fileUrl = `/uploads/profiles/${req.file.filename}`;
+    const fileUrl = buildTenantFileStorageUrl(tenantId, 'profiles', req.file.filename);
 
     const user = await prisma.user.update({
       where: { id: userId },
@@ -46,7 +58,12 @@ export const updateProfilePicture = async (req: Request, res: Response) => {
       select: { profilePictureUrl: true }
     });
 
-    res.json({ message: 'Profile picture updated', profilePictureUrl: user.profilePictureUrl });
+    res.json({
+      message: 'Profile picture updated',
+      profilePictureUrl: user.profilePictureUrl
+        ? signTenantFileUrl(user.profilePictureUrl, tenantId)
+        : null,
+    });
   } catch (error) {
     console.error('Update profile picture error:', error);
     res.status(500).json({ message: 'Failed to update profile picture' });

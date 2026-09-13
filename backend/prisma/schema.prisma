@@ -78,7 +78,6 @@ enum TransferEntityType {
   USER
 }
 
-
 enum TenantStatus {
   ACTIVE
   SUSPENDED
@@ -109,48 +108,48 @@ enum TenantDomainStatus {
 }
 
 model Tenant {
-  id        String       @id @default(uuid())
-  name      String
-  slug      String       @unique
-  status    TenantStatus @default(ACTIVE)
-  plan      TenantPlan   @default(FREE)
-  domain    String?      @unique // custom domain, e.g. "school.edu.zm"
-  domainStatus TenantDomainStatus @default(NONE)
-  domainDnsTarget String?
+  id                      String                 @id @default(uuid())
+  name                    String
+  slug                    String                 @unique
+  status                  TenantStatus           @default(ACTIVE)
+  plan                    TenantPlan             @default(FREE)
+  domain                  String?                @unique // custom domain, e.g. "school.edu.zm"
+  domainStatus            TenantDomainStatus     @default(NONE)
+  domainDnsTarget         String?
   domainVerificationToken String?
-  domainRequestedAt DateTime?
-  domainVerifiedAt DateTime?
-  domainLastCheckedAt DateTime?
-  locale    String       @default("en")
-  timezone  String       @default("Africa/Lusaka")
-  currency  String       @default("ZMW")
-  maxUsers  Int          @default(50)
-  maxStudents Int        @default(500)
-  onboardingStatus TenantOnboardingStatus @default(NOT_STARTED)
-  onboardingChecklist Json?
-  onboardingOwner String?
-  onboardingNotes String?
-  onboardingStartedAt DateTime?
-  onboardingCompletedAt DateTime?
-  maintenanceMode Boolean @default(false)
-  maintenanceMessage String?
-  trialEndsAt DateTime?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  domainRequestedAt       DateTime?
+  domainVerifiedAt        DateTime?
+  domainLastCheckedAt     DateTime?
+  locale                  String                 @default("en")
+  timezone                String                 @default("Africa/Lusaka")
+  currency                String                 @default("ZMW")
+  maxUsers                Int                    @default(50)
+  maxStudents             Int                    @default(500)
+  onboardingStatus        TenantOnboardingStatus @default(NOT_STARTED)
+  onboardingChecklist     Json?
+  onboardingOwner         String?
+  onboardingNotes         String?
+  onboardingStartedAt     DateTime?
+  onboardingCompletedAt   DateTime?
+  maintenanceMode         Boolean                @default(false)
+  maintenanceMessage      String?
+  trialEndsAt             DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
 
-  features  TenantFeature[]
+  features     TenantFeature[]
   customFields TenantCustomField[]
 
   @@map("tenants")
 }
 
 model TenantFeature {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   tenantId  String
-  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  feature   String  // e.g. "AI_TUTOR", "DEBT_COLLECTION", "SMS", "WHATSAPP", "VIRTUAL_CLASSROOM", "PAYROLL"
-  enabled   Boolean @default(true)
-  config    Json?   // feature-specific config overrides as JSON
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feature   String // e.g. "AI_TUTOR", "DEBT_COLLECTION", "SMS", "WHATSAPP", "VIRTUAL_CLASSROOM", "PAYROLL"
+  enabled   Boolean  @default(true)
+  config    Json? // feature-specific config overrides as JSON
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -159,28 +158,235 @@ model TenantFeature {
   @@map("tenant_features")
 }
 
+model ScheduledJobLease {
+  id          String   @id @default(uuid())
+  name        String
+  tenantId    String
+  owner       String
+  lockedUntil DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name, tenantId])
+  @@index([lockedUntil])
+  @@index([tenantId])
+  @@map("scheduled_job_leases")
+}
+
 model TenantCustomField {
-  id           String  @id @default(uuid())
-  tenantId     String
-  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  entity       String  // "STUDENT", "INVOICE", "GUARDIAN", etc.
-  fieldName    String  // e.g. "house", "transport_zone"
-  fieldLabel   String  // Display label: "House", "Transport Zone"
-  fieldType    String  // "TEXT", "NUMBER", "DATE", "SELECT", "BOOLEAN"
-  options      Json?   // For SELECT type: ["Red House","Blue House"]
-  required     Boolean @default(false)
-  sortOrder    Int     @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entity     String // "STUDENT", "INVOICE", "GUARDIAN", etc.
+  fieldName  String // e.g. "house", "transport_zone"
+  fieldLabel String // Display label: "House", "Transport Zone"
+  fieldType  String // "TEXT", "NUMBER", "DATE", "SELECT", "BOOLEAN"
+  options    Json? // For SELECT type: ["Red House","Blue House"]
+  required   Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([tenantId, entity, fieldName])
   @@index([tenantId])
   @@map("tenant_custom_fields")
 }
 
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum SupportTier {
+  BASIC
+  PRIORITY
+  DEDICATED
+}
+
+enum PlatformInvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  VOID
+}
+
+// Per-plan platform billing defaults (editable from the Ops Dashboard).
+model PlatformPlanPricing {
+  id                     String     @id @default(uuid())
+  plan                   TenantPlan @unique
+  pricePerActiveStudent  Decimal    @db.Decimal(12, 2) @default(0) // charged per student with status=ACTIVE
+  setupFeeAmount         Decimal    @db.Decimal(12, 2) @default(0) // one-time onboarding fee
+  setupFeeWaivedOnAnnual Boolean    @default(false) // waive setup fee when tenant commits to annual billing
+  aiIncludedUnits        Int        @default(0) // AI requests included per month before overage billing
+  smsIncludedUnits       Int        @default(0) // SMS messages included per month before overage billing
+  minimumMonthlyBill     Decimal    @db.Decimal(12, 2) @default(0) // revenue floor regardless of student count
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  @@map("platform_plan_pricing")
+}
+
+// Global billing policy shared across all plans (editable from the Ops Dashboard).
+model PlatformBillingSettings {
+  id                    String   @id @default(uuid())
+  singleton             Boolean  @unique @default(true) // enforces a single row
+  supportFeeBasic       Decimal  @db.Decimal(12, 2) @default(150)
+  supportFeePriority    Decimal  @db.Decimal(12, 2) @default(400)
+  supportFeeDedicated   Decimal  @db.Decimal(12, 2) @default(900)
+  aiOverageRatePerUnit  Decimal  @db.Decimal(12, 4) @default(0) // charge per AI request beyond included quota
+  smsOverageRatePerUnit Decimal  @db.Decimal(12, 4) @default(0) // charge per SMS beyond included quota
+  annualDiscountPercent Decimal  @db.Decimal(5, 2) @default(16.67) // applied to recurring charges on ANNUAL cycle (10-for-12)
+  trialAiIncludedUnits  Int      @default(200) // AI request cap for FREE/TRIAL tenants
+  trialSmsIncludedUnits Int      @default(50) // SMS cap for FREE/TRIAL tenants
+  updatedAt             DateTime @updatedAt
+
+  @@map("platform_billing_settings")
+}
+
+// Global fallback SMS provider configuration (editable from the Ops Dashboard).
+// Used only when a tenant hasn't configured their own SMS provider in SchoolSettings,
+// so new/unconfigured tenants can still send SMS via the platform's own account.
+model PlatformSmsSettings {
+  id        String   @id @default(uuid())
+  singleton Boolean  @unique @default(true) // enforces a single row
+  enabled   Boolean  @default(false)
+  provider  String? // e.g., 'MSHASTRA', 'TWILIO', 'AFRICASTALKING'
+  apiKey    String?
+  apiSecret String?
+  senderId  String?
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_sms_settings")
+}
+
+// Global fallback WhatsApp provider configuration (editable from the Ops Dashboard).
+// Used only when a tenant hasn't configured their own WhatsApp provider in SchoolSettings,
+// so new/unconfigured tenants can still send WhatsApp messages via the platform's own account.
+model PlatformWhatsappSettings {
+  id        String   @id @default(uuid())
+  singleton Boolean  @unique @default(true) // enforces a single row
+  enabled   Boolean  @default(false)
+  provider  String? // e.g., 'META', 'TWILIO_WHATSAPP'
+  apiKey    String?
+  phoneId   String? // Meta Business phone number ID
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_whatsapp_settings")
+}
+
+// The platform's own Lenco merchant account (editable from the Ops Dashboard).
+// Used exclusively to collect a tenant's platform subscription/invoice payments
+// (see PlatformInvoiceCollection) — never as a fallback for a tenant's own
+// fee-collection Lenco account, which stays configured per-tenant in SchoolSettings.
+model PlatformLencoSettings {
+  id            String   @id @default(uuid())
+  singleton     Boolean  @unique @default(true) // enforces a single row
+  enabled       Boolean  @default(false)
+  apiKey        String?
+  environment   String?  @default("sandbox") // 'sandbox' or 'production'
+  defaultBearer String?  @default("merchant") // 'merchant' or 'customer' - who pays fees
+  updatedAt     DateTime @updatedAt
+
+  @@map("platform_lenco_settings")
+}
+
+// Per-tenant billing overrides layered on top of the plan defaults.
+model TenantBillingProfile {
+  id                    String       @id @default(uuid())
+  tenantId              String       @unique
+  billingCycle          BillingCycle @default(MONTHLY)
+  supportTier           SupportTier  @default(BASIC)
+  setupFeeInvoiced      Boolean      @default(false) // ensures the one-time setup fee is only charged once
+  customPricePerStudent Decimal?     @db.Decimal(12, 2) // optional negotiated override
+  notes                 String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@map("tenant_billing_profiles")
+}
+
+// Generated monthly/annual platform billing invoices per tenant.
+model PlatformInvoice {
+  id                 String                 @id @default(uuid())
+  tenantId           String
+  periodStart        DateTime
+  periodEnd          DateTime
+  billingCycle       BillingCycle
+  activeStudentCount Int
+  studentCharge      Decimal                @db.Decimal(12, 2)
+  setupFeeCharge     Decimal                @db.Decimal(12, 2) @default(0)
+  supportFeeCharge   Decimal                @db.Decimal(12, 2) @default(0)
+  aiIncludedUnits    Int                    @default(0)
+  aiUsedUnits        Int                    @default(0)
+  aiOverageUnits     Int                    @default(0)
+  aiOverageCharge    Decimal                @db.Decimal(12, 2) @default(0)
+  smsIncludedUnits   Int                    @default(0)
+  smsUsedUnits       Int                    @default(0)
+  smsOverageUnits    Int                    @default(0)
+  smsOverageCharge   Decimal                @db.Decimal(12, 2) @default(0)
+  subtotal           Decimal                @db.Decimal(12, 2)
+  discountAmount     Decimal                @db.Decimal(12, 2) @default(0)
+  totalAmount        Decimal                @db.Decimal(12, 2)
+  status             PlatformInvoiceStatus  @default(DRAFT)
+  issuedAt           DateTime?
+  dueAt              DateTime?
+  paidAt             DateTime?
+  notes              String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@unique([tenantId, periodStart, periodEnd])
+  @@index([tenantId])
+  @@index([status])
+  @@map("platform_invoices")
+}
+
+// Tracks a Lenco mobile-money collection attempt against a tenant's platform
+// subscription invoice, always initiated using the platform's own Lenco
+// merchant account (PlatformLencoSettings) — never the tenant's own account.
+model PlatformInvoiceCollection {
+  id                String  @id @default(uuid())
+  reference         String  @unique // Globally unique provider correlation reference
+  lencoReference    String? // Lenco's reference
+  lencoCollectionId String? // Lenco's collection ID
+
+  invoiceId String
+  tenantId  String
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("ZMW")
+
+  // Mobile Money Details
+  phone                 String
+  country               String // 'zm' or 'mw'
+  operator              String // 'airtel', 'mtn', 'tnm'
+  accountName           String? // Returned by Lenco after verification
+  operatorTransactionId String? // Operator's transaction ID
+
+  fee    Decimal? @db.Decimal(12, 2)
+  bearer String   @default("merchant") // 'merchant' or 'customer'
+
+  status           MobileMoneyStatus @default(PENDING)
+  reasonForFailure String?
+
+  initiatedByUserId String?
+
+  initiatedAt DateTime  @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([status])
+  @@map("platform_invoice_collections")
+}
+
 model CustomFieldValue {
-  id            String @id @default(uuid())
-  tenantId      String @default("SYSTEM")
+  id            String   @id @default(uuid())
+  tenantId      String   @default("SYSTEM")
   customFieldId String
   entityId      String // The ID of the student/invoice/etc.
   value         String // Stored as string, cast by fieldType
@@ -238,9 +444,10 @@ model User {
   InterventionRecord   InterventionRecord[]
   AdaptedLesson        AdaptedLesson[]
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([email, tenantId])
+  @@unique([id, tenantId])
   @@index([tenantId])
   @@map("users")
 }
@@ -248,20 +455,23 @@ model User {
 model PushSubscription {
   id        String   @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  endpoint  String   @unique
+  user      User     @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  endpoint  String
   keys      Json // Stores p256dh and auth keys
   createdAt DateTime @default(now())
-
+  updatedAt DateTime @updatedAt
 
   tenantId String @default("SYSTEM")
+
+  @@unique([tenantId, endpoint])
   @@index([tenantId])
+  @@index([tenantId, userId])
   @@map("push_subscriptions")
 }
 
 model Student {
   id              String        @id @default(uuid())
-  admissionNumber String        
+  admissionNumber String
   firstName       String
   lastName        String
   dateOfBirth     DateTime
@@ -307,10 +517,11 @@ model Student {
   branchEnrollments        StudentBranch[]
   LearningObjectiveMastery LearningObjectiveMastery[]
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([admissionNumber, tenantId])
   @@index([tenantId])
+  @@index([tenantId, branchId, status])
   @@map("students")
 }
 
@@ -346,8 +557,8 @@ model Class {
   InterventionRecord       InterventionRecord[]
   AdaptedLesson            AdaptedLesson[]
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("classes")
 }
@@ -355,7 +566,7 @@ model Class {
 model Subject {
   id        String   @id @default(uuid())
   name      String
-  code      String   
+  code      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -367,8 +578,8 @@ model Subject {
   topics             Topic[]
   lessonPlans        LessonPlan[]
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([code, tenantId])
   @@index([tenantId])
   @@map("subjects")
@@ -381,20 +592,20 @@ model AcademicTerm {
   endDate   DateTime
   isActive  Boolean  @default(false)
 
-  classes          Class[]
-  feeTemplates     FeeTemplate[]
-  assessments      Assessment[]
-  termResults      TermResult[]
-  studentReports   StudentTermReport[]
-  timetablePeriods TimetablePeriod[]
-  lessonPlans      LessonPlan[]
-  financialReports FinancialReport[]
+  classes             Class[]
+  feeTemplates        FeeTemplate[]
+  assessments         Assessment[]
+  termResults         TermResult[]
+  studentReports      StudentTermReport[]
+  timetablePeriods    TimetablePeriod[]
+  lessonPlans         LessonPlan[]
+  financialReports    FinancialReport[]
   classFeeAssignments ClassFeeAssignment[]
 
   activeInSettings SchoolSettings?
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("academic_terms")
 }
@@ -474,8 +685,8 @@ model SchoolSettings {
 
   updatedAt DateTime @updatedAt
 
+  tenantId String @unique @default("SYSTEM")
 
-  tenantId String @default("SYSTEM") @unique
   @@index([tenantId])
   @@map("school_settings")
 }
@@ -497,8 +708,8 @@ model Notification {
   type      NotificationType @default(INFO)
   createdAt DateTime         @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("notifications")
 }
@@ -517,28 +728,28 @@ model FeeTemplate {
   studentFeeStructures StudentFeeStructure[]
   classFeeAssignments  ClassFeeAssignment[]
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("fee_templates")
 }
 
 model ClassFeeAssignment {
-  id            String      @id @default(uuid())
-  classId       String
-  class         Class       @relation(fields: [classId], references: [id], onDelete: Cascade)
-  feeTemplateId String
-  feeTemplate   FeeTemplate @relation(fields: [feeTemplateId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid())
+  classId        String
+  class          Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  feeTemplateId  String
+  feeTemplate    FeeTemplate  @relation(fields: [feeTemplateId], references: [id], onDelete: Cascade)
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
-  categoryId    String?
-  category      FeeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  dueDate       DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-
+  categoryId     String?
+  category       FeeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  dueDate        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   tenantId String @default("SYSTEM")
+
   @@unique([classId, feeTemplateId])
   @@unique([classId, academicTermId, categoryId])
   @@index([classId])
@@ -563,10 +774,11 @@ model StudentFeeStructure {
 
   allocations PaymentAllocation[]
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, feeTemplateId])
   @@index([tenantId])
+  @@index([tenantId, studentId])
   @@map("student_fee_structures")
 }
 
@@ -586,7 +798,7 @@ enum MobileMoneyStatus {
 
 model MobileMoneyCollection {
   id                String  @id @default(uuid())
-  reference         String   // Our unique reference
+  reference         String  @unique // Globally unique provider correlation reference
   lencoReference    String? // Lenco's reference
   lencoCollectionId String? // Lenco's collection ID
 
@@ -626,10 +838,8 @@ model MobileMoneyCollection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
-  @@unique([reference, tenantId])
-  @@index([reference])
+
   @@index([lencoReference])
   @@index([studentId, status])
   @@index([status])
@@ -639,7 +849,7 @@ model MobileMoneyCollection {
 
 model Payment {
   id            String        @id @default(uuid())
-  transactionId String?        // Auto-generated: TXN-XXXXXXXX
+  transactionId String? // Auto-generated: TXN-XXXXXXXX
   studentId     String
   student       Student       @relation(fields: [studentId], references: [id])
   amount        Decimal       @db.Decimal(10, 2)
@@ -677,14 +887,16 @@ model Payment {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([transactionId, tenantId])
   @@index([transactionId])
   @@index([studentId, status]) // For student payment history
   @@index([paymentDate, status]) // For reports filtering by status
   @@index([isReconciled, paymentDate])
   @@index([tenantId])
+  @@index([tenantId, status, studentId])
+  @@index([tenantId, status, paymentDate])
   @@map("payments")
 }
 
@@ -696,16 +908,16 @@ model Attendance {
   class            Class            @relation(fields: [classId], references: [id])
   date             DateTime
   status           AttendanceStatus
-  reason           String?          // Absence/late reason (e.g. "Sick", "Doctor appointment")
-  lateMinutes      Int?             // How many minutes late (null if not LATE)
-  notes            String?          // Additional teacher notes
+  reason           String? // Absence/late reason (e.g. "Sick", "Doctor appointment")
+  lateMinutes      Int? // How many minutes late (null if not LATE)
+  notes            String? // Additional teacher notes
   recordedByUserId String
   recordedBy       User             @relation(fields: [recordedByUserId], references: [id])
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([classId, date])
   @@index([studentId, date])
   @@index([tenantId])
@@ -725,8 +937,8 @@ model ClassMovementLog {
   changedBy       User?    @relation(fields: [changedByUserId], references: [id])
   createdAt       DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("class_movement_logs")
 }
@@ -764,8 +976,8 @@ model Assessment {
   updatedAt            DateTime               @updatedAt
   MisconceptionPattern MisconceptionPattern[]
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("assessments")
 }
@@ -792,8 +1004,8 @@ model Question {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("questions")
 }
@@ -805,8 +1017,8 @@ model QuestionOption {
   text       String
   isCorrect  Boolean  @default(false)
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("question_options")
 }
@@ -833,8 +1045,8 @@ model AssessmentSubmission {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([assessmentId, studentId])
   @@index([tenantId])
   @@map("assessment_submissions")
@@ -852,8 +1064,8 @@ model StudentResponse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([submissionId, questionId])
   @@index([tenantId])
   @@map("student_responses")
@@ -875,8 +1087,8 @@ model AssessmentResult {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([assessmentId, studentId])
   @@index([tenantId])
   @@map("assessment_results")
@@ -900,8 +1112,8 @@ model TermResult {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, subjectId, termId])
   @@index([tenantId])
   @@map("term_results")
@@ -917,8 +1129,8 @@ model GradingScale {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("grading_scales")
 }
@@ -941,8 +1153,8 @@ model StudentTermReport {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, termId])
   @@index([tenantId])
   @@map("student_term_reports")
@@ -959,8 +1171,8 @@ model TeacherSubject {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([classId, subjectId]) // One teacher per subject per class (usually)
   @@index([tenantId])
   @@map("teacher_subjects")
@@ -984,8 +1196,8 @@ model TimetablePeriod {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("timetable_periods")
 }
@@ -998,8 +1210,8 @@ model TimetablePeriodClass {
   classId           String
   class             Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([timetablePeriodId, classId])
   @@index([tenantId])
   @@map("timetable_period_classes")
@@ -1020,8 +1232,8 @@ model Topic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("topics")
 }
@@ -1043,8 +1255,8 @@ model SubTopic {
   InterventionRecord       InterventionRecord[]
   AdaptedLesson            AdaptedLesson[]
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("sub_topics")
 }
@@ -1069,8 +1281,8 @@ model TeachingContent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([subjectId, gradeLevel])
   @@index([topicId])
   @@index([subTopicId])
@@ -1089,8 +1301,8 @@ model TopicProgress {
 
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([topicId, classId])
   @@index([tenantId])
   @@map("topic_progress")
@@ -1115,8 +1327,8 @@ model LessonPlan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("lesson_plans")
 }
@@ -1129,8 +1341,8 @@ model ConversationParticipant {
   user           User         @relation(fields: [userId], references: [id])
   joinedAt       DateTime     @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([conversationId, userId])
   @@index([tenantId])
   @@map("conversation_participants")
@@ -1147,8 +1359,9 @@ model Message {
   readAt         DateTime? // When the message was read
   createdAt      DateTime     @default(now())
 
-
   tenantId String @default("SYSTEM")
+
+  @@index([tenantId, conversationId, isRead, senderId])
   @@index([tenantId])
   @@map("messages")
 }
@@ -1163,8 +1376,8 @@ model Conversation {
   participants ConversationParticipant[]
   messages     Message[]
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("conversations")
 }
@@ -1180,8 +1393,8 @@ model Scholarship {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("scholarships")
 }
@@ -1189,7 +1402,7 @@ model Scholarship {
 model Branch {
   id      String  @id @default(uuid())
   name    String
-  code    String  // e.g., "MAIN", "NORTH"
+  code    String // e.g., "MAIN", "NORTH"
   address String?
   phone   String?
   email   String?
@@ -1235,8 +1448,8 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([code, tenantId])
   @@index([tenantId])
   @@map("branches")
@@ -1261,8 +1474,8 @@ model BranchTransfer {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([entityType, entityId])
   @@index([tenantId])
   @@map("branch_transfers")
@@ -1285,8 +1498,8 @@ model UserBranch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([userId, branchId])
   @@index([userId])
   @@index([branchId])
@@ -1311,8 +1524,8 @@ model StudentBranch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, branchId])
   @@index([studentId])
   @@index([branchId])
@@ -1335,8 +1548,8 @@ model AuditLog {
   userAgent  String?
   createdAt  DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([entityType, entityId])
   @@index([action])
@@ -1370,8 +1583,8 @@ model PaymentPlan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([studentId])
   @@index([tenantId])
   @@map("payment_plans")
@@ -1391,8 +1604,8 @@ model PaymentPlanSchedule {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([planId])
   @@index([tenantId])
   @@map("payment_plan_schedules")
@@ -1477,7 +1690,7 @@ enum RefundStatus {
 // Chart of Accounts for proper double-entry
 model ChartOfAccount {
   id          String           @id @default(uuid())
-  code        String            // e.g., "1000", "2000", "4000"
+  code        String // e.g., "1000", "2000", "4000"
   name        String // e.g., "Cash at Bank", "Tuition Revenue"
   type        AccountType
   parentId    String?
@@ -1495,8 +1708,8 @@ model ChartOfAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([code, tenantId])
   @@index([type])
   @@index([code])
@@ -1507,7 +1720,7 @@ model ChartOfAccount {
 // Journal Entries for double-entry bookkeeping
 model JournalEntry {
   id            String    @id @default(uuid())
-  entryNumber   String     // JE-2026-00001
+  entryNumber   String // JE-2026-00001
   date          DateTime
   description   String
   reference     String? // Link to source document (invoice, payment, expense)
@@ -1525,13 +1738,15 @@ model JournalEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([entryNumber, tenantId])
   @@index([entryNumber])
   @@index([date])
   @@index([referenceType, referenceId])
   @@index([tenantId])
+  @@index([tenantId, isPosted, date])
+  @@index([tenantId, branchId, isPosted, date])
   @@map("journal_entries")
 }
 
@@ -1547,11 +1762,12 @@ model JournalEntryLine {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([journalId])
   @@index([accountId])
   @@index([tenantId])
+  @@index([tenantId, journalId, accountId])
   @@map("journal_entry_lines")
 }
 
@@ -1566,8 +1782,8 @@ model PaymentAllocation {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([paymentId])
   @@index([studentFeeId])
   @@index([tenantId])
@@ -1597,8 +1813,8 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("vendors")
 }
@@ -1606,7 +1822,7 @@ model Vendor {
 // Expense Management
 model Expense {
   id            String          @id @default(uuid())
-  expenseNumber String           // EXP-2026-00001
+  expenseNumber String // EXP-2026-00001
   date          DateTime
   category      ExpenseCategory
   description   String
@@ -1643,8 +1859,8 @@ model Expense {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([expenseNumber, tenantId])
   @@index([status])
   @@index([category])
@@ -1658,21 +1874,21 @@ model Expense {
 model FeeCategory {
   id          String        @id @default(uuid())
   name        String // Tuition, Transport, Boarding, Lab, Uniform
-  code        String        
+  code        String
   description String?
   parentId    String?
   parent      FeeCategory?  @relation("FeeCategoryHierarchy", fields: [parentId], references: [id])
   children    FeeCategory[] @relation("FeeCategoryHierarchy")
   isActive    Boolean       @default(true)
 
-  feeTemplates FeeTemplate[]
+  feeTemplates        FeeTemplate[]
   classFeeAssignments ClassFeeAssignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([code, tenantId])
   @@index([tenantId])
   @@map("fee_categories")
@@ -1681,7 +1897,7 @@ model FeeCategory {
 // Invoice Generation
 model Invoice {
   id            String   @id @default(uuid())
-  invoiceNumber String    // INV-2026-00001
+  invoiceNumber String // INV-2026-00001
   studentId     String
   student       Student  @relation(fields: [studentId], references: [id])
   termId        String
@@ -1709,8 +1925,8 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([invoiceNumber, tenantId])
   @@index([studentId])
   @@index([status])
@@ -1731,8 +1947,8 @@ model InvoiceItem {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([invoiceId])
   @@index([tenantId])
   @@map("invoice_items")
@@ -1741,7 +1957,7 @@ model InvoiceItem {
 // Credit Notes for adjustments
 model CreditNote {
   id               String   @id @default(uuid())
-  creditNoteNumber String    // CN-2026-00001
+  creditNoteNumber String // CN-2026-00001
   invoiceId        String
   invoice          Invoice  @relation(fields: [invoiceId], references: [id])
   amount           Decimal  @db.Decimal(12, 2)
@@ -1751,8 +1967,8 @@ model CreditNote {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([creditNoteNumber, tenantId])
   @@index([invoiceId])
   @@index([tenantId])
@@ -1762,7 +1978,7 @@ model CreditNote {
 // Refund Management
 model Refund {
   id           String       @id @default(uuid())
-  refundNumber String        // REF-2026-00001
+  refundNumber String // REF-2026-00001
   paymentId    String
   payment      Payment      @relation(fields: [paymentId], references: [id])
   studentId    String
@@ -1789,8 +2005,8 @@ model Refund {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([refundNumber, tenantId])
   @@index([paymentId])
   @@index([studentId])
@@ -1832,8 +2048,8 @@ model StaffPayroll {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([userId])
   @@index([tenantId])
   @@map("staff_payrolls")
@@ -1841,7 +2057,7 @@ model StaffPayroll {
 
 model PayrollRun {
   id          String  @id @default(uuid())
-  runNumber   String   // PAY-2026-03
+  runNumber   String // PAY-2026-03
   month       Int // 1-12
   year        Int
   description String?
@@ -1864,8 +2080,8 @@ model PayrollRun {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([runNumber, tenantId])
   @@unique([month, year, branchId])
   @@index([month, year])
@@ -1875,7 +2091,7 @@ model PayrollRun {
 
 model Payslip {
   id             String       @id @default(uuid())
-  payslipNumber  String        // PS-2026-03-00001
+  payslipNumber  String // PS-2026-03-00001
   payrollRunId   String
   payrollRun     PayrollRun   @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   staffPayrollId String
@@ -1904,8 +2120,8 @@ model Payslip {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([payslipNumber, tenantId])
   @@index([payrollRunId])
   @@index([userId])
@@ -1941,8 +2157,8 @@ model Budget {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([year])
   @@index([status])
   @@index([tenantId])
@@ -1963,8 +2179,8 @@ model BudgetItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([budgetId])
   @@index([tenantId])
   @@map("budget_items")
@@ -1987,8 +2203,8 @@ model PettyCashAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("petty_cash_accounts")
 }
@@ -2011,8 +2227,8 @@ model PettyCashTransaction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([accountId])
   @@index([date])
   @@index([tenantId])
@@ -2029,8 +2245,8 @@ model ReceiptSequence {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([prefix, year, branchId])
   @@index([tenantId])
   @@map("receipt_sequences")
@@ -2053,8 +2269,8 @@ model FinancialAuditLog {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([entityType, entityId])
   @@index([action])
@@ -2092,8 +2308,8 @@ model AcademicEvent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([startDate, endDate])
   @@index([eventType])
   @@index([tenantId])
@@ -2134,8 +2350,8 @@ model HomeworkSubmission {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([assessmentId, studentId])
   @@index([studentId])
   @@index([assessmentId])
@@ -2170,8 +2386,8 @@ model AIConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([tenantId])
   @@map("ai_conversations")
@@ -2187,8 +2403,8 @@ model AIMessage {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([conversationId])
   @@index([tenantId])
   @@map("ai_messages")
@@ -2208,8 +2424,8 @@ model AIArtifact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([conversationId])
   @@index([tenantId])
@@ -2226,8 +2442,8 @@ model AIFavoritePrompt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([tenantId])
   @@map("ai_favorite_prompts")
@@ -2257,8 +2473,8 @@ model AIUsageLog {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([userId])
   @@index([feature])
   @@index([createdAt])
@@ -2300,8 +2516,8 @@ model AIProactiveAlert {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([category])
   @@index([severity])
   @@index([isRead])
@@ -2316,13 +2532,13 @@ model AIInsightsCache {
   id       String  @id @default(uuid())
   branchId String?
 
-  cacheKey    String    // 'financial-health', 'academic-overview', 'weekly-digest'
+  cacheKey    String // 'financial-health', 'academic-overview', 'weekly-digest'
   data        Json // The cached insight data
   generatedAt DateTime @default(now())
   expiresAt   DateTime
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([cacheKey, tenantId])
   @@index([cacheKey])
   @@index([tenantId])
@@ -2363,8 +2579,8 @@ model StudentRiskAssessment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, termId])
   @@index([riskLevel])
   @@index([tenantId])
@@ -2391,8 +2607,8 @@ model AttendanceAlert {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([studentId])
   @@index([isResolved])
   @@index([tenantId])
@@ -2438,14 +2654,17 @@ model CommunicationLog {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([channel])
   @@index([status])
   @@index([source])
   @@index([sentById])
   @@index([createdAt])
   @@index([tenantId])
+  @@index([tenantId, channel, createdAt])
+  @@index([tenantId, channel, sentById, createdAt])
+  @@index([channel, createdAt, tenantId, sentById])
   @@map("communication_logs")
 }
 
@@ -2475,8 +2694,8 @@ model Announcement {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([createdById])
   @@index([createdAt])
   @@index([scheduledAt])
@@ -2494,8 +2713,8 @@ model AnnouncementAcknowledgment {
   userId         String
   acknowledgedAt DateTime     @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([announcementId, userId])
   @@index([tenantId])
   @@map("announcement_acknowledgments")
@@ -2516,8 +2735,8 @@ model MessageTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("message_templates")
 }
@@ -2541,8 +2760,8 @@ model CommunicationPreference {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([tenantId])
   @@map("communication_preferences")
 }
@@ -2592,8 +2811,8 @@ model DebtCollectionCampaign {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([status])
   @@index([createdById])
   @@index([tenantId])
@@ -2633,8 +2852,8 @@ model CampaignMessage {
   sentAt    DateTime @default(now())
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([campaignId])
   @@index([studentId])
   @@index([status])
@@ -2658,7 +2877,7 @@ model VirtualClassroom {
   teacherId String? // The human teacher who owns this classroom
 
   // Jitsi configuration
-  roomName     String   // Jitsi room identifier
+  roomName     String // Jitsi room identifier
   roomPassword String?
   jitsiDomain  String  @default("meet.jit.si") // Jitsi server domain
 
@@ -2697,8 +2916,8 @@ model VirtualClassroom {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([roomName, tenantId])
   @@index([status])
   @@index([scheduledStart])
@@ -2742,8 +2961,8 @@ model AITutorSession {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([classroomId])
   @@index([status])
   @@index([tenantId])
@@ -2769,8 +2988,8 @@ model ClassroomParticipant {
   speakingDuration Float  @default(0) // in seconds
   attentionScore   Float? // 0-100 AI-estimated engagement
 
-
   tenantId String @default("SYSTEM")
+
   @@index([classroomId])
   @@index([userId])
   @@index([tenantId])
@@ -2792,8 +3011,8 @@ model ClassroomChat {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([classroomId])
   @@index([createdAt])
   @@index([tenantId])
@@ -2816,8 +3035,8 @@ model ClassRecording {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([classroomId])
   @@index([tenantId])
   @@map("class_recordings")
@@ -2851,8 +3070,8 @@ model FinancialReport {
   branch      Branch?             @relation(fields: [branchId], references: [id])
   createdAt   DateTime            @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([branchId, reportDate])
   @@index([termId])
   @@index([tenantId])
@@ -2884,8 +3103,8 @@ model LearningObjectiveMastery {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@unique([studentId, subTopicId])
   @@index([classId])
   @@index([status])
@@ -2911,8 +3130,8 @@ model MisconceptionPattern {
 
   createdAt DateTime @default(now())
 
-
   tenantId String @default("SYSTEM")
+
   @@index([assessmentId])
   @@index([subTopicId])
   @@index([tenantId])
@@ -2941,8 +3160,8 @@ model PendingTeacherAction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([teacherId])
   @@index([actionType])
   @@index([status])
@@ -2973,8 +3192,8 @@ model InterventionRecord {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([teacherId])
   @@index([classId])
   @@index([effectiveness])
@@ -3015,8 +3234,8 @@ model AdaptedLesson {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   tenantId String @default("SYSTEM")
+
   @@index([teacherId])
   @@index([classId])
   @@index([status])

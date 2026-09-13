@@ -15,7 +15,9 @@ export default defineConfig({
         enabled: false,
       },
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // Route JavaScript is cached on demand by the runtime strategy below.
+        // Precaching every lazy chunk made first install download the whole app.
+        globPatterns: ['**/*.{css,html,ico,png,svg,woff,woff2}'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4MB
       },
       includeAssets: [

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { User, Mail, Camera, Lock, Save, Upload, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { User, Mail, Camera, Lock, Save, Upload } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import CameraModal from '../../components/CameraModal';

@@ -13,7 +13,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 export const getUsageSummary = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
-    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!user?.tenantId) return res.status(401).json({ error: 'Unauthorized' });
 
     const days = parseInt(req.query.days as string) || 30;
     const since = new Date();
@@ -59,14 +59,13 @@ export const getUsageSummary = async (req: Request, res: Response) => {
     });
 
     // Daily usage trend (last N days)
-    const dailyUsage = await prisma.$queryRawUnsafe<Array<{ day: string; count: bigint }>>(
-      `SELECT DATE("createdAt") as day, COUNT(*) as count 
-       FROM "ai_usage_logs" 
-       WHERE "createdAt" >= $1 
-       GROUP BY DATE("createdAt") 
-       ORDER BY day ASC`,
-      since
-    );
+    const dailyUsage = await prisma.$queryRaw<Array<{ day: string; count: bigint }>>`
+      SELECT DATE("createdAt") as day, COUNT(*) as count
+      FROM "ai_usage_logs"
+      WHERE "createdAt" >= ${since} AND "tenantId" = ${user.tenantId}
+      GROUP BY DATE("createdAt")
+      ORDER BY day ASC
+    `;
 
     // Top users
     const topUsers = await prisma.aIUsageLog.groupBy({

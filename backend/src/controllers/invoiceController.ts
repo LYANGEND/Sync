@@ -6,6 +6,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { generateSequenceNumber, logFinancialAction } from '../services/accountingService';
 import { onInvoiceSent } from '../services/accountingBridge';
 import { createNotification, generateInvoiceIssuedEmail, sendNotification } from '../services/notificationService';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ========================================
 // INVOICE MANAGEMENT
@@ -150,6 +151,12 @@ export const createInvoice = async (req: Request, res: Response) => {
       include: { items: true, student: { select: { firstName: true, lastName: true } } },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: invoice.tenantId,
+      branchId: invoice.branchId,
+      source: 'invoice.created',
+    });
+
     await logFinancialAction({
       userId: user.userId,
       action: 'INVOICE_CREATED',
@@ -202,6 +209,12 @@ export const sendInvoice = async (req: Request, res: Response) => {
         status: invoice.status === 'DRAFT' ? 'SENT' : invoice.status,
         sentAt: new Date(),
       },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'invoice.sent',
     });
 
     await logFinancialAction({
@@ -296,6 +309,12 @@ export const recordInvoicePayment = async (req: Request, res: Response) => {
       },
     });
 
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'invoice.payment-recorded',
+    });
+
     res.json(updated);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -315,6 +334,12 @@ export const cancelInvoice = async (req: Request, res: Response) => {
     const updated = await prisma.invoice.update({
       where: { id: req.params.id },
       data: { status: 'CANCELLED' },
+    });
+
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: updated.tenantId,
+      branchId: updated.branchId,
+      source: 'invoice.cancelled',
     });
 
     await logFinancialAction({
@@ -358,6 +383,7 @@ export const generateStudentInvoices = async (req: Request, res: Response) => {
     });
 
     let invoicesCreated = 0;
+    let createdTenantId: string | undefined;
 
     for (const student of students) {
       if (student.feeStructures.length === 0) continue;
@@ -385,7 +411,7 @@ export const generateStudentInvoices = async (req: Request, res: Response) => {
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 30); // 30 days from now
 
-      await prisma.invoice.create({
+      const invoice = await prisma.invoice.create({
         data: {
           invoiceNumber,
           studentId: student.id,
@@ -402,8 +428,17 @@ export const generateStudentInvoices = async (req: Request, res: Response) => {
           items: { create: items },
         },
       });
+      createdTenantId ||= invoice.tenantId;
 
       invoicesCreated++;
+    }
+
+    if (createdTenantId) {
+      await invalidateFinancialSnapshotAfterMutation({
+        tenantId: createdTenantId,
+        scope: 'tenant',
+        source: 'invoice.bulk-created',
+      });
     }
 
     res.json({ message: `Generated ${invoicesCreated} invoices`, count: invoicesCreated });
@@ -433,24 +468,32 @@ export const createCreditNote = async (req: Request, res: Response) => {
 
     const creditNoteNumber = await generateSequenceNumber('CN', user.branchId);
 
-    const creditNote = await prisma.creditNote.create({
-      data: {
-        creditNoteNumber,
-        invoiceId,
-        amount,
-        reason,
-        issuedBy: user.userId,
-      },
+    const newBalance = Number(invoice.balanceDue) - amount;
+    const creditNote = await prisma.$transaction(async transaction => {
+      const created = await transaction.creditNote.create({
+        data: {
+          creditNoteNumber,
+          invoiceId,
+          amount,
+          reason,
+          issuedBy: user.userId,
+        },
+      });
+
+      await transaction.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          balanceDue: newBalance,
+          status: newBalance <= 0 ? 'CREDITED' : invoice.status,
+        },
+      });
+      return created;
     });
 
-    // Update invoice balances
-    const newBalance = Number(invoice.balanceDue) - amount;
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        balanceDue: newBalance,
-        status: newBalance <= 0 ? 'CREDITED' : invoice.status,
-      },
+    await invalidateFinancialSnapshotAfterMutation({
+      tenantId: invoice.tenantId,
+      scope: 'tenant',
+      source: 'invoice.credit-note-created',
     });
 
     res.status(201).json(creditNote);

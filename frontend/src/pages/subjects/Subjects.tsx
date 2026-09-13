@@ -419,7 +419,7 @@ const Subjects = () => {
     const gradeStats = selectedSubject.byGrade.find(g => g.gradeLevel === selectedGrade);
 
     return (
-      <div className="p-4 md:p-6 pb-24 md:pb-6 space-y-4 print:p-2">
+      <div className="ds-page print:p-2">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
           <div className="flex items-center gap-3">
@@ -891,20 +891,20 @@ const Subjects = () => {
      ========================================== */
 
   return (
-    <div className="p-4 md:p-6 pb-24 md:pb-6 space-y-4">
+    <div className="ds-page">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="ds-page-header">
         <div>
           <h2 className="text-lg font-bold text-gray-800 dark:text-white">Subjects</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Manage subjects, topics, subtopics & outlines</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition text-sm font-medium">
+            className="ds-button-outline">
             <Upload size={16} /> Import
           </button>
           <button onClick={openAddSubject}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
+            className="ds-button-primary">
             <Plus size={16} /> Add Subject
           </button>
         </div>
@@ -914,8 +914,8 @@ const Subjects = () => {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="Search subjects..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input type="text" aria-label="Search subjects" placeholder="Search subjects..." value={search} onChange={e => setSearch(e.target.value)}
+            className="ds-input pl-9" />
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
           <span className="flex items-center gap-1"><BookOpen size={14} className="text-blue-500" /> {overview.length} Subjects</span>

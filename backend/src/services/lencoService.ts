@@ -5,6 +5,8 @@
  */
 
 import { prisma } from '../utils/prisma';
+import crypto from 'crypto';
+import { getPlatformLencoSettings } from './platformLencoSettingsService';
 // Lenco API Configuration
 interface LencoConfig {
     apiKey: string;
@@ -63,7 +65,12 @@ interface LencoErrorResponse {
     errors?: Array<{ field: string; message: string }>;
 }
 
-// Get Lenco configuration from school settings
+// Get Lenco configuration from the tenant's own school settings.
+// Tenant fee-collection (from parents/students) always uses the tenant's own
+// merchant account — it never falls back to the platform's Lenco account.
+// The platform's own account (PlatformLencoSettings) is reserved exclusively
+// for collecting a tenant's platform subscription/invoice payments — see
+// getPlatformOnlyLencoConfig() below.
 async function getLencoConfig(): Promise<LencoConfig | null> {
     try {
         const settings = await prisma.schoolSettings.findFirst({
@@ -73,33 +80,17 @@ async function getLencoConfig(): Promise<LencoConfig | null> {
             },
         });
 
-        if (!settings?.lencoApiKey) {
+        const apiKey = settings?.lencoApiKey;
+        const environment = (settings?.lencoEnvironment as 'sandbox' | 'production') || 'sandbox';
+
+        if (!apiKey) {
             console.log('Lenco API key not configured');
             return null;
         }
 
-        const environment = (settings.lencoEnvironment as 'sandbox' | 'production') || 'sandbox';
-
-        // Define endpoints based on environment (User provided paths)
-        const endpoints = environment === 'production'
-            ? {
-                baseUrl: 'https://api.lenco.co/access/v2',
-                initiate: 'https://api.lenco.co/access/v2/collections/mobile-money',
-                // Assuming status/details follow standard REST structure under the base
-                status: 'https://api.lenco.co/access/v2/collections/status',
-                details: 'https://api.lenco.co/access/v2/collections'
-            }
-            : {
-                baseUrl: 'https://sandbox.lenco.co/access/v2',
-                // Updated to standard structure based on docs
-                initiate: 'https://sandbox.lenco.co/access/v2/collections/mobile-money',
-                status: 'https://sandbox.lenco.co/access/v2/collections/status',
-                details: 'https://sandbox.lenco.co/access/v2/collections'
-            };
-
         return {
-            apiKey: settings.lencoApiKey,
-            ...endpoints,
+            apiKey,
+            ...lencoEndpointsFor(environment),
             environment,
         };
     } catch (error) {
@@ -108,9 +99,103 @@ async function getLencoConfig(): Promise<LencoConfig | null> {
     }
 }
 
+// Get the platform's own Lenco configuration (PlatformLencoSettings), used
+// exclusively for collecting a tenant's platform subscription/invoice payments.
+export async function getPlatformOnlyLencoConfig(): Promise<LencoConfig | null> {
+    try {
+        const platform = await getPlatformLencoSettings();
+        if (!platform.enabled || !platform.apiKey) {
+            console.log('Platform Lenco account not configured');
+            return null;
+        }
+        const environment = (platform.environment as 'sandbox' | 'production') || 'sandbox';
+        return {
+            apiKey: platform.apiKey,
+            ...lencoEndpointsFor(environment),
+            environment,
+        };
+    } catch (error) {
+        console.error('Failed to get platform Lenco config:', error);
+        return null;
+    }
+}
+
+function lencoEndpointsFor(environment: 'sandbox' | 'production') {
+    return environment === 'production'
+        ? {
+            baseUrl: 'https://api.lenco.co/access/v2',
+            initiate: 'https://api.lenco.co/access/v2/collections/mobile-money',
+            status: 'https://api.lenco.co/access/v2/collections/status',
+            details: 'https://api.lenco.co/access/v2/collections'
+        }
+        : {
+            baseUrl: 'https://sandbox.lenco.co/access/v2',
+            initiate: 'https://sandbox.lenco.co/access/v2/collections/mobile-money',
+            status: 'https://sandbox.lenco.co/access/v2/collections/status',
+            details: 'https://sandbox.lenco.co/access/v2/collections'
+        };
+}
+
 /**
- * Initiate a mobile money collection request
- * The customer will receive a prompt on their phone to authorize the payment
+ * Initiate a mobile money collection request against a resolved Lenco config.
+ * Shared by both the tenant fee-collection flow and the platform subscription flow.
+ */
+async function postCollection(
+    config: LencoConfig,
+    request: MobileMoneyCollectionRequest
+): Promise<{ success: boolean; data?: LencoCollectionResponse['data']; error?: string }> {
+    // Validate operator by country
+    if (request.country === 'zm' && !['airtel', 'mtn'].includes(request.operator)) {
+        return { success: false, error: 'Invalid operator for Zambia. Use "airtel" or "mtn".' };
+    }
+    if (request.country === 'mw' && !['airtel', 'tnm'].includes(request.operator)) {
+        return { success: false, error: 'Invalid operator for Malawi. Use "airtel" or "tnm".' };
+    }
+
+    console.log('Initiating Lenco collection', {
+        environment: config.environment,
+        reference: request.reference,
+        country: request.country,
+        operator: request.operator,
+    });
+
+    const response = await fetch(config.initiate, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+            amount: request.amount,
+            phone: request.phone,
+            country: request.country,
+            operator: request.operator,
+            reference: request.reference,
+            bearer: request.bearer || 'merchant',
+        }),
+    });
+
+    const result = await response.json() as LencoCollectionResponse | LencoErrorResponse;
+
+    if (!response.ok || !result.status) {
+        const errorResponse = result as LencoErrorResponse;
+        console.error('Lenco API error:', errorResponse);
+        return {
+            success: false,
+            error: errorResponse.message || 'Failed to initiate mobile money collection'
+        };
+    }
+
+    const successResponse = result as LencoCollectionResponse;
+    console.log('Mobile money collection initiated:', successResponse.data.reference);
+    return { success: true, data: successResponse.data };
+}
+
+
+
+/**
+ * Initiate a mobile money collection request against a tenant's own Lenco account.
+ * The customer will receive a prompt on their phone to authorize the payment.
  */
 export async function initiateMobileMoneyCollection(
     request: MobileMoneyCollectionRequest
@@ -120,63 +205,7 @@ export async function initiateMobileMoneyCollection(
         if (!config) {
             return { success: false, error: 'Lenco API not configured. Please configure your API key in settings.' };
         }
-
-        // Validate operator by country
-        if (request.country === 'zm' && !['airtel', 'mtn'].includes(request.operator)) {
-            return { success: false, error: 'Invalid operator for Zambia. Use "airtel" or "mtn".' };
-        }
-        if (request.country === 'mw' && !['airtel', 'tnm'].includes(request.operator)) {
-            return { success: false, error: 'Invalid operator for Malawi. Use "airtel" or "tnm".' };
-        }
-
-        // DEBUGGING LOGS
-        console.log('--- Lenco Initiation Debug ---');
-        console.log('URL:', config.initiate);
-        console.log('Environment:', config.environment);
-        console.log('API Key (Masked):', config.apiKey ? `${config.apiKey.substring(0, 4)}...${config.apiKey.substring(config.apiKey.length - 4)}` : 'MISSING');
-        console.log('Payload:', JSON.stringify({
-            amount: request.amount,
-            phone: request.phone,
-            country: request.country,
-            operator: request.operator,
-            reference: request.reference,
-            bearer: request.bearer || 'merchant',
-        }, null, 2));
-
-        const response = await fetch(config.initiate, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`,
-            },
-            body: JSON.stringify({
-                amount: request.amount,
-                phone: request.phone,
-                country: request.country,
-                operator: request.operator,
-                reference: request.reference,
-                bearer: request.bearer || 'merchant',
-            }),
-        });
-
-        console.log('Response Status:', response.status);
-        console.log('Response Headers:', JSON.stringify([...response.headers.entries()]));
-
-        const result = await response.json() as LencoCollectionResponse | LencoErrorResponse;
-        console.log('Full Response Body:', JSON.stringify(result, null, 2));
-
-        if (!response.ok || !result.status) {
-            const errorResponse = result as LencoErrorResponse;
-            console.error('Lenco API error:', errorResponse);
-            return {
-                success: false,
-                error: errorResponse.message || 'Failed to initiate mobile money collection'
-            };
-        }
-
-        const successResponse = result as LencoCollectionResponse;
-        console.log('Mobile money collection initiated:', successResponse.data.reference);
-        return { success: true, data: successResponse.data };
+        return await postCollection(config, request);
     } catch (error) {
         console.error('Lenco mobile money collection error:', error);
         return { success: false, error: 'Failed to connect to Lenco API' };
@@ -184,7 +213,56 @@ export async function initiateMobileMoneyCollection(
 }
 
 /**
- * Get collection status by reference
+ * Initiate a mobile money collection request against the platform's own Lenco
+ * account, used exclusively to collect a tenant's platform subscription/invoice
+ * payment. The customer (the tenant's billing contact) will receive a prompt on
+ * their phone to authorize the payment.
+ */
+export async function initiatePlatformSubscriptionCollection(
+    request: MobileMoneyCollectionRequest
+): Promise<{ success: boolean; data?: LencoCollectionResponse['data']; error?: string }> {
+    try {
+        const config = await getPlatformOnlyLencoConfig();
+        if (!config) {
+            return { success: false, error: 'Platform Lenco account is not configured. Please contact support.' };
+        }
+        return await postCollection(config, request);
+    } catch (error) {
+        console.error('Lenco platform subscription collection error:', error);
+        return { success: false, error: 'Failed to connect to Lenco API' };
+    }
+}
+
+/**
+ * Get collection status by reference, against a resolved Lenco config.
+ */
+async function fetchCollectionStatus(
+    config: LencoConfig,
+    reference: string
+): Promise<{ success: boolean; data?: LencoCollectionResponse['data']; error?: string }> {
+    const response = await fetch(
+        `${config.status}/${encodeURIComponent(reference)}`,
+        {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${config.apiKey}`,
+            },
+        }
+    );
+
+    const result = await response.json() as LencoCollectionResponse | LencoErrorResponse;
+
+    if (!response.ok || !result.status) {
+        const errorResponse = result as LencoErrorResponse;
+        return { success: false, error: errorResponse.message };
+    }
+
+    const successResponse = result as LencoCollectionResponse;
+    return { success: true, data: successResponse.data };
+}
+
+/**
+ * Get collection status by reference (tenant's own Lenco account).
  */
 export async function getCollectionStatus(
     reference: string
@@ -194,28 +272,27 @@ export async function getCollectionStatus(
         if (!config) {
             return { success: false, error: 'Lenco API not configured' };
         }
-
-        const response = await fetch(
-            `${config.status}/${encodeURIComponent(reference)}`,
-            {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${config.apiKey}`,
-                },
-            }
-        );
-
-        const result = await response.json() as LencoCollectionResponse | LencoErrorResponse;
-
-        if (!response.ok || !result.status) {
-            const errorResponse = result as LencoErrorResponse;
-            return { success: false, error: errorResponse.message };
-        }
-
-        const successResponse = result as LencoCollectionResponse;
-        return { success: true, data: successResponse.data };
+        return await fetchCollectionStatus(config, reference);
     } catch (error) {
         console.error('Lenco get collection status error:', error);
+        return { success: false, error: 'Failed to get collection status' };
+    }
+}
+
+/**
+ * Get platform subscription collection status by reference (platform's own Lenco account).
+ */
+export async function getPlatformCollectionStatus(
+    reference: string
+): Promise<{ success: boolean; data?: LencoCollectionResponse['data']; error?: string }> {
+    try {
+        const config = await getPlatformOnlyLencoConfig();
+        if (!config) {
+            return { success: false, error: 'Platform Lenco account is not configured' };
+        }
+        return await fetchCollectionStatus(config, reference);
+    } catch (error) {
+        console.error('Lenco get platform collection status error:', error);
         return { success: false, error: 'Failed to get collection status' };
     }
 }
@@ -258,13 +335,17 @@ export async function getCollectionById(
 }
 
 /**
- * Verify webhook signature (for production use)
- * TODO: Implement signature verification when Lenco provides documentation
+ * Verify the provider's HMAC SHA-256 webhook signature.
+ * The raw request body is used so serialization differences cannot invalidate signatures.
  */
 export function verifyWebhookSignature(payload: string, signature: string): boolean {
-    // Placeholder - implement when Lenco provides webhook signature verification
-    console.log('Webhook signature verification not yet implemented');
-    return true;
+    const secret = process.env.LENCO_WEBHOOK_SECRET;
+    if (!secret || !signature) return false;
+
+    const supplied = signature.replace(/^sha256=/i, '').trim().toLowerCase();
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    if (supplied.length !== expected.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(supplied, 'hex'), Buffer.from(expected, 'hex'));
 }
 
 // Export types for use in controllers
@@ -274,9 +355,12 @@ export type {
     LencoConfig
 };
 
+
 export default {
     initiateMobileMoneyCollection,
+    initiatePlatformSubscriptionCollection,
     getCollectionStatus,
+    getPlatformCollectionStatus,
     getCollectionById,
     verifyWebhookSignature,
 };

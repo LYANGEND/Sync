@@ -328,7 +328,7 @@ const BranchDetail = () => {
                     {financials && (
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-gray-200 dark:border-slate-700">
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Financial Summary</h3>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-xl">
                                     <p className="text-2xl font-bold text-green-600">{formatCurrency(Number(financials.summary.totalCollected))}</p>
                                     <p className="text-sm text-gray-500">Total Collected</p>
@@ -436,7 +436,7 @@ const BranchDetail = () => {
                     {/* Payment Methods Breakdown */}
                     <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-gray-200 dark:border-slate-700">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Payments by Method</h3>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             {financials.byMethod.map((item) => (
                                 <div key={item.method} className="text-center p-4 bg-gray-50 dark:bg-slate-700 rounded-xl">
                                     <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(Number(item.total))}</p>

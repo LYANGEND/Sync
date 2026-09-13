@@ -1,54 +1,55 @@
+import { ACADEMICS_ROLES } from './utils/academicNavigation';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { BranchProvider } from './context/BranchContext';
 import Login from './pages/auth/Login';
-import PlatformLogin from './pages/auth/PlatformLogin';
-import Dashboard from './pages/dashboard/Dashboard';
-import Students from './pages/students/Students';
-import StudentProfile from './pages/students/StudentProfile';
-import Finance from './pages/finance/Finance';
-import Academics from './pages/academics/Academics';
-import GradingScales from './pages/academics/GradingScales';
-import ReportCards from './pages/academics/ReportCards';
-import Timetable from './pages/academics/Timetable';
-import Subjects from './pages/subjects/Subjects';
-import Classes from './pages/classes/Classes';
-import Users from './pages/users/Users';
-import Branches from './pages/branches/Branches';
-import BranchDetail from './pages/branches/BranchDetail';
-import Settings from './pages/settings/Settings';
-import Profile from './pages/profile/Profile';
-import Communication from './pages/communication/Communication';
-import MyChildren from './pages/parents/MyChildren';
-import AcademicReports from './pages/parents/AcademicReports';
 import DashboardLayout from './components/layout/DashboardLayout';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import RoleGuard from './components/layout/RoleGuard';
-
-import StudentQuiz from './pages/student/StudentQuiz';
-import StudentAssessments from './pages/student/StudentAssessments';
-import AttendanceRegister from './pages/academics/AttendanceRegister';
-import TeacherGradebook from './pages/academics/TeacherGradebook';
-import StudentAcademicPortal from './pages/academics/StudentAcademicPortal';
-import AcademicCalendar from './pages/academics/AcademicCalendar';
-import VirtualClassrooms from './pages/academics/VirtualClassrooms';
-import VirtualClassroom from './pages/academics/VirtualClassroom';
 import { Toaster } from 'react-hot-toast';
 import { AppDialogProvider } from './components/ui/AppDialogProvider';
-import VerifyReport from './pages/public/VerifyReport';
-import PublicPayment from './pages/public/PublicPayment';
-import ShareTargetHandler from './pages/public/ShareTargetHandler';
-import OpsDashboard from './pages/ops/OpsDashboard';
+import AppLoadingScreen from './components/ui/AppLoadingScreen';
 import { shouldExposePlatformRoutes } from './utils/platformAccess';
-
-// New AI & Intelligence Pages
-import Analytics from './pages/analytics/Analytics';
-import AIAssistant from './pages/ai/AIAssistant';
-import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
-import MasterAI from './pages/ai/MasterAI';
-import AIIntelligenceHub from './pages/ai/AIIntelligenceHub';
 import { PWAManager } from './components/pwa/PWAManager';
+
+const PlatformLogin = lazy(() => import('./pages/auth/PlatformLogin'));
+const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'));
+const Students = lazy(() => import('./pages/students/Students'));
+const StudentProfile = lazy(() => import('./pages/students/StudentProfile'));
+const Finance = lazy(() => import('./pages/finance/Finance'));
+const Academics = lazy(() => import('./pages/academics/Academics'));
+const GradingScales = lazy(() => import('./pages/academics/GradingScales'));
+const ReportCards = lazy(() => import('./pages/academics/ReportCards'));
+const Timetable = lazy(() => import('./pages/academics/Timetable'));
+const Subjects = lazy(() => import('./pages/subjects/Subjects'));
+const Classes = lazy(() => import('./pages/classes/Classes'));
+const Users = lazy(() => import('./pages/users/Users'));
+const Branches = lazy(() => import('./pages/branches/Branches'));
+const BranchDetail = lazy(() => import('./pages/branches/BranchDetail'));
+const Settings = lazy(() => import('./pages/settings/Settings'));
+const Profile = lazy(() => import('./pages/profile/Profile'));
+const Communication = lazy(() => import('./pages/communication/Communication'));
+const MyChildren = lazy(() => import('./pages/parents/MyChildren'));
+const AcademicReports = lazy(() => import('./pages/parents/AcademicReports'));
+const StudentQuiz = lazy(() => import('./pages/student/StudentQuiz'));
+const StudentAssessments = lazy(() => import('./pages/student/StudentAssessments'));
+const AttendanceRegister = lazy(() => import('./pages/academics/AttendanceRegister'));
+const TeacherGradebook = lazy(() => import('./pages/academics/TeacherGradebook'));
+const StudentAcademicPortal = lazy(() => import('./pages/academics/StudentAcademicPortal'));
+const AcademicCalendar = lazy(() => import('./pages/academics/AcademicCalendar'));
+const VirtualClassrooms = lazy(() => import('./pages/academics/VirtualClassrooms'));
+const VirtualClassroom = lazy(() => import('./pages/academics/VirtualClassroom'));
+const VerifyReport = lazy(() => import('./pages/public/VerifyReport'));
+const PublicPayment = lazy(() => import('./pages/public/PublicPayment'));
+const ShareTargetHandler = lazy(() => import('./pages/public/ShareTargetHandler'));
+const OpsDashboard = lazy(() => import('./pages/ops/OpsDashboard'));
+const Analytics = lazy(() => import('./pages/analytics/Analytics'));
+const AIAssistant = lazy(() => import('./pages/ai/AIAssistant'));
+const AIAnalyticsDashboard = lazy(() => import('./pages/ai/AIAnalytics'));
+const MasterAI = lazy(() => import('./pages/ai/MasterAI'));
+const AIIntelligenceHub = lazy(() => import('./pages/ai/AIIntelligenceHub'));
 
 function App() {
   return (
@@ -58,21 +59,29 @@ function App() {
           <BranchProvider>
             <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <Toaster
-                position="top-center"
+                position="top-right"
+                containerStyle={{
+                  zIndex: 120,
+                  top: 'calc(1rem + env(safe-area-inset-top))',
+                  right: 'max(1rem, env(safe-area-inset-right))',
+                }}
                 toastOptions={{
                   duration: 2800,
+                  className: 'ds-toast',
                   style: {
-                    borderRadius: '18px',
+                    borderRadius: 'var(--radius-md)',
                     padding: '14px 16px',
-                    background: 'rgba(15, 23, 42, 0.94)',
-                    color: '#fff',
-                    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.28)',
-                    border: '1px solid rgba(148, 163, 184, 0.18)',
-                    backdropFilter: 'blur(14px)',
+                    background: 'var(--surface)',
+                    color: 'var(--text-primary)',
+                    boxShadow: 'var(--shadow-md)',
+                    border: '1px solid var(--border-color)',
+                    maxWidth: 'min(24rem, calc(100vw - 2rem))',
+                    overflowWrap: 'anywhere',
                   },
                 }}
               />
             <PWAManager />
+            <Suspense fallback={<AppLoadingScreen compact />}>
             <Routes>
               <Route path="/login" element={shouldExposePlatformRoutes() ? <Navigate to="/ops/login" replace /> : <Login />} />
               <Route path="/ops/login" element={shouldExposePlatformRoutes() ? <PlatformLogin /> : <Navigate to="/login" replace />} />
@@ -132,7 +141,7 @@ function App() {
                   } />
 
                   <Route path="/academics" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                    <RoleGuard allowedRoles={ACADEMICS_ROLES}>
                       <Academics />
                     </RoleGuard>
                   } />
@@ -261,6 +270,7 @@ function App() {
               </Route>
 
             </Routes>
+            </Suspense>
             </Router>
           </BranchProvider>
         </ThemeProvider>

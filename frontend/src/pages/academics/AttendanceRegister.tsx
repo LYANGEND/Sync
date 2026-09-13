@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-    Calendar, Save, CheckCircle, XCircle, Clock, UserCheck,
+    Calendar, Save, CheckCircle, XCircle, Clock,
     Search, BarChart2, Download, ChevronLeft, ChevronRight,
     MessageSquare, FileText, Printer, Undo2, AlertTriangle,
     Image, List, Volume2, Eye, Shield, Bell, Zap
@@ -9,6 +9,7 @@ import api from '../../utils/api';
 import { toast } from 'react-hot-toast';
 import AttendanceAnalytics from '../../components/academics/AttendanceAnalytics';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { PageHeader } from '../../components/ui/DesignSystem';
 import * as XLSX from 'xlsx';
 
 interface Student {
@@ -430,7 +431,7 @@ const AttendanceRegister = () => {
         const step = w / (data.length - 1);
         const points = data.map((v, i) => `${i * step},${h - v * h}`).join(' ');
         return (
-            <svg width={w} height={h} className="inline-block ml-2 opacity-70">
+            <svg width={w} height={h} className="inline-block ml-2 opacity-70" role="img" aria-label={`Recent attendance trend: ${data.join(', ')}`}>
                 <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-blue-500" />
             </svg>
         );
@@ -441,22 +442,22 @@ const AttendanceRegister = () => {
         if (!streak || streak.count < 2) return null;
         if (streak.type === 'ABSENT') {
             return (
-                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 ml-2" title={`${streak.count}-day absence streak`}>
-                    🔴 {streak.count}
+                <span className="ds-badge ds-badge-error ml-2" title={`${streak.count}-day absence streak`}>
+                    Absent {streak.count} days
                 </span>
             );
         }
         if (streak.type === 'LATE') {
             return (
-                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 ml-2" title={`${streak.count}-day late streak`}>
-                    🟠 {streak.count}
+                <span className="ds-badge ds-badge-warning ml-2" title={`${streak.count}-day late streak`}>
+                    Late {streak.count} days
                 </span>
             );
         }
         if (streak.type === 'PRESENT' && streak.count >= 10) {
             return (
-                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 ml-2" title={`${streak.count}-day present streak!`}>
-                    🟢 {streak.count}
+                <span className="ds-badge ds-badge-success ml-2" title={`${streak.count}-day present streak!`}>
+                    Present {streak.count} days
                 </span>
             );
         }
@@ -509,32 +510,25 @@ const AttendanceRegister = () => {
 
     if (viewMode === 'analytics') {
         return (
-            <div className="p-6 max-w-7xl mx-auto">
+            <div className="ds-page">
                 <AttendanceAnalytics classId={selectedClassId} className={selectedClassName} onBack={() => setViewMode('daily')} />
             </div>
         );
     }
 
     return (
-        <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto print:p-0 printable-content">
+        <div className="ds-page pb-24 md:pb-6 print:p-0 print:space-y-0 printable-content">
             {/* Header */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <UserCheck className="text-blue-600" />
-                        Class Attendance
-                    </h1>
-                    <p className="text-gray-500 dark:text-gray-400">Daily register and attendance tracking</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
+            <PageHeader title="Class Attendance" description="Daily register and attendance tracking" actions={
+                <div className="ds-actions">
                     {/* View Mode Toggle */}
-                    <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
+                    <div className="ds-actions" role="group" aria-label="Attendance view">
                         {(['daily', 'weekly', 'analytics'] as const).map(mode => (
                             <button
                                 key={mode}
                                 onClick={() => setViewMode(mode)}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1 ${viewMode === mode ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                                aria-pressed={viewMode === mode}
+                                className={viewMode === mode ? 'ds-button-primary' : 'ds-button-secondary'}
                             >
                                 {mode === 'analytics' && <BarChart2 size={14} />}
                                 {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -544,12 +538,12 @@ const AttendanceRegister = () => {
 
                     {/* Display mode toggle (list vs photo) */}
                     {viewMode === 'daily' && (
-                        <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1 print:hidden">
-                            <button onClick={() => setDisplayMode('list')} className={`p-1.5 rounded ${displayMode === 'list' ? 'bg-white dark:bg-slate-600 shadow-sm' : ''}`} title="List view">
-                                <List size={16} className={displayMode === 'list' ? 'text-blue-600' : 'text-gray-400'} />
+                        <div className="ds-actions print:hidden" role="group" aria-label="Register display">
+                            <button onClick={() => setDisplayMode('list')} className={displayMode === 'list' ? 'ds-button-primary' : 'ds-button-secondary'} aria-pressed={displayMode === 'list'} aria-label="List view" title="List view">
+                                <List size={16} aria-hidden="true" />
                             </button>
-                            <button onClick={() => setDisplayMode('photo')} className={`p-1.5 rounded ${displayMode === 'photo' ? 'bg-white dark:bg-slate-600 shadow-sm' : ''}`} title="Photo grid">
-                                <Image size={16} className={displayMode === 'photo' ? 'text-blue-600' : 'text-gray-400'} />
+                            <button onClick={() => setDisplayMode('photo')} className={displayMode === 'photo' ? 'ds-button-primary' : 'ds-button-secondary'} aria-pressed={displayMode === 'photo'} aria-label="Photo grid" title="Photo grid">
+                                <Image size={16} aria-hidden="true" />
                             </button>
                         </div>
                     )}
@@ -557,100 +551,103 @@ const AttendanceRegister = () => {
                     {/* Sound toggle */}
                     <button
                         onClick={() => setSoundEnabled(!soundEnabled)}
-                        className={`p-2 rounded-lg print:hidden ${soundEnabled ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'text-gray-400 bg-gray-100 dark:bg-slate-700'}`}
+                        className="ds-button-secondary print:hidden"
+                        aria-label="Attendance sound feedback"
+                        aria-pressed={soundEnabled}
                         title={soundEnabled ? 'Sound on' : 'Sound off'}
                     >
-                        <Volume2 size={16} />
+                        <Volume2 size={16} aria-hidden="true" />
                     </button>
                 </div>
-            </div>
+            } />
 
             {/* Controls Bar */}
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm mb-6 flex flex-wrap items-center gap-4">
+            <div className="ds-card ds-toolbar print:p-4 print:mb-6">
                 <select
                     value={selectedClassId}
                     onChange={(e) => {
                         setSelectedClassId(e.target.value);
                         setSelectedClassName(classes.find(c => c.id === e.target.value)?.name || '');
                     }}
-                    className="px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-slate-700 dark:text-white"
+                    aria-label="Attendance class"
+                    className="ds-select w-full sm:w-auto"
                 >
                     {classes.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                 </select>
 
-                <div className="flex items-center gap-1 bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg p-1">
-                    <button onClick={() => changeDate(-1)} className="p-2 hover:bg-white dark:hover:bg-slate-600 rounded transition-colors dark:text-gray-300">
-                        <ChevronLeft size={16} />
+                <div className="flex min-w-0 items-center gap-1">
+                    <button onClick={() => changeDate(-1)} className="ds-button-ghost" aria-label="Previous day">
+                        <ChevronLeft size={16} aria-hidden="true" />
                     </button>
-                    <div className="relative">
-                        <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <div className="relative min-w-0">
+                        <Calendar size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
                         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                            className="pl-9 pr-3 py-2 bg-transparent focus:outline-none w-36 dark:text-white" />
+                            aria-label="Attendance date" className="ds-input pl-9" />
                     </div>
-                    <button onClick={() => changeDate(1)} className="p-2 hover:bg-white dark:hover:bg-slate-600 rounded transition-colors dark:text-gray-300">
-                        <ChevronRight size={16} />
+                    <button onClick={() => changeDate(1)} className="ds-button-ghost" aria-label="Next day">
+                        <ChevronRight size={16} aria-hidden="true" />
                     </button>
                 </div>
 
-                <div className="relative flex-1 max-w-xs">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <div className="relative flex-1 basis-48 max-w-xs">
+                    <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
                     <input type="text" placeholder="Search student..."
                         value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400" />
+                        aria-label="Search students by name or admission number" className="ds-input pl-9" />
                 </div>
 
                 <div className="flex gap-2 ml-auto print:hidden">
                     {undoStack.length > 0 && (
                         <button onClick={handleUndo}
-                            className="flex items-center gap-1 px-3 py-2 text-orange-600 bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 rounded-lg transition-colors text-sm font-medium"
+                            className="ds-button-secondary"
                             title="Undo last change">
                             <Undo2 size={16} /> Undo
                         </button>
                     )}
-                    <button onClick={handleExportDaily} className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors" title="Export to Excel">
-                        <Download size={18} />
+                    <button onClick={handleExportDaily} className="ds-button-outline" aria-label="Export daily attendance to Excel" title="Export to Excel">
+                        <Download size={18} aria-hidden="true" />
                     </button>
-                    <button onClick={() => window.print()} className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors print:hidden" title="Print">
-                        <Printer size={18} />
+                    <button onClick={() => window.print()} className="ds-button-outline print:hidden" aria-label="Print attendance register" title="Print">
+                        <Printer size={18} aria-hidden="true" />
                     </button>
                 </div>
             </div>
 
             {/* Auto-save indicator */}
             {isDirty && (
-                <div className="mb-4 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 print:hidden">
-                    <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <div role="status" className="ds-alert ds-badge-warning print:hidden">
+                    <AlertTriangle size={16} aria-hidden="true" />
                     Unsaved changes (auto-saving draft)
                 </div>
             )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 print:hidden">
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
+                <div className="ds-card">
                     <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total</div>
                     <div className="text-2xl font-bold text-gray-800 dark:text-white">{stats.total}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-green-500">
+                <div className="ds-card">
                     <div className="text-sm text-green-600 dark:text-green-400 font-medium mb-1 flex items-center gap-1">
                         <CheckCircle size={14} /> Present
                     </div>
                     <div className="text-2xl font-bold text-green-700 dark:text-green-400">{stats.present}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-red-500">
+                <div className="ds-card">
                     <div className="text-sm text-red-600 dark:text-red-400 font-medium mb-1 flex items-center gap-1">
                         <XCircle size={14} /> Absent
                     </div>
                     <div className="text-2xl font-bold text-red-700 dark:text-red-400">{stats.absent}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-orange-500">
+                <div className="ds-card">
                     <div className="text-sm text-orange-600 dark:text-orange-400 font-medium mb-1 flex items-center gap-1">
                         <Clock size={14} /> Late
                     </div>
                     <div className="text-2xl font-bold text-orange-700 dark:text-orange-400">{stats.late}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm border-l-4 border-l-blue-500">
+                <div className="ds-card">
                     <div className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-1 flex items-center gap-1">
                         <Zap size={14} /> Rate
                     </div>
@@ -660,32 +657,34 @@ const AttendanceRegister = () => {
 
             {/* ═══════════ DAILY VIEW ═══════════ */}
             {viewMode === 'daily' && displayMode === 'list' && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-700/50 print:bg-white">
+                <div className="ds-surface overflow-hidden">
+                    <div className="px-6 py-4 border-b border-[var(--border-color)] flex flex-wrap gap-3 justify-between items-center bg-[var(--surface-muted)] print:bg-white">
                         <h2 className="font-semibold text-gray-700 dark:text-gray-200">Student Register</h2>
-                        <div className="flex gap-2 print:hidden">
+                        <div className="ds-actions print:hidden">
                             <button onClick={() => markAll('PRESENT')}
-                                className="text-xs font-medium text-green-700 bg-green-50 px-3 py-1.5 rounded-lg hover:bg-green-100 transition-colors">
+                                className="ds-button-secondary">
                                 Mark All Present
                             </button>
                             <button onClick={() => markAll('ABSENT')}
-                                className="text-xs font-medium text-red-700 bg-red-50 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors">
+                                className="ds-button-outline">
                                 Mark All Absent
                             </button>
                         </div>
                     </div>
 
                     {loading ? (
-                        <div className="p-12 text-center text-gray-500">
+                        <div role="status" className="ds-empty">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
                             Loading register...
                         </div>
                     ) : filteredStudents.length === 0 ? (
-                        <div className="p-12 text-center text-gray-500">
+                        <div className="ds-empty">
                             {searchQuery ? 'No students match your search.' : 'No students found in this class.'}
                         </div>
                     ) : (
-                        <table className="w-full text-left">
+                        <div className="overflow-x-auto print:overflow-visible" role="region" aria-label="Daily student attendance register" tabIndex={0}>
+                        {/* Standard ds-table padding matches the existing register's px-4/py-3 cells. */}
+                        <table className="ds-table">
                             <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                                 <tr>
                                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">#</th>
@@ -713,7 +712,7 @@ const AttendanceRegister = () => {
                                                     {student.profileImageUrl ? (
                                                         <img src={student.profileImageUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
                                                     ) : (
-                                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-sm">
+                                                        <div className="ds-avatar !w-10 !h-10">
                                                             {student.firstName[0]}{student.lastName[0]}
                                                         </div>
                                                     )}
@@ -723,7 +722,7 @@ const AttendanceRegister = () => {
                                                             {streak && <StreakBadge streak={streak} />}
                                                             {sparkline && <Sparkline data={sparkline} />}
                                                         </div>
-                                                        <div className="text-xs text-gray-400 dark:text-gray-500">{student.admissionNumber}</div>
+                                                        <div className="text-xs text-[var(--text-secondary)]">{student.admissionNumber}</div>
                                                     </div>
                                                 </div>
                                             </td>
@@ -732,22 +731,23 @@ const AttendanceRegister = () => {
                                                     {(['PRESENT', 'ABSENT', 'LATE'] as const).map(status => {
                                                         const isActive = rec?.status === status;
                                                         const colors = {
-                                                            PRESENT: { active: 'bg-green-100 text-green-700 ring-2 ring-green-500 dark:bg-green-900/40 dark:text-green-400 dark:ring-green-600', inactive: 'bg-gray-50 text-gray-600 hover:bg-gray-100 dark:bg-slate-700 dark:text-gray-400 dark:hover:bg-slate-600' },
-                                                            ABSENT: { active: 'bg-red-100 text-red-700 ring-2 ring-red-500 dark:bg-red-900/40 dark:text-red-400 dark:ring-red-600', inactive: 'bg-gray-50 text-gray-600 hover:bg-gray-100 dark:bg-slate-700 dark:text-gray-400 dark:hover:bg-slate-600' },
-                                                            LATE: { active: 'bg-orange-100 text-orange-700 ring-2 ring-orange-500 dark:bg-orange-900/40 dark:text-orange-400 dark:ring-orange-600', inactive: 'bg-gray-50 text-gray-600 hover:bg-gray-100 dark:bg-slate-700 dark:text-gray-400 dark:hover:bg-slate-600' }
+                                                            PRESENT: { active: 'ring-2 ring-inset ring-green-600', inactive: '' },
+                                                            ABSENT: { active: 'ring-2 ring-inset ring-red-600', inactive: '' },
+                                                            LATE: { active: 'ring-2 ring-inset ring-amber-600', inactive: '' }
                                                         };
                                                         const icons = { PRESENT: CheckCircle, ABSENT: XCircle, LATE: Clock };
                                                         const Icon = icons[status];
                                                         // Accessibility: different patterns
-                                                        const a11yLabel = { PRESENT: '✓ Present', ABSENT: '✗ Absent', LATE: '⏰ Late' };
+                                                        const a11yLabel = { PRESENT: 'Present', ABSENT: 'Absent', LATE: 'Late' };
 
                                                         return (
                                                             <button key={status}
                                                                 onClick={() => handleStatusChange(student.id, status)}
-                                                                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all ring-offset-1 ${isActive ? colors[status].active : colors[status].inactive}`}
-                                                                aria-label={a11yLabel[status]}
+                                                                className={`ds-button-secondary px-2.5 ${isActive ? colors[status].active : colors[status].inactive}`}
+                                                                aria-label={`Mark ${student.firstName} ${student.lastName} ${a11yLabel[status]}`}
+                                                                aria-pressed={isActive}
                                                             >
-                                                                <Icon size={15} />
+                                                                <Icon size={15} aria-hidden="true" />
                                                                 <span className="hidden sm:inline">{status.charAt(0) + status.slice(1).toLowerCase()}</span>
                                                             </button>
                                                         );
@@ -763,14 +763,16 @@ const AttendanceRegister = () => {
                                                 <div className="flex flex-col gap-1">
                                                     {rec?.status === 'ABSENT' && (
                                                         <button onClick={() => { setReasonStudent(student); setReasonText(rec?.reason || ''); setModalMode('reason'); setShowReasonModal(true); }}
-                                                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600">
+                                                            className="ds-button-ghost justify-start"
+                                                            aria-label={`Absence reason for ${student.firstName} ${student.lastName}${rec?.reason ? `: ${rec.reason}` : ''}`}>
                                                             <MessageSquare size={12} />
                                                             {rec?.reason ? <span className="truncate max-w-[120px]">{rec.reason}</span> : 'Add reason'}
                                                         </button>
                                                     )}
                                                     {rec?.status === 'LATE' && (
                                                         <button onClick={() => { setReasonStudent(student); setLateMinutes(rec?.lateMinutes || 15); setReasonText(rec?.reason || ''); setModalMode('late'); setShowReasonModal(true); }}
-                                                            className="flex items-center gap-1 text-xs text-orange-500 hover:text-orange-700">
+                                                            className="ds-button-ghost justify-start"
+                                                            aria-label={`Late arrival details for ${student.firstName} ${student.lastName}${rec?.lateMinutes ? `: ${rec.lateMinutes} minutes late` : ''}`}>
                                                             <Clock size={12} />
                                                             {rec?.lateMinutes ? `${rec.lateMinutes} min late` : 'Add time'}
                                                         </button>
@@ -782,6 +784,7 @@ const AttendanceRegister = () => {
                                 })}
                             </tbody>
                         </table>
+                        </div>
                     )}
                 </div>
             )}
@@ -789,17 +792,17 @@ const AttendanceRegister = () => {
             {/* ═══════════ PHOTO GRID VIEW ═══════════ */}
             {viewMode === 'daily' && displayMode === 'photo' && (
                 <div className="print:hidden">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-wrap gap-3 justify-between items-center mb-4">
                         <h2 className="font-semibold text-gray-700 dark:text-gray-200">Photo Grid — Tap to change status</h2>
-                        <div className="flex gap-2">
-                            <button onClick={() => markAll('PRESENT')} className="text-xs font-medium text-green-700 bg-green-50 px-3 py-1.5 rounded-lg hover:bg-green-100">Mark All Present</button>
-                            <button onClick={() => markAll('ABSENT')} className="text-xs font-medium text-red-700 bg-red-50 px-3 py-1.5 rounded-lg hover:bg-red-100">Mark All Absent</button>
+                        <div className="ds-actions">
+                            <button onClick={() => markAll('PRESENT')} className="ds-button-secondary">Mark All Present</button>
+                            <button onClick={() => markAll('ABSENT')} className="ds-button-outline">Mark All Absent</button>
                         </div>
                     </div>
                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
                         {filteredStudents.map(student => {
                             const rec = attendance[student.id];
-                            const statusColors = { PRESENT: 'ring-green-500 bg-green-50 dark:bg-green-900/20', ABSENT: 'ring-red-500 bg-red-50 dark:bg-red-900/20', LATE: 'ring-orange-500 bg-orange-50 dark:bg-orange-900/20' };
+                            const statusColors = { PRESENT: 'ring-green-600', ABSENT: 'ring-red-600', LATE: 'ring-amber-600' };
                             const statusIcons = { PRESENT: CheckCircle, ABSENT: XCircle, LATE: Clock };
                             const StatusIcon = statusIcons[rec?.status || 'PRESENT'];
                             const nextStatus = rec?.status === 'PRESENT' ? 'ABSENT' : rec?.status === 'ABSENT' ? 'LATE' : 'PRESENT';
@@ -807,18 +810,20 @@ const AttendanceRegister = () => {
                             return (
                                 <button key={student.id}
                                     onClick={() => handleStatusChange(student.id, nextStatus)}
-                                    className={`flex flex-col items-center p-3 rounded-xl border-2 ring-2 transition-all hover:shadow-md ${statusColors[rec?.status || 'PRESENT']} dark:border-slate-600`}
+                                    className={`ds-button-outline flex-col p-3 ring-2 ring-inset ${statusColors[rec?.status || 'PRESENT']}`}
+                                    aria-label={`${student.firstName} ${student.lastName}: ${rec?.status || 'PRESENT'}. Mark ${nextStatus}.`}
                                 >
                                     {student.profileImageUrl ? (
                                         <img src={student.profileImageUrl} alt="" className="w-14 h-14 rounded-full object-cover mb-2" />
                                     ) : (
-                                        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-lg mb-2">
+                                        <div className="ds-avatar !w-14 !h-14 mb-2">
                                             {student.firstName[0]}{student.lastName[0]}
                                         </div>
                                     )}
                                     <div className="text-xs font-medium text-gray-900 dark:text-white text-center truncate w-full">{student.firstName}</div>
-                                    <div className="text-[10px] text-gray-400 truncate w-full text-center">{student.lastName}</div>
+                                    <div className="text-xs text-[var(--text-secondary)] truncate w-full text-center">{student.lastName}</div>
                                     <StatusIcon size={18} className={`mt-1 ${rec?.status === 'PRESENT' ? 'text-green-600' : rec?.status === 'ABSENT' ? 'text-red-600' : 'text-orange-600'}`} />
+                                    <span className="text-xs text-[var(--text-secondary)]">{rec?.status || 'PRESENT'}</span>
                                 </button>
                             );
                         })}
@@ -828,8 +833,8 @@ const AttendanceRegister = () => {
 
             {/* ═══════════ WEEKLY VIEW ═══════════ */}
             {viewMode === 'weekly' && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50 flex justify-between items-center">
+                <div className="ds-surface overflow-hidden">
+                    <div className="px-6 py-4 border-b border-[var(--border-color)] bg-[var(--surface-muted)] flex flex-wrap gap-3 justify-between items-center">
                         <div>
                             <h2 className="font-semibold text-gray-700 dark:text-gray-200">Weekly View</h2>
                             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -838,19 +843,21 @@ const AttendanceRegister = () => {
                             </p>
                         </div>
                         <button onClick={() => setWeeklyEditable(!weeklyEditable)}
-                            className={`text-sm px-3 py-1.5 rounded-lg font-medium print:hidden ${weeklyEditable ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-400'}`}>
-                            {weeklyEditable ? '✏️ Editing' : '👁️ View Only'}
+                            aria-label="Enable weekly attendance editing" aria-pressed={weeklyEditable}
+                            className={`${weeklyEditable ? 'ds-button-primary' : 'ds-button-secondary'} print:hidden`}>
+                            {weeklyEditable ? 'Editing' : 'View Only'}
                         </button>
                     </div>
 
                     {loading ? (
-                        <div className="p-12 text-center text-gray-500">
+                        <div role="status" className="ds-empty">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
                             Loading...
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left">
+                        <div className="overflow-x-auto" role="region" aria-label="Weekly student attendance register" tabIndex={0}>
+                            {/* ds-table preserves the existing px-4/py-3 spacing; sticky student cells and day widths remain. */}
+                            <table className="ds-table">
                                 <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                                     <tr>
                                         <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase sticky left-0 bg-gray-50 dark:bg-slate-700 z-10">Student</th>
@@ -867,7 +874,7 @@ const AttendanceRegister = () => {
                                         <tr key={student.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50">
                                             <td className="px-4 py-3 sticky left-0 bg-white dark:bg-slate-800 z-10">
                                                 <div className="font-medium text-gray-900 dark:text-white text-sm">{student.firstName} {student.lastName}</div>
-                                                <div className="text-xs text-gray-400 dark:text-gray-500">{student.admissionNumber}</div>
+                                                <div className="text-xs text-[var(--text-secondary)]">{student.admissionNumber}</div>
                                             </td>
                                             {weekDates.map(d => {
                                                 const status = weeklyAttendance[student.id]?.[d];
@@ -877,7 +884,8 @@ const AttendanceRegister = () => {
                                                             <button
                                                                 onClick={() => handleWeeklyStatusChange(student.id, d)}
                                                                 disabled={!weeklyEditable}
-                                                                className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold transition-all ${weeklyEditable ? 'cursor-pointer hover:scale-110' : 'cursor-default'} ${status === 'PRESENT' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' : status === 'ABSENT' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400'}`}
+                                                                aria-label={`${student.firstName} ${student.lastName}, ${new Date(d).toLocaleDateString()}: ${status}${weeklyEditable ? `. Change to ${status === 'PRESENT' ? 'ABSENT' : status === 'ABSENT' ? 'LATE' : 'PRESENT'}` : ''}`}
+                                                                className={`ds-button-secondary px-2 ring-2 ring-inset print:!min-h-0 print:!min-w-0 print:!w-8 print:!h-8 print:!p-0 ${status === 'PRESENT' ? 'ring-green-600' : status === 'ABSENT' ? 'ring-red-600' : 'ring-amber-600'}`}
                                                             >
                                                                 {status === 'PRESENT' ? 'P' : status === 'ABSENT' ? 'A' : 'L'}
                                                             </button>
@@ -894,11 +902,12 @@ const AttendanceRegister = () => {
                         </div>
                     )}
 
+                    <p className="ds-helper px-6 py-3 print:hidden">P = Present · A = Absent · L = Late · – = Not recorded</p>
                     {weeklyEditable && (
-                        <div className="px-6 py-3 border-t border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50 flex gap-2 print:hidden">
+                        <div className="px-6 py-3 border-t border-[var(--border-color)] bg-[var(--surface-muted)] ds-actions print:hidden">
                             {weekDates.map(d => (
                                 <button key={d} onClick={() => saveWeeklyDay(d)}
-                                    className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                    aria-label={`Save attendance for ${new Date(d).toLocaleDateString()}`} className="ds-button-primary">
                                     Save {new Date(d).toLocaleDateString(undefined, { weekday: 'short' })}
                                 </button>
                             ))}
@@ -910,9 +919,9 @@ const AttendanceRegister = () => {
             {/* Floating Save Button */}
             {viewMode === 'daily' && (
                 <div className="fixed bottom-6 right-6 z-10 print:hidden flex items-center gap-3">
-                    {isDirty && <span className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded-full">Unsaved</span>}
+                    {isDirty && <span className="ds-badge ds-badge-warning">Unsaved</span>}
                     <button onClick={handleSave} disabled={saving || loading || students.length === 0}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium">
+                        aria-busy={saving} className="ds-button-primary">
                         <Save size={20} />
                         {saving ? 'Saving...' : 'Save Attendance'}
                     </button>
@@ -921,32 +930,33 @@ const AttendanceRegister = () => {
 
             {/* ═══════════ REASON / LATE MODAL ═══════════ */}
             {showReasonModal && reasonStudent && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden">
-                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-                            {modalMode === 'late' ? '⏰ Late Arrival Details' : '📝 Absence Reason'}
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] print:hidden p-4">
+                    <div role="dialog" aria-labelledby="attendance-reason-title" aria-describedby="attendance-reason-student" className="ds-card w-full max-w-md max-h-[90dvh] overflow-y-auto">
+                        <h3 id="attendance-reason-title" className="mb-1">
+                            {modalMode === 'late' ? 'Late Arrival Details' : 'Absence Reason'}
                         </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                        <p id="attendance-reason-student" className="ds-helper mb-4">
                             {reasonStudent.firstName} {reasonStudent.lastName}
                         </p>
 
                         {modalMode === 'late' && (
                             <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Minutes Late</label>
-                                <div className="flex items-center gap-3">
+                                <label htmlFor="attendance-late-minutes" className="ds-label mb-2">Minutes Late</label>
+                                <div className="ds-actions" role="group" aria-label="Minutes late presets">
                                     {[5, 10, 15, 30, 45, 60].map(mins => (
                                         <button key={mins} onClick={() => setLateMinutes(mins)}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${lateMinutes === mins ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-500' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-slate-700 dark:text-gray-300'}`}>
+                                            aria-label={`${mins} minutes late`} aria-pressed={lateMinutes === mins}
+                                            className={lateMinutes === mins ? 'ds-button-primary' : 'ds-button-secondary'}>
                                             {mins}m
                                         </button>
                                     ))}
                                 </div>
-                                <input type="number" value={lateMinutes} onChange={(e) => setLateMinutes(parseInt(e.target.value) || 0)} min={1} max={240}
-                                    className="mt-2 w-24 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-sm bg-white dark:bg-slate-700 dark:text-white" />
+                                <input id="attendance-late-minutes" type="number" value={lateMinutes} onChange={(e) => setLateMinutes(parseInt(e.target.value) || 0)} min={1} max={240}
+                                    className="ds-input mt-2 w-24" />
                             </div>
                         )}
 
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label htmlFor="attendance-reason" className="ds-label mb-2">
                             {modalMode === 'late' ? 'Reason (optional)' : 'Reason'}
                         </label>
                         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -955,23 +965,23 @@ const AttendanceRegister = () => {
                                 : ['Traffic', 'Overslept', 'Transport issue', 'Doctor visit', 'Other']
                             ).map(r => (
                                 <button key={r} onClick={() => setReasonText(r)}
-                                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${reasonText === r ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-500' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-slate-700 dark:text-gray-300'}`}>
+                                    aria-pressed={reasonText === r} className={reasonText === r ? 'ds-button-primary' : 'ds-button-secondary'}>
                                     {r}
                                 </button>
                             ))}
                         </div>
-                        <textarea value={reasonText} onChange={(e) => setReasonText(e.target.value)}
+                        <textarea id="attendance-reason" value={reasonText} onChange={(e) => setReasonText(e.target.value)}
                             placeholder={modalMode === 'late' ? 'Optional reason...' : 'e.g., Sick, Family emergency...'}
-                            className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400"
+                            className="ds-textarea"
                             rows={2} />
 
-                        <div className="flex justify-end gap-3 mt-4">
+                        <div className="ds-form-actions">
                             <button onClick={() => { setShowReasonModal(false); setReasonStudent(null); }}
-                                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+                                className="ds-button-outline">
                                 Cancel
                             </button>
                             <button onClick={handleSaveReason}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                className="ds-button-primary">
                                 Save
                             </button>
                         </div>

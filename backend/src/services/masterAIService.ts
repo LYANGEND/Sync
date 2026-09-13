@@ -3,6 +3,9 @@ import aiService from './aiService';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import curriculumService from './curriculumService';
+import { runWithTenant } from '../middleware/tenantContext';
+import { assertAITenantId, requireAITenantId, validateAITenantReferences } from './aiTenantBoundary';
+import { invalidateFinancialSnapshotAfterMutation } from '../cache/financialSnapshotCache';
 
 // ==========================================
 // MASTER AI OPS SERVICE
@@ -56,6 +59,7 @@ const LONG_RUNNING_TOOLS = new Set(['generate_syllabus']);
 // BACKGROUND JOB: Bulk syllabus generation progress tracker
 // ==========================
 interface BulkSyllabusJob {
+  tenantId: string;
   status: 'running' | 'completed' | 'failed';
   startedAt: Date;
   completedAt?: Date;
@@ -71,9 +75,11 @@ interface BulkSyllabusJob {
 }
 const bulkSyllabusJobs: Map<string, BulkSyllabusJob> = new Map();
 // Keep only last 5 jobs
-function cleanOldJobs() {
-  if (bulkSyllabusJobs.size > 5) {
-    const keys = [...bulkSyllabusJobs.keys()];
+function cleanOldJobs(tenantId: string) {
+  const keys = [...bulkSyllabusJobs.entries()]
+    .filter(([, job]) => job.tenantId === tenantId)
+    .map(([key]) => key);
+  if (keys.length > 5) {
     for (let i = 0; i < keys.length - 5; i++) bulkSyllabusJobs.delete(keys[i]);
   }
 }
@@ -696,6 +702,14 @@ const tools: ToolDefinition[] = [
           const alreadyIds = subjectIds.filter(id => existingIds.has(id));
 
           if (toConnect.length > 0) {
+            const ownedSubjects = await prisma.subject.findMany({
+              where: { id: { in: toConnect } },
+              select: { id: true },
+            });
+            if (ownedSubjects.length !== new Set(toConnect).size) {
+              errors.push(`${cls.name}: one or more subjects do not belong to this tenant`);
+              continue;
+            }
             await prisma.class.update({
               where: { id: cls.id },
               data: { subjects: { connect: toConnect.map(id => ({ id })) } },
@@ -962,9 +976,10 @@ Requirements:
       { name: 'subjectCodes', type: 'array', description: 'Optional: only populate these subject codes. If omitted, populates ALL subjects.' },
     ],
     execute: async (params) => {
+      const tenantId = requireAITenantId();
       // Check if a job is already running
       for (const [, job] of bulkSyllabusJobs) {
-        if (job.status === 'running') {
+        if (job.tenantId === tenantId && job.status === 'running') {
           return {
             summary: `A bulk syllabus job is already running (${job.completed}/${job.total} done, currently: ${job.current || '?'}). Use check_syllabus_progress to monitor.`,
           };
@@ -1023,6 +1038,7 @@ Requirements:
       // Create job tracker
       const jobId = `job_${Date.now()}`;
       const job: BulkSyllabusJob = {
+        tenantId,
         status: 'running',
         startedAt: new Date(),
         total: workQueue.length,
@@ -1034,8 +1050,9 @@ Requirements:
         errors: [],
         successes: [],
       };
-      bulkSyllabusJobs.set(jobId, job);
-      cleanOldJobs();
+      const tenantJobKey = `${tenantId}:${jobId}`;
+      bulkSyllabusJobs.set(tenantJobKey, job);
+      cleanOldJobs(tenantId);
 
       // Launch background processing (fire-and-forget)
       const processInBackground = async () => {
@@ -1104,7 +1121,7 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       };
 
       // Fire and forget — don't await
-      processInBackground().catch(err => {
+      runWithTenant(tenantId, processInBackground).catch(err => {
         job.status = 'failed';
         job.completedAt = new Date();
         job.errors.push(`Fatal: ${err.message}`);
@@ -1127,12 +1144,15 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
     description: 'Check the progress of a running bulk syllabus generation job. Use this when the user asks "how is the syllabus going", "check progress", "syllabus status", etc.',
     parameters: [],
     execute: async () => {
+      const tenantId = requireAITenantId();
       // Find the most recent job
-      const jobs = [...bulkSyllabusJobs.entries()];
+      const jobs = [...bulkSyllabusJobs.entries()]
+        .filter(([, job]) => job.tenantId === tenantId);
       if (jobs.length === 0) {
         return { summary: 'No bulk syllabus jobs have been started. Use populate_all_syllabi to start one.' };
       }
-      const [jobId, job] = jobs[jobs.length - 1];
+      const [tenantJobKey, job] = jobs[jobs.length - 1];
+      const jobId = tenantJobKey.slice(tenantId.length + 1);
       const elapsed = Math.round((Date.now() - job.startedAt.getTime()) / 1000);
       const elapsedStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
 
@@ -1810,6 +1830,13 @@ Return the homework as structured text.`;
           errors.push(`Fee "${t.name}": ${err.message?.split('\n').pop()}`);
         }
       }
+      if (created.length > 0) {
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: created[0].tenantId,
+          scope: 'tenant',
+          source: 'master-ai.fee-templates-created',
+        });
+      }
       return { created, existing, errors, summary: `${created.length} created, ${existing.length} already existed, ${errors.length} failed` };
     },
   },
@@ -2128,6 +2155,13 @@ Return the homework as structured text.`;
         } catch (err: any) {
           errors.push(`Expense "${expenses[i]?.description}": ${err.message?.split('\n').pop()}`);
         }
+      }
+      if (created.length > 0) {
+        await invalidateFinancialSnapshotAfterMutation({
+          tenantId: created[0].tenantId,
+          scope: 'tenant',
+          source: 'master-ai.expenses-created',
+        });
       }
       return { created, errors, summary: `${created.length} created, ${errors.length} failed` };
     },
@@ -2829,7 +2863,9 @@ class MasterAIService {
    * Shared tool execution engine — validates params, runs in parallel with timeouts.
    */
   private async executeToolActions(actions: { tool: string; params: Record<string, any> }[], userId: string): Promise<ExecutionResult[]> {
+    const tenantId = requireAITenantId();
     const executeOne = async (action: { tool: string; params: Record<string, any> }): Promise<ExecutionResult> => {
+      assertAITenantId(tenantId);
       const toolDef = tools.find(t => t.name === action.tool);
       if (!toolDef) {
         return { tool: action.tool, success: false, error: `Unknown tool: ${action.tool}`, summary: `Failed: unknown tool "${action.tool}"` };
@@ -2843,8 +2879,10 @@ class MasterAIService {
       }
 
       try {
+        await validateAITenantReferences(validation.sanitized);
         const timeoutMs = LONG_RUNNING_TOOLS.has(action.tool) ? TOOL_TIMEOUT_LONG_MS : TOOL_TIMEOUT_MS;
         const data = await withTimeout(toolDef.execute(validation.sanitized, userId), timeoutMs, action.tool);
+        assertAITenantId(tenantId);
         const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
         let summaryText: string;
         if (data?.summary && typeof data.summary === 'string') {
