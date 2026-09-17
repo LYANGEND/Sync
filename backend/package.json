@@ -10,7 +10,7 @@
     "migrate:dev": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
-    "test": "jest"
+    "test": "npm run build && node --test tests/schoolDataArchiveService.test.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

@@ -28,6 +28,7 @@ import feeReminderRoutes from './routes/feeReminderRoutes';
 import academicsRoutes from './routes/academicsRoutes';
 import branchRoutes from './routes/branchRoutes';
 import branchAssignmentRoutes from './routes/branchAssignmentRoutes';
+import dataManagementRoutes from './routes/dataManagementRoutes';
 // New AI & Intelligence Routes
 import analyticsRoutes from './routes/analyticsRoutes';
 import aiAssistantRoutes from './routes/aiAssistantRoutes';
@@ -79,6 +80,7 @@ app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? allowedOrigins : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Disposition', 'X-Archive-Checksum', 'X-Archive-Record-Count', 'X-Archive-Model-Count'],
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -121,6 +123,7 @@ app.use('/api/v1/fee-reminders', feeReminderRoutes);
 app.use('/api/v1/academics', academicsRoutes);
 app.use('/api/v1/branches', branchRoutes);
 app.use('/api/v1/branch-assignments', branchAssignmentRoutes);
+app.use('/api/v1/data-management', dataManagementRoutes);
 
 // AI & Intelligence Routes
 app.use('/api/v1/analytics', analyticsRoutes);

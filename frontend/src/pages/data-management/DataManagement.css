@@ -1,0 +1,272 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+.data-vault-page {
+  --vault-primary: #0047ab;
+  --vault-primary-dark: #003366;
+  --vault-accent: #ff9933;
+  --vault-accent-light: #ffb366;
+  --vault-surface: #f8fafc;
+  --vault-ink: #0f172a;
+  --vault-muted: #64748b;
+  --vault-border: #e2e8f0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: linear-gradient(180deg, #f6f8fc 0%, #eef4fb 100%);
+}
+
+.data-vault-shell {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 22px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+  padding: 1.25rem 1.3rem;
+}
+
+.data-vault-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.data-vault-intro-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.data-vault-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 71, 171, 0.18);
+  background: rgba(0, 71, 171, 0.08);
+  color: var(--vault-primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.8rem;
+}
+
+.data-vault-badge-soft {
+  border-color: rgba(255, 153, 51, 0.22);
+  background: rgba(255, 153, 51, 0.1);
+  color: #9a4b00;
+}
+
+.data-vault-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.data-vault-card {
+  animation: data-vault-rise 300ms ease-out both;
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+}
+
+.data-vault-card:nth-child(2) { animation-delay: 45ms; }
+.data-vault-card:nth-child(3) { animation-delay: 90ms; }
+.data-vault-card:nth-child(4) { animation-delay: 135ms; }
+
+.data-vault-dropzone {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 10px,
+    rgba(0, 71, 171, 0.035) 10px,
+    rgba(0, 71, 171, 0.035) 20px
+  );
+}
+
+.dark .data-vault-dropzone {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 10px,
+    rgba(255, 179, 102, 0.035) 10px,
+    rgba(255, 179, 102, 0.035) 20px
+  );
+}
+
+.data-vault-brand-kicker {
+  color: var(--vault-primary);
+}
+
+.dark .data-vault-brand-kicker {
+  color: #93c5fd;
+}
+
+.data-vault-accent-kicker {
+  color: #b45309;
+}
+
+.dark .data-vault-accent-kicker {
+  color: var(--vault-accent-light);
+}
+
+.data-vault-topline {
+  background: linear-gradient(90deg, var(--vault-primary), var(--vault-accent));
+}
+
+.data-vault-brand-icon,
+.data-vault-brand-pill,
+.data-vault-stat-primary {
+  color: var(--vault-primary);
+  background: rgba(0, 71, 171, 0.08);
+  border-color: rgba(0, 71, 171, 0.16);
+}
+
+.data-vault-accent-icon,
+.data-vault-stat-accent {
+  color: #9a4b00;
+  background: rgba(255, 153, 51, 0.14);
+  border-color: rgba(255, 153, 51, 0.28);
+}
+
+.data-vault-stat-neutral {
+  color: var(--vault-primary-dark);
+  background: #f1f5f9;
+  border-color: var(--vault-border);
+}
+
+.data-vault-stat-success {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #d1fae5;
+}
+
+.dark .data-vault-brand-icon,
+.dark .data-vault-brand-pill,
+.dark .data-vault-stat-primary {
+  color: #bfdbfe;
+  background: rgba(0, 71, 171, 0.28);
+  border-color: rgba(147, 197, 253, 0.22);
+}
+
+.dark .data-vault-accent-icon,
+.dark .data-vault-stat-accent {
+  color: var(--vault-accent-light);
+  background: rgba(255, 153, 51, 0.11);
+  border-color: rgba(255, 179, 102, 0.22);
+}
+
+.dark .data-vault-stat-neutral {
+  color: #e2e8f0;
+  background: #334155;
+  border-color: #475569;
+}
+
+.dark .data-vault-stat-success {
+  color: #6ee7b7;
+  background: rgba(6, 78, 59, 0.45);
+  border-color: rgba(16, 185, 129, 0.26);
+}
+
+.data-vault-primary-button {
+  color: #fff;
+  background: linear-gradient(135deg, var(--vault-primary) 0%, #0f66d9 100%);
+  box-shadow: 0 10px 20px rgba(0, 71, 171, 0.18);
+}
+
+.data-vault-primary-button:hover:not(:disabled) {
+  background: var(--vault-primary-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(0, 51, 102, 0.24);
+}
+
+.data-vault-primary-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.data-vault-outline-button {
+  color: var(--vault-primary);
+  border: 2px solid var(--vault-primary);
+  background: #fff;
+}
+
+.data-vault-outline-button:hover:not(:disabled) {
+  color: #fff;
+  background: var(--vault-primary);
+}
+
+.data-vault-primary-button:focus-visible,
+.data-vault-outline-button:focus-visible,
+.data-vault-refresh:focus-visible {
+  outline: 3px solid var(--vault-accent);
+  outline-offset: 3px;
+}
+
+.dark .data-vault-outline-button {
+  color: #bfdbfe;
+  border-color: #60a5fa;
+  background: #1e293b;
+}
+
+.dark .data-vault-outline-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--vault-primary);
+  background: var(--vault-primary);
+}
+
+.data-vault-brand-progress {
+  background: linear-gradient(90deg, var(--vault-primary), var(--vault-accent));
+}
+
+.data-vault-route-panel {
+  background: linear-gradient(135deg, var(--vault-primary-dark), var(--vault-primary));
+}
+
+.data-vault-dropzone-active {
+  border-color: var(--vault-primary) !important;
+  background-color: rgba(0, 71, 171, 0.06) !important;
+}
+
+.dark .data-vault-dropzone-active {
+  background-color: rgba(0, 71, 171, 0.18) !important;
+}
+
+.data-vault-refresh:hover {
+  color: var(--vault-primary);
+  border-color: rgba(0, 71, 171, 0.42);
+}
+
+.data-vault-export-activity {
+  color: var(--vault-primary);
+  background: rgba(0, 71, 171, 0.08);
+}
+
+.dark .data-vault-export-activity {
+  color: #bfdbfe;
+  background: rgba(0, 71, 171, 0.28);
+}
+
+@keyframes data-vault-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 640px) {
+  .data-vault-shell {
+    padding: 1rem;
+  }
+
+  .data-vault-intro {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .data-vault-card {
+    animation: none;
+  }
+
+  .data-vault-primary-button:hover:not(:disabled) {
+    transform: none;
+  }
+}

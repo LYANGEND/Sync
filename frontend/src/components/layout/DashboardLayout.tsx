@@ -12,8 +12,9 @@ const DashboardLayout = () => {
   const location = useLocation();
 
   // Pages where FAB should not appear
-  const hideFABPaths = ['/communication', '/profile', '/settings'];
+  const hideFABPaths = ['/communication', '/profile', '/settings', '/data-management'];
   const showFAB = !hideFABPaths.includes(location.pathname);
+  const showGlobalVoiceCommand = !location.pathname.startsWith('/data-management');
 
   return (
     <div className="min-h-screen bg-gray-50/50 dark:bg-slate-900">
@@ -49,8 +50,8 @@ const DashboardLayout = () => {
       {/* Floating Action Button - Mobile only, context-aware */}
       {showFAB && <FloatingActionButton />}
 
-      {/* Global Voice Command - available on all pages */}
-      <GlobalVoiceCommand />
+      {/* Keep sensitive data-transfer controls free of floating overlays. */}
+      {showGlobalVoiceCommand && <GlobalVoiceCommand />}
 
       {/* Bottom Navigation - Mobile only */}
       <BottomNav onMenuClick={() => setIsMobileMenuOpen(true)} />

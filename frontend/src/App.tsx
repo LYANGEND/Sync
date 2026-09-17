@@ -17,6 +17,7 @@ import Users from './pages/users/Users';
 import Branches from './pages/branches/Branches';
 import BranchDetail from './pages/branches/BranchDetail';
 import Settings from './pages/settings/Settings';
+import DataManagement from './pages/data-management/DataManagement';
 import Profile from './pages/profile/Profile';
 import Communication from './pages/communication/Communication';
 import MyChildren from './pages/parents/MyChildren';
@@ -241,6 +242,11 @@ function App() {
                   <Route path="/settings" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                       <Settings />
+                    </RoleGuard>
+                  } />
+                  <Route path="/data-management" element={
+                    <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                      <DataManagement />
                     </RoleGuard>
                   } />
                 </Route>

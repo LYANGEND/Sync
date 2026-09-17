@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Calendar, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Database } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -67,6 +67,7 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       items: [
         { icon: GitBranch, label: 'Branches', path: '/branches', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
         { icon: UserCog, label: 'User Directory', path: '/users', roles: ['SUPER_ADMIN'] },
+        { icon: Database, label: 'Data Management', path: '/data-management', roles: ['SUPER_ADMIN'] },
         { icon: Settings, label: 'Settings', path: '/settings', roles: ['SUPER_ADMIN'] },
       ]
     }
