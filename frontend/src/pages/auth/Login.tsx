@@ -10,8 +10,13 @@ import {
   BookOpen,
   Users,
   Calendar,
-  FileBarChart
+  ArrowRight,
+  AlertCircle,
+  ChevronDown,
+  LockKeyhole,
+  Mail,
 } from 'lucide-react';
+import styles from './Login.module.css';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -29,6 +34,7 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError('');
     setLoading(true);
 
@@ -45,178 +51,83 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-white dark:bg-slate-900 md:overflow-hidden">
-      {/* Left Panel - Branding & Information */}
-      <div className="hidden md:flex md:w-1/2 bg-[#0056b3] text-white p-6 md:p-12 flex-col justify-between relative h-full">
-        {/* Decorative Circle (Optional subtle gradient effect) */}
-        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-600 to-blue-800 opacity-50 z-0"></div>
-
-        <div className="relative z-10">
-          <div className="flex items-center space-x-3 mb-8">
-            {publicSettings.logoUrl ? (
-              <img
-                src={publicSettings.logoUrl.startsWith('http') ? publicSettings.logoUrl : publicSettings.logoUrl}
-                alt="School Logo"
-                className="w-12 h-12 rounded-lg object-contain bg-white/10 p-1"
-              />
-            ) : (
-              <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
-                <GraduationCap size={28} className="text-white" />
-              </div>
-            )}
-            <span className="text-2xl font-bold tracking-tight">{publicSettings.schoolName || 'Sync Portal'}</span>
-          </div>
-
-          <div className="space-y-6 max-w-lg">
-            <h1 className="text-4xl md:text-5xl font-bold leading-tight">
-              Empowering Education Through Technology
-            </h1>
-            <p className="text-blue-100 text-lg leading-relaxed opacity-90">
-              Manage students, track attendance, monitor grades, and streamline your school operations all in one place.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mt-8 max-w-lg">
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
-              <BookOpen className="mb-3 text-blue-200" size={24} />
-              <h3 className="font-semibold">Grades</h3>
-              <p className="text-sm text-blue-100 opacity-80">Track academic progress</p>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
-              <Users className="mb-3 text-blue-200" size={24} />
-              <h3 className="font-semibold">Students</h3>
-              <p className="text-sm text-blue-100 opacity-80">Manage enrollment</p>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
-              <Calendar className="mb-3 text-blue-200" size={24} />
-              <h3 className="font-semibold">Schedule</h3>
-              <p className="text-sm text-blue-100 opacity-80">Organize timetables</p>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 hover:bg-white/20 transition-colors">
-              <FileBarChart className="mb-3 text-blue-200" size={24} />
-              <h3 className="font-semibold">Reports</h3>
-              <p className="text-sm text-blue-100 opacity-80">Generate Insights</p>
-            </div>
-          </div>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.brand}>
+          {publicSettings.logoUrl ? (
+            <img src={publicSettings.logoUrl} alt={`${publicSettings.schoolName || 'School'} logo`} className={styles.logo} />
+          ) : (
+            <span className={`${styles.brandIcon} bg-primary`}><GraduationCap size={26} aria-hidden="true" /></span>
+          )}
+          <span className={styles.brandName}>{publicSettings.schoolName || 'Sync Portal'}</span>
         </div>
+        <span className={styles.portalLabel}>School workspace</span>
+      </header>
 
-        <div className="relative z-10 mt-12 md:mt-0 text-sm text-blue-200 opacity-60">
-          © {new Date().getFullYear()} Sync Portal. All rights reserved.
-        </div>
-      </div>
+      <main className={styles.main}>
+        <section className={styles.intro} aria-labelledby="intro-title">
+          <span className={`${styles.accentLine} bg-primary`} aria-hidden="true" />
+          <p className={styles.eyebrow}>MORE TIME FOR WHAT MATTERS</p>
+          <h2 id="intro-title" className={styles.introTitle}>Your school day.<br /><span>All in sync.</span></h2>
+          <p className={styles.introCopy}>Less time on admin. More time for education. Bring your people, learning, and everyday school life together.</p>
+          <ul className={styles.features}>
+            <li><span className={styles.featureIcon}><Users size={20} aria-hidden="true" /></span><div><h3>People, connected</h3><p>Students, teachers, and families in one place.</p></div></li>
+            <li><span className={styles.featureIcon}><BookOpen size={20} aria-hidden="true" /></span><div><h3>Learning, in focus</h3><p>Keep track of grades and academic progress.</p></div></li>
+            <li><span className={styles.featureIcon}><Calendar size={20} aria-hidden="true" /></span><div><h3>Every day, organized</h3><p>Stay on top of attendance and timetables.</p></div></li>
+          </ul>
+        </section>
 
-      {/* Right Panel - Login Form */}
-      <div className="md:w-1/2 flex items-center justify-center p-6 md:p-12 bg-white dark:bg-slate-900 md:h-full md:overflow-y-auto">
-        <div className="w-full max-w-md space-y-6">
-          <div className="space-y-2">
-            {/* Mobile Logo */}
-            <div className="flex items-center space-x-2 md:hidden mb-6">
-              {publicSettings.logoUrl ? (
-                <img
-                  src={publicSettings.logoUrl.startsWith('http') ? publicSettings.logoUrl : publicSettings.logoUrl}
-                  alt="Logo"
-                  className="w-10 h-10 rounded-lg object-contain"
-                />
-              ) : (
-                <div className="bg-blue-600 p-2 rounded-lg">
-                  <GraduationCap size={24} className="text-white" />
-                </div>
-              )}
-              <span className="text-xl font-bold tracking-tight text-blue-900 dark:text-white">{publicSettings.schoolName || 'Sync Portal'}</span>
-            </div>
-
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome back</h2>
-            <p className="text-gray-500 dark:text-gray-400">Sign in to access your dashboard</p>
+        <section className={styles.card} aria-labelledby="login-title">
+          <div className={styles.cardHeading}>
+            <h1 id="login-title">Welcome back</h1>
+            <p>Sign in to pick up where you left off.</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-4 rounded-lg text-sm border border-red-100 dark:border-red-800 flex items-center">
-                {error}
+          <form onSubmit={handleSubmit} className={styles.form} aria-labelledby="login-title" aria-busy={loading}>
+            <div className={styles.field}>
+              <label htmlFor="email">Email address</label>
+              <div className={styles.inputWrap}>
+                <Mail size={20} className={styles.inputIcon} aria-hidden="true" />
+                <input id="email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@school.edu" aria-describedby={error ? 'email-hint login-error' : 'email-hint'} />
               </div>
-            )}
-
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email or ID
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white dark:bg-slate-800"
-                  placeholder="student@school.edu"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Password
-                  </label>
-                  <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-500">
-                    Forgot password?
-                  </a>
-                </div>
-                <div className="relative">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full px-4 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-10 bg-white dark:bg-slate-800"
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                  </button>
-                </div>
+              <p id="email-hint" className={styles.hint}>Use the email linked to your school account.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="password">Password</label>
+              <div className={styles.inputWrap}>
+                <LockKeyhole size={20} className={styles.inputIcon} aria-hidden="true" />
+                <input id="password" name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className={styles.passwordInput} placeholder="Enter your password" aria-describedby={error ? 'login-error' : undefined} />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className={styles.passwordToggle} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-controls="password" aria-pressed={showPassword}>
+                  {showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center">
-              <input
-                id="remember-me"
-                name="remember-me"
-                type="checkbox"
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-slate-600 rounded"
-              />
-              <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600 dark:text-gray-400">
-                Keep me signed in
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              {loading ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                'Sign in'
-              )}
+            <button type="submit" disabled={loading} className={styles.submit}>
+              {loading ? <><Loader2 size={20} className="motion-safe:animate-spin" aria-hidden="true" /> Signing in…</> : <>Sign in <ArrowRight size={20} aria-hidden="true" /></>}
             </button>
+            <div id="login-error" role="alert" aria-atomic="true" className={styles.errorSlot} tabIndex={error ? 0 : undefined}>
+              {error && (
+                <div className={styles.error}>
+                  <AlertCircle size={20} aria-hidden="true" />
+                  <div><strong>Unable to sign in</strong><p>{error}</p></div>
+                </div>
+              )}
+            </div>
+            <span className="sr-only" role="status">{loading ? 'Signing in. Please wait.' : ''}</span>
           </form>
 
-          <div className="text-center">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Need help?{' '}
-              <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
-                Contact IT Support
-              </a>
-            </p>
-          </div>
-        </div>
-      </div>
+          <details className={styles.help}>
+            <summary>Trouble signing in?<ChevronDown size={18} aria-hidden="true" /></summary>
+            <p>Forgot your password or need an account? Contact your school administrator for help accessing your account.</p>
+          </details>
+          <p className={styles.sessionNote}>Using a shared device? Remember to sign out when you’re done.</p>
+        </section>
+      </main>
+
+      <footer className={styles.footer}>
+        <span>© {new Date().getFullYear()} Sync. All rights reserved.</span>
+        <span>Run your school. In sync.</span>
+      </footer>
     </div>
   );
 };

@@ -141,12 +141,25 @@
 
   <!-- Inline Critical CSS for Splash Screen -->
   <style>
+    html {
+      --startup-background: #f3f5f7;
+      --startup-spinner-track: #e5e9ef;
+      --startup-spinner-color: #596779;
+      background: var(--startup-background);
+    }
+
+    html.dark {
+      --startup-background: #151e2c;
+      --startup-spinner-track: #334155;
+      --startup-spinner-color: #b0bdce;
+    }
+
     /* Prevent FOUC and show loading state */
     #root:empty::before {
       content: '';
       position: fixed;
       inset: 0;
-      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      background: var(--startup-background);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -158,22 +171,30 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 48px;
-      height: 48px;
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-top-color: white;
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--startup-spinner-track);
+      border-top-color: var(--startup-spinner-color);
       border-radius: 50%;
-      animation: spin 1s linear infinite;
+      animation: startup-spin 1s linear infinite;
     }
 
-    @keyframes spin {
+    @keyframes startup-spin {
       to {
         transform: translate(-50%, -50%) rotate(360deg);
       }
     }
 
+    @media (prefers-reduced-motion: reduce) {
+      #root:empty::after {
+        animation: none;
+      }
+    }
+
     /* iOS Safe Area Support */
     body {
+      margin: 0;
+      background: var(--startup-background);
       padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
   </style>
