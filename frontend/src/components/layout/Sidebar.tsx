@@ -1,14 +1,16 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Database } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarCheck, Settings, LogOut, BookOpen, GraduationCap, UserCog, MessageSquare, X, Award, TrendingUp, GitBranch, BarChart3, Brain, Cpu, Video, Sparkles, Database, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
+const Sidebar = ({ isOpen = false, onClose, isCollapsed, onToggleCollapse }: SidebarProps) => {
   const location = useLocation();
   const { logout, user } = useAuth();
   const { settings } = useTheme();
@@ -85,19 +87,33 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
       )}
 
       <aside className={`
-        h-dvh w-64 bg-[linear-gradient(180deg,#003366_0%,#021a33_100%)] text-white flex flex-col fixed left-0 top-0 z-50 transition-transform duration-300 ease-in-out shadow-[18px_0_48px_-32px_rgba(0,18,38,0.8)]
+        fixed left-0 top-0 z-50 flex h-dvh w-64 flex-col bg-[linear-gradient(180deg,#003366_0%,#021a33_100%)] text-white shadow-[18px_0_48px_-32px_rgba(0,18,38,0.8)] transition-[width,transform] duration-200 ease-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:translate-x-0
+        md:translate-x-0 ${isCollapsed ? 'md:w-20' : 'md:w-64'}
       `}>
-        <div className="relative flex items-center justify-between border-b border-white/10 p-4">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label={isCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-controls="primary-navigation"
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+          className="group absolute -right-[22px] top-[4.5rem] z-10 hidden size-11 place-items-center rounded-full focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-[#003366] md:grid"
+        >
+          <span className="grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-primary shadow-md transition-colors group-hover:border-blue-200 group-hover:bg-blue-50" aria-hidden="true">
+            {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+          </span>
+        </button>
+
+        <div className={`relative flex items-center justify-between border-b border-white/10 p-4 ${isCollapsed ? 'md:justify-center md:gap-0 md:px-3' : ''}`}>
           <span className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent" aria-hidden="true" />
-          <div className="flex items-center gap-3 min-w-0">
+          <div className={`flex min-w-0 items-center gap-3 ${isCollapsed ? 'md:justify-center md:gap-0' : ''}`}>
             <img
               src={settings.logoUrl || '/logo.svg'}
               alt={settings.logoUrl ? `${schoolLabel} logo` : 'Sync logo'}
               className="size-11 shrink-0 rounded-[14px] bg-white object-contain p-1 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.8)] ring-1 ring-white/25"
             />
-            <div className="min-w-0">
+            <div className={`max-w-[11rem] min-w-0 overflow-hidden transition-[max-width,opacity] duration-150 ${isCollapsed ? 'md:max-w-0 md:opacity-0' : 'md:opacity-100'}`}>
               <p className="text-[15px] font-extrabold uppercase tracking-[0.2em] text-white">
                 Sync<span className="text-accent">.</span>
               </p>
@@ -114,7 +130,11 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
           </button>
         </div>
 
-        <nav className="custom-scrollbar flex-1 space-y-5 overflow-y-auto px-3 py-5" aria-label="Primary navigation">
+        <nav
+          id="primary-navigation"
+          className={`custom-scrollbar flex-1 space-y-5 overflow-y-auto px-3 py-5 transition-[padding] duration-200 ${isCollapsed ? 'md:px-2 md:[scrollbar-width:none] md:[&::-webkit-scrollbar]:hidden' : ''}`}
+          aria-label="Primary navigation"
+        >
           {menuGroups.map((group) => {
             const filteredItems = group.items.filter(item => user && item.roles.includes(user.role));
             if (filteredItems.length === 0) return null;
@@ -122,7 +142,8 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
             return (
               <div key={group.title} className="space-y-1">
                 <h3 className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-100/50">
-                  {group.title}
+                  <span className={isCollapsed ? 'md:sr-only' : undefined}>{group.title}</span>
+                  <span className={`hidden h-px bg-white/10 ${isCollapsed ? 'md:block' : ''}`} aria-hidden="true" />
                 </h3>
                 {filteredItems.map((item) => {
                   const isActive = item.path === '/'
@@ -134,15 +155,16 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
                       to={item.path}
                       onClick={onClose}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`flex min-h-11 w-full items-center space-x-3 rounded-xl px-3.5 py-2.5 text-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-[#003366] ${
+                      title={isCollapsed ? item.label : undefined}
+                      className={`flex min-h-11 w-full items-center space-x-3 rounded-xl px-3.5 py-2.5 text-sm transition-[padding,background-color,color,box-shadow] duration-200 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-[#003366] ${isCollapsed ? 'md:space-x-0 md:px-5' : ''} ${
                         isActive
                           ? 'bg-white/[0.12] font-semibold text-white ring-1 ring-white/10'
                           : 'text-blue-50/75 hover:bg-white/[0.08] hover:text-white'
                       }`}
                       style={isActive ? { boxShadow: 'inset 3px 0 0 var(--accent-color), 0 8px 24px -18px rgba(0, 0, 0, 0.9)' } : undefined}
                     >
-                      <item.icon size={18} className={isActive ? 'text-accent' : 'text-blue-100/55'} aria-hidden="true" />
-                      <span>{item.label}</span>
+                      <item.icon size={18} className={`shrink-0 ${isActive ? 'text-accent' : 'text-blue-100/55'}`} aria-hidden="true" />
+                      <span className={`max-w-[10rem] overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-150 ${isCollapsed ? 'md:max-w-0 md:opacity-0' : 'md:opacity-100'}`}>{item.label}</span>
                     </Link>
                   );
                 })}
@@ -155,10 +177,11 @@ const Sidebar = ({ isOpen = false, onClose }: SidebarProps) => {
           <button
             type="button"
             onClick={logout}
-            className="flex min-h-11 w-full items-center space-x-3 rounded-xl px-3.5 py-2.5 text-sm text-red-200/80 transition hover:bg-red-500/10 hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 focus:ring-offset-[#003366]"
+            title={isCollapsed ? 'Sign Out' : undefined}
+            className={`flex min-h-11 w-full items-center space-x-3 rounded-xl px-3.5 py-2.5 text-sm text-red-200/80 transition-[padding,background-color,color] duration-200 hover:bg-red-500/10 hover:text-red-100 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 focus:ring-offset-[#003366] ${isCollapsed ? 'md:space-x-0 md:px-[19px]' : ''}`}
           >
-            <LogOut size={18} />
-            <span className="font-medium">Sign Out</span>
+            <LogOut size={18} className="shrink-0" />
+            <span className={`max-w-[10rem] overflow-hidden whitespace-nowrap font-medium transition-[max-width,opacity] duration-150 ${isCollapsed ? 'md:max-w-0 md:opacity-0' : 'md:opacity-100'}`}>Sign Out</span>
           </button>
         </div>
       </aside>

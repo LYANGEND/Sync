@@ -7,10 +7,37 @@ import BottomNav from './BottomNav';
 import { FloatingActionButton } from '../mobile';
 import GlobalVoiceCommand from '../voice/GlobalVoiceCommand';
 
+const SIDEBAR_COLLAPSED_KEY = 'sync.sidebar.collapsed';
+
+const getInitialSidebarCollapsed = () => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
 const DashboardLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const location = useLocation();
   const shouldReduceMotion = useReducedMotion();
+
+  const handleSidebarToggle = () => {
+    setIsSidebarCollapsed((current) => {
+      const next = !current;
+
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      } catch {
+        // The preference is optional when storage is unavailable.
+      }
+
+      return next;
+    });
+  };
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -43,14 +70,19 @@ const DashboardLayout = () => {
   return (
     <div className="min-h-screen min-h-dvh overflow-x-clip bg-gray-50/50 dark:bg-slate-900">
       {/* Sidebar - Hidden on mobile */}
-      <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
+      <Sidebar
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleSidebarToggle}
+      />
 
       {/* Header */}
-      <Header />
+      <Header isSidebarCollapsed={isSidebarCollapsed} />
 
       {/* Main Content */}
       <main
-        className="min-h-screen min-h-dvh md:pl-64"
+        className={`min-h-screen min-h-dvh transition-[padding-left] duration-200 ease-out ${isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'}`}
         style={{
           paddingTop: 'calc(4rem + env(safe-area-inset-top))',
           paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))',

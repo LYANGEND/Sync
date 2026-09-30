@@ -16,7 +16,11 @@ interface Notification {
   createdAt: string;
 }
 
-const Header = () => {
+interface HeaderProps {
+  isSidebarCollapsed: boolean;
+}
+
+const Header = ({ isSidebarCollapsed }: HeaderProps) => {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { settings: themeSettings } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -139,7 +143,7 @@ const Header = () => {
 
   return (
     <header
-      className="fixed left-0 right-0 top-0 z-40 border-b border-gray-200/50 bg-white/95 backdrop-blur-lg transition-colors duration-200 dark:border-slate-700/50 dark:bg-slate-900/95 md:left-64"
+      className={`fixed left-0 right-0 top-0 z-40 border-b border-gray-200/50 bg-white/95 backdrop-blur-lg transition-[left,background-color,border-color] duration-200 ease-out dark:border-slate-700/50 dark:bg-slate-900/95 ${isSidebarCollapsed ? 'md:left-20' : 'md:left-64'}`}
       style={{
         paddingTop: 'env(safe-area-inset-top)',
       }}
