@@ -159,9 +159,9 @@ export const getPublicSettings = async (req: Request, res: Response) => {
     if (!settings) {
       return res.json({
         schoolName: 'My School',
-        primaryColor: '#2563eb',
+        primaryColor: '#0047AB',
         secondaryColor: '#475569',
-        accentColor: '#f59e0b',
+        accentColor: '#FF9933',
       });
     }
 
