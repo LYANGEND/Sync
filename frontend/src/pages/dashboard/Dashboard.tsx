@@ -7,7 +7,7 @@ import { PullToRefresh, DashboardSkeleton, SwipeableCards } from '../../componen
 import analyticsService, { type AnalyticsDashboard } from '../../services/analyticsService';
 
 import TeacherDashboard from './TeacherDashboard';
-import DashboardAnalytics from './DashboardAnalytics';
+import DashboardAnalytics, { type AnalyticsPeriod } from './DashboardAnalytics';
 
 // Admin Stats Interface
 interface AdminStats {
@@ -77,6 +77,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [analyticsUnavailable, setAnalyticsUnavailable] = useState(false);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(90);
+  const [analyticsDataPeriod, setAnalyticsDataPeriod] = useState<AnalyticsPeriod>(90);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchStats = useCallback(async () => {
@@ -100,21 +102,27 @@ const Dashboard = () => {
     setAnalyticsLoading(true);
     setAnalyticsUnavailable(false);
     try {
-      setAnalytics(await analyticsService.getDashboard(90));
+      setAnalytics(await analyticsService.getDashboard(analyticsPeriod));
+      setAnalyticsDataPeriod(analyticsPeriod);
     } catch (error) {
       console.error('Error fetching dashboard analytics:', error);
       setAnalyticsUnavailable(true);
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [canViewAnalytics]);
+  }, [analyticsPeriod, canViewAnalytics]);
 
   useEffect(() => {
     if (user?.role === 'PARENT' || user?.role === 'PLATFORM_ADMIN') return;
 
     void fetchStats();
+  }, [user?.role, fetchStats]);
+
+  useEffect(() => {
+    if (user?.role === 'PARENT' || user?.role === 'PLATFORM_ADMIN') return;
+
     void fetchAnalytics();
-  }, [user?.role, fetchStats, fetchAnalytics]);
+  }, [user?.role, fetchAnalytics]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -271,111 +279,13 @@ const Dashboard = () => {
             analytics={analytics}
             loading={analyticsLoading}
             unavailable={analyticsUnavailable}
+            periodDays={analyticsPeriod}
+            dataPeriodDays={analyticsDataPeriod}
+            onPeriodChange={setAnalyticsPeriod}
+            onRetry={fetchAnalytics}
           />
         )}
 
-        {/* Recent Payments */}
-        <section className="overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-[0_8px_32px_-18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-800" aria-labelledby="recent-payments-title">
-          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4 md:px-6 dark:border-slate-700">
-            <h2 id="recent-payments-title" className="text-base font-semibold text-gray-900 dark:text-white">Recent Payments</h2>
-            <Link
-              to="/finance"
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-lg px-2 text-sm font-semibold text-primary transition-opacity duration-150 hover:opacity-75 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 motion-reduce:transition-none dark:focus-visible:ring-offset-slate-800"
-            >
-              View All
-            </Link>
-          </div>
-
-          {/* Desktop Table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-600 dark:text-gray-300" aria-label="Recent payments">
-              <thead className="bg-gray-50 font-semibold text-gray-800 dark:bg-slate-700 dark:text-gray-100">
-                <tr>
-                  <th scope="col" className="px-6 py-3">Student</th>
-                  <th scope="col" className="px-6 py-3">Class</th>
-                  <th scope="col" className="px-6 py-3 text-right">Amount</th>
-                  <th scope="col" className="px-6 py-3">Method</th>
-                  <th scope="col" className="px-6 py-3">Time</th>
-                  <th scope="col" className="px-6 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                {(stats?.recentPayments?.length ?? 0) === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-600 dark:text-gray-300">No recent payments</td>
-                  </tr>
-                ) : (
-                  stats?.recentPayments?.map((payment) => (
-                    <tr key={payment.id} className="transition-colors duration-150 hover:bg-gray-50 motion-reduce:transition-none dark:hover:bg-slate-700/50">
-                      <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
-                        {payment.student?.firstName} {payment.student?.lastName}
-                      </td>
-                      <td className="px-6 py-4">{payment.student?.class?.name || 'N/A'}</td>
-                      <td className={`px-6 py-4 text-right font-semibold tabular-nums ${payment.status === 'VOIDED' ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                        ZMW {Number(payment.amount).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
-                          ${payment.method === 'CASH' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                            payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                              'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
-                          {payment.method.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                      <td className="px-6 py-4">
-                        {payment.status === 'VOIDED' ? (
-                          <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">Voided</span>
-                        ) : (
-                          <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">Completed</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile List */}
-          <div className="md:hidden">
-            {(stats?.recentPayments?.length ?? 0) === 0 ? (
-              <div className="p-8 text-center text-sm text-gray-600 dark:text-gray-300">No recent payments</div>
-            ) : (
-              stats?.recentPayments?.map((payment) => (
-                <div key={payment.id} className="border-t border-gray-200 p-4 transition-colors duration-150 active:bg-gray-50 motion-reduce:transition-none dark:border-slate-700 dark:active:bg-slate-700/50">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="min-w-0 pr-3">
-                      <p className="truncate font-semibold text-gray-900 dark:text-white">{payment.student?.firstName} {payment.student?.lastName}</p>
-                      <p className="text-xs text-gray-600 dark:text-gray-300">{payment.student?.class?.name || 'N/A'}</p>
-                    </div>
-                    <span className={`shrink-0 text-right text-lg font-bold tabular-nums ${payment.status === 'VOIDED' ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                      ZMW {Number(payment.amount).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
-                        ${payment.method === 'CASH' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                            'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
-                        {payment.method.replace('_', ' ')}
-                      </span>
-                      {payment.status === 'VOIDED' && (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">Voided</span>
-                      )}
-                    </div>
-                    <span className="text-xs text-gray-600 dark:text-gray-300">
-                      {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
       </div>
     </PullToRefresh>
   );
