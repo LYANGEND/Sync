@@ -4,8 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
 import { PullToRefresh, DashboardSkeleton, SwipeableCards } from '../../components/mobile';
+import analyticsService, { type AnalyticsDashboard } from '../../services/analyticsService';
 
 import TeacherDashboard from './TeacherDashboard';
+import DashboardAnalytics from './DashboardAnalytics';
 
 // Admin Stats Interface
 interface AdminStats {
@@ -69,13 +71,17 @@ type DashboardData = AdminStats | TeacherStats;
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const canViewAnalytics = ['SUPER_ADMIN', 'BURSAR', 'BRANCH_MANAGER'].includes(user?.role ?? '');
   const [data, setData] = useState<DashboardData | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsUnavailable, setAnalyticsUnavailable] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
-      const response = await api.get('/dashboard/stats');
+      const response = await api.get<DashboardData>('/dashboard/stats');
       setData(response.data);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -84,16 +90,39 @@ const Dashboard = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (user?.role !== 'PARENT') {
-      fetchStats();
+  const fetchAnalytics = useCallback(async () => {
+    if (!canViewAnalytics) {
+      setAnalytics(null);
+      setAnalyticsLoading(false);
+      return;
     }
-  }, [user, fetchStats]);
+
+    setAnalyticsLoading(true);
+    setAnalyticsUnavailable(false);
+    try {
+      setAnalytics(await analyticsService.getDashboard(90));
+    } catch (error) {
+      console.error('Error fetching dashboard analytics:', error);
+      setAnalyticsUnavailable(true);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [canViewAnalytics]);
+
+  useEffect(() => {
+    if (user?.role === 'PARENT' || user?.role === 'PLATFORM_ADMIN') return;
+
+    void fetchStats();
+    void fetchAnalytics();
+  }, [user?.role, fetchStats, fetchAnalytics]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchStats();
-    setRefreshing(false);
+    try {
+      await Promise.allSettled([fetchStats(), fetchAnalytics()]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   if (user?.role === 'PARENT') {
@@ -164,15 +193,15 @@ const Dashboard = () => {
 
         {/* Stats Grid - Desktop */}
         <div className="hidden gap-4 md:grid md:grid-cols-3">
-          <div className="rounded-[20px] bg-gradient-to-br from-green-500 to-green-600 p-6 text-white shadow-[0_8px_32px_-18px_rgba(15,23,42,0.14)]">
+          <div className="rounded-[20px] border border-gray-200 bg-white p-6 shadow-[0_8px_32px_-18px_rgba(15,23,42,0.14)] dark:border-slate-700 dark:bg-slate-800">
             <div className="flex items-center justify-between mb-3">
-              <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+              <div className="grid size-9 place-items-center rounded-[10px] bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">
                 <TrendingUp size={20} aria-hidden="true" />
               </div>
-              <span className="text-xs font-medium bg-white/20 px-2 py-1 rounded-full backdrop-blur-sm">Today</span>
+              <span className="rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">Today</span>
             </div>
-            <h3 className="text-sm font-medium text-green-50">Today's Collection</h3>
-            <p className="mt-0.5 text-[28px] font-bold tabular-nums">ZMW {stats?.dailyRevenue.toLocaleString() || '0'}</p>
+            <h3 className="text-sm font-medium text-gray-600 dark:text-gray-300">Today's Collection</h3>
+            <p className="mt-0.5 text-[28px] font-bold tabular-nums text-gray-900 dark:text-white">ZMW {stats?.dailyRevenue.toLocaleString() || '0'}</p>
           </div>
 
           <div className="rounded-[20px] border border-gray-200 bg-white p-6 shadow-[0_8px_32px_-18px_rgba(15,23,42,0.14)] dark:border-slate-700 dark:bg-slate-800">
@@ -235,6 +264,15 @@ const Dashboard = () => {
             </div>
           </SwipeableCards>
         </div>
+
+        {/* School Analytics */}
+        {canViewAnalytics && (
+          <DashboardAnalytics
+            analytics={analytics}
+            loading={analyticsLoading}
+            unavailable={analyticsUnavailable}
+          />
+        )}
 
         {/* Recent Payments */}
         <section className="overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-[0_8px_32px_-18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-800" aria-labelledby="recent-payments-title">
