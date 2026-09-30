@@ -119,7 +119,7 @@ function App() {
                   } />
 
                   <Route path="/academics" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']}>
                       <Academics />
                     </RoleGuard>
                   } />
