@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import BottomNav from './BottomNav';
@@ -10,6 +10,30 @@ import GlobalVoiceCommand from '../voice/GlobalVoiceCommand';
 const DashboardLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const shouldReduceMotion = useReducedMotion();
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previousScrollbarGutter = root.style.scrollbarGutter;
+
+    // Keep page width fixed while short and long route states swap in.
+    root.style.scrollbarGutter = 'stable';
+
+    return () => {
+      root.style.scrollbarGutter = previousScrollbarGutter;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previousScrollBehavior = root.style.scrollBehavior;
+
+    // Reset before paint so a new route never appears at the previous page's offset.
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, 0);
+    root.style.scrollBehavior = previousScrollBehavior;
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   // Pages where FAB should not appear
   const hideFABPaths = ['/communication', '/profile', '/settings', '/data-management'];
@@ -17,7 +41,7 @@ const DashboardLayout = () => {
   const showGlobalVoiceCommand = !location.pathname.startsWith('/data-management');
 
   return (
-    <div className="min-h-screen bg-gray-50/50 dark:bg-slate-900">
+    <div className="min-h-screen min-h-dvh overflow-x-clip bg-gray-50/50 dark:bg-slate-900">
       {/* Sidebar - Hidden on mobile */}
       <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 
@@ -26,24 +50,28 @@ const DashboardLayout = () => {
 
       {/* Main Content */}
       <main
-        className="md:pl-64 min-h-screen transition-all duration-300"
+        className="min-h-screen min-h-dvh md:pl-64"
         style={{
           paddingTop: 'calc(4rem + env(safe-area-inset-top))',
           paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))',
         }}
       >
-        <div className="max-w-7xl mx-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+        <div
+          className="mx-auto max-w-7xl"
+          style={{
+            minHeight: 'calc(100dvh - 8rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
+          }}
+        >
+          <motion.div
+            key={location.pathname}
+            initial={shouldReduceMotion ? false : { opacity: 0.82 }}
+            animate={{ opacity: 1 }}
+            transition={shouldReduceMotion
+              ? { duration: 0 }
+              : { duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <Outlet />
+          </motion.div>
         </div>
       </main>
 

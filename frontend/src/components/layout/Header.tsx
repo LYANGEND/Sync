@@ -139,7 +139,7 @@ const Header = () => {
 
   return (
     <header
-      className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-b border-gray-200/50 dark:border-slate-700/50 fixed top-0 right-0 left-0 md:left-64 z-40 transition-all duration-300"
+      className="fixed left-0 right-0 top-0 z-40 border-b border-gray-200/50 bg-white/95 backdrop-blur-lg transition-colors duration-200 dark:border-slate-700/50 dark:bg-slate-900/95 md:left-64"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
       }}
