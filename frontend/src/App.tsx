@@ -192,7 +192,7 @@ function App() {
                   } />
 
                   <Route path="/analytics" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER']}>
                       <Analytics />
                     </RoleGuard>
                   } />

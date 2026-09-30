@@ -49,6 +49,10 @@ export interface AttendanceAnalytics {
   totalStudentsTracked: number;
 }
 
+export interface AttendanceAnalyticsUnavailable {
+  message: string;
+}
+
 export interface SchoolHealth {
   metrics: {
     activeStudents: number;
@@ -71,7 +75,7 @@ const analyticsService = {
     api.get<RevenueAnalytics>('/analytics/revenue', { params }).then(r => r.data),
 
   getAttendance: () =>
-    api.get<AttendanceAnalytics>('/analytics/attendance').then(r => r.data),
+    api.get<AttendanceAnalytics | AttendanceAnalyticsUnavailable>('/analytics/attendance').then(r => r.data),
 
   getSchoolHealth: () =>
     api.get<SchoolHealth>('/analytics/school-health').then(r => r.data),
