@@ -67,6 +67,36 @@ interface TeacherStats {
 
 type DashboardData = AdminStats | TeacherStats;
 
+// Static class map for Quick Actions - Tailwind cannot generate classes from
+// runtime template literals (e.g. `bg-${color}-100`), so each variant must be
+// spelled out literally to survive production purging.
+const quickActionStyles: Record<string, { hoverBg: string; iconBg: string; iconText: string; groupHoverBg: string }> = {
+  blue: {
+    hoverBg: 'hover:bg-blue-50 dark:hover:bg-slate-700',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconText: 'text-blue-600 dark:text-blue-400',
+    groupHoverBg: 'group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50',
+  },
+  green: {
+    hoverBg: 'hover:bg-green-50 dark:hover:bg-slate-700',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600 dark:text-green-400',
+    groupHoverBg: 'group-hover:bg-green-200 dark:group-hover:bg-green-900/50',
+  },
+  purple: {
+    hoverBg: 'hover:bg-purple-50 dark:hover:bg-slate-700',
+    iconBg: 'bg-purple-100 dark:bg-purple-900/30',
+    iconText: 'text-purple-600 dark:text-purple-400',
+    groupHoverBg: 'group-hover:bg-purple-200 dark:group-hover:bg-purple-900/50',
+  },
+  orange: {
+    hoverBg: 'hover:bg-orange-50 dark:hover:bg-slate-700',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconText: 'text-orange-600 dark:text-orange-400',
+    groupHoverBg: 'group-hover:bg-orange-200 dark:group-hover:bg-orange-900/50',
+  },
+};
+
 const Dashboard = () => {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
@@ -136,9 +166,9 @@ const Dashboard = () => {
             <Link
               key={action.label}
               to={action.path}
-              className={`p-3 md:p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 flex flex-col items-center justify-center gap-2 hover:bg-${action.color}-50 dark:hover:bg-slate-700 active:scale-95 transition-all group`}
+              className={`p-3 md:p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 flex flex-col items-center justify-center gap-2 ${quickActionStyles[action.color].hoverBg} active:scale-95 transition-all group`}
             >
-              <div className={`p-2 md:p-3 bg-${action.color}-100 dark:bg-${action.color}-900/30 text-${action.color}-600 dark:text-${action.color}-400 rounded-xl group-hover:bg-${action.color}-200 dark:group-hover:bg-${action.color}-900/50 transition-colors`}>
+              <div className={`p-2 md:p-3 ${quickActionStyles[action.color].iconBg} ${quickActionStyles[action.color].iconText} rounded-xl ${quickActionStyles[action.color].groupHoverBg} transition-colors`}>
                 <action.icon size={20} className="md:w-6 md:h-6" />
               </div>
               <span className="text-[10px] md:text-xs font-medium text-gray-700 dark:text-gray-300 text-center">{action.label}</span>
@@ -266,7 +296,7 @@ const Dashboard = () => {
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
           <div className="p-4 md:p-6 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center">
             <h2 className="text-base md:text-lg font-bold text-gray-900 dark:text-white">Recent Payments</h2>
-            <Link to="/finance" className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 font-medium">View All</Link>
+            <Link to="/finance" className="text-sm text-primary hover:underline font-medium">View All</Link>
           </div>
 
           {/* Desktop Table */}
