@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-// PERSISTENCE_TEST_MARKER_9f3a1
 import FinanceReports from './FinanceReports';
 
 import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target, ShieldCheck } from 'lucide-react';
