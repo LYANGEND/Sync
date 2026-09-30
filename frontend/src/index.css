@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --primary-color: #1A3A9C;
+  --primary-color: #0047AB;
   --secondary-color: #475569;
-  --accent-color: #F5820A;
+  --accent-color: #FF9933;
 
   /* Safe area custom properties */
   --safe-area-top: env(safe-area-inset-top);
@@ -31,7 +31,7 @@
 .dark {
   --primary-color: #3b6fd4;
   --secondary-color: #94a3b8;
-  --accent-color: #F5820A;
+  --accent-color: #FF9933;
 
   /* Dark mode colors */
   --bg-primary: #0f172a;

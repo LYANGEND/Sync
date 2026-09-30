@@ -17,9 +17,9 @@ interface ThemeContextType {
 
 const defaultSettings: ThemeSettings = {
   schoolName: 'My School',
-  primaryColor: '#1A3A9C',
+  primaryColor: '#0047AB',
   secondaryColor: '#475569',
-  accentColor: '#F5820A',
+  accentColor: '#FF9933',
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
