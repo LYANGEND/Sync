@@ -50,7 +50,7 @@ export const PWAUpdatePrompt = () => {
                     <div className="flex gap-2 mt-3">
                         <button
                             onClick={handleUpdate}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
+                            className="bg-primary hover:bg-primary-hover text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
                         >
                             Update Now
                         </button>
@@ -149,14 +149,14 @@ export const PWAInstallPrompt = () => {
                         {!isIOS && (
                             <button
                                 onClick={handleInstall}
-                                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
+                                className="bg-primary hover:bg-primary-hover text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
                             >
                                 Install
                             </button>
                         )}
                         <button
                             onClick={handleDismiss}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium px-4 py-2 rounded-lg transition-colors"
+                            className="bg-slate-100 hover:bg-surface-hover-strong text-slate-600 text-xs font-medium px-4 py-2 rounded-lg transition-colors"
                         >
                             {isIOS ? 'Got it' : 'Not now'}
                         </button>

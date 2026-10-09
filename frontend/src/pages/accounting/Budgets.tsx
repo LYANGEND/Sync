@@ -225,7 +225,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
         <div className="space-y-4">
           <div className="flex justify-end">
             <button onClick={() => { setEditingBudgetId(null); resetForm(); setShowCreateModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <Plus size={16} /><span>New Budget</span>
             </button>
           </div>
@@ -435,7 +435,7 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
                     <input type="number" step="0.01" value={item.allocated} onChange={e => updateItem(idx, 'allocated', e.target.value)}
                       className="w-32 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Amount" />
                     {form.items.length > 1 && (
-                      <button onClick={() => removeItem(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><X size={16} /></button>
+                      <button onClick={() => removeItem(idx)} className="p-2 text-red-500 hover:bg-surface-hover-danger rounded"><X size={16} /></button>
                     )}
                   </div>
                 ))}
@@ -452,9 +452,9 @@ const Budgets = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={closeFormModal}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleSubmit}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">{editingBudgetId ? 'Save Changes' : 'Create Budget'}</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">{editingBudgetId ? 'Save Changes' : 'Create Budget'}</button>
             </div>
           </div>
         </div>

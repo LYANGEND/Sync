@@ -24,7 +24,7 @@ class SmartFeeService {
   /**
    * Get fee collection analytics
    */
-  async getCollectionAnalytics(termId?: string): Promise<{
+  async getCollectionAnalytics(termId: string): Promise<{
     summary: {
       totalFees: number;
       totalCollected: number;
@@ -51,18 +51,20 @@ class SmartFeeService {
       count: number;
     }>;
   }> {
-    // Get all fee structures
+    // Get fee structures owned by the selected term.
     const feeStructures = await prisma.studentFeeStructure.findMany({
+      where: { academicTermId: termId },
       include: {
-        student: { include: { class: true } },
+        student: {
+          include: {
+            termEnrollments: { where: { academicTermId: termId }, include: { class: true }, take: 1 },
+          },
+        },
         feeTemplate: true,
       },
     });
 
-    // Filter by term if specified
-    const filteredFees = termId
-      ? feeStructures.filter(f => f.feeTemplate.academicTermId === termId)
-      : feeStructures;
+    const filteredFees = feeStructures;
 
     const totalFees = filteredFees.reduce((sum, f) => sum + Number(f.amountDue), 0);
     const totalPaid = filteredFees.reduce((sum, f) => sum + Number(f.amountPaid), 0);
@@ -89,7 +91,9 @@ class SmartFeeService {
     // By grade level
     const gradeMap = new Map<number, { totalFees: number; collected: number }>();
     filteredFees.forEach(f => {
-      const grade = f.student.class.gradeLevel;
+      const placement = f.student.termEnrollments[0];
+      if (!placement) return;
+      const grade = placement.class.gradeLevel;
       const current = gradeMap.get(grade) || { totalFees: 0, collected: 0 };
       current.totalFees += Number(f.amountDue);
       current.collected += Number(f.amountPaid);
@@ -107,7 +111,7 @@ class SmartFeeService {
 
     // Monthly payment trends
     const payments = await prisma.payment.findMany({
-      where: { status: 'COMPLETED' },
+      where: { academicTermId: termId, status: 'COMPLETED' },
       orderBy: { paymentDate: 'asc' },
     });
 
@@ -157,17 +161,23 @@ class SmartFeeService {
   /**
    * Predict payment likelihood for students with outstanding fees
    */
-  async predictPayments(classId?: string): Promise<PaymentPrediction[]> {
-    const where: any = { status: 'ACTIVE' };
-    if (classId) where.classId = classId;
+  async predictPayments(termId: string, classId?: string): Promise<PaymentPrediction[]> {
+    const where: any = {
+      status: 'ACTIVE',
+      termEnrollments: {
+        some: {
+          academicTermId: termId,
+          ...(classId ? { classId } : {}),
+        },
+      },
+    };
 
     const students = await prisma.student.findMany({
       where,
       include: {
-        class: true,
-        feeStructures: { include: { feeTemplate: true } },
+        feeStructures: { where: { academicTermId: termId }, include: { feeTemplate: true } },
         payments: {
-          where: { status: 'COMPLETED' },
+          where: { academicTermId: termId, status: 'COMPLETED' },
           orderBy: { paymentDate: 'desc' },
         },
         parent: { select: { fullName: true } },
@@ -318,7 +328,7 @@ class SmartFeeService {
   /**
    * Send smart fee reminders - targets parents based on payment history
    */
-  async sendSmartReminders(): Promise<{
+  async sendSmartReminders(termId: string): Promise<{
     sent: number;
     skipped: number;
   }> {
@@ -331,17 +341,22 @@ class SmartFeeService {
     const studentsWithFees = await prisma.student.findMany({
       where: {
         status: 'ACTIVE',
+        termEnrollments: { some: { academicTermId: termId } },
         feeStructures: {
           some: {
+            academicTermId: termId,
             dueDate: { lte: new Date() }, // Due or overdue
           },
         },
       },
       include: {
-        feeStructures: { include: { feeTemplate: true } },
+        feeStructures: {
+          where: { academicTermId: termId },
+          include: { feeTemplate: true },
+        },
         parent: { select: { email: true, fullName: true } },
         payments: {
-          where: { status: 'COMPLETED' },
+          where: { academicTermId: termId, status: 'COMPLETED' },
           orderBy: { paymentDate: 'desc' },
           take: 1,
         },
@@ -411,7 +426,7 @@ class SmartFeeService {
   /**
    * Identify students who may need financial aid
    */
-  async identifyFinancialAidCandidates(): Promise<Array<{
+  async identifyFinancialAidCandidates(termId: string): Promise<Array<{
     studentId: string;
     studentName: string;
     className: string;
@@ -420,11 +435,14 @@ class SmartFeeService {
     recommendation: string;
   }>> {
     const students = await prisma.student.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        termEnrollments: { some: { academicTermId: termId } },
+      },
       include: {
-        class: true,
-        feeStructures: true,
-        payments: { where: { status: 'COMPLETED' } },
+        termEnrollments: { where: { academicTermId: termId }, include: { class: true }, take: 1 },
+        feeStructures: { where: { academicTermId: termId } },
+        payments: { where: { academicTermId: termId, status: 'COMPLETED' } },
         scholarship: true,
       },
     });
@@ -443,6 +461,8 @@ class SmartFeeService {
 
       const paidPercentage = (totalPaid / totalDue) * 100;
       const paymentCount = student.payments.length;
+      const placement = student.termEnrollments[0];
+      if (!placement) continue;
 
       // Flag if paid less than 30% or no payments in 2+ months
       if (paidPercentage < 30 || (paymentCount === 0 && totalDue > 0)) {
@@ -458,7 +478,7 @@ class SmartFeeService {
         candidates.push({
           studentId: student.id,
           studentName: `${student.firstName} ${student.lastName}`,
-          className: student.class.name,
+          className: placement.class.name,
           totalOutstanding: outstanding,
           paymentHistory: `${paidPercentage.toFixed(0)}% paid (${paymentCount} payments)`,
           recommendation,

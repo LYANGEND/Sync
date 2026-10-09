@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { TeachingHubService } from '../services/teachingHubService';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 /**
  * 1. GET /api/v1/teaching-hub/learning-objectives
@@ -167,6 +169,7 @@ export const resolveAction = async (req: Request, res: Response) => {
     const updated = await TeachingHubService.resolvePendingAction(actionId, status);
     res.json({ data: updated });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[TeachingHub] resolveAction error:', error);
     res.status(500).json({ error: 'Failed to resolve action' });
   }
@@ -198,6 +201,7 @@ export const logIntervention = async (req: Request, res: Response) => {
 
     res.status(201).json({ data: intervention });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[TeachingHub] logIntervention error:', error);
     res.status(500).json({ error: 'Failed to log intervention' });
   }

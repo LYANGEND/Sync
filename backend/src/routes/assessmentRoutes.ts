@@ -5,6 +5,7 @@ import {
   getAssessmentById,
   updateAssessment,
   recordResults,
+  bulkRecordResults,
   getAssessmentResults,
   getStudentResults,
   deleteAssessment,
@@ -28,6 +29,7 @@ router.post('/bulk-delete', authorizeRole(['TEACHER', 'SUPER_ADMIN']), bulkDelet
 
 // Results Management
 router.post('/results', authorizeRole(['TEACHER', 'SUPER_ADMIN']), recordResults);
+router.post('/results/bulk', authorizeRole(['TEACHER', 'SUPER_ADMIN']), bulkRecordResults);
 router.get('/:id/results', getAssessmentResults);
 
 // Student specific

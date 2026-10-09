@@ -115,7 +115,7 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
           </button>
           {selectedAccountId && (
             <button onClick={() => { setTxForm({ ...txForm, accountId: selectedAccountId }); setShowTransactionModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <Plus size={16} /><span>New Transaction</span>
             </button>
           )}
@@ -204,7 +204,7 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
                     {transactions.length === 0 ? (
                       <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No transactions yet</td></tr>
                     ) : transactions.map(tx => (
-                      <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <tr key={tx.id} className="hover:bg-surface-hover">
                         <td className="px-4 py-3">{new Date(tx.date).toLocaleDateString()}</td>
                         <td className="px-4 py-3">
                           {tx.type === 'DISBURSEMENT' ? (
@@ -255,9 +255,9 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowAccountModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateAccount}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Account</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Create Account</button>
             </div>
           </div>
         </div>
@@ -303,9 +303,9 @@ const PettyCash = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowTransactionModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateTransaction}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Record Transaction</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Record Transaction</button>
             </div>
           </div>
         </div>

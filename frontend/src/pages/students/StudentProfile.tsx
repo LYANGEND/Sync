@@ -144,7 +144,10 @@ const StudentProfile = () => {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showScholarshipModal, setShowScholarshipModal] = useState(false);
   const [scholarships, setScholarships] = useState<Scholarship[]>([]);
+  const [academicTerms, setAcademicTerms] = useState<Array<{ id: string; name: string; isActive?: boolean }>>([]);
+  const [financeAcademicTermId, setFinanceAcademicTermId] = useState('');
   const [paymentForm, setPaymentForm] = useState({
+    academicTermId: '',
     amount: '',
     method: 'CASH',
     notes: ''
@@ -157,9 +160,12 @@ const StudentProfile = () => {
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [academicLoading, setAcademicLoading] = useState(false);
 
-  const fetchStudent = async () => {
+  const fetchStudent = async (academicTermId?: string) => {
+    setLoading(true);
     try {
-      const response = await api.get(`/students/${id}`);
+      const response = await api.get(`/students/${id}`, {
+        params: academicTermId ? { academicTermId } : undefined,
+      });
       setStudent(response.data);
     } catch (error) {
       console.error('Failed to fetch student details', error);
@@ -177,10 +183,26 @@ const StudentProfile = () => {
     }
   };
 
+  const fetchAcademicTerms = async () => {
+    try {
+      const response = await api.get('/academic-terms');
+      const terms = Array.isArray(response.data) ? response.data : [];
+      const defaultTerm = terms.find((term: any) => term.isActive) || terms[0];
+      setAcademicTerms(terms);
+      if (defaultTerm) {
+        setFinanceAcademicTermId(current => current || defaultTerm.id);
+        setPaymentForm(current => ({ ...current, academicTermId: current.academicTermId || defaultTerm.id }));
+      }
+    } catch (error) {
+      console.error('Failed to fetch academic terms', error);
+    }
+  };
+
   const fetchTeacherAcademicProfile = async (studentId: string) => {
     setAcademicLoading(true);
     try {
-      const dashboardResponse = await api.get(`/student-portal/student/${studentId}/dashboard`);
+      if (!financeAcademicTermId) return;
+      const dashboardResponse = await api.get(`/student-portal/student/${studentId}/dashboard`, { params: { termId: financeAcademicTermId } });
       const dashboard = dashboardResponse.data as AcademicDashboardData;
       setAcademicDashboard(dashboard);
 
@@ -219,22 +241,27 @@ const StudentProfile = () => {
 
   useEffect(() => {
     if (id) {
-      fetchStudent();
-      if (canViewFinance) {
-        fetchScholarships();
-      }
-      if (isTeacherView) {
-        fetchTeacherAcademicProfile(id);
-      }
+      if (canViewFinance) fetchScholarships();
+      fetchAcademicTerms();
     }
   }, [id, canViewFinance, isTeacherView]);
+
+  useEffect(() => {
+    if (id && isTeacherView && financeAcademicTermId) fetchTeacherAcademicProfile(id);
+  }, [id, isTeacherView, financeAcademicTermId]);
+
+  useEffect(() => {
+    if (id && financeAcademicTermId) {
+      fetchStudent(financeAcademicTermId);
+    }
+  }, [id, financeAcademicTermId]);
 
   const handleScholarshipUpdate = async (scholarshipId: string | null) => {
     if (!student) return;
     try {
       await api.put(`/students/${student.id}`, { scholarshipId });
       setShowScholarshipModal(false);
-      fetchStudent();
+      fetchStudent(financeAcademicTermId || undefined);
     } catch (error) {
       console.error('Failed to update scholarship', error);
       alert('Failed to update scholarship');
@@ -249,13 +276,14 @@ const StudentProfile = () => {
     try {
       await api.post('/payments', {
         studentId: student.id,
+        academicTermId: paymentForm.academicTermId,
         amount: Number(paymentForm.amount),
         method: paymentForm.method,
         notes: paymentForm.notes
       });
 
       closePaymentModal();
-      fetchStudent(); // Refresh data
+      fetchStudent(financeAcademicTermId); // Refresh the selected reporting term
     } catch (error: any) {
       console.error('Failed to record payment', error);
       alert(error.response?.data?.message || 'Failed to record payment');
@@ -266,15 +294,18 @@ const StudentProfile = () => {
 
   const closePaymentModal = () => {
     setShowPaymentModal(false);
-    setPaymentForm({ amount: '', method: 'CASH', notes: '' });
+    setPaymentForm({ academicTermId: financeAcademicTermId, amount: '', method: 'CASH', notes: '' });
   };
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!student) return;
     try {
-      await api.put(`/students/${student.id}`, { status: newStatus });
+      await api.put(`/students/${student.id}`, {
+        status: newStatus,
+        academicTermId: financeAcademicTermId,
+      });
       setShowStatusModal(false);
-      fetchStudent();
+      fetchStudent(financeAcademicTermId || undefined);
     } catch (error) {
       console.error('Failed to update status', error);
       alert('Failed to update status');
@@ -282,10 +313,12 @@ const StudentProfile = () => {
   };
 
   const handleDownloadStatement = async () => {
-    if (!student) return;
+    if (!student || !financeAcademicTermId) return;
     try {
-      const res = await api.get(`/fees/statement/${student.id}`);
-      const { school, student: studentInfo, transactions } = res.data;
+      const res = await api.get(`/fees/statement/${student.id}`, {
+        params: { academicTermId: financeAcademicTermId },
+      });
+      const { school, student: studentInfo, academicTerm, transactions } = res.data;
 
       const doc = new jsPDF();
 
@@ -321,6 +354,7 @@ const StudentProfile = () => {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Date: ${new Date().toLocaleDateString()}`, 196, 26, { align: 'right' });
+      doc.text(`Term: ${academicTerm.name}`, 196, 32, { align: 'right' });
 
       // STUDENT INFO
       const contentStartY = headerHeight + 15;
@@ -401,7 +435,7 @@ const StudentProfile = () => {
         doc.text('Account is in good standing.', 14, finalY);
       }
 
-      doc.save(`${studentInfo.name.replace(' ', '_')}_Statement.pdf`);
+      doc.save(`${studentInfo.name.replace(' ', '_')}_${academicTerm.name}_Statement.pdf`);
 
     } catch (error) {
       console.error('Failed to download statement', error);
@@ -486,7 +520,7 @@ const StudentProfile = () => {
                   </span>
                   <button
                     onClick={() => setShowStatusModal(true)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-full hover:bg-surface-hover"
                     title="Change Status"
                   >
                     <Edit2 size={14} />
@@ -496,17 +530,30 @@ const StudentProfile = () => {
             </div>
           </div>
           {canViewFinance && (
-            <div className="flex gap-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Reporting term
+                <select
+                  value={financeAcademicTermId}
+                  onChange={(event) => {
+                    setFinanceAcademicTermId(event.target.value);
+                    setPaymentForm(current => ({ ...current, academicTermId: event.target.value }));
+                  }}
+                  className="mt-1 block rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-700 outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                >
+                  {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+                </select>
+              </label>
               <button
                 onClick={handleDownloadStatement}
-                className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
+                className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg hover:bg-surface-hover transition-colors flex items-center gap-2"
               >
                 <Download size={18} />
                 Statement
               </button>
               <button
                 onClick={() => setShowPaymentModal(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
               >
                 <CreditCard size={18} />
                 Record Payment
@@ -853,7 +900,7 @@ const StudentProfile = () => {
                         </tr>
                       ) : (
                         student.feeStructures.map((fee) => (
-                          <tr key={fee.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                          <tr key={fee.id} className="hover:bg-surface-hover">
                             <td className="px-6 py-4 text-gray-900 dark:text-white font-medium">
                               {fee.feeTemplate.name}
                             </td>
@@ -895,7 +942,7 @@ const StudentProfile = () => {
                         </tr>
                       ) : (
                         student.payments.map((payment) => (
-                          <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                          <tr key={payment.id} className="hover:bg-surface-hover">
                             <td className="px-6 py-4 text-gray-900 dark:text-white">
                               {new Date(payment.paymentDate).toLocaleDateString()}
                             </td>
@@ -944,7 +991,7 @@ const StudentProfile = () => {
                     </tr>
                   ) : (
                     student.classMovements?.map((movement) => (
-                      <tr key={movement.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                      <tr key={movement.id} className="hover:bg-surface-hover">
                         <td className="px-6 py-4 text-gray-900 dark:text-white">
                           {new Date(movement.createdAt).toLocaleDateString()}
                         </td>
@@ -981,7 +1028,7 @@ const StudentProfile = () => {
                   onClick={() => handleStatusUpdate(status)}
                   className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${student.status === status
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                    : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300'
+                    : 'border-gray-200 dark:border-slate-600 hover:bg-surface-hover text-gray-700 dark:text-gray-300'
                     }`}
                 >
                   <div className="font-medium">{status}</div>
@@ -990,7 +1037,7 @@ const StudentProfile = () => {
             </div>
             <button
               onClick={() => setShowStatusModal(false)}
-              className="mt-4 w-full px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+              className="mt-4 w-full px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
             >
               Cancel
             </button>
@@ -1007,7 +1054,7 @@ const StudentProfile = () => {
                 onClick={() => handleScholarshipUpdate(null)}
                 className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${!student.scholarshipId
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                  : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300'
+                  : 'border-gray-200 dark:border-slate-600 hover:bg-surface-hover text-gray-700 dark:text-gray-300'
                   }`}
               >
                 <div className="font-medium">None</div>
@@ -1020,7 +1067,7 @@ const StudentProfile = () => {
                   onClick={() => handleScholarshipUpdate(scholarship.id)}
                   className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${student.scholarshipId === scholarship.id
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                    : 'border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300'
+                    : 'border-gray-200 dark:border-slate-600 hover:bg-surface-hover text-gray-700 dark:text-gray-300'
                     }`}
                 >
                   <div className="font-medium">{scholarship.name}</div>
@@ -1030,7 +1077,7 @@ const StudentProfile = () => {
             </div>
             <button
               onClick={() => setShowScholarshipModal(false)}
-              className="mt-4 w-full px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+              className="mt-4 w-full px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
             >
               Cancel
             </button>
@@ -1059,6 +1106,19 @@ const StudentProfile = () => {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Academic Term</label>
+                <select
+                  required
+                  value={paymentForm.academicTermId}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, academicTermId: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select term</option>
+                  {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+                </select>
               </div>
 
               <div>
@@ -1100,14 +1160,14 @@ const StudentProfile = () => {
                 <button
                   type="button"
                   onClick={closePaymentModal}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 text-slate-600 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                  className={`px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   {submitting ? 'Saving...' : 'Save Payment'}
                 </button>

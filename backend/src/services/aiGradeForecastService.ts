@@ -12,6 +12,7 @@
 
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { getClassEnrollmentsForTerm } from './studentPlacementService';
 
 export interface StudentForecast {
   studentId: string;
@@ -48,11 +49,6 @@ export async function generateGradeForecast(
   const cls = await prisma.class.findUnique({
     where: { id: classId },
     include: {
-      students: {
-        where: { status: 'ACTIVE' },
-        select: { id: true, firstName: true, lastName: true, gender: true },
-        orderBy: { lastName: 'asc' },
-      },
       academicTerm: { select: { id: true, name: true } },
     },
   });
@@ -60,7 +56,10 @@ export async function generateGradeForecast(
 
   const termId = cls.academicTerm?.id;
   const termName = cls.academicTerm?.name || null;
-  const studentIds = cls.students.map((s: any) => s.id);
+  const rosterStudents = (await getClassEnrollmentsForTerm(classId, termId, {
+    statuses: ['ACTIVE'],
+  })).map(enrollment => enrollment.student);
+  const studentIds = rosterStudents.map(student => student.id);
 
   // ── 2. Load subject name (optional filter) ───────────────────────────
   let subjectName: string | null = null;
@@ -131,7 +130,7 @@ export async function generateGradeForecast(
   }
 
   const studentDataMap: Record<string, StudentData> = {};
-  for (const s of cls.students as any[]) {
+  for (const s of rosterStudents) {
     studentDataMap[s.id] = {
       name: `${s.firstName} ${s.lastName}`,
       gender: s.gender || 'Unknown',

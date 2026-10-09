@@ -367,7 +367,17 @@ export const getBranchUsers = async (req: Request, res: Response) => {
 export const getBranchStudents = async (req: Request, res: Response) => {
     try {
         const { branchId } = req.params;
-        const { includeSecondary } = req.query;
+        const { includeSecondary, academicTermId } = req.query;
+        if (typeof academicTermId !== 'string') {
+            return res.status(400).json({ error: 'academicTermId is required' });
+        }
+        const termExists = await prisma.academicTerm.findUnique({
+            where: { id: academicTermId },
+            select: { id: true },
+        });
+        if (!termExists) {
+            return res.status(400).json({ error: 'A valid academicTermId is required' });
+        }
 
         // Get students with this as primary branch OR enrolled via junction table
         const [primaryStudents, enrolledStudents] = await Promise.all([
@@ -380,7 +390,11 @@ export const getBranchStudents = async (req: Request, res: Response) => {
                     lastName: true,
                     admissionNumber: true,
                     status: true,
-                    class: { select: { id: true, name: true } }
+                    termEnrollments: {
+                        where: { academicTermId },
+                        select: { class: { select: { id: true, name: true } } },
+                        take: 1,
+                    },
                 }
             }),
             // Students enrolled via junction table (if includeSecondary)
@@ -398,7 +412,11 @@ export const getBranchStudents = async (req: Request, res: Response) => {
                             admissionNumber: true,
                             status: true,
                             branchId: true,
-                            class: { select: { id: true, name: true } }
+                            termEnrollments: {
+                                where: { academicTermId },
+                                select: { class: { select: { id: true, name: true } } },
+                                take: 1,
+                            },
                         }
                     }
                 }
@@ -406,13 +424,20 @@ export const getBranchStudents = async (req: Request, res: Response) => {
         ]);
 
         // Combine and dedupe
-        const allStudents = [...primaryStudents];
+        const projectTermPlacement = (student: any) => {
+            const { termEnrollments, ...identity } = student;
+            return {
+                ...identity,
+                class: termEnrollments[0]?.class ?? null,
+            };
+        };
+        const allStudents: any[] = primaryStudents.map(projectTermPlacement);
         const primaryIds = new Set(primaryStudents.map(s => s.id));
 
         for (const enrollment of enrolledStudents) {
             if (!primaryIds.has(enrollment.student.id)) {
                 allStudents.push({
-                    ...enrollment.student,
+                    ...projectTermPlacement(enrollment.student),
                     _enrollment: {
                         isPrimary: enrollment.isPrimary,
                         enrollType: enrollment.enrollType,

@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { runTermWriteTransaction } from './termLifecycleService';
 
 const applyScholarshipDiscount = (amount: number, percentage?: number | null) => {
   if (!percentage || percentage <= 0) return amount;
@@ -7,34 +8,38 @@ const applyScholarshipDiscount = (amount: number, percentage?: number | null) =>
 };
 
 export const syncStudentClassFees = async (studentId: string) => {
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
-    include: {
-      class: {
-        select: {
-          id: true,
-          academicTermId: true,
+  const [student, placement] = await Promise.all([
+    prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        scholarship: {
+          select: {
+            percentage: true,
+          },
+        },
+        feeStructures: {
+          select: {
+            feeTemplateId: true,
+          },
         },
       },
-      scholarship: {
-        select: {
-          percentage: true,
-        },
+    }),
+    prisma.studentTermEnrollment.findFirst({
+      where: {
+        studentId,
+        status: 'ACTIVE',
+        academicTerm: { status: 'ACTIVE' },
       },
-      feeStructures: {
-        select: {
-          feeTemplateId: true,
-        },
-      },
-    },
-  });
+      include: { class: { select: { id: true, academicTermId: true } } },
+    }),
+  ]);
 
-  if (!student || student.status !== 'ACTIVE' || !student.class) {
+  if (!student || student.status !== 'ACTIVE' || !placement) {
     return { created: 0, skipped: 0, assignmentCount: 0 };
   }
 
   const assignments = await prisma.classFeeAssignment.findMany({
-    where: { classId: student.classId },
+    where: { classId: placement.classId },
     include: {
       feeTemplate: {
         select: {
@@ -50,7 +55,7 @@ export const syncStudentClassFees = async (studentId: string) => {
   const scholarshipPercentage = student.scholarship ? Number(student.scholarship.percentage) : 0;
 
   const dataToCreate = assignments
-    .filter(assignment => assignment.feeTemplate.academicTermId === student.class!.academicTermId)
+    .filter(assignment => assignment.feeTemplate.academicTermId === placement.academicTermId)
     .filter(assignment => !existingFeeTemplateIds.has(assignment.feeTemplateId))
     .map(assignment => ({
       studentId: student.id,
@@ -65,10 +70,14 @@ export const syncStudentClassFees = async (studentId: string) => {
     return { created: 0, skipped: assignments.length, assignmentCount: assignments.length };
   }
 
-  const result = await prisma.studentFeeStructure.createMany({
-    data: dataToCreate,
-    skipDuplicates: true,
-  });
+  const result = await runTermWriteTransaction(
+    placement.academicTermId,
+    'FINANCIAL_OBLIGATION',
+    tx => tx.studentFeeStructure.createMany({
+      data: dataToCreate,
+      skipDuplicates: true,
+    }),
+  );
 
   return {
     created: result.count,
@@ -78,7 +87,15 @@ export const syncStudentClassFees = async (studentId: string) => {
 };
 
 export const syncClassFeesToStudents = async (classId: string) => {
-  const [classAssignments, students] = await Promise.all([
+  const classRecord = await prisma.class.findUnique({
+    where: { id: classId },
+    select: { academicTermId: true },
+  });
+  if (!classRecord) {
+    return { assignmentCount: 0, studentCount: 0, created: 0 };
+  }
+
+  const [classAssignments, enrollments] = await Promise.all([
     prisma.classFeeAssignment.findMany({
       where: { classId },
       include: {
@@ -91,27 +108,26 @@ export const syncClassFeesToStudents = async (classId: string) => {
         },
       },
     }),
-    prisma.student.findMany({
-      where: { classId, status: 'ACTIVE' },
-      include: {
-        class: {
-          select: {
-            academicTermId: true,
-          },
-        },
-        scholarship: {
-          select: {
-            percentage: true,
-          },
-        },
-        feeStructures: {
-          select: {
-            feeTemplateId: true,
-          },
-        },
-      },
+    prisma.studentTermEnrollment.findMany({
+      where: { classId, academicTermId: classRecord.academicTermId, status: 'ACTIVE' },
+      select: { studentId: true },
     }),
   ]);
+  const students = await prisma.student.findMany({
+    where: { id: { in: enrollments.map(enrollment => enrollment.studentId) }, status: 'ACTIVE' },
+    include: {
+      scholarship: {
+        select: {
+          percentage: true,
+        },
+      },
+      feeStructures: {
+        select: {
+          feeTemplateId: true,
+        },
+      },
+    },
+  });
 
   if (classAssignments.length === 0 || students.length === 0) {
     return {
@@ -126,7 +142,7 @@ export const syncClassFeesToStudents = async (classId: string) => {
     const scholarshipPercentage = student.scholarship ? Number(student.scholarship.percentage) : 0;
 
     return classAssignments
-      .filter(assignment => assignment.feeTemplate.academicTermId === student.class.academicTermId)
+      .filter(assignment => assignment.feeTemplate.academicTermId === classRecord.academicTermId)
       .filter(assignment => !existingFeeTemplateIds.has(assignment.feeTemplateId))
       .map(assignment => ({
         studentId: student.id,
@@ -146,10 +162,14 @@ export const syncClassFeesToStudents = async (classId: string) => {
     };
   }
 
-  const result = await prisma.studentFeeStructure.createMany({
-    data: dataToCreate,
-    skipDuplicates: true,
-  });
+  const result = await runTermWriteTransaction(
+    classRecord.academicTermId,
+    'FINANCIAL_OBLIGATION',
+    tx => tx.studentFeeStructure.createMany({
+      data: dataToCreate,
+      skipDuplicates: true,
+    }),
+  );
 
   return {
     assignmentCount: classAssignments.length,

@@ -11,6 +11,7 @@
 
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { getStudentPlacementForTerm } from './studentPlacementService';
 
 export interface ParentLetterResponse {
   studentId: string;
@@ -26,16 +27,13 @@ export async function generateParentLetter(
   studentId: string,
   termId: string,
 ): Promise<ParentLetterResponse> {
-  // ── 1. Load student with class ───────────────────────────────────────
+  // ── 1. Load student and explicit-term placement ─────────────────────
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: {
-      class: {
-        select: { name: true, gradeLevel: true },
-      },
-    },
   });
   if (!student) throw new Error('Student not found');
+  const placement = await getStudentPlacementForTerm(studentId, termId);
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
 
   // ── 2. Load term ─────────────────────────────────────────────────────
   const term = await prisma.academicTerm.findUnique({ where: { id: termId } });
@@ -51,6 +49,7 @@ export async function generateParentLetter(
   // ── 4. Load attendance ───────────────────────────────────────────────
   // Attendance for the whole term (use term dates if available)
   const attendanceWhere: any = { studentId };
+  attendanceWhere.academicTermId = termId;
   if (term.startDate) attendanceWhere.date = { gte: new Date(term.startDate) };
   if (term.endDate) {
     attendanceWhere.date = { ...(attendanceWhere.date || {}), lte: new Date(term.endDate) };
@@ -110,7 +109,7 @@ export async function generateParentLetter(
 
 STUDENT DETAILS:
 - Name: ${student.firstName} ${student.lastName}
-- Class: ${(student as any).class?.name} (Grade ${(student as any).class?.gradeLevel})
+- Class: ${placement.class.name} (Grade ${placement.class.gradeLevel})
 - Term: ${term.name}
 - Gender: ${student.gender || 'Not specified'}
 

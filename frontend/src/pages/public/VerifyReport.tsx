@@ -11,6 +11,8 @@ interface VerificationResult {
     term?: string;
     averageScore?: number;
     schoolName?: string;
+    version?: number;
+    checksum?: string;
     generatedAt?: string;
     message?: string;
 }
@@ -141,6 +143,11 @@ const VerifyReport = () => {
                                 <ShieldCheck size={14} />
                                 <span>Authenticity Guaranteed</span>
                             </div>
+                            {result.version !== undefined && (
+                                <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                                    Published version {result.version}
+                                </p>
+                            )}
                             <p className="text-[10px] text-slate-400 mt-2">
                                 Generated on {result.generatedAt ? new Date(result.generatedAt).toLocaleDateString() : 'N/A'} via Sync School System
                             </p>

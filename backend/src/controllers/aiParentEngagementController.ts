@@ -13,13 +13,13 @@ import * as aiParentEngagement from '../services/aiParentEngagementService';
  */
 export const generateWeeklyUpdate = async (req: AuthRequest, res: Response) => {
   try {
-    const { studentId } = req.body;
+    const { studentId, academicTermId } = req.body;
 
-    if (!studentId) {
-      return res.status(400).json({ error: 'studentId is required' });
+    if (!studentId || !academicTermId) {
+      return res.status(400).json({ error: 'studentId and academicTermId are required' });
     }
 
-    const update = await aiParentEngagement.generateWeeklyUpdate(studentId);
+    const update = await aiParentEngagement.generateWeeklyUpdate(studentId, academicTermId);
 
     res.json(update);
   } catch (error: any) {
@@ -36,13 +36,13 @@ export const generateWeeklyUpdate = async (req: AuthRequest, res: Response) => {
  */
 export const detectEarlyWarnings = async (req: AuthRequest, res: Response) => {
   try {
-    const { studentId } = req.body;
+    const { studentId, academicTermId } = req.body;
 
-    if (!studentId) {
-      return res.status(400).json({ error: 'studentId is required' });
+    if (!studentId || !academicTermId) {
+      return res.status(400).json({ error: 'studentId and academicTermId are required' });
     }
 
-    const warnings = await aiParentEngagement.detectEarlyWarnings(studentId);
+    const warnings = await aiParentEngagement.detectEarlyWarnings(studentId, academicTermId);
 
     res.json(warnings);
   } catch (error: any) {
@@ -59,14 +59,15 @@ export const detectEarlyWarnings = async (req: AuthRequest, res: Response) => {
  */
 export const suggestInterventions = async (req: AuthRequest, res: Response) => {
   try {
-    const { studentId, issueType } = req.body;
+    const { studentId, academicTermId, issueType } = req.body;
 
-    if (!studentId) {
-      return res.status(400).json({ error: 'studentId is required' });
+    if (!studentId || !academicTermId) {
+      return res.status(400).json({ error: 'studentId and academicTermId are required' });
     }
 
     const interventions = await aiParentEngagement.suggestInterventions(
       studentId,
+      academicTermId,
       issueType
     );
 

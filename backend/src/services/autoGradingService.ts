@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { runTermWriteTransaction } from './termLifecycleService';
 
 interface GradingResult {
   questionId: string;
@@ -98,13 +99,23 @@ class AutoGradingService {
     // Calculate total score
     const totalScore = results.reduce((sum, r) => sum + r.score, 0);
 
-    // Update submission
-    await prisma.assessmentSubmission.update({
-      where: { id: submissionId },
-      data: {
-        score: totalScore,
-        status: 'GRADED',
-      },
+    // Update submission only if it still belongs to the assessment term we graded.
+    await runTermWriteTransaction(submission.assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
+      const currentSubmission = await tx.assessmentSubmission.findUnique({
+        where: { id: submissionId },
+        select: { assessment: { select: { termId: true } } },
+      });
+      if (!currentSubmission
+        || currentSubmission.assessment.termId !== submission.assessment.termId) {
+        throw new Error('Assessment submission changed while it was being graded');
+      }
+      await tx.assessmentSubmission.update({
+        where: { id: submissionId },
+        data: {
+          score: totalScore,
+          status: 'GRADED',
+        },
+      });
     });
 
     return {

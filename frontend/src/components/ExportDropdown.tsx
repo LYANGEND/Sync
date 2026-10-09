@@ -152,7 +152,7 @@ const ExportDropdown: React.FC<ExportDropdownProps> = ({ data, columns, filename
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50 overflow-hidden">
                     <button
                         onClick={exportToCSV}
-                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-gray-50 transition-colors"
+                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-surface-hover transition-colors"
                     >
                         <FileText size={18} className="text-green-600" />
                         <div>
@@ -162,7 +162,7 @@ const ExportDropdown: React.FC<ExportDropdownProps> = ({ data, columns, filename
                     </button>
                     <button
                         onClick={exportToExcel}
-                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-surface-hover transition-colors border-t border-gray-100"
                     >
                         <FileSpreadsheet size={18} className="text-emerald-600" />
                         <div>
@@ -172,7 +172,7 @@ const ExportDropdown: React.FC<ExportDropdownProps> = ({ data, columns, filename
                     </button>
                     <button
                         onClick={exportToPDF}
-                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                        className="w-full flex items-center space-x-3 px-4 py-3 text-left text-gray-700 hover:bg-surface-hover transition-colors border-t border-gray-100"
                     >
                         <FileText size={18} className="text-red-600" />
                         <div>

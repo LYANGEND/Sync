@@ -218,7 +218,7 @@ const Header = ({ isSidebarCollapsed }: HeaderProps) => {
               hapticLight();
               setShowSearch(true);
             }}
-            className="md:hidden p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+            className="md:hidden p-2.5 text-gray-500 dark:text-gray-400 hover:bg-surface-hover rounded-xl transition-colors"
           >
             <Search size={20} />
           </button>
@@ -240,7 +240,7 @@ const Header = ({ isSidebarCollapsed }: HeaderProps) => {
           <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2.5 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+              className="relative p-2.5 text-gray-500 hover:bg-surface-hover rounded-xl transition-colors"
             >
               <Bell size={20} />
               {unreadCount > 0 && (
@@ -374,7 +374,7 @@ const Header = ({ isSidebarCollapsed }: HeaderProps) => {
                       notifications.map(notification => (
                         <div
                           key={notification.id}
-                          className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
+                          className={`p-4 border-b border-gray-50 hover:bg-surface-hover transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
                         >
                           <div className="flex justify-between items-start">
                             <h4 className={`text-sm font-medium ${!notification.isRead ? 'text-gray-900' : 'text-gray-600'}`}>
@@ -414,7 +414,7 @@ const Header = ({ isSidebarCollapsed }: HeaderProps) => {
 
           {/* Profile - Desktop */}
           <div
-            className="hidden md:flex items-center gap-3 pl-4 border-l border-gray-200 cursor-pointer hover:bg-gray-50 rounded-xl py-2 pr-3 -mr-3 transition-colors"
+            className="hidden md:flex items-center gap-3 pl-4 border-l border-gray-200 cursor-pointer hover:bg-surface-hover rounded-xl py-2 pr-3 -mr-3 transition-colors"
             onClick={() => window.location.href = '/profile'}
           >
             <div className="text-right">

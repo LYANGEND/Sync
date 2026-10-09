@@ -8,7 +8,8 @@ import {
   getMyChildren,
   bulkCreateStudents,
   bulkDeleteStudents,
-  getStudentProfile
+  getStudentProfile,
+  checkStudentDuplicates
 } from '../controllers/studentController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -20,6 +21,7 @@ router.get('/profile/me', authorizeRole(['STUDENT']), getStudentProfile);
 router.get('/my-children', authorizeRole(['PARENT']), getMyChildren);
 router.get('/', getStudents);
 router.post('/bulk', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), bulkCreateStudents);
+router.post('/duplicate-check', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), checkStudentDuplicates);
 router.post('/bulk-delete', authorizeRole(['SUPER_ADMIN']), bulkDeleteStudents);
 router.get('/:id', getStudentById);
 router.post('/', authorizeRole(['SUPER_ADMIN', 'SECRETARY']), createStudent);

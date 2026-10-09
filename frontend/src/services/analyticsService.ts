@@ -68,17 +68,17 @@ export interface SchoolHealth {
 }
 
 const analyticsService = {
-  getDashboard: (period?: number) =>
-    api.get<AnalyticsDashboard>('/analytics/dashboard', { params: { period } }).then(r => r.data),
+  getDashboard: (academicTermId: string, period?: number) =>
+    api.get<AnalyticsDashboard>('/analytics/dashboard', { params: { academicTermId, period } }).then(r => r.data),
 
-  getRevenue: (params?: { startDate?: string; endDate?: string; groupBy?: string }) =>
-    api.get<RevenueAnalytics>('/analytics/revenue', { params }).then(r => r.data),
+  getRevenue: (academicTermId: string, params?: { startDate?: string; endDate?: string; groupBy?: string }) =>
+    api.get<RevenueAnalytics>('/analytics/revenue', { params: { ...params, academicTermId } }).then(r => r.data),
 
-  getAttendance: () =>
-    api.get<AttendanceAnalytics | AttendanceAnalyticsUnavailable>('/analytics/attendance').then(r => r.data),
+  getAttendance: (academicTermId: string) =>
+    api.get<AttendanceAnalytics | AttendanceAnalyticsUnavailable>('/analytics/attendance', { params: { academicTermId } }).then(r => r.data),
 
-  getSchoolHealth: () =>
-    api.get<SchoolHealth>('/analytics/school-health').then(r => r.data),
+  getSchoolHealth: (academicTermId: string) =>
+    api.get<SchoolHealth>('/analytics/school-health', { params: { academicTermId } }).then(r => r.data),
 };
 
 export default analyticsService;

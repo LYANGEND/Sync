@@ -10,6 +10,7 @@ interface BulkImportModalProps {
     templateFields: string[];
     onSuccess: () => void;
     instructions?: string[];
+    additionalFields?: Record<string, unknown>;
 }
 
 const BulkImportModal: React.FC<BulkImportModalProps> = ({
@@ -20,6 +21,7 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
     templateFields,
     onSuccess,
     instructions = [],
+    additionalFields = {},
 }) => {
     const [file, setFile] = useState<File | null>(null);
     const [importing, setImporting] = useState(false);
@@ -82,7 +84,7 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
 
         try {
             const text = await file.text();
-            const data = parseCSV(text);
+            const data = parseCSV(text).map(row => ({ ...row, ...additionalFields }));
 
             const response = await api.post(apiEndpoint, data);
 
@@ -176,7 +178,7 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                         <div className="flex justify-end space-x-3 pt-4 border-t">
                             <button
                                 onClick={onClose}
-                                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-surface-hover transition-colors"
                                 disabled={importing}
                             >
                                 Cancel
@@ -184,7 +186,7 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                             <button
                                 onClick={handleImport}
                                 disabled={!file || importing}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center"
+                                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center"
                             >
                                 {importing ? (
                                     <>

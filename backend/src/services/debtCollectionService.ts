@@ -1,9 +1,15 @@
 import { prisma } from '../utils/prisma';
+import { Prisma } from '@prisma/client';
 import { sendEmail } from './emailService';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
 import { logCommunication, updateCommunicationLogStatus } from './communicationLogService';
 import aiService from './aiService';
+import {
+  getActiveTerm,
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from './termLifecycleService';
 
 // ========================================
 // DEBTOR SEGMENTATION
@@ -33,18 +39,26 @@ export interface DebtorProfile {
 /**
  * Segment all debtors by analyzing their payment behaviour
  */
-export async function segmentDebtors(options?: {
+export async function segmentDebtors(options: {
+  academicTermId: string;
   minAmount?: number;
   minDaysOverdue?: number;
   gradeLevels?: number[];
 }): Promise<DebtorProfile[]> {
   const students = await prisma.student.findMany({
-    where: { status: 'ACTIVE' },
+    where: {
+      status: 'ACTIVE',
+      termEnrollments: { some: { academicTermId: options.academicTermId } },
+    },
     include: {
-      class: true,
-      feeStructures: { include: { feeTemplate: true } },
+      termEnrollments: {
+        where: { academicTermId: options.academicTermId },
+        include: { class: true },
+        take: 1,
+      },
+      feeStructures: { where: { academicTermId: options?.academicTermId }, include: { feeTemplate: true } },
       payments: {
-        where: { status: 'COMPLETED' },
+        where: { academicTermId: options?.academicTermId, status: 'COMPLETED' },
         orderBy: { paymentDate: 'desc' },
       },
       parent: { select: { fullName: true, email: true } },
@@ -60,6 +74,8 @@ export async function segmentDebtors(options?: {
   const debtors: DebtorProfile[] = [];
 
   for (const student of students) {
+    const reportingClass = student.termEnrollments[0]?.class;
+    if (!reportingClass) continue;
     const totalDue = student.feeStructures.reduce((sum, f) => sum + Number(f.amountDue), 0);
     const totalPaid = student.feeStructures.reduce((sum, f) => sum + Number(f.amountPaid), 0);
     const amountOwed = totalDue - totalPaid;
@@ -76,7 +92,7 @@ export async function segmentDebtors(options?: {
       : 0;
 
     if (options?.minDaysOverdue && daysOverdue < options.minDaysOverdue) continue;
-    if (options?.gradeLevels?.length && !options.gradeLevels.includes(student.class.gradeLevel)) continue;
+    if (options?.gradeLevels?.length && !options.gradeLevels.includes(reportingClass.gradeLevel)) continue;
 
     const paymentRate = totalDue > 0 ? (totalPaid / totalDue) * 100 : 0;
     const paymentCount = student.payments.length;
@@ -114,8 +130,8 @@ export async function segmentDebtors(options?: {
     debtors.push({
       studentId: student.id,
       studentName: `${student.firstName} ${student.lastName}`,
-      className: student.class.name,
-      gradeLevel: student.class.gradeLevel,
+      className: reportingClass.name,
+      gradeLevel: reportingClass.gradeLevel,
       parentName: student.parent?.fullName || student.guardianName || null,
       parentEmail: student.parent?.email || student.guardianEmail || null,
       parentPhone: student.guardianPhone || null,
@@ -315,10 +331,45 @@ ${paymentPlanNote}
 // CAMPAIGN EXECUTION
 // ========================================
 
+type CampaignMessageReservation = Omit<
+  Prisma.CampaignMessageUncheckedCreateInput,
+  'id' | 'academicTermId' | 'status' | 'sentAt' | 'createdAt' | 'paidAmount' | 'paidAt' | 'errorMessage'
+>;
+
+const reserveCampaignMessage = async (
+  academicTermId: string,
+  data: CampaignMessageReservation,
+) => runTermWriteTransaction(academicTermId, 'FINANCIAL_OBLIGATION', tx => (
+  tx.campaignMessage.create({
+    data: {
+      ...data,
+      academicTermId,
+      status: 'PENDING',
+    },
+    select: { id: true },
+  })
+));
+
+const finalizeCampaignMessage = async (
+  academicTermId: string,
+  messageId: string,
+  success: boolean,
+  errorMessage?: string,
+) => runTermWriteTransaction(academicTermId, 'FINANCIAL_RECEIPT', tx => (
+  tx.campaignMessage.update({
+    where: { id: messageId },
+    data: {
+      status: success ? 'SENT' : 'FAILED',
+      errorMessage: success ? null : (errorMessage || 'Delivery failed'),
+    },
+  })
+));
+
 /**
  * Create a new debt collection campaign
  */
 export async function createCampaign(data: {
+  academicTermId: string;
   name: string;
   description?: string;
   minAmountOwed?: number;
@@ -327,18 +378,20 @@ export async function createCampaign(data: {
   targetGradeLevels?: number[];
   createdById: string;
 }) {
-  const campaign = await (prisma as any).debtCollectionCampaign.create({
-    data: {
-      name: data.name,
-      description: data.description || null,
-      minAmountOwed: data.minAmountOwed || null,
-      minDaysOverdue: data.minDaysOverdue || null,
-      targetSegments: data.targetSegments || [],
-      targetGradeLevels: data.targetGradeLevels || [],
-      createdById: data.createdById,
-    },
-  });
-  return campaign;
+  return runTermWriteTransaction(data.academicTermId, 'FINANCIAL_OBLIGATION', tx => (
+    tx.debtCollectionCampaign.create({
+      data: {
+        name: data.name,
+        academicTermId: data.academicTermId,
+        description: data.description || null,
+        minAmountOwed: data.minAmountOwed || null,
+        minDaysOverdue: data.minDaysOverdue || null,
+        targetSegments: data.targetSegments || [],
+        targetGradeLevels: data.targetGradeLevels || [],
+        createdById: data.createdById,
+      },
+    })
+  ));
 }
 
 /**
@@ -349,7 +402,7 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   failed: number;
   skipped: number;
 }> {
-  const campaign = await (prisma as any).debtCollectionCampaign.findUnique({
+  const campaign = await prisma.debtCollectionCampaign.findUnique({
     where: { id: campaignId },
   });
   if (!campaign) throw new Error('Campaign not found');
@@ -360,6 +413,7 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
 
   // Get debtors matching campaign criteria
   const debtors = await segmentDebtors({
+    academicTermId: campaign.academicTermId,
     minAmount: campaign.minAmountOwed ? Number(campaign.minAmountOwed) : undefined,
     minDaysOverdue: campaign.minDaysOverdue || undefined,
     gradeLevels: campaign.targetGradeLevels?.length ? campaign.targetGradeLevels : undefined,
@@ -375,10 +429,18 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   let failed = 0;
   let skipped = 0;
 
-  // Mark campaign as active
-  await (prisma as any).debtCollectionCampaign.update({
-    where: { id: campaignId },
-    data: { status: 'ACTIVE', startedAt: new Date(), totalTargeted: filtered.length },
+  await runTermWriteTransaction(campaign.academicTermId, 'FINANCIAL_OBLIGATION', async tx => {
+    const current = await tx.debtCollectionCampaign.findUnique({
+      where: { id: campaignId },
+      select: { academicTermId: true },
+    });
+    if (!current || current.academicTermId !== campaign.academicTermId) {
+      throw new Error('Campaign changed while execution was being prepared');
+    }
+    await tx.debtCollectionCampaign.update({
+      where: { id: campaignId },
+      data: { status: 'ACTIVE', startedAt: new Date(), totalTargeted: filtered.length },
+    });
   });
 
   for (const debtor of filtered) {
@@ -396,11 +458,31 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
       if (channel === 'EMAIL' && !debtor.parentEmail) { skipped++; continue; }
       if ((channel === 'SMS' || channel === 'WHATSAPP') && !debtor.parentPhone) { skipped++; continue; }
 
+      let reservationId: string | undefined;
       try {
         // Generate message (AI or template)
         const msg = useAI
           ? await generatePersonalizedMessage(debtor, channel, schoolName)
           : generateTemplateMessage(debtor, channel, schoolName);
+
+        const reservation = await reserveCampaignMessage(campaign.academicTermId, {
+          campaignId,
+          studentId: debtor.studentId,
+          studentName: debtor.studentName,
+          parentName: debtor.parentName,
+          parentEmail: debtor.parentEmail,
+          parentPhone: debtor.parentPhone,
+          channel,
+          escalationLevel: debtor.escalationLevel,
+          subject: msg.subject || null,
+          messageContent: msg.message,
+          aiGenerated: useAI,
+          amountOwed: debtor.amountOwed,
+          daysOverdue: debtor.daysOverdue,
+          segment: debtor.segment,
+          paymentLikelihood: debtor.paymentLikelihood,
+        });
+        reservationId = reservation.id;
 
         // Send via appropriate channel
         let success = false;
@@ -440,32 +522,22 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
           });
         }
 
-        // Record campaign message
-        await (prisma as any).campaignMessage.create({
-          data: {
-            campaignId,
-            studentId: debtor.studentId,
-            studentName: debtor.studentName,
-            parentName: debtor.parentName,
-            parentEmail: debtor.parentEmail,
-            parentPhone: debtor.parentPhone,
-            channel,
-            escalationLevel: debtor.escalationLevel,
-            subject: msg.subject || null,
-            messageContent: msg.message,
-            aiGenerated: useAI,
-            amountOwed: debtor.amountOwed,
-            daysOverdue: debtor.daysOverdue,
-            segment: debtor.segment,
-            paymentLikelihood: debtor.paymentLikelihood,
-            status: success ? 'SENT' : 'FAILED',
-            errorMessage: success ? null : 'Delivery failed',
-          },
-        });
+        await finalizeCampaignMessage(campaign.academicTermId, reservationId, success);
 
         if (success) sent++;
         else failed++;
       } catch (error: any) {
+        if (reservationId) {
+          await finalizeCampaignMessage(
+            campaign.academicTermId,
+            reservationId,
+            false,
+            error.message,
+          ).catch(finalizeError => {
+            console.error('Could not finalize failed campaign delivery:', finalizeError);
+          });
+        }
+        if (error instanceof TermLifecycleError) throw error;
         console.error(`Campaign message failed for ${debtor.studentName}:`, error.message);
         failed++;
       }
@@ -473,14 +545,16 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
   }
 
   // Update campaign results
-  await (prisma as any).debtCollectionCampaign.update({
-    where: { id: campaignId },
-    data: {
-      status: 'COMPLETED',
-      completedAt: new Date(),
-      totalContacted: sent,
-    },
-  });
+  await runTermWriteTransaction(campaign.academicTermId, 'FINANCIAL_RECEIPT', tx => (
+    tx.debtCollectionCampaign.update({
+      where: { id: campaignId },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        totalContacted: sent,
+      },
+    })
+  ));
 
   return { sent, failed, skipped };
 }
@@ -489,17 +563,21 @@ export async function executeCampaign(campaignId: string, sentById: string): Pro
  * Quick send — no campaign, just send reminders to specific debtors
  */
 export async function sendQuickReminders(options: {
+  academicTermId: string;
   studentIds?: string[];
   segments?: string[];
   minDaysOverdue?: number;
   channels: ('EMAIL' | 'SMS' | 'WHATSAPP')[];
   sentById: string;
 }): Promise<{ sent: number; failed: number }> {
+  await runTermWriteTransaction(options.academicTermId, 'FINANCIAL_OBLIGATION', async () => undefined);
+
   const settings = await prisma.schoolSettings.findFirst() as any;
   const schoolName = settings?.schoolName || 'School';
   const useAI = settings?.aiPersonalizedMessages !== false;
 
   let debtors = await segmentDebtors({
+    academicTermId: options.academicTermId,
     minDaysOverdue: options.minDaysOverdue,
   });
 
@@ -520,10 +598,30 @@ export async function sendQuickReminders(options: {
       if (channel === 'EMAIL' && !debtor.parentEmail) continue;
       if ((channel === 'SMS' || channel === 'WHATSAPP') && !debtor.parentPhone) continue;
 
+      let reservationId: string | undefined;
       try {
         const msg = useAI
           ? await generatePersonalizedMessage(debtor, channel, schoolName)
           : generateTemplateMessage(debtor, channel, schoolName);
+
+        const reservation = await reserveCampaignMessage(options.academicTermId, {
+          campaignId: null,
+          studentId: debtor.studentId,
+          studentName: debtor.studentName,
+          parentName: debtor.parentName,
+          parentEmail: debtor.parentEmail,
+          parentPhone: debtor.parentPhone,
+          channel,
+          escalationLevel: debtor.escalationLevel,
+          subject: msg.subject || null,
+          messageContent: msg.message,
+          aiGenerated: useAI,
+          amountOwed: debtor.amountOwed,
+          daysOverdue: debtor.daysOverdue,
+          segment: debtor.segment,
+          paymentLikelihood: debtor.paymentLikelihood,
+        });
+        reservationId = reservation.id;
 
         let success = false;
 
@@ -543,9 +641,23 @@ export async function sendQuickReminders(options: {
           await logCommunication({ channel: 'WHATSAPP', status: success ? 'SENT' : 'FAILED', recipientPhone: debtor.parentPhone, recipientName: debtor.parentName || undefined, message: msg.message, source: 'quick_reminder', sentById: options.sentById });
         }
 
+        await finalizeCampaignMessage(options.academicTermId, reservationId, success);
         if (success) sent++;
         else failed++;
-      } catch { failed++; }
+      } catch (error: any) {
+        if (reservationId) {
+          await finalizeCampaignMessage(
+            options.academicTermId,
+            reservationId,
+            false,
+            error.message,
+          ).catch(finalizeError => {
+            console.error('Could not finalize failed quick reminder:', finalizeError);
+          });
+        }
+        if (error instanceof TermLifecycleError) throw error;
+        failed++;
+      }
     }
   }
 
@@ -559,8 +671,8 @@ export async function sendQuickReminders(options: {
 /**
  * Get collection effectiveness — how many paid after being contacted
  */
-export async function getCampaignAnalytics(campaignId?: string) {
-  const where: any = campaignId ? { campaignId } : {};
+export async function getCampaignAnalytics(academicTermId: string, campaignId?: string) {
+  const where: any = { academicTermId, ...(campaignId ? { campaignId } : {}) };
 
   const messages = await (prisma as any).campaignMessage.findMany({ where });
   const totalSent = messages.filter((m: any) => m.status === 'SENT').length;
@@ -606,54 +718,59 @@ export async function getCampaignAnalytics(campaignId?: string) {
 /**
  * Auto-detect payments from debtors who were contacted and mark as PAID
  */
-export async function reconcileCampaignPayments(): Promise<number> {
-  // Get all SENT campaign messages that haven't been marked paid
-  const pendingMessages = await (prisma as any).campaignMessage.findMany({
-    where: { status: 'SENT' },
-  });
-
-  let reconciled = 0;
-
-  for (const msg of pendingMessages) {
-    // Check if any payment was made by this student after the message was sent
-    const payment = await prisma.payment.findFirst({
-      where: {
-        studentId: msg.studentId,
-        status: 'COMPLETED',
-        paymentDate: { gte: msg.sentAt },
-      },
-      orderBy: { paymentDate: 'desc' },
+export async function reconcileCampaignPayments(academicTermId: string): Promise<number> {
+  return runTermWriteTransaction(academicTermId, 'FINANCIAL_RECEIPT', async tx => {
+    const pendingMessages = await tx.campaignMessage.findMany({
+      where: { academicTermId, status: 'SENT' },
     });
 
-    if (payment) {
-      await (prisma as any).campaignMessage.update({
-        where: { id: msg.id },
-        data: {
-          status: 'PAID',
-          paidAmount: payment.amount,
-          paidAt: payment.paymentDate,
+    let reconciled = 0;
+    for (const message of pendingMessages) {
+      const payment = await tx.payment.findFirst({
+        where: {
+          studentId: message.studentId,
+          academicTermId,
+          status: 'COMPLETED',
+          paymentDate: { gte: message.sentAt },
         },
+        orderBy: { paymentDate: 'desc' },
       });
-      reconciled++;
+
+      if (payment) {
+        await tx.campaignMessage.update({
+          where: { id: message.id },
+          data: {
+            status: 'PAID',
+            paidAmount: payment.amount,
+            paidAt: payment.paymentDate,
+          },
+        });
+        reconciled++;
+      }
     }
-  }
 
-  // Also update campaign totals
-  const campaigns = await (prisma as any).debtCollectionCampaign.findMany({
-    where: { status: { in: ['ACTIVE', 'COMPLETED'] } },
-    include: { messages: { where: { status: 'PAID' } } },
-  });
-
-  for (const campaign of campaigns) {
-    const totalResponded = campaign.messages.length;
-    const amountCollected = campaign.messages.reduce((sum: number, m: any) => sum + Number(m.paidAmount || 0), 0);
-    await (prisma as any).debtCollectionCampaign.update({
-      where: { id: campaign.id },
-      data: { totalResponded, amountCollected },
+    const campaigns = await tx.debtCollectionCampaign.findMany({
+      where: {
+        academicTermId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      include: { messages: { where: { status: 'PAID' } } },
     });
-  }
 
-  return reconciled;
+    for (const campaign of campaigns) {
+      const totalResponded = campaign.messages.length;
+      const amountCollected = campaign.messages.reduce(
+        (sum, message) => sum + Number(message.paidAmount || 0),
+        0,
+      );
+      await tx.debtCollectionCampaign.update({
+        where: { id: campaign.id },
+        data: { totalResponded, amountCollected },
+      });
+    }
+
+    return reconciled;
+  });
 }
 
 // ========================================
@@ -672,7 +789,14 @@ export async function runScheduledCollection(): Promise<void> {
 
   console.log('[Debt Collection] Running scheduled collection check...');
 
+  const activeTerm = await getActiveTerm();
+  if (!activeTerm) {
+    console.log('[Debt Collection] No active academic term, skipping...');
+    return;
+  }
+
   const debtors = await segmentDebtors({
+    academicTermId: activeTerm.id,
     minAmount: settings.debtCollectionMinAmount ? Number(settings.debtCollectionMinAmount) : 0,
   });
 
@@ -686,18 +810,6 @@ export async function runScheduledCollection(): Promise<void> {
   let sent = 0;
 
   for (const debtor of debtors) {
-    // Check if we already sent a message at this escalation level recently (within the frequency period)
-    const recentMessage = await (prisma as any).campaignMessage.findFirst({
-      where: {
-        studentId: debtor.studentId,
-        escalationLevel: debtor.escalationLevel,
-        sentAt: { gte: new Date(Date.now() - (settings.overdueReminderFrequency || 7) * 24 * 60 * 60 * 1000) },
-      },
-      orderBy: { sentAt: 'desc' },
-    });
-
-    if (recentMessage) continue; // Already sent at this level recently
-
     // Determine channel for this escalation level
     const channel = getChannelForEscalation(debtor.escalationLevel, settings);
     if (!channel) continue;
@@ -710,10 +822,59 @@ export async function runScheduledCollection(): Promise<void> {
       if (ch === 'EMAIL' && !debtor.parentEmail) continue;
       if ((ch === 'SMS' || ch === 'WHATSAPP') && !debtor.parentPhone) continue;
 
+      let reservationId: string | undefined;
       try {
         const msg = useAI
           ? await generatePersonalizedMessage(debtor, ch, schoolName)
           : generateTemplateMessage(debtor, ch, schoolName);
+
+        const reservation = await runTermWriteTransaction(
+          activeTerm.id,
+          'FINANCIAL_OBLIGATION',
+          async tx => {
+            const recentMessage = await tx.campaignMessage.findFirst({
+              where: {
+                studentId: debtor.studentId,
+                academicTermId: activeTerm.id,
+                escalationLevel: debtor.escalationLevel,
+                channel: ch,
+                sentAt: {
+                  gte: new Date(
+                    Date.now()
+                    - (settings.overdueReminderFrequency || 7) * 24 * 60 * 60 * 1000,
+                  ),
+                },
+              },
+              select: { id: true },
+            });
+            if (recentMessage) return null;
+
+            return tx.campaignMessage.create({
+              data: {
+                campaignId: null,
+                academicTermId: activeTerm.id,
+                studentId: debtor.studentId,
+                studentName: debtor.studentName,
+                parentName: debtor.parentName,
+                parentEmail: debtor.parentEmail,
+                parentPhone: debtor.parentPhone,
+                channel: ch,
+                escalationLevel: debtor.escalationLevel,
+                subject: msg.subject || null,
+                messageContent: msg.message,
+                aiGenerated: useAI,
+                amountOwed: debtor.amountOwed,
+                daysOverdue: debtor.daysOverdue,
+                segment: debtor.segment,
+                paymentLikelihood: debtor.paymentLikelihood,
+                status: 'PENDING',
+              },
+              select: { id: true },
+            });
+          },
+        );
+        if (!reservation) continue;
+        reservationId = reservation.id;
 
         let success = false;
         if (ch === 'EMAIL' && debtor.parentEmail) {
@@ -731,31 +892,20 @@ export async function runScheduledCollection(): Promise<void> {
           await logCommunication({ channel: 'WHATSAPP', status: success ? 'SENT' : 'FAILED', recipientPhone: debtor.parentPhone, recipientName: debtor.parentName || undefined, message: msg.message, source: 'scheduled_collection' });
         }
 
-        if (success) {
-          // Record as campaign message for tracking
-          await (prisma as any).campaignMessage.create({
-            data: {
-              campaignId: null, // No campaign, scheduled
-              studentId: debtor.studentId,
-              studentName: debtor.studentName,
-              parentName: debtor.parentName,
-              parentEmail: debtor.parentEmail,
-              parentPhone: debtor.parentPhone,
-              channel: ch,
-              escalationLevel: debtor.escalationLevel,
-              subject: msg.subject || null,
-              messageContent: msg.message,
-              aiGenerated: useAI,
-              amountOwed: debtor.amountOwed,
-              daysOverdue: debtor.daysOverdue,
-              segment: debtor.segment,
-              paymentLikelihood: debtor.paymentLikelihood,
-              status: 'SENT',
-            },
-          });
-          sent++;
-        }
+        await finalizeCampaignMessage(activeTerm.id, reservationId, success);
+        if (success) sent++;
       } catch (error: any) {
+        if (reservationId) {
+          await finalizeCampaignMessage(
+            activeTerm.id,
+            reservationId,
+            false,
+            error.message,
+          ).catch(finalizeError => {
+            console.error('[Debt Collection] Could not finalize failed delivery:', finalizeError);
+          });
+        }
+        if (error instanceof TermLifecycleError) throw error;
         console.error(`[Debt Collection] Failed for ${debtor.studentName}:`, error.message);
       }
     }

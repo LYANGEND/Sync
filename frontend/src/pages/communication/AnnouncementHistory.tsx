@@ -248,7 +248,7 @@ const AnnouncementHistory = () => {
                   ) : (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleAcknowledge(announcement.id); }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors"
                     >
                       <CheckCircle size={16} /> Acknowledge
                     </button>
@@ -271,14 +271,14 @@ const AnnouncementHistory = () => {
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronRight size={16} />
             </button>

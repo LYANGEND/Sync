@@ -317,14 +317,14 @@ const ChatInterface = () => {
           <div className="flex gap-1">
             <button
               onClick={() => { setShowGroupForm(true); setShowNewChat(false); }}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-full text-green-600"
+              className="p-2 hover:bg-surface-hover rounded-full text-green-600"
               title="New group chat"
             >
               <Users size={18} />
             </button>
             <button
               onClick={() => { setShowNewChat(true); setShowGroupForm(false); }}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-full text-blue-600"
+              className="p-2 hover:bg-surface-hover rounded-full text-blue-600"
               title="New chat"
             >
               <Plus size={20} />
@@ -355,7 +355,7 @@ const ChatInterface = () => {
               <div key={u.id} onClick={() => {
                 if (!groupMembers.find(m => m.id === u.id)) setGroupMembers([...groupMembers, u]);
                 setSearchQuery(''); setSearchResults([]);
-              }} className="text-sm p-2 hover:bg-gray-50 dark:hover:bg-slate-700 rounded cursor-pointer flex items-center gap-2 dark:text-white">
+              }} className="text-sm p-2 hover:bg-surface-hover rounded cursor-pointer flex items-center gap-2 dark:text-white">
                 <div className="w-6 h-6 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-xs text-blue-600 dark:text-blue-400">{u.fullName.charAt(0)}</div>
                 {u.fullName} <span className="text-xs text-gray-400">({u.role})</span>
               </div>
@@ -390,7 +390,7 @@ const ChatInterface = () => {
             </div>
             <div className="space-y-2">
               {searchResults.map(user => (
-                <div key={user.id} onClick={() => startNewChat(user)} className="flex items-center gap-3 p-2 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-lg cursor-pointer">
+                <div key={user.id} onClick={() => startNewChat(user)} className="flex items-center gap-3 p-2 hover:bg-surface-hover rounded-lg cursor-pointer">
                   <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-medium">
                     {user.fullName.charAt(0)}
                   </div>
@@ -417,7 +417,7 @@ const ChatInterface = () => {
                 <div
                   key={conv.id}
                   onClick={() => setSelectedConversation(conv)}
-                  className={`p-4 border-b border-gray-50 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors ${
+                  className={`p-4 border-b border-gray-50 dark:border-slate-700 cursor-pointer hover:bg-surface-hover transition-colors ${
                     isActive ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-600' : ''
                   }`}
                 >
@@ -551,7 +551,7 @@ const ChatInterface = () => {
                 <button
                   type="submit"
                   disabled={!newMessage.trim()}
-                  className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-slate-600 transition-colors"
+                  className="p-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-gray-300 dark:disabled:bg-slate-600 transition-colors"
                 >
                   <Send size={20} />
                 </button>

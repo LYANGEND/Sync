@@ -67,6 +67,10 @@ function resolveIncomeAccount(feeTemplateName?: string): string {
   return FEE_INCOME_ACCOUNTS.default;
 }
 
+const postingExists = async (postingKey: string): Promise<boolean> => (
+  (await prisma.journalEntry.count({ where: { postingKey } })) > 0
+);
+
 // ========================================
 // PAYMENT → JOURNAL ENTRY
 // ========================================
@@ -75,70 +79,55 @@ function resolveIncomeAccount(feeTemplateName?: string): string {
  * Create journal entries when a fee payment is recorded.
  * 
  * DEBIT:  1000 Cash at Bank (asset increases)
- * CREDIT: 4xxx Income account (revenue recognized)
- * 
- * If payment is allocated to specific fee structures, creates
- * separate lines per fee category. Otherwise uses a single income line.
+ * CREDIT: 2400 Advance Fees Received
+ *
+ * Allocation events separately reclassify source credit to receivable/revenue.
+ * This keeps later allocations auditable without rewriting the receipt journal.
  */
-export async function onPaymentCreated(paymentId: string, userId?: string): Promise<void> {
+export async function onPaymentCreated(
+  paymentId: string,
+  userId?: string,
+  options: { allowSuperseded?: boolean } = {},
+): Promise<void> {
   try {
+    const postingKey = `payment:${paymentId}:receipt`;
+    if (await postingExists(postingKey)) return;
+
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
         student: { select: { firstName: true, lastName: true, admissionNumber: true } },
-        allocations: {
-          include: {
-            studentFee: {
-              include: { feeTemplate: true },
-            },
-          },
-        },
       },
     }) as any;
 
-    if (!payment || payment.status !== 'COMPLETED') return;
+    if (
+      !payment
+      || (payment.status !== 'COMPLETED' && !(options.allowSuperseded && payment.status === 'VOIDED'))
+    ) return;
 
     const amount = Number(payment.amount);
     const cashAccount = PAYMENT_METHOD_ACCOUNTS[payment.method] || '1000';
     const studentName = `${payment.student.firstName} ${payment.student.lastName}`;
     const description = `Fee payment received - ${studentName} (${payment.transactionId})`;
 
-    // Build journal lines
-    const lines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [];
-
-    // DEBIT: Cash/Bank account
-    lines.push({
-      accountCode: cashAccount,
-      debit: amount,
-      description: `Payment ${payment.transactionId} - ${payment.method}`,
-    });
-
-    // CREDIT: Income accounts (split by fee category if allocations exist)
-    if (payment.allocations && payment.allocations.length > 0) {
-      for (const alloc of payment.allocations) {
-        const templateName = alloc.studentFee?.feeTemplate?.name;
-        const incomeAccount = resolveIncomeAccount(templateName);
-        lines.push({
-          accountCode: incomeAccount,
-          credit: Number(alloc.amount),
-          description: `${templateName || 'Fee'} - ${studentName}`,
-        });
-      }
-    } else {
-      // Single income line for unallocated payment
-      lines.push({
-        accountCode: '4000', // Default: Tuition Fees
-        credit: amount,
-        description: `Fee payment - ${studentName}`,
-      });
-    }
-
     await createJournalEntry({
       date: payment.paymentDate,
       description,
+      postingKey,
       referenceType: 'PAYMENT',
       referenceId: payment.id,
-      lines,
+      lines: [
+        {
+          accountCode: cashAccount,
+          debit: amount,
+          description: `Payment ${payment.transactionId} - ${payment.method}`,
+        },
+        {
+          accountCode: '2400',
+          credit: amount,
+          description: `Source account credit - ${studentName}`,
+        },
+      ],
       branchId: payment.branchId || undefined,
       autoPost: true,
     });
@@ -162,45 +151,153 @@ export async function onPaymentCreated(paymentId: string, userId?: string): Prom
 }
 
 // ========================================
+// PAYMENT ALLOCATION → CREDIT RECLASSIFICATION
+// ========================================
+
+export async function onPaymentAllocated(
+  allocationId: string,
+  amount: number,
+  postingKey: string,
+  classification: { settlesInvoice: boolean; feeTemplateName?: string | null },
+  userId?: string,
+): Promise<void> {
+  try {
+    if (await postingExists(postingKey)) return;
+    const allocation = await prisma.paymentAllocation.findUnique({
+      where: { id: allocationId },
+      include: {
+        payment: {
+          include: { student: { select: { firstName: true, lastName: true } } },
+        },
+      },
+    });
+    if (!allocation || !['COMPLETED', 'VOIDED'].includes(allocation.payment.status)) return;
+    if (amount <= 0 || amount > Number(allocation.amount) + 0.005) {
+      throw new Error(`Invalid allocation accounting delta ${amount} for ${allocationId}`);
+    }
+
+    const studentName = `${allocation.payment.student.firstName} ${allocation.payment.student.lastName}`;
+    const targetAccount = classification.settlesInvoice
+      ? '1200'
+      : resolveIncomeAccount(classification.feeTemplateName || undefined);
+    await createJournalEntry({
+      date: allocation.createdAt,
+      description: `Allocate payment ${allocation.payment.transactionId} - ${studentName}`,
+      postingKey,
+      referenceType: 'PAYMENT_ALLOCATION',
+      referenceId: allocation.id,
+      lines: [
+        {
+          accountCode: '2400',
+          debit: amount,
+          description: `Apply source account credit - ${studentName}`,
+        },
+        {
+          accountCode: targetAccount,
+          credit: amount,
+          description: classification.settlesInvoice
+            ? `Settle invoice receivable - ${classification.feeTemplateName || 'Fee'}`
+            : `Recognize ${classification.feeTemplateName || 'fee'} revenue - ${studentName}`,
+        },
+      ],
+      branchId: allocation.payment.branchId || undefined,
+      autoPost: true,
+    });
+
+    if (userId) {
+      await logFinancialAction({
+        userId,
+        action: 'PAYMENT_ALLOCATION_JOURNALED',
+        entityType: 'PaymentAllocation',
+        entityId: allocation.id,
+        description: `Reclassified payment allocation for ${allocation.payment.transactionId}`,
+        amount,
+        branchId: allocation.payment.branchId || undefined,
+      });
+    }
+  } catch (error) {
+    console.error(`[AccountingBridge] Failed to journal allocation ${allocationId}:`, error);
+  }
+}
+
+// ========================================
 // PAYMENT VOID → REVERSAL JOURNAL ENTRY
 // ========================================
 
 /**
  * Create a reversal journal entry when a payment is voided.
- * Reverses the original entry: DEBIT income, CREDIT cash.
+ * Reverses the source receipt and every allocation reclassification.
  */
 export async function onPaymentVoided(paymentId: string, userId?: string): Promise<void> {
   try {
+    const postingKey = `payment:${paymentId}:void`;
+    if (await postingExists(postingKey)) return;
+
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
         student: { select: { firstName: true, lastName: true } },
+        allocations: { select: { id: true, amount: true } },
       },
     }) as any;
 
     if (!payment) return;
 
     const amount = Number(payment.amount);
-    const cashAccount = PAYMENT_METHOD_ACCOUNTS[payment.method] || '1000';
     const studentName = `${payment.student.firstName} ${payment.student.lastName}`;
 
+    const allocationIds = payment.allocations.map((allocation: { id: string }) => allocation.id);
+    const sourceJournals = await prisma.journalEntry.findMany({
+      where: {
+        OR: [
+          { postingKey: `payment:${paymentId}:receipt` },
+          { referenceType: 'PAYMENT', referenceId: paymentId },
+          ...(allocationIds.length > 0
+            ? [{
+              referenceType: 'PAYMENT_ALLOCATION',
+              referenceId: { in: allocationIds },
+            }]
+            : []),
+        ],
+      },
+      include: { lines: { include: { account: { select: { code: true } } } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const receiptJournal = sourceJournals.find(journal => (
+      journal.postingKey === `payment:${paymentId}:receipt`
+      || (journal.referenceType === 'PAYMENT' && journal.referenceId === paymentId)
+    ));
+    if (!receiptJournal) {
+      throw new Error(`Original journal entry for payment ${paymentId} was not found`);
+    }
+
+    const expectedAllocationAmount = payment.allocations.reduce(
+      (sum: number, allocation: { amount: unknown }) => sum + Number(allocation.amount),
+      0,
+    );
+    const allocationJournalAmount = sourceJournals
+      .filter(journal => journal.referenceType === 'PAYMENT_ALLOCATION')
+      .flatMap(journal => journal.lines)
+      .filter(line => line.account.code === '2400')
+      .reduce((sum, line) => sum + Number(line.debit), 0);
+    if (Math.abs(expectedAllocationAmount - allocationJournalAmount) > 0.005) {
+      throw new Error(
+        `Allocation journals for payment ${paymentId} total ${allocationJournalAmount.toFixed(2)} instead of ${expectedAllocationAmount.toFixed(2)}`,
+      );
+    }
+
     await createJournalEntry({
-      date: new Date(),
+      date: payment.voidedAt || new Date(),
       description: `VOID: Payment reversal - ${studentName} (${payment.transactionId}) - ${payment.voidReason || 'Voided'}`,
-      referenceType: 'PAYMENT',
+      postingKey,
+      referenceType: 'PAYMENT_VOID',
       referenceId: payment.id,
-      lines: [
-        {
-          accountCode: '4000',
-          debit: amount,
-          description: `Reversal of payment ${payment.transactionId}`,
-        },
-        {
-          accountCode: cashAccount,
-          credit: amount,
-          description: `Cash reversal - ${payment.transactionId}`,
-        },
-      ],
+      lines: sourceJournals.flatMap(journal => journal.lines.map(line => ({
+        accountCode: line.account.code,
+        debit: Number(line.credit),
+        credit: Number(line.debit),
+        description: `Reversal of ${line.description || journal.entryNumber}`,
+      }))),
       branchId: payment.branchId || undefined,
       autoPost: true,
     });
@@ -431,8 +528,15 @@ export async function onPayrollCompleted(payrollRunId: string, userId?: string):
  * DEBIT:  1200 Accounts Receivable (money owed to school)
  * CREDIT: 4xxx Income account (revenue recognized on accrual basis)
  */
-export async function onInvoiceSent(invoiceId: string, userId?: string): Promise<void> {
+export async function onInvoiceSent(
+  invoiceId: string,
+  userId?: string,
+  options: { allowSuperseded?: boolean } = {},
+): Promise<void> {
   try {
+    const postingKey = `invoice:${invoiceId}:issued`;
+    if (await postingExists(postingKey)) return;
+
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: {
@@ -441,7 +545,13 @@ export async function onInvoiceSent(invoiceId: string, userId?: string): Promise
       },
     });
 
-    if (!invoice) return;
+    if (
+      !invoice
+      || (
+        !['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CREDITED'].includes(invoice.status)
+        && !(options.allowSuperseded && invoice.status === 'CANCELLED')
+      )
+    ) return;
 
     const totalAmount = Number(invoice.totalAmount);
     const studentName = `${invoice.student.firstName} ${invoice.student.lastName}`;
@@ -461,7 +571,7 @@ export async function onInvoiceSent(invoiceId: string, userId?: string): Promise
         const incomeAccount = resolveIncomeAccount(item.description);
         lines.push({
           accountCode: incomeAccount,
-          credit: Number(item.amount) * item.quantity,
+          credit: Number(item.amount),
           description: `${item.description} - ${studentName}`,
         });
       }
@@ -473,9 +583,24 @@ export async function onInvoiceSent(invoiceId: string, userId?: string): Promise
       });
     }
 
+    const itemTotal = invoice.items.reduce((sum, item) => sum + Number(item.amount), 0);
+    const invoiceAdjustment = totalAmount - itemTotal;
+    if (Math.abs(invoiceAdjustment) > 0.005) {
+      lines.push({
+        accountCode: '4900',
+        ...(invoiceAdjustment > 0
+          ? { credit: invoiceAdjustment }
+          : { debit: Math.abs(invoiceAdjustment) }),
+        description: invoiceAdjustment > 0
+          ? `Invoice tax/rounding adjustment - ${studentName}`
+          : `Invoice discount adjustment - ${studentName}`,
+      });
+    }
+
     await createJournalEntry({
       date: invoice.issueDate,
       description: `Invoice: ${invoice.invoiceNumber} - ${studentName}`,
+      postingKey,
       referenceType: 'INVOICE',
       referenceId: invoice.id,
       lines,
@@ -496,6 +621,236 @@ export async function onInvoiceSent(invoiceId: string, userId?: string): Promise
     }
   } catch (error) {
     console.error(`[AccountingBridge] Failed to journal invoice ${invoiceId}:`, error);
+  }
+}
+
+// ========================================
+// CREDIT NOTE → RECEIVABLE/REVENUE REVERSAL
+// ========================================
+
+export async function onCreditNoteCreated(
+  creditNoteId: string,
+  userId?: string,
+  options: { allowSuperseded?: boolean } = {},
+): Promise<void> {
+  try {
+    const postingKey = `credit-note:${creditNoteId}:issued`;
+    if (await postingExists(postingKey)) return;
+
+    const creditNote = await prisma.creditNote.findUnique({
+      where: { id: creditNoteId },
+      include: {
+        invoice: {
+          include: { student: { select: { firstName: true, lastName: true } } },
+        },
+      },
+    });
+    if (!creditNote || (creditNote.invoice.status === 'CANCELLED' && !options.allowSuperseded)) return;
+
+    // An issued credit note reverses part of the accrual recognized when the
+    // invoice was sent. Ensure that source posting exists before its reversal.
+    await onInvoiceSent(creditNote.invoiceId, userId, options);
+    if (!await postingExists(`invoice:${creditNote.invoiceId}:issued`)) {
+      throw new Error(`Invoice journal for credit note ${creditNoteId} was not created`);
+    }
+
+    const amount = Number(creditNote.amount);
+    const studentName = `${creditNote.invoice.student.firstName} ${creditNote.invoice.student.lastName}`;
+    await createJournalEntry({
+      date: creditNote.issuedAt,
+      description: `Credit note ${creditNote.creditNoteNumber} - ${studentName}`,
+      postingKey,
+      referenceType: 'CREDIT_NOTE',
+      referenceId: creditNote.id,
+      lines: [
+        {
+          accountCode: '4900',
+          debit: amount,
+          description: `Revenue adjustment - ${creditNote.reason}`,
+        },
+        {
+          accountCode: '1200',
+          credit: amount,
+          description: `Reduce invoice ${creditNote.invoice.invoiceNumber} receivable`,
+        },
+      ],
+      branchId: creditNote.invoice.branchId || undefined,
+      autoPost: true,
+    });
+
+    if (userId) {
+      await logFinancialAction({
+        userId,
+        action: 'CREDIT_NOTE_JOURNALED',
+        entityType: 'CreditNote',
+        entityId: creditNote.id,
+        description: `Auto-created journal entry for credit note ${creditNote.creditNoteNumber}`,
+        amount,
+        branchId: creditNote.invoice.branchId || undefined,
+      });
+    }
+  } catch (error) {
+    console.error(`[AccountingBridge] Failed to journal credit note ${creditNoteId}:`, error);
+  }
+}
+
+// ========================================
+// INVOICE CANCELLATION → JOURNAL REVERSAL
+// ========================================
+
+export async function onInvoiceCancelled(invoiceId: string, userId?: string): Promise<void> {
+  try {
+    const postingKey = `invoice:${invoiceId}:cancelled`;
+    if (await postingExists(postingKey)) return;
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        student: { select: { firstName: true, lastName: true } },
+        creditNotes: { select: { id: true } },
+      },
+    });
+    if (!invoice || invoice.status !== 'CANCELLED') return;
+
+    await onInvoiceSent(invoice.id, userId, { allowSuperseded: true });
+    for (const creditNote of invoice.creditNotes) {
+      await onCreditNoteCreated(creditNote.id, userId, { allowSuperseded: true });
+    }
+
+    const sourceKeys = [
+      `invoice:${invoice.id}:issued`,
+      ...invoice.creditNotes.map(note => `credit-note:${note.id}:issued`),
+    ];
+    const sourceJournals = await prisma.journalEntry.findMany({
+      where: { postingKey: { in: sourceKeys } },
+      include: { lines: { include: { account: { select: { code: true } } } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (sourceJournals.length === 0) return;
+
+    const studentName = `${invoice.student.firstName} ${invoice.student.lastName}`;
+    await createJournalEntry({
+      date: new Date(),
+      description: `CANCELLED: Invoice ${invoice.invoiceNumber} - ${studentName}`,
+      postingKey,
+      referenceType: 'INVOICE_CANCELLED',
+      referenceId: invoice.id,
+      lines: sourceJournals.flatMap(journal => journal.lines.map(line => ({
+        accountCode: line.account.code,
+        debit: Number(line.credit),
+        credit: Number(line.debit),
+        description: `Reversal of ${line.description || journal.entryNumber}`,
+      }))),
+      branchId: invoice.branchId || undefined,
+      autoPost: true,
+    });
+
+    if (userId) {
+      await logFinancialAction({
+        userId,
+        action: 'INVOICE_CANCELLED_JOURNALED',
+        entityType: 'Invoice',
+        entityId: invoice.id,
+        description: `Auto-created reversal journal for invoice ${invoice.invoiceNumber}`,
+        amount: Number(invoice.totalAmount),
+        branchId: invoice.branchId || undefined,
+      });
+    }
+  } catch (error) {
+    console.error(`[AccountingBridge] Failed to journal invoice cancellation ${invoiceId}:`, error);
+  }
+}
+
+// ========================================
+// REFUND → REVERSAL JOURNAL ENTRY
+// ========================================
+
+export async function onRefundProcessed(refundId: string, userId?: string): Promise<void> {
+  try {
+    const postingKey = `refund:${refundId}:processed`;
+    if (await postingExists(postingKey)) return;
+
+    const refund = await prisma.refund.findUnique({
+      where: { id: refundId },
+      include: {
+        payment: {
+          include: { student: { select: { firstName: true, lastName: true } } },
+        },
+        allocationReversals: {
+          include: {
+            paymentAllocation: {
+              include: {
+                studentFee: {
+                  include: {
+                    feeTemplate: true,
+                    invoiceItem: { select: { invoiceId: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }) as any;
+    if (!refund || refund.status !== 'PROCESSED') return;
+
+    const amount = Number(refund.amount);
+    const studentName = `${refund.payment.student.firstName} ${refund.payment.student.lastName}`;
+    const lines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [];
+    let reversedAllocations = 0;
+
+    for (const reversal of refund.allocationReversals) {
+      const reversalAmount = Number(reversal.amount);
+      reversedAllocations += reversalAmount;
+      const studentFee = reversal.paymentAllocation.studentFee;
+      const settlesInvoice = Boolean(studentFee.invoiceItem);
+      lines.push({
+        accountCode: settlesInvoice ? '1200' : resolveIncomeAccount(studentFee.feeTemplate?.name),
+        debit: reversalAmount,
+        description: settlesInvoice
+          ? `Reopen invoice receivable - ${studentName}`
+          : `Reverse ${studentFee.feeTemplate?.name || 'fee'} revenue - ${studentName}`,
+      });
+    }
+
+    const returnedAccountCredit = Math.max(0, amount - reversedAllocations);
+    if (returnedAccountCredit > 0.005) {
+      lines.push({
+        accountCode: '2400',
+        debit: returnedAccountCredit,
+        description: `Return unallocated account credit - ${studentName}`,
+      });
+    }
+    lines.push({
+      accountCode: PAYMENT_METHOD_ACCOUNTS[refund.payment.method] || '1000',
+      credit: amount,
+      description: `Refund ${refund.refundNumber} paid - ${studentName}`,
+    });
+
+    await createJournalEntry({
+      date: refund.processedAt || new Date(),
+      description: `Refund processed - ${studentName} (${refund.refundNumber})`,
+      postingKey,
+      referenceType: 'REFUND',
+      referenceId: refund.id,
+      lines,
+      branchId: refund.branchId || undefined,
+      autoPost: true,
+    });
+
+    if (userId) {
+      await logFinancialAction({
+        userId,
+        action: 'REFUND_JOURNALED',
+        entityType: 'Refund',
+        entityId: refund.id,
+        description: `Auto-created reversal journal for refund ${refund.refundNumber}`,
+        amount,
+        branchId: refund.branchId || undefined,
+      });
+    }
+  } catch (error) {
+    console.error(`[AccountingBridge] Failed to journal refund ${refundId}:`, error);
   }
 }
 

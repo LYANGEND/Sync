@@ -27,7 +27,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
             onClick={handleToggle}
             className={`p-2.5 rounded-xl transition-all duration-200 ${isDark
                     ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-surface-hover-strong'
                 } ${className}`}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         >

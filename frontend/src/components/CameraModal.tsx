@@ -103,7 +103,7 @@ const CameraModal = ({ isOpen, onClose, onCapture }: CameraModalProps) => {
             <p>{error}</p>
             <button 
               onClick={() => startCamera()}
-              className="px-4 py-2 bg-blue-600 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors"
+              className="px-4 py-2 bg-primary rounded-lg flex items-center gap-2 hover:bg-primary-hover transition-colors"
             >
               <RefreshCw size={16} />
               Retry Camera

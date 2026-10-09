@@ -7,6 +7,9 @@ import { z } from 'zod';
 import aiService from '../services/aiService';
 import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
 import { ingestAllPDFs, getIngestionStatus, ingestUploadedPDF } from '../services/contentIngestionService';
+import { isDateWithinRangeByDay } from '../utils/academicValidation';
+import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // ==========================================
 // VALIDATION SCHEMAS (DRY — reused across CRUD)
@@ -37,7 +40,7 @@ const createLessonPlanSchema = z.object({
   classId: z.string().uuid(),
   subjectId: z.string().uuid(),
   termId: z.string().uuid(),
-  weekStartDate: z.string(),
+  weekStartDate: z.string().datetime(),
   title: z.string().min(3),
   content: z.string().min(10),
   fileUrl: z.string().url().optional().or(z.literal('')),
@@ -57,11 +60,58 @@ function handler(fn: (req: Request, res: Response) => Promise<any>) {
       if (error instanceof AcademicScopeError) {
         return res.status(error.status).json({ message: error.message });
       }
+      if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
       console.error(`[Syllabus] ${fn.name || 'handler'} error:`, error);
       res.status(500).json({ message: 'Internal server error' });
     }
   };
 }
+
+const ensureSyllabusDefinitionAccess = async (
+  req: AuthRequest,
+  subjectId: string,
+  gradeLevel: number,
+) => {
+  const user = req.user;
+  if (!user) throw new AcademicScopeError(401, 'Unauthorized');
+  if (user.role === 'SUPER_ADMIN') return;
+  if (user.role !== 'TEACHER') {
+    throw new AcademicScopeError(403, 'You cannot modify this syllabus');
+  }
+
+  const assignedClass = await prisma.class.findFirst({
+    where: {
+      gradeLevel,
+      ...(user.branchId ? { branchId: user.branchId } : {}),
+      OR: [
+        {
+          teacherAssignments: {
+            some: { teacherId: user.userId, subjectId },
+          },
+        },
+        {
+          teacherId: user.userId,
+          subjects: { some: { id: subjectId } },
+        },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (!assignedClass) {
+    throw new AcademicScopeError(403, 'You are not assigned to this subject and grade level');
+  }
+};
+
+const getAuthorizedTopic = async (req: AuthRequest, topicId: string) => {
+  const topic = await prisma.topic.findUnique({
+    where: { id: topicId },
+    select: { id: true, subjectId: true, gradeLevel: true },
+  });
+  if (!topic) throw new AcademicScopeError(404, 'Topic not found');
+  await ensureSyllabusDefinitionAccess(req, topic.subjectId, topic.gradeLevel);
+  return topic;
+};
 
 // ==========================================
 // SYLLABUS OVERVIEW (subject-level stats)
@@ -131,6 +181,7 @@ export const getTopics = handler(async (req, res) => {
 
 export const createTopic = handler(async (req, res) => {
   const data = createTopicSchema.parse(req.body);
+  await ensureSyllabusDefinitionAccess(req as AuthRequest, data.subjectId, data.gradeLevel);
   const topic = await prisma.topic.create({ data });
   res.status(201).json(topic);
 });
@@ -138,12 +189,19 @@ export const createTopic = handler(async (req, res) => {
 export const updateTopic = handler(async (req, res) => {
   const { id } = req.params;
   const data = createTopicSchema.partial().parse(req.body);
+  const existing = await getAuthorizedTopic(req as AuthRequest, id);
+  await ensureSyllabusDefinitionAccess(
+    req as AuthRequest,
+    data.subjectId || existing.subjectId,
+    data.gradeLevel ?? existing.gradeLevel,
+  );
   const topic = await prisma.topic.update({ where: { id }, data });
   res.json(topic);
 });
 
 export const deleteTopic = handler(async (req, res) => {
   const { id } = req.params;
+  await getAuthorizedTopic(req as AuthRequest, id);
   await prisma.topic.delete({ where: { id } });
   res.status(204).send();
 });
@@ -169,6 +227,7 @@ export const getSubTopics = handler(async (req, res) => {
 
 export const createSubTopic = handler(async (req, res) => {
   const data = createSubTopicSchema.parse(req.body);
+  await getAuthorizedTopic(req as AuthRequest, data.topicId);
   const subtopic = await prisma.subTopic.create({
     data: {
       title: data.title,
@@ -185,6 +244,12 @@ export const createSubTopic = handler(async (req, res) => {
 export const updateSubTopic = handler(async (req, res) => {
   const { id } = req.params;
   const data = createSubTopicSchema.partial().parse(req.body);
+  const existing = await prisma.subTopic.findUnique({
+    where: { id },
+    select: { topicId: true },
+  });
+  if (!existing) throw new AcademicScopeError(404, 'Subtopic not found');
+  await getAuthorizedTopic(req as AuthRequest, existing.topicId);
   const updateData: any = { ...data };
   if (data.learningObjectives) {
     updateData.learningObjectives = JSON.stringify(data.learningObjectives);
@@ -196,6 +261,12 @@ export const updateSubTopic = handler(async (req, res) => {
 
 export const deleteSubTopic = handler(async (req, res) => {
   const { id } = req.params;
+  const existing = await prisma.subTopic.findUnique({
+    where: { id },
+    select: { topicId: true },
+  });
+  if (!existing) throw new AcademicScopeError(404, 'Subtopic not found');
+  await getAuthorizedTopic(req as AuthRequest, existing.topicId);
   await prisma.subTopic.delete({ where: { id } });
   res.status(204).send();
 });
@@ -212,11 +283,15 @@ export const getTopicAvailability = handler(async (req, res) => {
   }
 
   const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId as string);
+  const classSubjectIds = classInfo.subjects.map((subject) => subject.id);
 
   // Group topics by subject for this grade level
   const grouped = await prisma.topic.groupBy({
     by: ['subjectId'],
-    where: { gradeLevel: classInfo.gradeLevel },
+    where: {
+      gradeLevel: classInfo.gradeLevel,
+      subjectId: { in: classSubjectIds },
+    },
     _count: { id: true },
   });
 
@@ -272,22 +347,25 @@ export const updateTopicProgress = handler(async (req, res) => {
   const { topicId, classId } = req.params;
   const { status } = updateTopicProgressSchema.parse(req.body);
 
-  await ensureAcademicClassAccess(req as AuthRequest, classId);
-  await ensureTopicMatchesClassGrade(topicId, classId);
+  const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId);
+  const { topic } = await ensureTopicMatchesClassGrade(topicId, classId);
+  await ensureAcademicClassAccess(req as AuthRequest, classId, { subjectId: topic.subjectId });
 
-  const progress = await prisma.topicProgress.upsert({
-    where: { topicId_classId: { topicId, classId } },
-    update: {
-      status: status as TopicStatus,
-      completedAt: status === 'COMPLETED' ? new Date() : null,
-    },
-    create: {
-      topicId,
-      classId,
-      status: status as TopicStatus,
-      completedAt: status === 'COMPLETED' ? new Date() : null,
-    },
-  });
+  const progress = await runTermWriteTransaction(classInfo.academicTermId, 'ACADEMIC_ACTIVITY', tx => (
+    tx.topicProgress.upsert({
+      where: { topicId_classId: { topicId, classId } },
+      update: {
+        status: status as TopicStatus,
+        completedAt: status === 'COMPLETED' ? new Date() : null,
+      },
+      create: {
+        topicId,
+        classId,
+        status: status as TopicStatus,
+        completedAt: status === 'COMPLETED' ? new Date() : null,
+      },
+    })
+  ));
 
   res.json(progress);
 });
@@ -322,15 +400,23 @@ export const createLessonPlan = handler(async (req, res) => {
   const data = createLessonPlanSchema.parse(req.body);
   const userId = (req as any).user?.userId;
 
-  await ensureAcademicClassAccess(req as AuthRequest, data.classId, { subjectId: data.subjectId });
+  const classInfo = await ensureAcademicClassAccess(req as AuthRequest, data.classId, { subjectId: data.subjectId });
+  if (classInfo.academicTermId !== data.termId) {
+    throw new AcademicScopeError(400, 'Selected class does not belong to the selected academic term');
+  }
+  if (!isDateWithinRangeByDay(data.weekStartDate, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
+    throw new AcademicScopeError(400, 'Lesson plan week must begin within the selected academic term');
+  }
 
-  const plan = await prisma.lessonPlan.create({
-    data: {
-      ...data,
-      weekStartDate: new Date(data.weekStartDate),
-      teacherId: userId,
-    },
-  });
+  const plan = await runTermWriteTransaction(data.termId, 'SETUP', tx => (
+    tx.lessonPlan.create({
+      data: {
+        ...data,
+        weekStartDate: new Date(data.weekStartDate),
+        teacherId: userId,
+      },
+    })
+  ));
 
   res.status(201).json(plan);
 });
@@ -341,11 +427,33 @@ export const updateLessonPlan = handler(async (req, res) => {
   const existing = await prisma.lessonPlan.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ message: 'Lesson plan not found' });
 
-  await ensureAcademicClassAccess(req as AuthRequest, data.classId || existing.classId, { subjectId: data.subjectId || existing.subjectId });
+  const user = (req as AuthRequest).user;
+  if (user?.role === 'TEACHER' && existing.teacherId !== user.userId) {
+    throw new AcademicScopeError(403, 'You can only update your own lesson plans');
+  }
+  if (data.termId && data.termId !== existing.termId) {
+    throw new AcademicScopeError(400, 'A lesson plan cannot be moved to another academic term');
+  }
+
+  const classInfo = await ensureAcademicClassAccess(
+    req as AuthRequest,
+    data.classId || existing.classId,
+    { subjectId: data.subjectId || existing.subjectId },
+  );
+  const effectiveTermId = data.termId || existing.termId;
+  const effectiveWeekStartDate = data.weekStartDate || existing.weekStartDate;
+  if (classInfo.academicTermId !== effectiveTermId) {
+    throw new AcademicScopeError(400, 'Selected class does not belong to the selected academic term');
+  }
+  if (!isDateWithinRangeByDay(effectiveWeekStartDate, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
+    throw new AcademicScopeError(400, 'Lesson plan week must begin within the selected academic term');
+  }
 
   const updateData: any = { ...data };
   if (data.weekStartDate) updateData.weekStartDate = new Date(data.weekStartDate);
-  const plan = await prisma.lessonPlan.update({ where: { id }, data: updateData });
+  const plan = await runTermWriteTransaction(existing.termId, 'SETUP', tx => (
+    tx.lessonPlan.update({ where: { id }, data: updateData })
+  ));
   res.json(plan);
 });
 
@@ -353,8 +461,14 @@ export const deleteLessonPlan = handler(async (req, res) => {
   const { id } = req.params;
   const existing = await prisma.lessonPlan.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ message: 'Lesson plan not found' });
+  const user = (req as AuthRequest).user;
+  if (user?.role === 'TEACHER' && existing.teacherId !== user.userId) {
+    throw new AcademicScopeError(403, 'You can only delete your own lesson plans');
+  }
   await ensureAcademicClassAccess(req as AuthRequest, existing.classId, { subjectId: existing.subjectId });
-  await prisma.lessonPlan.delete({ where: { id } });
+  await runTermWriteTransaction(existing.termId, 'SETUP', tx => (
+    tx.lessonPlan.delete({ where: { id } })
+  ));
   res.status(204).send();
 });
 
@@ -384,6 +498,10 @@ export const generateLessonPlan = handler(async (req, res) => {
   });
 
   if (!topic) return res.status(404).json({ message: 'Topic not found' });
+  await ensureSyllabusDefinitionAccess(req as AuthRequest, topic.subjectId, topic.gradeLevel);
+  if (subjectId && subjectId !== topic.subjectId) {
+    return res.status(400).json({ message: 'Selected subject does not match the topic' });
+  }
 
   const subjectName = subjectId
     ? (await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true } }))?.name || topic.subject.name
@@ -616,6 +734,12 @@ export const generateSyllabus = handler(async (req, res) => {
   const subject = await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true, code: true } });
   if (!subject) return res.status(404).json({ message: 'Subject not found' });
 
+  const normalizedGradeLevel = Number(gradeLevel);
+  if (!Number.isInteger(normalizedGradeLevel) || normalizedGradeLevel < -3 || normalizedGradeLevel > 12) {
+    return res.status(400).json({ message: 'gradeLevel must be a whole number between -3 and 12' });
+  }
+  await ensureSyllabusDefinitionAccess(req as AuthRequest, subjectId, normalizedGradeLevel);
+
   // Check if topics already exist
   const existingCount = await prisma.topic.count({ where: { subjectId, gradeLevel: Number(gradeLevel) } });
   if (existingCount > 0) {
@@ -623,7 +747,7 @@ export const generateSyllabus = handler(async (req, res) => {
   }
 
   // Determine age/grade label for the AI prompt
-  const gl = Number(gradeLevel);
+  const gl = normalizedGradeLevel;
   let levelDesc = '';
   if (gl <= -1) levelDesc = `Early Childhood Education (ECE), age ${gl + 6} years`;
   else if (gl === 0) levelDesc = `Early Childhood Education (ECE), reception/pre-school, age 5-6 years`;
@@ -744,8 +868,11 @@ export const getNextTopic = handler(async (req, res) => {
     return res.status(400).json({ message: 'Class ID and Subject ID are required' });
   }
 
-  const classInfo = await prisma.class.findUnique({ where: { id: classId as string } });
-  if (!classInfo) return res.status(404).json({ message: 'Class not found' });
+  const classInfo = await ensureAcademicClassAccess(
+    req as AuthRequest,
+    classId as string,
+    { subjectId: subjectId as string },
+  );
 
   // Get all topics with their progress for this class
   const topics = await prisma.topic.findMany({

@@ -13,7 +13,8 @@
   "include": [
     "src/**/*",
     "scripts/**/*",
-    "prisma/**/*"
+    "prisma/**/*",
+    "tests/**/*.ts"
   ],
   "exclude": [
     "node_modules",

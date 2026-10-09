@@ -120,7 +120,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                         <h3 className="text-lg font-bold text-gray-900">{title}</h3>
                         <button
                             onClick={onClose}
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-surface-hover rounded-xl transition-colors"
                         >
                             <X size={20} />
                         </button>

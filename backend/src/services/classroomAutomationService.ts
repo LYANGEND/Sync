@@ -2,6 +2,7 @@ import { prisma } from '../utils/prisma';
 import { aiTutorService, LESSON_PHASES } from './aiTutorService';
 import { syncClassroomAttendance } from './classroomAttendanceService';
 import { emitClassroomUpdated } from './classroomRealtimeService';
+import { runClassroomTermWriteTransaction } from './classroomTermService';
 import {
   buildRuntimeLessonPlan,
   getCurrentSegment,
@@ -185,16 +186,26 @@ async function startDueClassrooms(now: Date) {
   });
 
   for (const classroom of dueClassrooms) {
-    const started = await prisma.virtualClassroom.updateMany({
-      where: {
-        id: classroom.id,
-        status: 'SCHEDULED',
-      },
-      data: {
-        status: 'LIVE',
-        actualStart: now,
-      },
-    });
+    let started;
+    try {
+      started = await runClassroomTermWriteTransaction(
+        classroom.id,
+        'ACADEMIC_ACTIVITY',
+        async tx => tx.virtualClassroom.updateMany({
+          where: {
+            id: classroom.id,
+            status: 'SCHEDULED',
+          },
+          data: {
+            status: 'LIVE',
+            actualStart: now,
+          },
+        }),
+      );
+    } catch (error) {
+      console.error(`[ClassroomAutomation] Failed to start "${classroom.title}":`, error);
+      continue;
+    }
 
     if (started.count === 0) {
       continue;
@@ -229,16 +240,26 @@ async function closeExpiredScheduledClassrooms(now: Date) {
   });
 
   for (const classroom of expiredClassrooms) {
-    const ended = await prisma.virtualClassroom.updateMany({
-      where: {
-        id: classroom.id,
-        status: 'SCHEDULED',
-      },
-      data: {
-        status: 'ENDED',
-        actualEnd: now,
-      },
-    });
+    let ended;
+    try {
+      ended = await runClassroomTermWriteTransaction(
+        classroom.id,
+        'ACADEMIC_ACTIVITY',
+        async tx => tx.virtualClassroom.updateMany({
+          where: {
+            id: classroom.id,
+            status: 'SCHEDULED',
+          },
+          data: {
+            status: 'ENDED',
+            actualEnd: now,
+          },
+        }),
+      );
+    } catch (error) {
+      console.error(`[ClassroomAutomation] Failed to close missed classroom "${classroom.title}":`, error);
+      continue;
+    }
 
     if (ended.count > 0) {
       console.log(`[ClassroomAutomation] Marked missed classroom "${classroom.title}" as ended`);
@@ -342,16 +363,20 @@ async function endDueClassrooms(now: Date) {
         await aiTutorService.endSession(session.id);
       }
 
-      const ended = await prisma.virtualClassroom.updateMany({
-        where: {
-          id: classroom.id,
-          status: 'LIVE',
-        },
-        data: {
-          status: 'ENDED',
-          actualEnd: now,
-        },
-      });
+      const ended = await runClassroomTermWriteTransaction(
+        classroom.id,
+        'ACADEMIC_ACTIVITY',
+        async tx => tx.virtualClassroom.updateMany({
+          where: {
+            id: classroom.id,
+            status: 'LIVE',
+          },
+          data: {
+            status: 'ENDED',
+            actualEnd: now,
+          },
+        }),
+      );
 
       if (ended.count > 0) {
         const attendanceSync = await syncClassroomAttendance(classroom.id);

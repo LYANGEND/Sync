@@ -50,6 +50,7 @@ backend/Finalised Syllabi
 .gitignore
 backend/Finalised Teaching Modules
 *.md
+!docs/architecture/TERM_ROLLOVER_IMPLEMENTATION_PLAN.md
 scripts/deploy-azure.sh
 scripts/deploy-azure.ps1
 scripts/backup.sh

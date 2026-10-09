@@ -2,29 +2,25 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentRecordAccess } from '../utils/academicScope';
+import { getStudentPlacementForTerm, StudentPlacementError } from '../services/studentPlacementService';
 // Get comprehensive academic dashboard for a student
 export const getStudentAcademicDashboard = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
-    await ensureStudentRecordAccess(req as AuthRequest, studentId);
+    const termId = typeof req.query.termId === 'string' ? req.query.termId : '';
+    if (!termId) return res.status(400).json({ error: 'termId is required' });
+    await ensureStudentRecordAccess(req as AuthRequest, studentId, { academicTermId: termId });
 
     // Get student info
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      include: {
-        class: { include: { subjects: true } },
-      }
     });
 
     if (!student) {
       return res.status(404).json({ error: 'Student not found' });
     }
 
-    // Get active term
-    const settings = await prisma.schoolSettings.findFirst({
-      include: { currentTerm: true }
-    });
-    const activeTerm = settings?.currentTerm;
+    const activeTerm = await prisma.academicTerm.findUnique({ where: { id: termId } });
 
     if (!activeTerm) {
       return res.json({
@@ -37,6 +33,9 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
       });
     }
 
+    const placement = await getStudentPlacementForTerm(studentId, termId);
+    const historicalClass = placement?.class ?? null;
+
     // 1. Current grades per subject (term results)
     const termResults = await prisma.termResult.findMany({
       where: { studentId, termId: activeTerm.id },
@@ -48,7 +47,7 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
     const attendanceRecords = await prisma.attendance.findMany({
       where: {
         studentId,
-        date: { gte: activeTerm.startDate, lte: activeTerm.endDate },
+        academicTermId: activeTerm.id,
       },
     });
 
@@ -65,7 +64,7 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
     // 3. Upcoming assessments (future date)
     const upcomingAssessments = await prisma.assessment.findMany({
       where: {
-        classId: student.classId,
+        classId: historicalClass?.id ?? '',
         termId: activeTerm.id,
         date: { gte: new Date() },
       },
@@ -102,7 +101,7 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
     // 6. Class ranking (position)
     const classTermResults = await prisma.termResult.findMany({
       where: {
-        classId: student.classId,
+        classId: historicalClass?.id ?? '',
         termId: activeTerm.id,
       },
     });
@@ -126,7 +125,7 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
     const totalStudents = rankings.length;
 
     res.json({
-      student,
+      student: { ...student, classId: historicalClass?.id ?? null, class: historicalClass },
       activeTerm,
       currentGrades: termResults,
       attendanceSummary,
@@ -140,6 +139,9 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Get student academic dashboard error:', error);
     res.status(500).json({ error: 'Failed to fetch academic dashboard' });
   }
@@ -149,7 +151,9 @@ export const getStudentAcademicDashboard = async (req: Request, res: Response) =
 export const getGradeTrends = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
-    await ensureStudentRecordAccess(req as AuthRequest, studentId);
+    const termId = typeof req.query.termId === 'string' ? req.query.termId : '';
+    if (!termId) return res.status(400).json({ error: 'termId is required' });
+    await ensureStudentRecordAccess(req as AuthRequest, studentId, { academicTermId: termId });
 
     const results = await prisma.termResult.findMany({
       where: { studentId },
@@ -199,7 +203,7 @@ export const getClassAnalytics = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Term ID is required' });
     }
 
-    await ensureAcademicClassAccess(req as AuthRequest, classId);
+    await ensureAcademicClassAccess(req as AuthRequest, classId, { academicTermId: termId as string });
 
     // Get all term results for this class and term
     const results = await prisma.termResult.findMany({

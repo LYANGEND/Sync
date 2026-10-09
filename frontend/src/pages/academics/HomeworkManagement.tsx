@@ -124,11 +124,14 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
 
   const fetchClasses = async () => {
     try {
-      const [classesRes, subjectsRes, termsRes] = await Promise.all([
-        api.get('/classes'),
+      const [subjectsRes, termsRes] = await Promise.all([
         api.get('/subjects'),
         api.get('/academic-terms'),
       ]);
+      const activeTerm = termsRes.data.find((term: any) => term.isActive) || termsRes.data[0];
+      const classesRes = activeTerm
+        ? await api.get('/classes', { params: { academicTermId: activeTerm.id } })
+        : { data: [] };
       setClasses(classesRes.data);
       setSubjects(subjectsRes.data);
       setTerms(termsRes.data);
@@ -389,7 +392,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                             <button onClick={() => handleGrade(sub.id)} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">
                               Save Grade
                             </button>
-                            <button onClick={() => setGradingId(null)} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+                            <button onClick={() => setGradingId(null)} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm hover:bg-surface-hover">
                               Cancel
                             </button>
                           </div>
@@ -519,7 +522,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                       className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                         aiHomeworkType === 'HOMEWORK'
                           ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
-                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-surface-hover-strong'
                       }`}
                     >
                       📝 Homework
@@ -529,7 +532,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                       className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                         aiHomeworkType === 'PROJECT'
                           ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
-                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-surface-hover-strong'
                       }`}
                     >
                       🎯 Project
@@ -540,7 +543,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                 <div className="flex justify-end gap-3 pt-2">
                   <button
                     onClick={() => setShowAIModal(false)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                   >
                     Cancel
                   </button>
@@ -609,7 +612,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                     <button
                       type="button"
                       onClick={() => setPreviewMode(!previewMode)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition"
                     >
                       {previewMode ? <><Edit3 size={12} /> Edit</> : <><Eye size={12} /> Preview</>}
                     </button>
@@ -631,7 +634,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                 <div className="flex justify-between gap-3 pt-2">
                   <button
                     onClick={() => setAIGeneratedContent(null)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg flex items-center gap-2"
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg flex items-center gap-2"
                   >
                     <Sparkles size={16} />
                     Regenerate
@@ -639,7 +642,7 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowAIModal(false)}
-                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                     >
                       Discard
                     </button>

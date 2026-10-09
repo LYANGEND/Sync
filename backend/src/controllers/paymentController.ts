@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PaymentStatus } from '@prisma/client';
+import { PaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -11,12 +11,28 @@ import {
   MobileMoneyCollectionRequest
 } from '../services/lencoService';
 import { onPaymentCreated, onPaymentVoided } from '../services/accountingBridge';
+import {
+  getActiveTerm,
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { getAgeingBucket, getTermStudentBalances } from '../services/termFinancialService';
+import {
+  completePendingPaymentInTransaction,
+  createCompletedPayment,
+  PaymentSettlementError,
+  voidPaymentSettlement,
+} from '../services/paymentSettlementService';
+import { sendPaymentSettlementError } from '../utils/paymentSettlementHttp';
 
 const createPaymentSchema = z.object({
   studentId: z.string().uuid(),
+  academicTermId: z.string().uuid(),
   amount: z.number().positive(),
   method: z.enum(['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT']),
   notes: z.string().optional(),
+  idempotencyKey: z.string().min(8).max(200).optional(),
 });
 
 // Generate unique transaction ID: TXN-XXXXXXXX (8 char UUID)
@@ -36,72 +52,34 @@ export const createPayment = async (req: Request, res: Response) => {
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
-    const { studentId, amount, method, notes } = parseResult.data;
-    const userId = (req as any).user?.userId;
+    const { studentId, academicTermId, amount, method, notes } = parseResult.data;
+    const user = (req as AuthRequest).user;
+    const userId = user?.userId;
 
     if (!userId) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Check if student exists
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-    });
-
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
+    const headerIdempotencyKey = req.header?.('Idempotency-Key')?.trim();
+    const idempotencyKey = parseResult.data.idempotencyKey ?? headerIdempotencyKey;
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 200)) {
+      return res.status(400).json({ error: 'Idempotency key must be between 8 and 200 characters' });
     }
 
-    // Check for potential duplicate payments (same student, same amount within 5 minutes)
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentDuplicate = await prisma.payment.findFirst({
-      where: {
-        studentId,
-        amount,
-        status: 'COMPLETED',
-        createdAt: {
-          gte: fiveMinutesAgo
-        }
-      },
-      orderBy: { createdAt: 'desc' }
+    const creation = await createCompletedPayment({
+      studentId,
+      receiptTermId: academicTermId,
+      amount,
+      method,
+      source: 'MANUAL',
+      notes,
+      recordedByUserId: userId,
+      actorBranchId: user?.role === 'SUPER_ADMIN' ? null : user?.branchId,
+      idempotencyKey,
     });
 
-    // If duplicate found and force flag not set, return warning
-    if (recentDuplicate && !req.body.forceCreate) {
-      return res.status(409).json({
-        warning: 'POTENTIAL_DUPLICATE',
-        message: `A similar payment of ZMW ${amount} for this student was recorded ${Math.round((Date.now() - recentDuplicate.createdAt.getTime()) / 1000 / 60)} minutes ago. Set forceCreate=true to proceed anyway.`,
-        existingPayment: {
-          id: recentDuplicate.id,
-          transactionId: recentDuplicate.transactionId,
-          amount: Number(recentDuplicate.amount),
-          paymentDate: recentDuplicate.paymentDate,
-          method: recentDuplicate.method
-        }
-      });
-    }
-
-    // Generate transaction ID
-    const transactionId = generateTransactionId();
-
-    // Link payment to the branch of the student
-    const branchId = student.branchId;
-
-    // Automatically assign term based on payment date
-    const { getTermForDate } = await import('../utils/termHelper');
-    const academicTermId = await getTermForDate(new Date());
-
-    const payment = await prisma.payment.create({
-      data: {
-        transactionId,
-        studentId,
-        amount,
-        method,
-        notes,
-        recordedByUserId: userId,
-        branchId, // Assign branch
-        academicTermId, // Assign term
-      },
+    const payment = await prisma.payment.findUniqueOrThrow({
+      where: { id: creation.payment.id },
       include: {
         student: {
           select: {
@@ -111,36 +89,23 @@ export const createPayment = async (req: Request, res: Response) => {
             guardianEmail: true,
             guardianName: true,
             guardianPhone: true,
-            parent: {
-              select: {
-                id: true,
-                email: true,
-                fullName: true
-              }
-            },
-            class: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
+            parent: { select: { id: true, email: true, fullName: true } },
           },
         },
-        recordedBy: {
-          select: {
-            fullName: true,
-          },
-        },
+        recordedBy: { select: { fullName: true } },
       },
     });
+    const transactionId = payment.transactionId || payment.id;
 
     // Create accounting journal entry (double-entry bookkeeping)
-    onPaymentCreated(payment.id, userId).catch(err =>
-      console.error('Background journal entry creation failed:', err)
-    );
+    if (!creation.reused) {
+      onPaymentCreated(payment.id, userId).catch(err =>
+        console.error('Background journal entry creation failed:', err)
+      );
+    }
 
     // Send Notification (Email & SMS) via Notification Service
-    try {
+    if (!creation.reused) try {
       // Fetch school settings for the name
       const settings = await prisma.schoolSettings.findFirst();
       const schoolName = settings?.schoolName || 'School';
@@ -188,11 +153,20 @@ export const createPayment = async (req: Request, res: Response) => {
       // Don't block the response, just log the error
     }
 
-    res.status(201).json(payment);
+    res.status(creation.reused ? 200 : 201).json({
+      ...payment,
+      settlement: {
+        allocatedAmount: creation.settlement.allocatedAmount,
+        unallocatedAmount: creation.settlement.unallocatedAmount,
+      },
+      reused: creation.reused,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Create payment error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -205,9 +179,13 @@ export const getPayments = async (req: Request, res: Response) => {
     const search = req.query.search as string;
     const status = req.query.status as string;
     const branchId = req.query.branchId as string; // Optional branch filter
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) {
+      return res.status(400).json({ message: 'Academic term ID is required' });
+    }
 
     const skip = (page - 1) * limit;
-    const where: any = {};
+    const where: any = { academicTermId };
 
     if (branchId) {
       where.branchId = branchId;
@@ -289,8 +267,20 @@ export const getPayments = async (req: Request, res: Response) => {
       prisma.payment.count({ where }),
     ]);
 
+    const data = payments.map(payment => {
+      const allocatedAmount = payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
+      return {
+        ...payment,
+        amount: Number(payment.amount),
+        allocatedAmount,
+        unallocatedAmount: Math.max(0, Number(payment.amount) - allocatedAmount),
+        allocationCount: payment.allocations.length,
+        allocationLabels: payment.allocations.map(allocation => allocation.studentFee.feeTemplate.name),
+      };
+    });
+
     res.json({
-      data: payments,
+      data,
       meta: {
         total,
         page,
@@ -307,8 +297,14 @@ export const getPayments = async (req: Request, res: Response) => {
 export const getStudentPayments = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
     const userRole = (req as any).user?.role;
-    const userId = (req as any).user?.userId;
+    const requestUser = (req as AuthRequest).user;
+    const userId = requestUser?.userId;
+
+    if (!academicTermId) {
+      return res.status(400).json({ message: 'Academic term ID is required' });
+    }
 
     // Security check for PARENT
     if (userRole === 'PARENT') {
@@ -323,8 +319,14 @@ export const getStudentPayments = async (req: Request, res: Response) => {
     }
 
     const payments = await prisma.payment.findMany({
-      where: { studentId },
+      where: { studentId, academicTermId },
       include: {
+        academicTerm: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         recordedBy: {
           select: {
             fullName: true,
@@ -347,8 +349,10 @@ export const getFinanceStats = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const branchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : req.query.branchId as string;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ message: 'Academic term ID is required' });
 
-    const whereStatus: any = { status: 'COMPLETED' };
+    const whereStatus: any = { status: 'COMPLETED', academicTermId };
     if (branchId) whereStatus.branchId = branchId;
 
     // 1. Total Revenue (Sum of COMPLETED payments only)
@@ -360,20 +364,15 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     const totalRevenue = Number(totalRevenueAgg._sum.amount || 0);
     const totalTransactions = totalRevenueAgg._count.id;
 
-    // 2. Total Fees Assigned (Sum of all fee structures)
-    const totalFeesAgg = await prisma.studentFeeStructure.aggregate({
-      _sum: { amountDue: true },
-    });
-    const totalFeesAssigned = Number(totalFeesAgg._sum.amountDue || 0);
-
-    // 3. Pending Fees
-    // 3. Pending Fees
-    const pendingFees = Math.max(0, totalFeesAssigned - totalRevenue);
-
-    // 4. Overdue Students Count
-    // Get total due per student
-    // Note: This logic needs to be branch-aware if strict branch separation is needed. 
-    // For now, it calculates globally or we can filter by branchId if passed.
+    // 2-4. Billed, still owed and credit, from the same per-student balances used by fee reminders
+    const balances = await getTermStudentBalances(academicTermId, branchId);
+    const totalBilled = balances.reduce((sum, b) => sum + b.billed, 0);
+    const debtors = balances.filter(b => b.balance > 0);
+    const creditors = balances.filter(b => b.balance < 0);
+    const pendingFees = debtors.reduce((sum, b) => sum + b.balance, 0);
+    const overdueCount = debtors.length;
+    const creditBalance = creditors.reduce((sum, b) => sum - b.balance, 0);
+    const creditCount = creditors.length;
 
     // 5. Total Revenue per Branch
     // Only fetch breakdown if SUPER_ADMIN and no specific branch filter applied
@@ -381,7 +380,7 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     if (user?.role === 'SUPER_ADMIN' && !branchId) {
       revenueByBranch = await prisma.payment.groupBy({
         by: ['branchId'],
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', academicTermId },
         _sum: { amount: true },
       } as any);
     }
@@ -394,34 +393,8 @@ export const getFinanceStats = async (req: Request, res: Response) => {
       amount: Number(r._sum.amount || 0)
     }));
 
-    // 4. Overdue Students Count
-    // Get total due per student
-    const feesByStudent = await prisma.studentFeeStructure.groupBy({
-      by: ['studentId'],
-      _sum: { amountDue: true },
-    });
-
-    // Get total paid per student (COMPLETED only)
-    const paymentsByStudent = await prisma.payment.groupBy({
-      by: ['studentId'],
-      where: { status: 'COMPLETED' },
-      _sum: { amount: true },
-    });
-
-    const paymentMap = new Map();
-    paymentsByStudent.forEach(p => {
-      paymentMap.set(p.studentId, Number(p._sum.amount || 0));
-    });
-
-    let overdueCount = 0;
-    feesByStudent.forEach(f => {
-      const due = Number(f._sum.amountDue || 0);
-      const paid = paymentMap.get(f.studentId) || 0;
-      if (due > paid) overdueCount++;
-    });
-
-    // 5. Recent Activity (Show voided ones too, with status)
-    const whereRecent: any = {};
+    // 6. Recent Activity (Show voided ones too, with status)
+    const whereRecent: any = { academicTermId };
     if (branchId) whereRecent.branchId = branchId;
 
     const recentActivity = await prisma.payment.findMany({
@@ -436,8 +409,11 @@ export const getFinanceStats = async (req: Request, res: Response) => {
     res.json({
       totalRevenue,
       totalTransactions,
+      totalBilled,
       pendingFees,
       overdueCount,
+      creditBalance,
+      creditCount,
       revenueByBranch: revenueByBranchWithNames, // New breakdown
       recentActivity: recentActivity.map(p => ({
         id: p.id,
@@ -456,10 +432,13 @@ export const getFinanceStats = async (req: Request, res: Response) => {
 export const getReconciliationDashboard = async (req: Request, res: Response) => {
   try {
     const { status = 'all', method = 'ALL', startDate, endDate, branchId } = req.query;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ message: 'Academic term ID is required' });
     const user = (req as any).user;
 
     const where: any = {
       status: 'COMPLETED',
+      academicTermId,
     };
 
     const effectiveBranchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : (branchId as string);
@@ -491,7 +470,11 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
             firstName: true,
             lastName: true,
             admissionNumber: true,
-            class: { select: { id: true, name: true } },
+            termEnrollments: {
+              where: { academicTermId },
+              select: { class: { select: { id: true, name: true } } },
+              take: 1,
+            },
           },
         },
         recordedBy: { select: { fullName: true } },
@@ -526,6 +509,11 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
 
       return {
         ...payment,
+        student: {
+          ...payment.student,
+          class: payment.student.termEnrollments[0]?.class ?? null,
+          termEnrollments: undefined,
+        },
         amount: Number(payment.amount),
         allocatedAmount,
         unallocatedAmount,
@@ -578,98 +566,129 @@ export const getReconciliationDashboard = async (req: Request, res: Response) =>
 
 export const getFinancialReport = async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, branchId } = req.query;
-
-    const dateFilter: any = {};
-    if (startDate) dateFilter.gte = new Date(startDate as string);
-    if (endDate) dateFilter.lte = new Date(endDate as string);
-
-    const paymentWhere: any = {
-      paymentDate: dateFilter,
-      status: 'COMPLETED'
-    };
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ message: 'Academic term ID is required' });
 
     const user = (req as any).user;
-    // Determine effective branchId: User's branch overrides query if not SUPER_ADMIN
-    const effectiveBranchId = user?.role !== 'SUPER_ADMIN' ? user?.branchId : (branchId as string);
+    const branchId: string | undefined = user?.role !== 'SUPER_ADMIN' ? user?.branchId : (req.query.branchId as string | undefined);
 
-    if (effectiveBranchId) {
-      paymentWhere.branchId = effectiveBranchId;
+    const term = await prisma.academicTerm.findUnique({
+      where: { id: academicTermId },
+      select: { id: true, name: true, startDate: true, endDate: true },
+    });
+    if (!term) return res.status(404).json({ message: 'Academic term not found' });
+
+    const paymentWhere: Prisma.PaymentWhereInput = {
+      status: 'COMPLETED',
+      academicTermId,
+      ...(branchId ? { student: { branchId } } : {}),
+    };
+
+    const [balances, payments, methodsStats] = await Promise.all([
+      getTermStudentBalances(academicTermId, branchId),
+      prisma.payment.findMany({ where: paymentWhere, select: { amount: true, paymentDate: true } }),
+      prisma.payment.groupBy({
+        by: ['method'],
+        where: paymentWhere,
+        _count: { id: true },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const now = new Date();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // Debtors, ageing and summary all come from the same per-student balances
+    const debtors = balances
+      .filter(b => b.balance > 0)
+      .map(b => {
+        const daysOverdue = b.earliestDueDate ? Math.floor((now.getTime() - b.earliestDueDate.getTime()) / dayMs) : 0;
+        return {
+          studentId: b.id,
+          name: `${b.firstName} ${b.lastName}`,
+          admissionNumber: b.admissionNumber,
+          className: b.className,
+          billed: b.billed,
+          paid: b.paid,
+          balance: b.balance,
+          earliestDueDate: b.earliestDueDate,
+          daysOverdue: Math.max(0, daysOverdue),
+          bucket: getAgeingBucket(daysOverdue),
+          guardianName: b.guardianName,
+          guardianPhone: b.guardianPhone,
+          guardianEmail: b.guardianEmail,
+        };
+      })
+      .sort((a, b) => b.daysOverdue - a.daysOverdue || b.balance - a.balance);
+
+    const ageingOrder = ['current', '1-30', '31-60', '61-90', '90+'] as const;
+    const ageing = ageingOrder.map(bucket => {
+      const inBucket = debtors.filter(d => d.bucket === bucket);
+      return { bucket, amount: inBucket.reduce((sum, d) => sum + d.balance, 0), students: inBucket.length };
+    });
+
+    const billed = balances.reduce((sum, b) => sum + b.billed, 0);
+    const collected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const owed = debtors.reduce((sum, d) => sum + d.balance, 0);
+    const overdue = debtors.filter(d => d.bucket !== 'current');
+    const creditors = balances.filter(b => b.balance < 0);
+
+    // Classes: how much of each class's billing is settled (overpayments do not offset other students)
+    const classMap = new Map<string, { className: string; students: number; billed: number; settled: number; owed: number; debtors: number }>();
+    for (const b of balances) {
+      const entry = classMap.get(b.className) || { className: b.className, students: 0, billed: 0, settled: 0, owed: 0, debtors: 0 };
+      entry.students += 1;
+      entry.billed += b.billed;
+      entry.settled += Math.min(b.paid, b.billed);
+      entry.owed += Math.max(0, b.balance);
+      if (b.balance > 0) entry.debtors += 1;
+      classMap.set(b.className, entry);
     }
+    const classCollection = Array.from(classMap.values())
+      .map(c => ({ ...c, rate: c.billed > 0 ? Math.round((c.settled / c.billed) * 100) : 0 }))
+      .sort((a, b) => a.rate - b.rate || b.owed - a.owed);
 
-    // Monthly Revenue (COMPLETED only)
-    const payments = await prisma.payment.findMany({
-      where: paymentWhere,
-      select: {
-        amount: true,
-        paymentDate: true
-      }
-    });
-
-    const monthlyRevenue = new Array(12).fill(0);
-    payments.forEach(p => {
-      const month = new Date(p.paymentDate).getMonth();
-      monthlyRevenue[month] += Number(p.amount);
-    });
-
-    // Payment Methods Stats (COMPLETED only)
-    const methodsStats = await prisma.payment.groupBy({
-      by: ['method'],
-      where: paymentWhere,
-      _count: { id: true },
-      _sum: { amount: true }
-    });
-
-    // 3. Collection by Class
-    const classWhere: any = {};
-    if (effectiveBranchId) {
-      classWhere.branchId = effectiveBranchId;
+    // Weekly collections across the term so far (payments outside the term dates fall into the first/last week)
+    const termStart = new Date(term.startDate);
+    const lastDay = now < term.endDate ? now : new Date(term.endDate);
+    const weekCount = Math.max(1, Math.ceil((lastDay.getTime() - termStart.getTime() + 1) / (7 * dayMs)));
+    const weekly = Array.from({ length: weekCount }, (_, index) => ({
+      week: index + 1,
+      weekStart: new Date(termStart.getTime() + index * 7 * dayMs),
+      amount: 0,
+      payments: 0,
+      cumulative: 0,
+    }));
+    for (const payment of payments) {
+      const index = Math.min(weekCount - 1, Math.max(0, Math.floor((payment.paymentDate.getTime() - termStart.getTime()) / (7 * dayMs))));
+      weekly[index].amount += Number(payment.amount);
+      weekly[index].payments += 1;
     }
-
-    const classes = await prisma.class.findMany({
-      where: classWhere,
-      select: {
-        id: true,
-        name: true,
-        students: {
-          select: {
-            feeStructures: {
-              select: { amountDue: true }
-            },
-            payments: {
-              where: { status: 'COMPLETED' }, // Ensure we only count completed payments
-              select: { amount: true }
-            }
-          }
-        }
-      }
-    });
-
-    const classCollection = classes.map(cls => {
-      let totalDue = 0;
-      let totalCollected = 0;
-
-      cls.students.forEach(student => {
-        student.feeStructures.forEach(fee => totalDue += Number(fee.amountDue));
-        student.payments.forEach(pay => totalCollected += Number(pay.amount));
-      });
-
-      return {
-        className: cls.name,
-        totalDue,
-        totalCollected,
-        percentage: totalDue > 0 ? Math.round((totalCollected / totalDue) * 100) : 0
-      };
-    }).sort((a, b) => b.percentage - a.percentage); // Best performing first
+    weekly.reduce((running, week) => (week.cumulative = running + week.amount), 0);
 
     res.json({
-      monthlyRevenue,
-      paymentMethods: methodsStats.map(m => ({
-        method: m.method,
-        count: m._count.id,
-        amount: Number(m._sum.amount || 0)
-      })),
-      classCollection
+      term,
+      summary: {
+        billed,
+        collected,
+        paymentsCount: payments.length,
+        owed,
+        debtorCount: debtors.length,
+        overdueAmount: overdue.reduce((sum, d) => sum + d.balance, 0),
+        overdueCount: overdue.length,
+        credit: creditors.reduce((sum, b) => sum - b.balance, 0),
+        creditCount: creditors.length,
+        studentsBilled: balances.filter(b => b.billed > 0).length,
+        settledRate: billed > 0 ? Math.round(((billed - owed) / billed) * 100) : 0,
+      },
+      weekly,
+      paymentMethods: methodsStats
+        .map(m => ({ method: m.method, count: m._count.id, amount: Number(m._sum.amount || 0) }))
+        .sort((a, b) => b.amount - a.amount),
+      classCollection,
+      ageing,
+      debtors,
+      generatedAt: now,
     });
 
   } catch (error) {
@@ -693,14 +712,18 @@ export const reconcilePayment = async (req: Request, res: Response) => {
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
-    const userId = (req as any).user?.userId;
-    if (!userId) {
+    const requestUser = (req as AuthRequest).user;
+    const userId = requestUser?.userId;
+    if (!requestUser || !userId) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found' });
+    }
+    if (requestUser.role !== 'SUPER_ADMIN' && payment.branchId !== requestUser.branchId) {
+      return res.status(403).json({ message: 'Payment does not belong to the current branch' });
     }
 
     if (payment.status !== 'COMPLETED') {
@@ -710,24 +733,27 @@ export const reconcilePayment = async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
     const { bankReference, settlementDate, reconciliationNote } = parseResult.data;
 
-    const updated = await prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        isReconciled: true,
-        reconciledAt: new Date(),
-        reconciledByUserId: userId,
-        reconciledByName: user?.fullName || 'Unknown User',
-        settlementDate: settlementDate ? new Date(settlementDate) : (payment.settlementDate || new Date()),
-        bankReference: bankReference || payment.bankReference,
-        reconciliationNote: reconciliationNote || payment.reconciliationNote,
-      },
-    });
+    const updated = await runTermWriteTransaction(payment.academicTermId, 'FINANCIAL_RECEIPT', tx => (
+      tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          isReconciled: true,
+          reconciledAt: new Date(),
+          reconciledByUserId: userId,
+          reconciledByName: user?.fullName || 'Unknown User',
+          settlementDate: settlementDate ? new Date(settlementDate) : (payment.settlementDate || new Date()),
+          bankReference: bankReference || payment.bankReference,
+          reconciliationNote: reconciliationNote || payment.reconciliationNote,
+        },
+      })
+    ));
 
     res.json({
       message: 'Payment reconciled successfully',
       payment: { ...updated, amount: Number(updated.amount) },
     });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Reconcile payment error:', error);
     res.status(500).json({ message: 'Failed to reconcile payment' });
   }
@@ -736,29 +762,42 @@ export const reconcilePayment = async (req: Request, res: Response) => {
 export const unreconcilePayment = async (req: Request, res: Response) => {
   try {
     const { paymentId } = req.params;
+    const requestUser = (req as AuthRequest).user;
+    if (!requestUser) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
 
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found' });
     }
+    if (requestUser.role !== 'SUPER_ADMIN' && payment.branchId !== requestUser.branchId) {
+      return res.status(403).json({ message: 'Payment does not belong to the current branch' });
+    }
+    if (payment.status !== 'COMPLETED') {
+      return res.status(400).json({ message: 'Only completed payments can be unreconciled' });
+    }
 
-    const updated = await prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        isReconciled: false,
-        reconciledAt: null,
-        reconciledByUserId: null,
-        reconciledByName: null,
-        settlementDate: null,
-        bankReference: null,
-      },
-    });
+    const updated = await runTermWriteTransaction(payment.academicTermId, 'FINANCIAL_RECEIPT', tx => (
+      tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          isReconciled: false,
+          reconciledAt: null,
+          reconciledByUserId: null,
+          reconciledByName: null,
+          settlementDate: null,
+          bankReference: null,
+        },
+      })
+    ));
 
     res.json({
       message: 'Payment moved back to unreconciled state',
       payment: { ...updated, amount: Number(updated.amount) },
     });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Unreconcile payment error:', error);
     res.status(500).json({ message: 'Failed to unreconcile payment' });
   }
@@ -785,62 +824,26 @@ export const voidPayment = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Find the payment
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId },
-      include: {
-        student: {
-          select: {
-            firstName: true,
-            lastName: true,
-            admissionNumber: true,
-          }
-        }
-      }
-    });
-
-    if (!payment) {
-      return res.status(404).json({ message: 'Payment not found' });
-    }
-
     // Verify the user exists (handles stale tokens)
     const voidingUser = await prisma.user.findUnique({ where: { id: userId } });
     if (!voidingUser) {
       return res.status(401).json({ message: 'Session invalid. Please log out and log in again.' });
     }
 
-    if (payment.status === 'VOIDED') {
-      return res.status(400).json({ message: 'This payment has already been voided' });
-    }
-
-    // Void the payment
-    const voidedPayment = await prisma.payment.update({
+    const requestUser = (req as AuthRequest).user;
+    await voidPaymentSettlement(
+      paymentId,
+      userId,
+      reason,
+      requestUser?.role === 'SUPER_ADMIN' ? null : requestUser?.branchId,
+    );
+    const voidedPayment = await prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
-      data: {
-        status: 'VOIDED',
-        voidedAt: new Date(),
-        voidedByUserId: userId,
-        voidReason: reason,
-      },
       include: {
-        student: {
-          select: {
-            firstName: true,
-            lastName: true,
-            admissionNumber: true,
-          }
-        },
-        recordedBy: {
-          select: {
-            fullName: true,
-          }
-        },
-        voidedBy: {
-          select: {
-            fullName: true,
-          }
-        }
-      }
+        student: { select: { firstName: true, lastName: true, admissionNumber: true } },
+        recordedBy: { select: { fullName: true } },
+        voidedBy: { select: { fullName: true } },
+      },
     });
 
     console.log(`Payment ${paymentId} voided by user ${userId}. Reason: ${reason}`);
@@ -855,6 +858,8 @@ export const voidPayment = async (req: Request, res: Response) => {
       payment: voidedPayment
     });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Void payment error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -960,11 +965,13 @@ export const checkDuplicatePayment = async (req: Request, res: Response) => {
 // Validation schema for mobile money collection
 const mobileMoneyPaymentSchema = z.object({
   studentId: z.string().uuid(),
+  academicTermId: z.string().uuid(),
   amount: z.number().positive(),
   phone: z.string().min(10).max(15),
   country: z.enum(['zm', 'mw']).default('zm'),
   operator: z.enum(['airtel', 'mtn', 'tnm']),
   notes: z.string().optional(),
+  idempotencyKey: z.string().min(8).max(200).optional(),
 });
 
 // Generate unique reference for mobile money collection
@@ -972,6 +979,174 @@ const generateMobileMoneyReference = (): string => {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `MM-${timestamp}-${random}`;
+};
+
+const createPendingMobileMoneyRecords = async (input: {
+  reference: string;
+  transactionId: string;
+  studentId: string;
+  academicTermId: string;
+  amount: number;
+  totalCharge: number;
+  phone: string;
+  country: 'zm' | 'mw';
+  operator: 'airtel' | 'mtn' | 'tnm';
+  notes?: string;
+  initiatedByUserId: string | null;
+  actorBranchId?: string | null;
+  source: 'MOBILE_MONEY' | 'PUBLIC_MOBILE_MONEY';
+  idempotencyKey?: string;
+}) => runTermWriteTransaction(input.academicTermId, 'FINANCIAL_RECEIPT', async tx => {
+  if (input.idempotencyKey) {
+    const existingPayment = await tx.payment.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      include: { mobileMoneyCollection: true },
+    });
+    if (existingPayment) {
+      if (
+        existingPayment.studentId !== input.studentId
+        || existingPayment.academicTermId !== input.academicTermId
+        || Number(existingPayment.amount) !== Number(input.amount)
+        || existingPayment.method !== 'MOBILE_MONEY'
+        || existingPayment.source !== input.source
+        || !existingPayment.mobileMoneyCollection
+        || existingPayment.mobileMoneyCollection.phone !== input.phone
+        || existingPayment.mobileMoneyCollection.operator !== input.operator
+      ) {
+        throw new PaymentSettlementError(
+          'IDEMPOTENCY_CONFLICT',
+          'The idempotency key is already associated with a different mobile-money request',
+        );
+      }
+      return {
+        collection: existingPayment.mobileMoneyCollection,
+        pendingPayment: existingPayment,
+        reused: true,
+      };
+    }
+  }
+
+  const student = await tx.student.findUnique({
+    where: { id: input.studentId },
+    select: { branchId: true },
+  });
+  if (!student) {
+    throw new PaymentSettlementError('STUDENT_NOT_FOUND', 'Student not found', 404);
+  }
+  if (input.actorBranchId && student.branchId !== input.actorBranchId) {
+    throw new PaymentSettlementError(
+      'STUDENT_BRANCH_MISMATCH',
+      'Student does not belong to the current branch',
+      403,
+    );
+  }
+
+  const collection = await tx.mobileMoneyCollection.create({
+    data: {
+      reference: input.reference,
+      studentId: input.studentId,
+      amount: input.totalCharge,
+      phone: input.phone,
+      country: input.country,
+      operator: input.operator,
+      initiatedByUserId: input.initiatedByUserId,
+      status: 'PENDING',
+      branchId: student.branchId,
+    },
+  });
+
+  const pendingPayment = await tx.payment.create({
+    data: {
+      transactionId: input.transactionId,
+      idempotencyKey: input.idempotencyKey || null,
+      source: input.source,
+      studentId: input.studentId,
+      academicTermId: input.academicTermId,
+      amount: input.amount,
+      method: 'MOBILE_MONEY',
+      notes: input.notes || `Mobile Money payment via ${input.operator.toUpperCase()}. Ref: ${input.reference}`,
+      status: 'PENDING',
+      recordedByUserId: input.initiatedByUserId,
+      branchId: student.branchId,
+    },
+  });
+
+  await tx.mobileMoneyCollection.update({
+    where: { id: collection.id },
+    data: { paymentId: pendingPayment.id },
+  });
+
+  return { collection, pendingPayment, reused: false };
+});
+
+const updateMobileMoneyCollectionForTerm = async (
+  academicTermId: string,
+  collectionId: string,
+  data: Prisma.MobileMoneyCollectionUpdateInput,
+  paymentStatus?: PaymentStatus,
+) => {
+  const result = await runTermWriteTransaction(
+    academicTermId,
+    'FINANCIAL_RECEIPT',
+    async tx => {
+      const ownedCollection = await tx.mobileMoneyCollection.findFirst({
+        where: {
+          id: collectionId,
+          payment: { is: { academicTermId } },
+        },
+        select: {
+          id: true,
+          status: true,
+          payment: { select: { id: true, status: true } },
+        },
+      });
+      if (!ownedCollection || !ownedCollection.payment) {
+        throw new Error('Mobile money collection is not linked to the requested academic term');
+      }
+
+      const collection = await tx.mobileMoneyCollection.update({
+        where: { id: collectionId },
+        data,
+        include: {
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              admissionNumber: true,
+            },
+          },
+        },
+      });
+
+      let payment = null;
+      let paymentBecameCompleted = false;
+      if (paymentStatus === 'COMPLETED') {
+        const completion = await completePendingPaymentInTransaction(
+          tx,
+          ownedCollection.payment.id,
+        );
+        payment = completion.payment;
+        paymentBecameCompleted = completion.becameCompleted;
+      } else if (paymentStatus) {
+        payment = await tx.payment.update({
+          where: { id: ownedCollection.payment.id },
+          data: { status: paymentStatus },
+        });
+      }
+
+      return {
+        collection,
+        payment,
+        paymentBecameCompleted,
+      };
+    },
+  );
+
+  if (result.payment && result.paymentBecameCompleted) {
+    await processCompletedMobileMoneyPayment(result.payment, result.collection.reference);
+  }
+
+  return result.collection;
 };
 
 /**
@@ -985,7 +1160,11 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
-    const { studentId, amount, phone, country, operator, notes } = parseResult.data;
+    const { studentId, academicTermId, amount, phone, country, operator, notes } = parseResult.data;
+    const idempotencyKey = parseResult.data.idempotencyKey ?? req.header?.('Idempotency-Key')?.trim();
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 200)) {
+      return res.status(400).json({ error: 'Idempotency key must be between 8 and 200 characters' });
+    }
 
     // Calculate 2.5% processing fee
     const processingFee = amount * 0.025;
@@ -1035,38 +1214,43 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
     // Generate transaction ID for the payment
     const transactionId = generateTransactionId();
 
-    // Create the collection record and pending payment in our database first
-    const collection = await prisma.mobileMoneyCollection.create({
-      data: {
-        reference,
-        studentId,
-        amount: totalCharge,
-        phone,
-        country,
-        operator,
-        initiatedByUserId: userId,
-        status: 'PENDING',
-      },
+    const pending = await createPendingMobileMoneyRecords({
+      reference,
+      transactionId,
+      studentId,
+      academicTermId,
+      amount,
+      totalCharge,
+      phone,
+      country,
+      operator,
+      notes,
+      initiatedByUserId: userId,
+      actorBranchId: (req as AuthRequest).user?.role === 'SUPER_ADMIN'
+        || (req as AuthRequest).user?.role === 'PARENT'
+        ? null
+        : (req as AuthRequest).user?.branchId,
+      source: 'MOBILE_MONEY',
+      idempotencyKey,
     });
+    const { collection, pendingPayment } = pending;
 
-    // Create Payment record with PENDING status
-    const pendingPayment = await prisma.payment.create({
-      data: {
-        transactionId,
-        studentId,
-        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
-        method: 'MOBILE_MONEY',
-        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
-        status: 'PENDING',
-        recordedByUserId: userId,
-      },
-    });
-
-    // Link the payment to the collection
-    await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: { paymentId: pendingPayment.id },
-    });
+    if (pending.reused) {
+      return res.status(200).json({
+        message: 'Existing mobile money payment request returned',
+        collection: {
+          id: collection.id,
+          reference: collection.reference,
+          lencoReference: collection.lencoReference,
+          amount: Number(collection.amount),
+          phone: collection.phone,
+          operator: collection.operator,
+          status: collection.status,
+          payment: { id: pendingPayment.id, transactionId: pendingPayment.transactionId },
+        },
+        reused: true,
+      });
+    }
 
     // Call Lenco API to initiate the collection
     const lencoResult = await initiateMobileMoneyCollection({
@@ -1079,13 +1263,15 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
 
     if (!lencoResult.success) {
       // Update collection status to FAILED
-      await prisma.mobileMoneyCollection.update({
-        where: { id: collection.id },
-        data: {
+      await updateMobileMoneyCollectionForTerm(
+        academicTermId,
+        collection.id,
+        {
           status: 'FAILED',
           reasonForFailure: lencoResult.error,
         },
-      });
+        'FAILED',
+      );
 
       return res.status(400).json({
         message: 'Failed to initiate mobile money collection',
@@ -1094,25 +1280,17 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
     }
 
     // Update collection with Lenco response
-    const updatedCollection = await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: {
+    const updatedCollection = await updateMobileMoneyCollectionForTerm(
+      academicTermId,
+      collection.id,
+      {
         lencoReference: lencoResult.data?.lencoReference,
         lencoCollectionId: lencoResult.data?.id,
         status: lencoResult.data?.status === 'pay-offline' ? 'PAY_OFFLINE' : 'PENDING',
         fee: lencoResult.data?.fee ? parseFloat(lencoResult.data.fee) : null,
         accountName: lencoResult.data?.mobileMoneyDetails?.accountName,
       },
-      include: {
-        student: {
-          select: {
-            firstName: true,
-            lastName: true,
-            admissionNumber: true,
-          }
-        }
-      }
-    });
+    );
 
     console.log(`Mobile money collection initiated: ${reference} for student ${studentId}`);
 
@@ -1136,6 +1314,8 @@ export const initiateMobileMoneyPayment = async (req: Request, res: Response) =>
       ]
     });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Initiate mobile money payment error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -1169,6 +1349,9 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
 
     if (!collection) {
       return res.status(404).json({ message: 'Collection not found' });
+    }
+    if (!collection.payment) {
+      return res.status(409).json({ message: 'Collection is not linked to a term-owned payment' });
     }
 
     // If already successful or failed, return cached status
@@ -1218,23 +1401,20 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
 
     // If status changed, update the collection
     if (newStatus !== collection.status) {
-      const updatedCollection = await prisma.mobileMoneyCollection.update({
-        where: { id: collection.id },
-        data: {
+      const updatedCollection = await updateMobileMoneyCollectionForTerm(
+        collection.payment.academicTermId,
+        collection.id,
+        {
           status: newStatus,
           completedAt: newStatus === 'SUCCESSFUL' ? new Date() : null,
           reasonForFailure: lencoResult.data?.reasonForFailure,
           operatorTransactionId: lencoResult.data?.mobileMoneyDetails?.operatorTransactionId,
           accountName: lencoResult.data?.mobileMoneyDetails?.accountName,
         },
-      });
-
-      // Update payment status based on collection result
-      if (newStatus === 'SUCCESSFUL' && collection.paymentId) {
-        await updatePaymentFromCollection({ ...collection, paymentId: collection.paymentId }, 'COMPLETED');
-      } else if (newStatus === 'FAILED' && collection.paymentId) {
-        await updatePaymentFromCollection({ ...collection, paymentId: collection.paymentId }, 'FAILED');
-      }
+        newStatus === 'SUCCESSFUL'
+          ? 'COMPLETED'
+          : newStatus === 'FAILED' ? 'FAILED' : undefined,
+      );
 
       // If successful, return with payment info
       if (newStatus === 'SUCCESSFUL') {
@@ -1267,85 +1447,67 @@ export const checkMobileMoneyStatus = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Check mobile money status error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 /**
- * Helper function to update payment status from mobile money collection
+ * Run accounting and notification side effects after a collection and its payment
+ * have atomically entered the completed state.
  */
-async function updatePaymentFromCollection(collection: any, newStatus: 'COMPLETED' | 'FAILED') {
+async function processCompletedMobileMoneyPayment(payment: any, collectionReference: string) {
   try {
-    if (!collection.paymentId) {
-      console.error(`No payment linked to collection ${collection.reference}`);
-      return null;
-    }
-
-    // Update payment status
-    const paymentStatus = newStatus === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
-    const payment = await prisma.payment.update({
-      where: { id: collection.paymentId },
-      data: {
-        status: paymentStatus as PaymentStatus,
-      },
-    });
-
-    console.log(`Payment ${payment.transactionId} updated to ${newStatus} from collection ${collection.reference}`);
+    console.log(`Payment ${payment.transactionId} completed from collection ${collectionReference}`);
 
     // Create accounting journal entry for completed mobile money payment
-    if (newStatus === 'COMPLETED') {
-      onPaymentCreated(payment.id).catch(err =>
-        console.error('Background journal entry for mobile money failed:', err)
-      );
-    }
+    onPaymentCreated(payment.id).catch(err =>
+      console.error('Background journal entry for mobile money failed:', err)
+    );
 
     // Send notification to parent on successful payment
-    if (newStatus === 'COMPLETED') {
-      // Fetch student with parent info for notification
-      const student = await prisma.student.findUnique({
-        where: { id: payment.studentId },
-        include: { parent: true },
-      });
+    // Fetch student with parent info for notification
+    const student = await prisma.student.findUnique({
+      where: { id: payment.studentId },
+      include: { parent: true },
+    });
 
-      if (student) {
-        const guardianEmail = student.guardianEmail || student.parent?.email;
-        const guardianPhone = student.guardianPhone; // Phone from student record
-        const guardianName = student.guardianName || student.parent?.fullName || 'Parent/Guardian';
+    if (student) {
+      const guardianEmail = student.guardianEmail || student.parent?.email;
+      const guardianPhone = student.guardianPhone; // Phone from student record
+      const guardianName = student.guardianName || student.parent?.fullName || 'Parent/Guardian';
 
-        // Get school name
-        const settings = await prisma.schoolSettings.findFirst();
-        const schoolName = settings?.schoolName || 'School';
+      // Get school name
+      const settings = await prisma.schoolSettings.findFirst();
+      const schoolName = settings?.schoolName || 'School';
 
-        // Generate email/SMS content
-        const { subject, text, html, sms } = generatePaymentReceiptEmail(
-          guardianName,
-          `${student.firstName} ${student.lastName}`,
-          Number(payment.amount),
-          new Date(),
-          'MOBILE_MONEY',
-          payment.transactionId || collection.reference,
-          schoolName
-        );
+      // Generate email/SMS content
+      const { subject, text, html, sms } = generatePaymentReceiptEmail(
+        guardianName,
+        `${student.firstName} ${student.lastName}`,
+        Number(payment.amount),
+        new Date(),
+        'MOBILE_MONEY',
+        payment.transactionId || collectionReference,
+        schoolName
+      );
 
-        // Send email and SMS
-        const { emailSent, smsSent } = await sendNotification(
-          guardianEmail || undefined,
-          guardianPhone || undefined,
-          subject,
-          text,
-          html,
-          sms
-        );
+      // Send email and SMS
+      const { emailSent, smsSent } = await sendNotification(
+        guardianEmail || undefined,
+        guardianPhone || undefined,
+        subject,
+        text,
+        html,
+        sms
+      );
 
-        console.log(`Payment notification sent - Email: ${emailSent}, SMS: ${smsSent}`);
-      }
+      console.log(`Payment notification sent - Email: ${emailSent}, SMS: ${smsSent}`);
     }
-
-    return payment;
   } catch (error) {
-    console.error('Error updating payment from collection:', error);
-    return null;
+    console.error('Error processing completed mobile money payment:', error);
   }
 }
 
@@ -1369,11 +1531,15 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
     // Find the collection
     const collection = await prisma.mobileMoneyCollection.findUnique({
       where: { reference },
+      include: { payment: { select: { academicTermId: true } } },
     });
 
     if (!collection) {
       console.log(`Collection not found for reference: ${reference}`);
       return res.status(404).json({ message: 'Collection not found' });
+    }
+    if (!collection.payment) {
+      return res.status(409).json({ message: 'Collection is not linked to a term-owned payment' });
     }
 
     // Map Lenco status to our status
@@ -1387,29 +1553,28 @@ export const handleLencoWebhook = async (req: Request, res: Response) => {
     }
 
     // Update collection status
-    const updatedCollection = await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: {
+    const updatedCollection = await updateMobileMoneyCollectionForTerm(
+      collection.payment.academicTermId,
+      collection.id,
+      {
         status: newStatus,
         completedAt: newStatus === 'SUCCESSFUL' ? new Date() : null,
         reasonForFailure: reasonForFailure || null,
         operatorTransactionId: mobileMoneyDetails?.operatorTransactionId,
         accountName: mobileMoneyDetails?.accountName,
       },
-    });
-
-    // Update payment status based on collection result
-    if (newStatus === 'SUCCESSFUL' && updatedCollection.paymentId) {
-      await updatePaymentFromCollection(updatedCollection, 'COMPLETED');
-    } else if (newStatus === 'FAILED' && updatedCollection.paymentId) {
-      await updatePaymentFromCollection(updatedCollection, 'FAILED');
-    }
+      newStatus === 'SUCCESSFUL'
+        ? 'COMPLETED'
+        : newStatus === 'FAILED' ? 'FAILED' : undefined,
+    );
 
     console.log(`Webhook processed for collection ${reference}: ${newStatus}`);
 
     // Respond to webhook
     res.status(200).json({ received: true });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Lenco webhook error:', error);
     res.status(500).json({ message: 'Webhook processing failed' });
   }
@@ -1424,6 +1589,7 @@ export const getMobileMoneyCollections = async (req: Request, res: Response) => 
     const limit = Number(req.query.limit) || 20;
     const status = req.query.status as string;
     const studentId = req.query.studentId as string;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
 
     const skip = (page - 1) * limit;
     const where: any = {};
@@ -1434,6 +1600,10 @@ export const getMobileMoneyCollections = async (req: Request, res: Response) => 
 
     if (studentId) {
       where.studentId = studentId;
+    }
+
+    if (academicTermId) {
+      where.payment = { academicTermId };
     }
 
     // Security Check: If user is PARENT, only show collections for their children
@@ -1569,6 +1739,11 @@ export const getStudentForPublicPayment = async (req: Request, res: Response) =>
       return res.status(400).json({ message: 'Student Identifier is required' });
     }
 
+    const academicTerm = await getActiveTerm();
+    if (!academicTerm) {
+      return res.status(503).json({ message: 'No active academic term is configured.' });
+    }
+
     const student = await prisma.student.findFirst({
       where: {
         OR: [
@@ -1581,7 +1756,11 @@ export const getStudentForPublicPayment = async (req: Request, res: Response) =>
         firstName: true,
         lastName: true,
         admissionNumber: true,
-        class: { select: { name: true } }
+        termEnrollments: {
+          where: { academicTermId: academicTerm.id },
+          select: { class: { select: { name: true } } },
+          take: 1,
+        }
       }
     });
 
@@ -1589,25 +1768,36 @@ export const getStudentForPublicPayment = async (req: Request, res: Response) =>
       return res.status(404).json({ message: 'Student not found.' });
     }
 
-    // Calculate Balance
-    const totalFees = await prisma.studentFeeStructure.aggregate({
-      where: { studentId: student.id },
-      _sum: { amountDue: true }
+    // Public receipts use the active term for cash provenance but settle the
+    // student's oldest outstanding obligations across terms.
+    const [accountSettlement, currentTermSettlement] = await Promise.all([
+      prisma.studentFeeStructure.aggregate({
+        where: { studentId: student.id },
+        _sum: { amountDue: true, amountPaid: true },
+      }),
+      prisma.studentFeeStructure.aggregate({
+        where: { studentId: student.id, academicTermId: academicTerm.id },
+        _sum: { amountDue: true, amountPaid: true },
+      }),
+    ]);
+
+    const balance = Math.max(
+      0,
+      Number(accountSettlement._sum.amountDue || 0) - Number(accountSettlement._sum.amountPaid || 0),
+    );
+    const currentTermBalance = Math.max(
+      0,
+      Number(currentTermSettlement._sum.amountDue || 0) - Number(currentTermSettlement._sum.amountPaid || 0),
+    );
+
+    res.json({
+      ...student,
+      class: student.termEnrollments[0]?.class ?? null,
+      termEnrollments: undefined,
+      balance,
+      currentTermBalance,
+      academicTerm,
     });
-
-    const totalPayments = await prisma.payment.aggregate({
-      where: {
-        studentId: student.id,
-        status: 'COMPLETED'
-      },
-      _sum: { amount: true }
-    });
-
-    const due = Number(totalFees._sum.amountDue || 0);
-    const paid = Number(totalPayments._sum.amount || 0);
-    const balance = due - paid;
-
-    res.json({ ...student, balance });
   } catch (error) {
     console.error('Public Get Student Error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1621,7 +1811,11 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
-    const { studentId, amount, phone, country, operator, notes } = parseResult.data;
+    const { studentId, academicTermId, amount, phone, country, operator, notes } = parseResult.data;
+    const idempotencyKey = parseResult.data.idempotencyKey ?? req.header?.('Idempotency-Key')?.trim();
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 200)) {
+      return res.status(400).json({ error: 'Idempotency key must be between 8 and 200 characters' });
+    }
 
     // Calculate 2.5% processing fee
     const processingFee = amount * 0.025;
@@ -1639,36 +1833,38 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     const reference = generateMobileMoneyReference();
     const transactionId = generateTransactionId();
 
-    const collection = await prisma.mobileMoneyCollection.create({
-      data: {
-        reference,
-        studentId,
-        amount: totalCharge,
-        phone,
-        country,
-        operator,
-        status: 'PENDING',
-      },
+    const pending = await createPendingMobileMoneyRecords({
+      reference,
+      transactionId,
+      studentId,
+      academicTermId,
+      amount,
+      totalCharge,
+      phone,
+      country,
+      operator,
+      notes,
+      initiatedByUserId: null,
+      source: 'PUBLIC_MOBILE_MONEY',
+      idempotencyKey,
     });
+    const { collection, pendingPayment } = pending;
 
-    // Create Payment record with PENDING status
-    const pendingPayment = await prisma.payment.create({
-      data: {
-        transactionId,
-        studentId,
-        amount: Number(totalCharge) / 1.025, // Record tuition amount (exclude processing fee)
-        method: 'MOBILE_MONEY',
-        notes: `Mobile Money payment via ${operator.toUpperCase()}. Ref: ${reference}`,
-        status: 'PENDING',
-        recordedByUserId: null, // Public payment has no recorded user
-      },
-    });
-
-    // Link the payment to the collection
-    await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: { paymentId: pendingPayment.id },
-    });
+    if (pending.reused) {
+      return res.status(200).json({
+        message: 'Existing mobile money payment request returned',
+        collection: {
+          id: collection.id,
+          reference: collection.reference,
+          amount: Number(collection.amount),
+          phone: collection.phone,
+          operator: collection.operator,
+          status: collection.status,
+          payment: { id: pendingPayment.id, transactionId: pendingPayment.transactionId },
+        },
+        reused: true,
+      });
+    }
 
     const lencoResult = await initiateMobileMoneyCollection({
       amount: totalCharge,
@@ -1679,13 +1875,15 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     });
 
     if (!lencoResult.success) {
-      await prisma.mobileMoneyCollection.update({
-        where: { id: collection.id },
-        data: {
+      await updateMobileMoneyCollectionForTerm(
+        academicTermId,
+        collection.id,
+        {
           status: 'FAILED',
           reasonForFailure: lencoResult.error,
         },
-      });
+        'FAILED',
+      );
 
       return res.status(400).json({
         message: 'Failed to initiate mobile money collection',
@@ -1693,16 +1891,17 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
       });
     }
 
-    const updatedCollection = await prisma.mobileMoneyCollection.update({
-      where: { id: collection.id },
-      data: {
+    const updatedCollection = await updateMobileMoneyCollectionForTerm(
+      academicTermId,
+      collection.id,
+      {
         lencoReference: lencoResult.data?.lencoReference,
         lencoCollectionId: lencoResult.data?.id,
         status: lencoResult.data?.status === 'pay-offline' ? 'PAY_OFFLINE' : 'PENDING',
         fee: lencoResult.data?.fee ? parseFloat(lencoResult.data.fee) : null,
         accountName: lencoResult.data?.mobileMoneyDetails?.accountName,
       },
-    });
+    );
 
     res.status(201).json({
       message: 'Mobile money payment request initiated.',
@@ -1717,6 +1916,8 @@ export const initiatePublicMobileMoneyPayment = async (req: Request, res: Respon
     });
 
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Public Initiate Payment Error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }

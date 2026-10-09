@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { TermLifecycleError, runTermWriteTransaction } from './termLifecycleService';
 
 /**
  * TEACHER INTELLIGENCE ENGINE
@@ -57,6 +58,12 @@ export class TeachingHubService {
       // Use the first subtopic as the assessment's learning objective
       // In production, assessments should be directly tagged to a subtopic
       const targetSubTopicId = allSubTopics[0].id;
+      const masteryUpdates: Array<{
+        studentId: string;
+        masteryScore: number;
+        attempts: number;
+        status: string;
+      }> = [];
 
       // For each student submission, calculate their score
       for (const submission of assessment.submissions) {
@@ -85,30 +92,52 @@ export class TeachingHubService {
         if (scorePercent < 50) status = 'URGENT';
         else if (scorePercent < 75) status = 'FRAGILE';
 
-        // Upsert the mastery record
-        await prisma.learningObjectiveMastery.upsert({
-          where: {
-            studentId_subTopicId: {
-              studentId: submission.studentId,
-              subTopicId: targetSubTopicId
-            }
-          },
-          create: {
-            studentId: submission.studentId,
-            classId: assessment.classId,
-            subTopicId: targetSubTopicId,
-            masteryScore: scorePercent,
-            attempts: totalQuestions,
-            status
-          },
-          update: {
-            masteryScore: scorePercent,
-            attempts: { increment: totalQuestions },
-            status,
-            lastAssessed: new Date()
-          }
+        masteryUpdates.push({
+          studentId: submission.studentId,
+          masteryScore: scorePercent,
+          attempts: totalQuestions,
+          status,
         });
       }
+
+      await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
+        const persistedAssessment = await tx.assessment.findUnique({
+          where: { id: assessmentId },
+          select: { termId: true, classId: true },
+        });
+        if (!persistedAssessment || persistedAssessment.termId !== assessment.termId) {
+          throw new TermLifecycleError(
+            'TERM_LIFECYCLE_CONFLICT',
+            'Assessment term ownership changed while mastery was being calculated',
+          );
+        }
+
+        for (const update of masteryUpdates) {
+          await tx.learningObjectiveMastery.upsert({
+            where: {
+              studentId_subTopicId: {
+                studentId: update.studentId,
+                subTopicId: targetSubTopicId
+              }
+            },
+            create: {
+              studentId: update.studentId,
+              classId: persistedAssessment.classId,
+              subTopicId: targetSubTopicId,
+              masteryScore: update.masteryScore,
+              attempts: update.attempts,
+              status: update.status
+            },
+            update: {
+              classId: persistedAssessment.classId,
+              masteryScore: update.masteryScore,
+              attempts: { increment: update.attempts },
+              status: update.status,
+              lastAssessed: new Date()
+            }
+          });
+        }
+      });
 
       console.log(`[TeachingHub] Mastery updated for ${assessment.submissions.length} students.`);
 
@@ -117,6 +146,7 @@ export class TeachingHubService {
 
     } catch (error) {
       console.error('[TeachingHub] processAssessmentMastery error:', error);
+      if (error instanceof TermLifecycleError) throw error;
     }
   }
 
@@ -193,15 +223,32 @@ export class TeachingHubService {
         const questionText = questionTextMap.get(questionId) || 'Unknown question';
 
         // Log the pattern in the database (deterministic)
-        const pattern = await prisma.misconceptionPattern.create({
-          data: {
-            assessmentId,
-            subTopicId: targetSubTopicId,
-            studentCount: count,
-            wrongAnswer: topWrongAnswer,
-            description: 'Pending AI analysis...'
-          }
-        });
+        const pattern = await runTermWriteTransaction(
+          assessment.termId,
+          'ACADEMIC_ACTIVITY',
+          async tx => {
+            const persistedAssessment = await tx.assessment.findUnique({
+              where: { id: assessmentId },
+              select: { termId: true },
+            });
+            if (!persistedAssessment || persistedAssessment.termId !== assessment.termId) {
+              throw new TermLifecycleError(
+                'TERM_LIFECYCLE_CONFLICT',
+                'Assessment term ownership changed while misconceptions were being analyzed',
+              );
+            }
+
+            return tx.misconceptionPattern.create({
+              data: {
+                assessmentId,
+                subTopicId: targetSubTopicId,
+                studentCount: count,
+                wrongAnswer: topWrongAnswer,
+                description: 'Pending AI analysis...'
+              }
+            });
+          },
+        );
 
         // Invoke the AI to explain "why" and draft a response
         await this.generateAIDraft(
@@ -216,6 +263,7 @@ export class TeachingHubService {
 
     } catch (error) {
       console.error('[TeachingHub] analyzeMisconceptions error:', error);
+      if (error instanceof TermLifecycleError) throw error;
     }
   }
 
@@ -261,35 +309,68 @@ Return ONLY a JSON object matching this exact format:
         parentNoteDraft: string;
       }>(prompt, { temperature: 0.2 });
 
-      // Update the misconception pattern with the AI explanation
-      await prisma.misconceptionPattern.update({
-        where: { id: patternId },
-        data: { description: aiResponse.explanation }
-      });
-
-      // Create the pending teacher action (the "tap on the shoulder")
-      await prisma.pendingTeacherAction.create({
-        data: {
-          teacherId: assessment.class.teacherId,
-          classId: assessment.classId,
-          actionType: 'RETEACH_PLAN',
-          title: `Intervention: ${aiResponse.diagnosisTitle}`,
-          description: `${count} students made the exact same error on "${subTopicTitle}". I've drafted a reteach plan and parent notes for your review.`,
-          draftPayload: aiResponse
+      await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
+        const persistedPattern = await tx.misconceptionPattern.findUnique({
+          where: { id: patternId },
+          include: {
+            assessment: {
+              select: {
+                termId: true,
+                classId: true,
+                class: { select: { teacherId: true } },
+              },
+            },
+          },
+        });
+        if (!persistedPattern || persistedPattern.assessment.termId !== assessment.termId) {
+          throw new TermLifecycleError(
+            'TERM_LIFECYCLE_CONFLICT',
+            'Misconception pattern term ownership changed while its draft was being generated',
+          );
         }
+
+        await tx.misconceptionPattern.update({
+          where: { id: patternId },
+          data: { description: aiResponse.explanation }
+        });
+
+        await tx.pendingTeacherAction.create({
+          data: {
+            teacherId: persistedPattern.assessment.class.teacherId,
+            classId: persistedPattern.assessment.classId,
+            actionType: 'RETEACH_PLAN',
+            title: `Intervention: ${aiResponse.diagnosisTitle}`,
+            description: `${count} students made the exact same error on "${subTopicTitle}". I've drafted a reteach plan and parent notes for your review.`,
+            draftPayload: aiResponse
+          }
+        });
       });
 
       console.log(`[TeachingHub] AI draft created for misconception pattern: ${patternId}`);
 
     } catch (error) {
+      if (error instanceof TermLifecycleError) throw error;
       console.error('[TeachingHub] AI draft generation failed:', error);
 
       // Safe fallback — never leave the teacher without information
-      await prisma.misconceptionPattern.update({
-        where: { id: patternId },
-        data: {
-          description: `${count} students chose the same wrong answer on this question. Manual review recommended.`
+      await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
+        const persistedPattern = await tx.misconceptionPattern.findUnique({
+          where: { id: patternId },
+          include: { assessment: { select: { termId: true } } },
+        });
+        if (!persistedPattern || persistedPattern.assessment.termId !== assessment.termId) {
+          throw new TermLifecycleError(
+            'TERM_LIFECYCLE_CONFLICT',
+            'Misconception pattern term ownership changed while its fallback was being saved',
+          );
         }
+
+        await tx.misconceptionPattern.update({
+          where: { id: patternId },
+          data: {
+            description: `${count} students chose the same wrong answer on this question. Manual review recommended.`
+          }
+        });
       });
     }
   }
@@ -299,12 +380,32 @@ Return ONLY a JSON object matching this exact format:
    * Called when the teacher approves, edits, or dismisses a draft.
    */
   static async resolvePendingAction(actionId: string, status: 'APPROVED' | 'DISMISSED' | 'EDITED') {
-    return prisma.pendingTeacherAction.update({
+    const action = await prisma.pendingTeacherAction.findUnique({
       where: { id: actionId },
-      data: {
-        status,
-        resolvedAt: new Date()
+      include: { class: { select: { academicTermId: true } } },
+    });
+    if (!action) throw new Error('Action not found');
+    if (!action.class) throw new Error('Action is not linked to a term-owned class');
+
+    return runTermWriteTransaction(action.class.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const persistedAction = await tx.pendingTeacherAction.findUnique({
+        where: { id: actionId },
+        include: { class: { select: { academicTermId: true } } },
+      });
+      if (!persistedAction || persistedAction.class?.academicTermId !== action.class!.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Teacher action term ownership changed while it was being resolved',
+        );
       }
+
+      return tx.pendingTeacherAction.update({
+        where: { id: actionId },
+        data: {
+          status,
+          resolvedAt: new Date()
+        }
+      });
     });
   }
 
@@ -321,17 +422,36 @@ Return ONLY a JSON object matching this exact format:
     notes?: string;
     preScore?: number;
   }) {
-    return prisma.interventionRecord.create({
-      data: {
-        teacherId: data.teacherId,
-        classId: data.classId,
-        subTopicId: data.subTopicId,
-        studentIds: data.studentIds,
-        strategyUsed: data.strategyUsed,
-        notes: data.notes,
-        preInterventionScore: data.preScore,
-        effectiveness: 'PENDING'
+    const targetClass = await prisma.class.findUnique({
+      where: { id: data.classId },
+      select: { academicTermId: true },
+    });
+    if (!targetClass) throw new Error('Class not found');
+
+    return runTermWriteTransaction(targetClass.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const persistedClass = await tx.class.findUnique({
+        where: { id: data.classId },
+        select: { academicTermId: true },
+      });
+      if (!persistedClass || persistedClass.academicTermId !== targetClass.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Class term ownership changed while the intervention was being logged',
+        );
       }
+
+      return tx.interventionRecord.create({
+        data: {
+          teacherId: data.teacherId,
+          classId: data.classId,
+          subTopicId: data.subTopicId,
+          studentIds: data.studentIds,
+          strategyUsed: data.strategyUsed,
+          notes: data.notes,
+          preInterventionScore: data.preScore,
+          effectiveness: 'PENDING'
+        }
+      });
     });
   }
 }

@@ -77,6 +77,80 @@ enum TransferEntityType {
   USER
 }
 
+enum AcademicYearStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum AcademicTermStatus {
+  DRAFT
+  ACTIVE
+  CLOSING
+  CLOSED
+}
+
+enum ClassCohortStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StudentTermEnrollmentStatus {
+  STAGED
+  ACTIVE
+  COMPLETED
+  TRANSFERRED
+  WITHDRAWN
+  GRADUATED
+}
+
+enum StudentTransitionAction {
+  CARRY_FORWARD
+  PROMOTE
+  RETAIN
+  GRADUATE
+  TRANSFER
+  WITHDRAW
+}
+
+enum TermRolloverType {
+  WITHIN_YEAR
+  YEAR_END
+}
+
+enum TermRolloverStatus {
+  DRAFT
+  PREPARING
+  PREPARED
+  READY
+  EXECUTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TermRolloverTaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum StudentTermReportStatus {
+  DRAFT
+  FINALIZED
+  PUBLISHED
+}
+
+enum ClosedTermAmendmentStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  APPLIED
+  CANCELLED
+}
+
 model User {
   id                String   @id @default(uuid())
   email             String   @unique
@@ -158,10 +232,11 @@ model Student {
   scholarshipId String?
   scholarship   Scholarship? @relation(fields: [scholarshipId], references: [id])
 
-  payments       Payment[]
-  attendance     Attendance[]
-  feeStructures  StudentFeeStructure[]
-  classMovements ClassMovementLog[]
+  payments         Payment[]
+  attendance       Attendance[]
+  attendanceAlerts AttendanceAlert[]
+  feeStructures    StudentFeeStructure[]
+  classMovements   ClassMovementLog[]
 
   parentId String?
   parent   User?   @relation("ParentChildren", fields: [parentId], references: [id])
@@ -183,6 +258,8 @@ model Student {
   // Multi-branch enrollments (for students attending multiple campuses)
   branchEnrollments        StudentBranch[]
   LearningObjectiveMastery LearningObjectiveMastery[]
+  termEnrollments          StudentTermEnrollment[]
+  transitionDecisions      StudentTransitionDecision[]
 
   @@map("students")
 }
@@ -195,6 +272,8 @@ model Class {
   teacher        User         @relation(fields: [teacherId], references: [id])
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
+  classCohortId  String?
+  classCohort    ClassCohort? @relation(fields: [classCohortId], references: [id])
 
   students   Student[]
   attendance Attendance[]
@@ -212,13 +291,18 @@ model Class {
   teacherAssignments TeacherSubject[]
 
   branchId                 String?
-  branch                   Branch?                    @relation(fields: [branchId], references: [id])
+  branch                   Branch?                     @relation(fields: [branchId], references: [id])
   classFeeAssignments      ClassFeeAssignment[]
   LearningObjectiveMastery LearningObjectiveMastery[]
   PendingTeacherAction     PendingTeacherAction[]
   InterventionRecord       InterventionRecord[]
   AdaptedLesson            AdaptedLesson[]
+  termEnrollments          StudentTermEnrollment[]
+  transitionDecisions      StudentTransitionDecision[]
 
+  @@unique([classCohortId, academicTermId])
+  @@index([academicTermId, branchId])
+  @@index([classCohortId])
   @@map("classes")
 }
 
@@ -240,29 +324,311 @@ model Subject {
   @@map("subjects")
 }
 
-model AcademicTerm {
-  id        String   @id @default(uuid())
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  isActive  Boolean  @default(false)
+model AcademicYear {
+  id                String             @id @default(uuid())
+  name              String             @unique
+  startDate         DateTime
+  endDate           DateTime
+  termCount         Int                @default(3)
+  status            AcademicYearStatus @default(DRAFT)
+  finalizedAt       DateTime?
+  finalizedByUserId String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
-  classes              Class[]
-  feeTemplates         FeeTemplate[]
-  assessments          Assessment[]
-  termResults          TermResult[]
-  studentReports       StudentTermReport[]
-  timetablePeriods     TimetablePeriod[]
-  lessonPlans          LessonPlan[]
-  financialReports     FinancialReport[]
-  classFeeAssignments  ClassFeeAssignment[]
-  studentFeeStructures StudentFeeStructure[]
-  payments             Payment[]
-  financialSummaries   TermFinancialSummary[]
+  terms        AcademicTerm[]
+  classCohorts ClassCohort[]
+
+  @@index([status, startDate])
+  @@map("academic_years")
+}
+
+model AcademicTerm {
+  id               String             @id @default(uuid())
+  name             String
+  startDate        DateTime
+  endDate          DateTime
+  isActive         Boolean            @default(false)
+  academicYearId   String?
+  academicYear     AcademicYear?      @relation(fields: [academicYearId], references: [id])
+  sequence         Int?
+  status           AcademicTermStatus @default(DRAFT)
+  activatedAt      DateTime?
+  closingStartedAt DateTime?
+  closedAt         DateTime?
+  closedByUserId   String?
+  version          Int                @default(1)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @default(now()) @updatedAt
+
+  classes                 Class[]
+  feeTemplates            FeeTemplate[]
+  assessments             Assessment[]
+  termResults             TermResult[]
+  studentReports          StudentTermReport[]
+  timetablePeriods        TimetablePeriod[]
+  lessonPlans             LessonPlan[]
+  financialReports        FinancialReport[]
+  classFeeAssignments     ClassFeeAssignment[]
+  studentFeeStructures    StudentFeeStructure[]
+  payments                Payment[]
+  attendances             Attendance[]
+  attendanceAlerts        AttendanceAlert[]
+  debtCollectionCampaigns DebtCollectionCampaign[]
+  campaignMessages        CampaignMessage[]
+  invoices                Invoice[]
+  financialSummaries      TermFinancialSummary[]
+  termEnrollments         StudentTermEnrollment[]
+  instructionalDays       TermInstructionalDay[]
+  sourceRollovers         TermRollover[]           @relation("SourceTermRollovers")
+  targetRollovers         TermRollover[]           @relation("TargetTermRollovers")
+  closeSnapshot           TermCloseSnapshot?
+  amendments              ClosedTermAmendment[]
 
   activeInSettings SchoolSettings?
 
+  @@unique([academicYearId, sequence])
+  @@index([status, startDate])
+  @@index([academicYearId, sequence])
   @@map("academic_terms")
+}
+
+model ClassCohort {
+  id                  String            @id @default(uuid())
+  academicYearId      String
+  academicYear        AcademicYear      @relation(fields: [academicYearId], references: [id])
+  name                String
+  gradeLevel          Int
+  branchId            String?
+  branch              Branch?           @relation(fields: [branchId], references: [id])
+  predecessorCohortId String?
+  predecessorCohort   ClassCohort?      @relation("ClassCohortLineage", fields: [predecessorCohortId], references: [id])
+  successorCohorts    ClassCohort[]     @relation("ClassCohortLineage")
+  status              ClassCohortStatus @default(ACTIVE)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  classOfferings Class[]
+
+  @@unique([academicYearId, branchId, name])
+  @@index([academicYearId, gradeLevel])
+  @@index([branchId])
+  @@map("class_cohorts")
+}
+
+model StudentTermEnrollment {
+  id                 String                      @id @default(uuid())
+  studentId          String
+  student            Student                     @relation(fields: [studentId], references: [id])
+  academicTermId     String
+  academicTerm       AcademicTerm                @relation(fields: [academicTermId], references: [id])
+  classId            String
+  class              Class                       @relation(fields: [classId], references: [id])
+  status             StudentTermEnrollmentStatus @default(STAGED)
+  transitionAction   StudentTransitionAction?
+  sourceEnrollmentId String?
+  sourceEnrollment   StudentTermEnrollment?      @relation("EnrollmentLineage", fields: [sourceEnrollmentId], references: [id])
+  nextEnrollments    StudentTermEnrollment[]     @relation("EnrollmentLineage")
+  startsAt           DateTime
+  endsAt             DateTime?
+  notes              String?
+  createdByUserId    String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  outgoingTransitionDecisions StudentTransitionDecision[] @relation("SourceTransitionEnrollment")
+
+  @@unique([studentId, academicTermId])
+  @@index([academicTermId, classId, status])
+  @@index([classId, status])
+  @@index([sourceEnrollmentId])
+  @@map("student_term_enrollments")
+}
+
+model TermInstructionalDay {
+  id              String       @id @default(uuid())
+  academicTermId  String
+  academicTerm    AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
+  date            DateTime
+  isInstructional Boolean      @default(true)
+  label           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([academicTermId, date])
+  @@index([academicTermId, isInstructional])
+  @@map("term_instructional_days")
+}
+
+model TermRollover {
+  id                             String             @id @default(uuid())
+  sourceTermId                   String
+  sourceTerm                     AcademicTerm       @relation("SourceTermRollovers", fields: [sourceTermId], references: [id])
+  targetTermId                   String
+  targetTerm                     AcademicTerm       @relation("TargetTermRollovers", fields: [targetTermId], references: [id])
+  transitionType                 TermRolloverType
+  status                         TermRolloverStatus @default(DRAFT)
+  idempotencyKey                 String             @unique
+  inputHash                      String?
+  preflightHash                  String?
+  preflightSnapshot              Json?
+  preflightGeneratedAt           DateTime?
+  warningHash                    String?
+  configuration                  Json?
+  warningAcknowledgements        Json?
+  warningAcknowledgementHash     String?
+  warningAcknowledgedFingerprint String?
+  warningAcknowledgedByUserId    String?
+  warningAcknowledgedAt          DateTime?
+  backupReference                String?
+  backupChecksum                 String?
+  backupFingerprint              String?
+  backupSizeBytes                Decimal?           @db.Decimal(20, 0)
+  backupManifest                 Json?
+  backupCreatedAt                DateTime?
+  backupVerifiedAt               DateTime?
+  backupVerifiedByUserId         String?
+  approvedFingerprint            String?
+  approvedByUserId               String?
+  approvedAt                     DateTime?
+  executedByUserId               String?
+  executedAt                     DateTime?
+  failureCode                    String?
+  failureMessage                 String?
+  version                        Int                @default(1)
+  createdAt                      DateTime           @default(now())
+  updatedAt                      DateTime           @updatedAt
+
+  tasks               TermRolloverTask[]
+  events              TermRolloverEvent[]
+  transitionDecisions StudentTransitionDecision[]
+  closeSnapshot       TermCloseSnapshot?
+  amendments          ClosedTermAmendment[]
+
+  @@index([sourceTermId, targetTermId, status])
+  @@index([status, updatedAt])
+  @@index([preflightHash])
+  @@map("term_rollovers")
+}
+
+model TermRolloverTask {
+  id             String                 @id @default(uuid())
+  rolloverId     String
+  rollover       TermRollover           @relation(fields: [rolloverId], references: [id], onDelete: Cascade)
+  category       String
+  operationKey   String
+  status         TermRolloverTaskStatus @default(PENDING)
+  sourceEntityId String?
+  targetEntityId String?
+  attemptCount   Int                    @default(0)
+  resultData     Json?
+  errorData      Json?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([rolloverId, operationKey])
+  @@index([rolloverId, category, status])
+  @@map("term_rollover_tasks")
+}
+
+model TermRolloverEvent {
+  id          String       @id @default(uuid())
+  rolloverId  String
+  rollover    TermRollover @relation(fields: [rolloverId], references: [id], onDelete: Cascade)
+  sequence    Int
+  type        String
+  payload     Json?
+  actorUserId String?
+  createdAt   DateTime     @default(now())
+
+  @@unique([rolloverId, sequence])
+  @@index([rolloverId, createdAt])
+  @@map("term_rollover_events")
+}
+
+model StudentTransitionDecision {
+  id                 String                  @id @default(uuid())
+  rolloverId         String
+  rollover           TermRollover            @relation(fields: [rolloverId], references: [id], onDelete: Cascade)
+  studentId          String
+  student            Student                 @relation(fields: [studentId], references: [id])
+  sourceEnrollmentId String
+  sourceEnrollment   StudentTermEnrollment   @relation("SourceTransitionEnrollment", fields: [sourceEnrollmentId], references: [id])
+  targetClassId      String?
+  targetClass        Class?                  @relation(fields: [targetClassId], references: [id])
+  action             StudentTransitionAction
+  reason             String?
+  decidedByUserId    String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@unique([rolloverId, studentId])
+  @@unique([rolloverId, sourceEnrollmentId])
+  @@index([rolloverId, action])
+  @@index([sourceEnrollmentId])
+  @@index([targetClassId])
+  @@map("student_transition_decisions")
+}
+
+model TermCloseSnapshot {
+  id              String        @id @default(uuid())
+  academicTermId  String        @unique
+  academicTerm    AcademicTerm  @relation(fields: [academicTermId], references: [id])
+  rolloverId      String?       @unique
+  rollover        TermRollover? @relation(fields: [rolloverId], references: [id])
+  schemaVersion   Int           @default(1)
+  checksum        String
+  snapshot        Json
+  createdByUserId String?
+  createdAt       DateTime      @default(now())
+
+  @@index([createdAt])
+  @@map("term_close_snapshots")
+}
+
+model ClosedTermAmendment {
+  id                String                    @id @default(uuid())
+  academicTermId    String
+  academicTerm      AcademicTerm              @relation(fields: [academicTermId], references: [id])
+  rolloverId        String?
+  rollover          TermRollover?             @relation(fields: [rolloverId], references: [id])
+  status            ClosedTermAmendmentStatus @default(REQUESTED)
+  reason            String
+  requestedByUserId String
+  requestedAt       DateTime                  @default(now())
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  rejectedByUserId  String?
+  rejectedAt        DateTime?
+  appliedByUserId   String?
+  appliedAt         DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  items ClosedTermAmendmentItem[]
+
+  @@index([academicTermId, status])
+  @@index([rolloverId])
+  @@map("closed_term_amendments")
+}
+
+model ClosedTermAmendmentItem {
+  id          String              @id @default(uuid())
+  amendmentId String
+  amendment   ClosedTermAmendment @relation(fields: [amendmentId], references: [id], onDelete: Cascade)
+  entityType  String
+  entityId    String
+  fieldName   String?
+  beforeValue Json?
+  afterValue  Json?
+  appliedAt   DateTime?
+  createdAt   DateTime            @default(now())
+
+  @@index([amendmentId, entityType])
+  @@index([entityType, entityId])
+  @@map("closed_term_amendment_items")
 }
 
 model SchoolSettings {
@@ -382,18 +748,18 @@ model FeeTemplate {
 }
 
 model ClassFeeAssignment {
-  id            String      @id @default(uuid())
-  classId       String
-  class         Class       @relation(fields: [classId], references: [id], onDelete: Cascade)
-  feeTemplateId String
-  feeTemplate   FeeTemplate @relation(fields: [feeTemplateId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid())
+  classId        String
+  class          Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  feeTemplateId  String
+  feeTemplate    FeeTemplate  @relation(fields: [feeTemplateId], references: [id], onDelete: Cascade)
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id], onDelete: Cascade)
-  categoryId    String?
-  category      FeeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  dueDate       DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  categoryId     String?
+  category       FeeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  dueDate        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([classId, feeTemplateId])
   @@unique([classId, academicTermId, categoryId])
@@ -405,20 +771,21 @@ model ClassFeeAssignment {
 }
 
 model StudentFeeStructure {
-  id            String      @id @default(uuid())
-  studentId     String
-  student       Student     @relation(fields: [studentId], references: [id])
-  feeTemplateId String
-  feeTemplate   FeeTemplate @relation(fields: [feeTemplateId], references: [id])
+  id             String       @id @default(uuid())
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id])
+  feeTemplateId  String
+  feeTemplate    FeeTemplate  @relation(fields: [feeTemplateId], references: [id])
   academicTermId String
   academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
-  amountDue     Decimal     @db.Decimal(10, 2)
-  amountPaid    Decimal     @default(0) @db.Decimal(10, 2)
-  dueDate       DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  amountDue      Decimal      @db.Decimal(10, 2)
+  amountPaid     Decimal      @default(0) @db.Decimal(10, 2)
+  dueDate        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   allocations PaymentAllocation[]
+  invoiceItem InvoiceItem?
 
   @@unique([studentId, feeTemplateId, academicTermId])
   @@index([academicTermId])
@@ -431,6 +798,32 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   VOIDED
+}
+
+enum PaymentSource {
+  MANUAL
+  INVOICE
+  MOBILE_MONEY
+  PUBLIC_MOBILE_MONEY
+  AI
+  IMPORT
+}
+
+enum AccountingPostingEventType {
+  PAYMENT_RECEIVED
+  PAYMENT_ALLOCATED
+  PAYMENT_VOIDED
+  INVOICE_ISSUED
+  INVOICE_CANCELLED
+  CREDIT_NOTE_ISSUED
+  REFUND_PROCESSED
+}
+
+enum AccountingPostingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 enum MobileMoneyStatus {
@@ -490,16 +883,18 @@ model MobileMoneyCollection {
 }
 
 model Payment {
-  id            String        @id @default(uuid())
-  transactionId String?       @unique // Auto-generated: TXN-XXXXXXXX
-  studentId     String
-  student       Student       @relation(fields: [studentId], references: [id])
-  academicTermId String?
-  academicTerm   AcademicTerm? @relation(fields: [academicTermId], references: [id])
-  amount        Decimal       @db.Decimal(10, 2)
-  paymentDate   DateTime      @default(now())
-  method        PaymentMethod
-  notes         String? // Optional notes about the payment
+  id             String        @id @default(uuid())
+  transactionId  String?       @unique // Auto-generated: TXN-XXXXXXXX
+  idempotencyKey String?       @unique
+  source         PaymentSource @default(MANUAL)
+  studentId      String
+  student        Student       @relation(fields: [studentId], references: [id])
+  academicTermId String
+  academicTerm   AcademicTerm  @relation(fields: [academicTermId], references: [id])
+  amount         Decimal       @db.Decimal(10, 2)
+  paymentDate    DateTime      @default(now())
+  method         PaymentMethod
+  notes          String? // Optional notes about the payment
 
   // Status management for handling mistakes
   status         PaymentStatus @default(COMPLETED)
@@ -546,17 +941,20 @@ model Attendance {
   student          Student          @relation(fields: [studentId], references: [id])
   classId          String
   class            Class            @relation(fields: [classId], references: [id])
+  academicTermId   String
+  academicTerm     AcademicTerm     @relation(fields: [academicTermId], references: [id])
   date             DateTime
   status           AttendanceStatus
-  reason           String?          // Absence/late reason (e.g. "Sick", "Doctor appointment")
-  lateMinutes      Int?             // How many minutes late (null if not LATE)
-  notes            String?          // Additional teacher notes
+  reason           String? // Absence/late reason (e.g. "Sick", "Doctor appointment")
+  lateMinutes      Int? // How many minutes late (null if not LATE)
+  notes            String? // Additional teacher notes
   recordedByUserId String
   recordedBy       User             @relation(fields: [recordedByUserId], references: [id])
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
   @@index([classId, date])
+  @@index([academicTermId, date])
   @@index([studentId, date])
   @@map("attendance")
 }
@@ -760,11 +1158,36 @@ model StudentTermReport {
   classTeacherRemark String?
   principalRemark    String?
 
+  status            StudentTermReportStatus    @default(DRAFT)
+  currentVersion    Int                        @default(1)
+  finalizedAt       DateTime?
+  finalizedByUserId String?
+  publishedAt       DateTime?
+  publishedByUserId String?
+  versions          StudentTermReportVersion[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([studentId, termId])
+  @@index([termId, status])
   @@map("student_term_reports")
+}
+
+model StudentTermReportVersion {
+  id              String                  @id @default(uuid())
+  reportId        String
+  report          StudentTermReport       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  version         Int
+  status          StudentTermReportStatus
+  snapshot        Json
+  reason          String?
+  createdByUserId String
+  createdAt       DateTime                @default(now())
+
+  @@unique([reportId, version])
+  @@index([reportId, status])
+  @@map("student_term_report_versions")
 }
 
 model TeacherSubject {
@@ -1006,19 +1429,20 @@ model Branch {
   studentEnrollments StudentBranch[]
 
   // Accounting relations
-  chartOfAccounts      ChartOfAccount[]
-  journalEntries       JournalEntry[]
-  vendors              Vendor[]
-  expenses             Expense[]
-  invoices             Invoice[]
-  refunds              Refund[]
-  staffPayrolls        StaffPayroll[]
-  payrollRuns          PayrollRun[]
-  budgets              Budget[]
-  pettyCashAccounts    PettyCashAccount[]
-  receiptSequences     ReceiptSequence[]
-  financialReports     FinancialReport[]
+  chartOfAccounts        ChartOfAccount[]
+  journalEntries         JournalEntry[]
+  vendors                Vendor[]
+  expenses               Expense[]
+  invoices               Invoice[]
+  refunds                Refund[]
+  staffPayrolls          StaffPayroll[]
+  payrollRuns            PayrollRun[]
+  budgets                Budget[]
+  pettyCashAccounts      PettyCashAccount[]
+  receiptSequences       ReceiptSequence[]
+  financialReports       FinancialReport[]
   termFinancialSummaries TermFinancialSummary[]
+  classCohorts           ClassCohort[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1270,6 +1694,7 @@ model ChartOfAccount {
 model JournalEntry {
   id            String    @id @default(uuid())
   entryNumber   String    @unique // JE-2026-00001
+  postingKey    String?   @unique // Stable source-event key for idempotent posting
   date          DateTime
   description   String
   reference     String? // Link to source document (invoice, payment, expense)
@@ -1319,8 +1744,11 @@ model PaymentAllocation {
   studentFee   StudentFeeStructure @relation(fields: [studentFeeId], references: [id])
   amount       Decimal             @db.Decimal(10, 2)
 
+  refundAllocations RefundAllocation[]
+
   createdAt DateTime @default(now())
 
+  @@unique([paymentId, studentFeeId])
   @@index([paymentId])
   @@index([studentFeeId])
   @@map("payment_allocations")
@@ -1410,7 +1838,7 @@ model FeeCategory {
   children    FeeCategory[] @relation("FeeCategoryHierarchy")
   isActive    Boolean       @default(true)
 
-  feeTemplates FeeTemplate[]
+  feeTemplates        FeeTemplate[]
   classFeeAssignments ClassFeeAssignment[]
 
   createdAt DateTime @default(now())
@@ -1421,12 +1849,13 @@ model FeeCategory {
 
 // Invoice Generation
 model Invoice {
-  id            String   @id @default(uuid())
-  invoiceNumber String   @unique // INV-2026-00001
+  id            String       @id @default(uuid())
+  invoiceNumber String       @unique // INV-2026-00001
   studentId     String
-  student       Student  @relation(fields: [studentId], references: [id])
+  student       Student      @relation(fields: [studentId], references: [id])
   termId        String
-  issueDate     DateTime @default(now())
+  term          AcademicTerm @relation(fields: [termId], references: [id])
+  issueDate     DateTime     @default(now())
   dueDate       DateTime
 
   subtotal    Decimal @db.Decimal(12, 2)
@@ -1451,20 +1880,25 @@ model Invoice {
   updatedAt DateTime @updatedAt
 
   @@index([studentId])
+  @@index([termId])
   @@index([status])
   @@index([dueDate])
+  @@index([studentId, termId, status])
+  @@index([termId, status, dueDate])
   @@map("invoices")
 }
 
 model InvoiceItem {
-  id            String  @id @default(uuid())
+  id            String               @id @default(uuid())
   invoiceId     String
-  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice       Invoice              @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   description   String
-  quantity      Int     @default(1)
-  unitPrice     Decimal @db.Decimal(10, 2)
-  amount        Decimal @db.Decimal(10, 2)
+  quantity      Int                  @default(1)
+  unitPrice     Decimal              @db.Decimal(10, 2)
+  amount        Decimal              @db.Decimal(10, 2)
   feeTemplateId String? // Link to fee template if applicable
+  studentFeeId  String?              @unique
+  studentFee    StudentFeeStructure? @relation(fields: [studentFeeId], references: [id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
 
@@ -1491,15 +1925,16 @@ model CreditNote {
 
 // Refund Management
 model Refund {
-  id           String       @id @default(uuid())
-  refundNumber String       @unique // REF-2026-00001
-  paymentId    String
-  payment      Payment      @relation(fields: [paymentId], references: [id])
-  studentId    String
-  amount       Decimal      @db.Decimal(10, 2)
-  reason       String
-  method       String // cash_back, credit_next_term, bank_transfer
-  status       RefundStatus @default(REQUESTED)
+  id             String       @id @default(uuid())
+  refundNumber   String       @unique // REF-2026-00001
+  idempotencyKey String?      @unique
+  paymentId      String
+  payment        Payment      @relation(fields: [paymentId], references: [id])
+  studentId      String
+  amount         Decimal      @db.Decimal(10, 2)
+  reason         String
+  method         String // cash_back, credit_next_term, bank_transfer
+  status         RefundStatus @default(REQUESTED)
 
   requestedBy     String
   requestedAt     DateTime  @default(now())
@@ -1513,6 +1948,8 @@ model Refund {
 
   notes String?
 
+  allocationReversals RefundAllocation[]
+
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
@@ -1523,6 +1960,21 @@ model Refund {
   @@index([studentId])
   @@index([status])
   @@map("refunds")
+}
+
+model RefundAllocation {
+  id                  String            @id @default(uuid())
+  refundId            String
+  refund              Refund            @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  paymentAllocationId String
+  paymentAllocation   PaymentAllocation @relation(fields: [paymentAllocationId], references: [id], onDelete: Restrict)
+  amount              Decimal           @db.Decimal(10, 2)
+  createdAt           DateTime          @default(now())
+
+  @@unique([refundId, paymentAllocationId])
+  @@index([refundId])
+  @@index([paymentAllocationId])
+  @@map("refund_allocations")
 }
 
 // Payroll
@@ -1732,8 +2184,29 @@ model ReceiptSequence {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
-  @@unique([prefix, year, branchId])
+  @@unique([prefix, year])
   @@map("receipt_sequences")
+}
+
+model AccountingPostingOutbox {
+  id          String                     @id @default(uuid())
+  postingKey  String                     @unique
+  eventType   AccountingPostingEventType
+  aggregateId String
+  userId      String?
+  payload     Json?
+  status      AccountingPostingStatus    @default(PENDING)
+  attempts    Int                        @default(0)
+  lastError   String?
+  availableAt DateTime                   @default(now())
+  lockedAt    DateTime?
+  processedAt DateTime?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  @@index([status, availableAt])
+  @@index([eventType, aggregateId])
+  @@map("accounting_posting_outbox")
 }
 
 // Financial Audit Trail (comprehensive, immutable)
@@ -2041,11 +2514,14 @@ model StudentRiskAssessment {
 // ATTENDANCE ALERTS
 // ========================================
 model AttendanceAlert {
-  id        String @id @default(uuid())
-  studentId String
-  type      String // CONSECUTIVE_ABSENCE, CHRONIC_ABSENTEEISM, PATTERN_DETECTED
-  message   String
-  details   Json? // Pattern details, dates, etc.
+  id             String       @id @default(uuid())
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicTermId String
+  academicTerm   AcademicTerm @relation(fields: [academicTermId], references: [id])
+  type           String // CONSECUTIVE_ABSENCE, CHRONIC_ABSENTEEISM, PATTERN_DETECTED
+  message        String
+  details        Json? // Pattern details, dates, etc.
 
   isResolved    Boolean   @default(false)
   resolvedBy    String?
@@ -2058,6 +2534,7 @@ model AttendanceAlert {
   createdAt DateTime @default(now())
 
   @@index([studentId])
+  @@index([academicTermId, isResolved])
   @@index([isResolved])
   @@map("attendance_alerts")
 }
@@ -2214,10 +2691,12 @@ enum DebtorSegment {
 }
 
 model DebtCollectionCampaign {
-  id          String         @id @default(uuid())
-  name        String
-  description String?        @db.Text
-  status      CampaignStatus @default(DRAFT)
+  id             String         @id @default(uuid())
+  name           String
+  description    String?        @db.Text
+  status         CampaignStatus @default(DRAFT)
+  academicTermId String
+  academicTerm   AcademicTerm   @relation(fields: [academicTermId], references: [id], onDelete: Restrict)
 
   // Targeting criteria
   minAmountOwed     Decimal? @db.Decimal(10, 2)
@@ -2242,14 +2721,17 @@ model DebtCollectionCampaign {
   updatedAt   DateTime  @updatedAt
 
   @@index([status])
+  @@index([academicTermId, status])
   @@index([createdById])
   @@map("debt_collection_campaigns")
 }
 
 model CampaignMessage {
-  id         String                 @id @default(uuid())
-  campaignId String
-  campaign   DebtCollectionCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id             String                  @id @default(uuid())
+  campaignId     String?
+  campaign       DebtCollectionCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  academicTermId String
+  academicTerm   AcademicTerm            @relation(fields: [academicTermId], references: [id], onDelete: Restrict)
 
   studentId   String
   studentName String
@@ -2280,6 +2762,7 @@ model CampaignMessage {
   createdAt DateTime @default(now())
 
   @@index([campaignId])
+  @@index([academicTermId, status])
   @@index([studentId])
   @@index([status])
   @@index([sentAt])
@@ -2646,15 +3129,19 @@ model TermFinancialSummary {
   branch         Branch?      @relation(fields: [branchId], references: [id])
 
   // Revenue tracking
-  totalFeesExpected    Decimal @db.Decimal(12, 2)
-  totalFeesCollected   Decimal @db.Decimal(12, 2)
-  totalOutstanding     Decimal @db.Decimal(12, 2)
-  collectionRate       Decimal @db.Decimal(5, 2) // Percentage
+  totalFeesExpected  Decimal @db.Decimal(12, 2)
+  totalFeesCollected Decimal @db.Decimal(12, 2)
+  totalOutstanding   Decimal @db.Decimal(12, 2)
+  collectionRate     Decimal @db.Decimal(5, 2) // Percentage
 
   // Payment method breakdown
   cashCollected        Decimal @default(0) @db.Decimal(12, 2)
   mobileMoneyCollected Decimal @default(0) @db.Decimal(12, 2)
   bankCollected        Decimal @default(0) @db.Decimal(12, 2)
+  totalCashReceived    Decimal @default(0) @db.Decimal(12, 2)
+  totalRefunded        Decimal @default(0) @db.Decimal(12, 2)
+  netCashReceived      Decimal @default(0) @db.Decimal(12, 2)
+  unallocatedCredit    Decimal @default(0) @db.Decimal(12, 2)
 
   // Student counts
   totalStudents         Int

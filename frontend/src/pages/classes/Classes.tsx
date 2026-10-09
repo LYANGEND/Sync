@@ -2,8 +2,11 @@ import React, { useEffect, useState } from 'react';
 import api from '../../utils/api';
 import { Plus, Search, Trash2, Edit2, BookOpen, Users, FileText, Upload } from 'lucide-react';
 import ClassSyllabus from '../../components/academics/ClassSyllabus';
+import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import BulkImportModal from '../../components/BulkImportModal';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 
 interface Subject {
   id: string;
@@ -85,6 +88,8 @@ const Classes = () => {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [draftSearchTerm, setDraftSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -112,18 +117,23 @@ const Classes = () => {
   });
 
   const [teachers, setTeachers] = useState<{ id: string, fullName: string }[]>([]);
-  const [terms, setTerms] = useState<{ id: string, name: string }[]>([]);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const activeTermId = activeTerm?.id ?? '';
 
   useEffect(() => {
-    fetchClasses();
     fetchSubjects();
     fetchTeachers();
-    fetchTerms();
   }, []);
 
-  const fetchClasses = async () => {
+  useEffect(() => {
+    if (activeTermId) fetchClasses(activeTermId);
+  }, [activeTermId]);
+
+  const fetchClasses = async (academicTermId = activeTermId) => {
+    if (!academicTermId) return;
     try {
-      const response = await api.get('/classes');
+      setLoading(true);
+      const response = await api.get('/classes', { params: { academicTermId } });
       setClasses(response.data);
     } catch (error) {
       console.error('Failed to fetch classes', error);
@@ -151,28 +161,20 @@ const Classes = () => {
     }
   };
 
-  const fetchTerms = async () => {
+  const fetchClassStudents = async (classId: string, academicTermId: string) => {
     try {
-      const response = await api.get('/academic-terms');
-      console.log('Terms fetched:', response.data);
-      setTerms(response.data);
-    } catch (error) {
-      console.error('Failed to fetch terms', error);
-    }
-  };
-
-  const fetchClassStudents = async (classId: string) => {
-    try {
-      const response = await api.get(`/classes/${classId}/students`);
+      const response = await api.get(`/classes/${classId}/students`, { params: { academicTermId } });
       setClassStudents(response.data);
     } catch (error) {
       console.error('Failed to fetch class students', error);
     }
   };
 
-  const fetchAllStudents = async () => {
+  const fetchAllStudents = async (academicTermId: string) => {
     try {
-      const response = await api.get('/students');
+      const response = await api.get('/students', {
+        params: { academicTermId, includeUnplaced: true },
+      });
       setAllStudents(response.data);
     } catch (error) {
       console.error('Failed to fetch all students', error);
@@ -181,8 +183,8 @@ const Classes = () => {
 
   const openStudentModal = async (cls: Class) => {
     setManagingClass(cls);
-    await fetchClassStudents(cls.id);
-    await fetchAllStudents();
+    await fetchClassStudents(cls.id, cls.academicTermId);
+    await fetchAllStudents(cls.academicTermId);
     setSelectedStudentIds([]);
     setShowStudentModal(true);
   };
@@ -202,10 +204,11 @@ const Classes = () => {
 
     try {
       await api.post(`/classes/${managingClass.id}/students`, {
-        studentIds: selectedStudentIds
+        studentIds: selectedStudentIds,
+        academicTermId: managingClass.academicTermId,
       });
-      await fetchClassStudents(managingClass.id);
-      await fetchClasses(); // Update counts
+      await fetchClassStudents(managingClass.id, managingClass.academicTermId);
+      await fetchClasses(managingClass.academicTermId); // Update counts
       setSelectedStudentIds([]);
       alert('Students added successfully');
     } catch (error) {
@@ -231,6 +234,7 @@ const Classes = () => {
 
       const payload = {
         ...formData,
+        academicTermId: editingClass?.academicTermId || activeTermId,
         gradeLevel: Number(formData.gradeLevel),
       };
 
@@ -239,7 +243,7 @@ const Classes = () => {
       } else {
         await api.post('/classes', payload);
       }
-      fetchClasses();
+      await fetchClasses();
       setShowModal(false);
       resetForm();
     } catch (error) {
@@ -288,8 +292,6 @@ const Classes = () => {
 
   const openAddModal = () => {
     resetForm();
-    // Pre-fill with some dummy UUIDs if we don't have a UI to select them yet
-    // This is a limitation of not having the full UI built out for Teachers/Terms
     setShowModal(true);
   };
 
@@ -308,6 +310,17 @@ const Classes = () => {
     cls.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const openFilters = () => {
+    setDraftSearchTerm(searchTerm);
+    setShowFilters(true);
+  };
+
+  const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSearchTerm(draftSearchTerm.trim());
+    setShowFilters(false);
+  };
+
   const availableStudents = allStudents.filter(s =>
     s.classId !== managingClass?.id &&
     (s.firstName.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
@@ -315,11 +328,17 @@ const Classes = () => {
       s.admissionNumber.includes(studentSearchTerm))
   );
 
+  if (termLoading) return null;
+  if (!activeTerm) {
+    return <div className="p-4 md:p-6"><NoActiveTermNotice /></div>;
+  }
+
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Class Sections</h2>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-2">
+          <AcademicFilterButton onClick={openFilters} activeCount={searchTerm ? 1 : 0} />
           <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
@@ -329,13 +348,38 @@ const Classes = () => {
           </button>
           <button
             onClick={openAddModal}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors"
           >
             <Plus size={20} />
             <span>Add Class</span>
           </button>
         </div>
       </div>
+
+      <AcademicFilterDialog
+        open={showFilters}
+        title="Filter classes"
+        description="Search class sections by name. Results update after you apply the filter."
+        onClose={() => setShowFilters(false)}
+        onApply={applyFilters}
+        onReset={() => setDraftSearchTerm('')}
+      >
+        <div>
+          <label htmlFor="class-name-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Search classes</label>
+          <div className="relative">
+            <Search size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <input
+              id="class-name-filter"
+              data-filter-autofocus="true"
+              type="search"
+              value={draftSearchTerm}
+              onChange={(event) => setDraftSearchTerm(event.target.value)}
+              placeholder="Class name"
+              className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+            />
+          </div>
+        </div>
+      </AcademicFilterDialog>
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -460,7 +504,7 @@ const Classes = () => {
                     <p className="text-gray-400 dark:text-gray-500 text-center py-4">No students in this class</p>
                   ) : (
                     classStudents.map(student => (
-                      <div key={student.id} className="flex justify-between items-center p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700">
+                      <div key={student.id} className="flex justify-between items-center p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-surface-hover">
                         <div>
                           <p className="font-medium dark:text-white">{student.firstName} {student.lastName}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">{student.admissionNumber}</p>
@@ -479,7 +523,7 @@ const Classes = () => {
                     onClick={handleAddStudents}
                     disabled={selectedStudentIds.length === 0}
                     className={`text-xs px-3 py-1 rounded ${selectedStudentIds.length > 0
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      ? 'bg-primary text-white hover:bg-primary-hover'
                       : 'bg-gray-200 dark:bg-slate-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                       }`}
                   >
@@ -503,7 +547,7 @@ const Classes = () => {
                     <p className="text-gray-400 dark:text-gray-500 text-center py-4">No students found</p>
                   ) : (
                     availableStudents.map(student => (
-                      <label key={student.id} className="flex items-center space-x-3 p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer">
+                      <label key={student.id} className="flex items-center space-x-3 p-2 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded hover:bg-surface-hover cursor-pointer">
                         <input
                           type="checkbox"
                           checked={selectedStudentIds.includes(student.id)}
@@ -582,25 +626,6 @@ const Classes = () => {
                     </p>
                   )}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
-                  <select
-                    required
-                    value={formData.academicTermId}
-                    onChange={(e) => setFormData({ ...formData, academicTermId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-                  >
-                    <option value="">Select a term</option>
-                    {terms.map(term => (
-                      <option key={term.id} value={term.id}>{term.name}</option>
-                    ))}
-                  </select>
-                  {terms.length === 0 && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                      No academic terms found. Please create a term first.
-                    </p>
-                  )}
-                </div>
               </div>
 
               <div className="mt-6">
@@ -622,7 +647,7 @@ const Classes = () => {
                           <p className="col-span-full text-sm text-gray-400 italic py-2">Select a grade level first</p>
                         )}
                         {recommended.map(subject => (
-                          <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
+                          <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-surface-hover rounded cursor-pointer">
                             <input
                               type="checkbox"
                               checked={formData.subjectIds.includes(subject.id)}
@@ -642,7 +667,7 @@ const Classes = () => {
                           </summary>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-40 overflow-y-auto p-2 mt-1 border border-dashed border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-800">
                             {others.map(subject => (
-                              <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-white dark:hover:bg-slate-700 rounded cursor-pointer">
+                              <label key={subject.id} className="flex items-center space-x-2 p-2 hover:bg-surface-hover rounded cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={formData.subjectIds.includes(subject.id)}
@@ -664,13 +689,13 @@ const Classes = () => {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   {editingClass ? 'Update Class' : 'Create Class'}
                 </button>
@@ -686,7 +711,8 @@ const Classes = () => {
         entityName="Classes"
         apiEndpoint="/api/v1/classes/bulk"
         templateFields={['name', 'gradeLevel']}
-        onSuccess={fetchClasses}
+        additionalFields={{ academicTermId: activeTermId }}
+        onSuccess={() => fetchClasses(activeTermId)}
         instructions={[
           'Upload a CSV file with class details.',
           'Required columns: name, gradeLevel.',

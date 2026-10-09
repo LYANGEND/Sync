@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, Plus, Edit3, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
+import { dateInputToIso, formatDateInputValue } from '../../utils/dateInput';
+import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
 interface AcademicEvent {
   id: string;
@@ -37,11 +39,14 @@ const AcademicCalendar: React.FC = () => {
   const isAdmin = user?.role === 'SUPER_ADMIN';
   const [events, setEvents] = useState<AcademicEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showModal, setShowModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<AcademicEvent | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<'month' | 'list'>('month');
+  const eventsRequestRef = useRef(0);
 
   const [form, setForm] = useState({
     title: '',
@@ -55,22 +60,31 @@ const AcademicCalendar: React.FC = () => {
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+  const closeEventDialog = () => {
+    if (!saving) setShowModal(false);
+  };
+  const eventDialogRef = useDialogAccessibility(showModal, closeEventDialog);
 
   useEffect(() => {
     fetchEvents();
   }, [year, month]);
 
   const fetchEvents = async () => {
+    const requestId = ++eventsRequestRef.current;
     try {
       setLoading(true);
+      setError(null);
       const startDate = new Date(year, month, 1).toISOString();
       const endDate = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
       const res = await api.get('/academic-calendar', { params: { startDate, endDate } });
+      if (requestId !== eventsRequestRef.current) return;
       setEvents(res.data);
     } catch (error) {
+      if (requestId !== eventsRequestRef.current) return;
       console.error('Failed to fetch events:', error);
+      setError('Calendar events could not be loaded.');
     } finally {
-      setLoading(false);
+      if (requestId === eventsRequestRef.current) setLoading(false);
     }
   };
 
@@ -104,7 +118,7 @@ const AcademicCalendar: React.FC = () => {
 
   const openCreateModal = (date?: Date) => {
     const d = date || new Date();
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = formatDateInputValue(d);
     setForm({
       title: '',
       description: '',
@@ -123,8 +137,8 @@ const AcademicCalendar: React.FC = () => {
       title: event.title,
       description: event.description || '',
       eventType: event.eventType,
-      startDate: event.startDate.split('T')[0],
-      endDate: event.endDate.split('T')[0],
+      startDate: formatDateInputValue(event.startDate),
+      endDate: formatDateInputValue(event.endDate),
       isAllDay: event.isAllDay,
       color: event.color || '',
     });
@@ -134,11 +148,16 @@ const AcademicCalendar: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (form.startDate > form.endDate) {
+      toast.error('End date must be on or after start date');
+      return;
+    }
     try {
+      setSaving(true);
       const payload = {
         ...form,
-        startDate: new Date(form.startDate).toISOString(),
-        endDate: new Date(form.endDate).toISOString(),
+        startDate: dateInputToIso(form.startDate),
+        endDate: dateInputToIso(form.endDate),
       };
 
       if (editingEvent) {
@@ -149,9 +168,12 @@ const AcademicCalendar: React.FC = () => {
         toast.success('Event created');
       }
       setShowModal(false);
-      fetchEvents();
-    } catch (error) {
-      toast.error('Failed to save event');
+      await fetchEvents();
+    } catch (error: any) {
+      const apiError = error.response?.data?.error;
+      toast.error(typeof apiError === 'string' ? apiError : 'Failed to save event');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -164,14 +186,20 @@ const AcademicCalendar: React.FC = () => {
     try {
       await api.delete(`/academic-calendar/${id}`);
       toast.success('Event deleted');
-      fetchEvents();
+      await fetchEvents();
     } catch (error) {
       toast.error('Failed to delete event');
     }
   };
 
-  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
-  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+  const prevMonth = () => {
+    setSelectedDate(null);
+    setCurrentDate(new Date(year, month - 1, 1));
+  };
+  const nextMonth = () => {
+    setSelectedDate(null);
+    setCurrentDate(new Date(year, month + 1, 1));
+  };
   const today = new Date();
   const isToday = (day: number) => day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
 
@@ -198,22 +226,31 @@ const AcademicCalendar: React.FC = () => {
             </button>
           </div>
           {isAdmin && (
-            <button onClick={() => openCreateModal()} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+            <button onClick={() => openCreateModal()} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover text-sm">
               <Plus className="w-4 h-4" /> Add Event
             </button>
           )}
         </div>
       </div>
 
+      {error && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={fetchEvents} className="min-h-10 rounded-lg bg-red-100 px-3 font-semibold hover:bg-red-200 dark:bg-red-900/50 dark:hover:bg-red-900">Retry</button>
+        </div>
+      )}
+
+      {loading && <div className="mb-4 text-sm font-medium text-blue-600 dark:text-blue-300" role="status">Loading calendar events…</div>}
+
       {viewMode === 'month' ? (
         <>
           {/* Month Navigation */}
           <div className="flex items-center justify-between mb-4">
-            <button onClick={prevMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+            <button onClick={prevMonth} className="grid size-11 place-items-center rounded-lg hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label="Previous month">
               <ChevronLeft className="w-5 h-5" />
             </button>
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{MONTHS[month]} {year}</h3>
-            <button onClick={nextMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+            <button onClick={nextMonth} className="grid size-11 place-items-center rounded-lg hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" aria-label="Next month">
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
@@ -237,9 +274,18 @@ const AcademicCalendar: React.FC = () => {
                   <div
                     key={i}
                     className={`min-h-[80px] md:min-h-[100px] border-b border-r border-gray-100 dark:border-slate-700/50 p-1 ${
-                      day ? 'cursor-pointer hover:bg-blue-50/50 dark:hover:bg-slate-800/50' : 'bg-gray-50/50 dark:bg-slate-900/30'
+                      day ? 'cursor-pointer hover:bg-surface-hover' : 'bg-gray-50/50 dark:bg-slate-900/30'
                     }`}
                     onClick={() => day && isAdmin && openCreateModal(new Date(year, month, day))}
+                    role={day && isAdmin ? 'button' : undefined}
+                    tabIndex={day && isAdmin ? 0 : undefined}
+                    aria-label={day && isAdmin ? `Add event on ${MONTHS[month]} ${day}, ${year}` : undefined}
+                    onKeyDown={(event) => {
+                      if (day && isAdmin && (event.key === 'Enter' || event.key === ' ')) {
+                        event.preventDefault();
+                        openCreateModal(new Date(year, month, day));
+                      }
+                    }}
                   >
                     {day && (
                       <>
@@ -250,15 +296,16 @@ const AcademicCalendar: React.FC = () => {
                         </div>
                         <div className="space-y-0.5">
                           {dayEvents.slice(0, 3).map(e => (
-                            <div
+                            <button
+                              type="button"
                               key={e.id}
-                              className="text-[10px] md:text-xs px-1 py-0.5 rounded truncate text-white font-medium"
+                              className="block w-full truncate rounded px-1 py-0.5 text-left text-[10px] font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white md:text-xs"
                               style={{ backgroundColor: e.color || getEventColor(e.eventType) }}
                               onClick={(ev) => { ev.stopPropagation(); setSelectedDate(new Date(year, month, day)); }}
                               title={e.title}
                             >
                               {e.title}
-                            </div>
+                            </button>
                           ))}
                           {dayEvents.length > 3 && (
                             <div className="text-[10px] text-gray-500">+{dayEvents.length - 3} more</div>
@@ -271,6 +318,33 @@ const AcademicCalendar: React.FC = () => {
               })}
             </div>
           </div>
+
+          {selectedDate && (
+            <section className="mt-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800" aria-labelledby="selected-calendar-day-title">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 id="selected-calendar-day-title" className="font-semibold text-gray-900 dark:text-white">
+                  Events on {selectedDate.toLocaleDateString(undefined, { dateStyle: 'long' })}
+                </h3>
+                <button type="button" onClick={() => setSelectedDate(null)} className="grid size-10 place-items-center rounded-lg text-gray-500 hover:bg-surface-hover" aria-label="Close selected day details">
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="space-y-2">
+                {getEventsForDay(selectedDate.getDate()).map((event) => (
+                  <div key={event.id} className="flex items-start gap-3 rounded-lg bg-gray-50 p-3 dark:bg-slate-900/60">
+                    <span className="text-xl" aria-hidden="true">{getEventIcon(event.eventType)}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-gray-900 dark:text-white">{event.title}</p>
+                      {event.description && <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{event.description}</p>}
+                    </div>
+                    {isAdmin && (
+                      <button type="button" onClick={() => openEditModal(event)} className="min-h-10 rounded-lg px-3 text-sm font-semibold text-blue-600 hover:bg-surface-hover-accent">Edit</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Event Legend */}
           <div className="mt-4 flex flex-wrap gap-3">
@@ -311,10 +385,10 @@ const AcademicCalendar: React.FC = () => {
                 </div>
                 {isAdmin && (
                   <div className="flex gap-1">
-                    <button onClick={() => openEditModal(event)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+                    <button onClick={() => openEditModal(event)} className="grid size-11 place-items-center rounded-lg hover:bg-surface-hover" aria-label={`Edit ${event.title}`}>
                       <Edit3 className="w-4 h-4 text-gray-500" />
                     </button>
-                    <button onClick={() => handleDelete(event.id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
+                    <button onClick={() => handleDelete(event.id)} className="grid size-11 place-items-center rounded-lg hover:bg-surface-hover-danger" aria-label={`Delete ${event.title}`}>
                       <Trash2 className="w-4 h-4 text-red-500" />
                     </button>
                   </div>
@@ -327,27 +401,27 @@ const AcademicCalendar: React.FC = () => {
 
       {/* Create/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEventDialog(); }}>
+          <div ref={eventDialogRef} className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="academic-event-dialog-title">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+              <h3 id="academic-event-dialog-title" className="text-lg font-bold text-gray-800 dark:text-white">
                 {editingEvent ? 'Edit Event' : 'New Event'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+              <button onClick={closeEventDialog} className="grid size-11 place-items-center rounded-lg hover:bg-surface-hover" aria-label="Close event dialog">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
-                <input type="text" required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                <label htmlFor="academic-event-title" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                <input id="academic-event-title" data-dialog-autofocus="true" type="text" required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                <select value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}
+                <label htmlFor="academic-event-type" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                <select id="academic-event-type" value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
                 >
                   {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
@@ -355,30 +429,30 @@ const AcademicCalendar: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
-                  <input type="date" required value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })}
+                  <label htmlFor="academic-event-start" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
+                  <input id="academic-event-start" type="date" required value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
-                  <input type="date" required value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })}
+                  <label htmlFor="academic-event-end" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
+                  <input id="academic-event-end" type="date" required min={form.startDate || undefined} value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
+                <label htmlFor="academic-event-description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                <textarea id="academic-event-description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
                 />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">
+                <button type="button" onClick={closeEventDialog} disabled={saving} className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60">
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                  {editingEvent ? 'Update' : 'Create'}
+                <button type="submit" disabled={saving} className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60">
+                  {saving ? 'Saving…' : editingEvent ? 'Update' : 'Create'}
                 </button>
               </div>
             </form>

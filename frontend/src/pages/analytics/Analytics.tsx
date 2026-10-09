@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity,
   BarChart3,
   CalendarDays,
   HeartPulse,
@@ -9,9 +8,12 @@ import {
   TrendingUp,
   Users,
   WalletCards,
+  type LucideIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 import analyticsService, {
   type AnalyticsDashboard,
   type AttendanceAnalytics,
@@ -35,7 +37,7 @@ interface TabDefinition {
   label: string;
   shortLabel: string;
   description: string;
-  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  icon: LucideIcon;
   roles: AnalyticsRole[];
 }
 
@@ -193,7 +195,7 @@ const EmptyState = ({ message, onRetry }: { message: string; onRetry: () => void
       <button
         type="button"
         onClick={onRetry}
-        className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:hover:bg-slate-600 dark:focus:ring-offset-slate-800"
+        className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:focus:ring-offset-slate-800"
       >
         <RefreshCw className="size-4" aria-hidden="true" />
         Check again
@@ -223,6 +225,8 @@ const Analytics = () => {
     TAB_DEFINITIONS.find(tab => tab.roles.includes(role))?.id ?? 'overview'
   ));
   const [periodDays, setPeriodDays] = useState<PeriodDays>(90);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const activeTermId = activeTerm?.id ?? '';
   const [dashboard, setDashboard] = useState<DatasetState<AnalyticsDashboard>>(createDatasetState);
   const [revenue, setRevenue] = useState<DatasetState<RevenueAnalytics>>(createDatasetState);
   const [attendance, setAttendance] = useState<DatasetState<AttendanceAnalytics>>(createDatasetState);
@@ -237,9 +241,10 @@ const Analytics = () => {
   }, [activeTab, availableTabs]);
 
   const fetchDashboard = useCallback(async () => {
+    if (!activeTermId) return false;
     setDashboard(previous => beginLoading(previous));
     try {
-      const data = await analyticsService.getDashboard(periodDays);
+      const data = await analyticsService.getDashboard(activeTermId, periodDays);
       setDashboard({
         data,
         loading: false,
@@ -254,12 +259,13 @@ const Analytics = () => {
       setDashboard(previous => ({ ...previous, loading: false, error: message }));
       return false;
     }
-  }, [periodDays]);
+  }, [periodDays, activeTermId]);
 
   const fetchRevenue = useCallback(async () => {
+    if (!activeTermId) return false;
     setRevenue(previous => beginLoading(previous));
     try {
-      const data = await analyticsService.getRevenue(getRevenueRange(periodDays));
+      const data = await analyticsService.getRevenue(activeTermId, getRevenueRange(periodDays));
       setRevenue({
         data,
         loading: false,
@@ -274,12 +280,13 @@ const Analytics = () => {
       setRevenue(previous => ({ ...previous, loading: false, error: message }));
       return false;
     }
-  }, [periodDays]);
+  }, [periodDays, activeTermId]);
 
   const fetchAttendance = useCallback(async () => {
+    if (!activeTermId) return false;
     setAttendance(previous => beginLoading(previous));
     try {
-      const data = await analyticsService.getAttendance();
+      const data = await analyticsService.getAttendance(activeTermId);
       if (isAttendanceUnavailable(data)) {
         setAttendance({
           data: null,
@@ -304,12 +311,13 @@ const Analytics = () => {
       setAttendance(previous => ({ ...previous, loading: false, error: message }));
       return false;
     }
-  }, []);
+  }, [activeTermId]);
 
   const fetchHealth = useCallback(async () => {
+    if (!activeTermId) return false;
     setHealth(previous => beginLoading(previous));
     try {
-      const data = await analyticsService.getSchoolHealth();
+      const data = await analyticsService.getSchoolHealth(activeTermId);
       setHealth({
         data,
         loading: false,
@@ -323,7 +331,7 @@ const Analytics = () => {
       setHealth(previous => ({ ...previous, loading: false, error: message }));
       return false;
     }
-  }, []);
+  }, [activeTermId]);
 
   const loadTab = useCallback(async (tab: AnalyticsTab, announce = false) => {
     let succeeded = false;
@@ -368,6 +376,8 @@ const Analytics = () => {
     if (!activeDefinition) {
       return <ErrorState message="Your role does not have an analytics view configured." onRetry={() => window.location.reload()} />;
     }
+
+    if (!termLoading && !activeTerm) return <NoActiveTermNotice />;
 
     if (activeState.loading && !activeState.data) return <AnalyticsSkeleton />;
     if (activeState.error && !activeState.data) {
@@ -443,7 +453,7 @@ const Analytics = () => {
               type="button"
               onClick={() => void loadTab(activeTab, true)}
               disabled={activeState.loading}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-primary shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-primary disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-primary shadow-sm transition hover:bg-surface-hover-accent focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-primary disabled:cursor-not-allowed disabled:opacity-70"
             >
               <RefreshCw className={`size-4 ${activeState.loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" />
               {activeState.loading ? 'Refreshing' : 'Refresh'}
@@ -472,7 +482,7 @@ const Analytics = () => {
                     className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
                       selected
                         ? 'bg-primary text-white shadow-sm'
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-slate-700 dark:hover:text-white'
+                        : 'text-gray-600 hover:bg-surface-hover hover:text-gray-950 dark:text-gray-300 dark:hover:text-white'
                     }`}
                   >
                     <Icon className="size-4" aria-hidden={true} />
@@ -515,7 +525,7 @@ const Analytics = () => {
             <h2 className="text-base font-semibold text-gray-950 dark:text-white">{activeDefinition.label}</h2>
             <p className="mt-0.5 text-xs leading-5 text-gray-600 dark:text-gray-300">{activeDefinition.description}</p>
           </div>
-          {activeState.loading && activeState.data && (
+          {activeState.loading && Boolean(activeState.data) && (
             <span className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary sm:mt-0 dark:text-blue-300" role="status">
               <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
               Updating

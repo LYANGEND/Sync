@@ -6,6 +6,11 @@ import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
 import * as convoService from '../services/conversationService';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
+import { isDateWithinRangeByDay } from '../utils/academicValidation';
+import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { getStudentPlacementForTerm, StudentPlacementError } from '../services/studentPlacementService';
 
 // ==========================================
 // Conversation Management
@@ -76,6 +81,9 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (!message?.trim() && !imageBase64) {
       return res.status(400).json({ error: 'Message or image is required' });
     }
+    if (!context?.academicTermId) {
+      return res.status(400).json({ error: 'academicTermId is required in chat context' });
+    }
 
     // Get or create conversation — scoped to 'teaching-assistant' only
     let conversation: any;
@@ -111,10 +119,10 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     });
 
     // Build context for AI — load teacher's real data
-    const teacherCtx = await getTeacherContext(userId);
+    const teacherCtx = await getTeacherContext(userId, context.academicTermId);
     let classInsights = '';
     if (context?.classId) {
-      classInsights = await getClassInsights(context.classId);
+      classInsights = await getClassInsights(context.classId, context.academicTermId);
     }
     let subjectTopics = '';
     if (context?.subjectId) {
@@ -192,6 +200,9 @@ export const handleSlashCommand = async (req: AuthRequest, res: Response) => {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { command, params, conversationId } = req.body;
+    if (!params?.academicTermId || typeof params.academicTermId !== 'string') {
+      return res.status(400).json({ error: 'academicTermId is required in command context' });
+    }
 
     let prompt = '';
     let systemOverride = '';
@@ -350,10 +361,13 @@ Include: what the image shows, teaching opportunities, likely learner misconcept
           ? { id: params.subjectId }
           : undefined;
 
-        const classForGap = await prisma.class.findUnique({
-          where: { id: params.classId },
+        const classForGap = await prisma.class.findFirst({
+          where: { id: params.classId, academicTermId: params.academicTermId },
           select: { name: true, gradeLevel: true, academicTermId: true },
         });
+        if (!classForGap) {
+          return res.status(404).json({ error: 'Class not found in the selected academic term' });
+        }
 
         const topicsForGap = await (prisma.topic as any).findMany({
           where: {
@@ -424,12 +438,22 @@ Provide a clear, structured report with actionable steps the teacher can take th
 
         const careerStudent = await prisma.student.findUnique({
           where: { id: params.studentId },
-          include: { class: { select: { name: true, gradeLevel: true } } },
+          include: {
+            termEnrollments: {
+              where: { academicTermId: params.academicTermId },
+              select: { class: { select: { name: true, gradeLevel: true } } },
+              take: 1,
+            },
+          },
         });
         if (!careerStudent) return res.status(404).json({ error: 'Student not found' });
+        const careerPlacement = careerStudent.termEnrollments[0];
+        if (!careerPlacement) {
+          return res.status(404).json({ error: 'Student has no placement in the selected academic term' });
+        }
 
         const careerTermResults = await prisma.termResult.findMany({
-          where: { studentId: params.studentId },
+          where: { studentId: params.studentId, termId: params.academicTermId },
           include: { subject: { select: { name: true } } },
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -451,7 +475,7 @@ Provide a clear, structured report with actionable steps the teacher can take th
         prompt = `Provide personalised career and subject path advice for this student:
 
 Student: ${careerStudent.firstName} ${careerStudent.lastName}
-Current Class: ${(careerStudent as any).class?.name} (Grade ${(careerStudent as any).class?.gradeLevel})
+Current Class: ${careerPlacement.class.name} (Grade ${careerPlacement.class.gradeLevel})
 Gender: ${careerStudent.gender}
 Subject Performance: ${subjectSummary || 'No results recorded yet'}
 
@@ -459,7 +483,7 @@ Based on this profile:
 1. Identify the student's academic strengths (top-performing subjects)
 2. Recommend 3 suitable subject combinations for Form 5/6 (Zambian A-Level equivalent)
 3. Suggest 5 career pathways that align with their strengths and the Zambian job market
-4. Recommend specific actions to take now (Grade ${(careerStudent as any).class?.gradeLevel}) to prepare for those pathways
+4. Recommend specific actions to take now (Grade ${careerPlacement.class.gradeLevel}) to prepare for those pathways
 5. Highlight any areas that need improvement to keep options open
 
 Be encouraging, realistic, and specific to the Zambian context.`;
@@ -547,6 +571,21 @@ export const publishArtifactToHomework = async (req: AuthRequest, res: Response)
     const { id } = req.params;
     const userId = req.user?.userId;
     const { classId, subjectId, termId, dueDate } = req.body;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const classInfo = await ensureAcademicClassAccess(req, classId, { subjectId });
+    if (classInfo.academicTermId !== termId) {
+      return res.status(400).json({ error: 'Selected class does not belong to the selected academic term' });
+    }
+
+    const assessmentDate = new Date(dueDate || Date.now());
+    if (!isDateWithinRangeByDay(
+      assessmentDate,
+      classInfo.academicTerm.startDate,
+      classInfo.academicTerm.endDate,
+    )) {
+      return res.status(400).json({ error: 'Homework due date must fall within the selected academic term' });
+    }
 
     const artifact = await prisma.aIArtifact.findFirst({
       where: { id, userId },
@@ -554,29 +593,33 @@ export const publishArtifactToHomework = async (req: AuthRequest, res: Response)
 
     if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
 
-    // Create an assessment from the artifact
-    const assessment = await prisma.assessment.create({
-      data: {
-        title: artifact.title,
-        type: 'HOMEWORK',
-        description: `AI-generated: ${artifact.title}`,
-        classId,
-        subjectId,
-        termId,
-        totalMarks: 100,
-        weight: 10,
-        date: new Date(dueDate || Date.now()),
-      },
-    });
-
-    // Mark artifact as published
-    await prisma.aIArtifact.update({
-      where: { id },
-      data: { isPublished: true },
+    const assessment = await runTermWriteTransaction(termId, 'ACADEMIC_ACTIVITY', async tx => {
+      const created = await tx.assessment.create({
+        data: {
+          title: artifact.title,
+          type: 'HOMEWORK',
+          description: `AI-generated: ${artifact.title}`,
+          classId,
+          subjectId,
+          termId,
+          totalMarks: 100,
+          weight: 10,
+          date: assessmentDate,
+        },
+      });
+      await tx.aIArtifact.update({
+        where: { id },
+        data: { isPublished: true },
+      });
+      return created;
     });
 
     res.json({ message: 'Published to homework', assessmentId: assessment.id });
   } catch (error) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to publish artifact' });
   }
 };
@@ -643,15 +686,18 @@ export const getTeachingContext = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ error: 'academicTermId is required' });
 
-    const ctx = await getTeacherContext(userId);
+    const ctx = await getTeacherContext(userId, academicTermId);
 
     // For admins / non-teachers with no assignments, return all classes
     if (ctx.classes.length === 0) {
       const allClasses = await prisma.class.findMany({
+        where: { academicTermId },
         include: {
           subjects: { select: { id: true, name: true, code: true } },
-          _count: { select: { students: true } },
+          _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } },
           academicTerm: { select: { name: true } },
         },
         orderBy: [{ gradeLevel: 'asc' }, { name: 'asc' }],
@@ -660,7 +706,7 @@ export const getTeachingContext = async (req: AuthRequest, res: Response) => {
         id: c.id,
         name: c.name,
         gradeLevel: c.gradeLevel,
-        studentCount: c._count.students,
+        studentCount: c._count.termEnrollments,
         isClassTeacher: false,
         subjects: c.subjects.map((s: any) => s.name),
         term: c.academicTerm?.name || null,
@@ -732,23 +778,28 @@ export const getStudentInsights = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { classId, subjectId } = req.query;
-    if (!classId) return res.status(400).json({ error: 'classId is required' });
+    const { classId, subjectId, academicTermId } = req.query;
+    if (!classId || typeof academicTermId !== 'string') {
+      return res.status(400).json({ error: 'classId and academicTermId are required' });
+    }
 
-    const cls = await prisma.class.findUnique({
-      where: { id: classId as string },
+    const cls = await prisma.class.findFirst({
+      where: { id: classId as string, academicTermId },
       include: {
-        students: {
+        termEnrollments: {
           where: { status: 'ACTIVE' },
-          select: { id: true, firstName: true, lastName: true, gender: true },
-          orderBy: { lastName: 'asc' },
+          select: {
+            student: { select: { id: true, firstName: true, lastName: true, gender: true } },
+          },
+          orderBy: { student: { lastName: 'asc' } },
         },
         academicTerm: true,
       },
     });
     if (!cls) return res.status(404).json({ error: 'Class not found' });
 
-    const studentIds = cls.students.map((s: any) => s.id);
+    const studentsInTerm = cls.termEnrollments.map(enrollment => enrollment.student);
+    const studentIds = studentsInTerm.map(student => student.id);
 
     // Attendance last 30 days
     const thirtyDaysAgo = new Date();
@@ -756,6 +807,7 @@ export const getStudentInsights = async (req: AuthRequest, res: Response) => {
     const attendance = await prisma.attendance.findMany({
       where: {
         studentId: { in: studentIds },
+        academicTermId,
         date: { gte: thirtyDaysAgo },
       },
     });
@@ -772,8 +824,7 @@ export const getStudentInsights = async (req: AuthRequest, res: Response) => {
     }
 
     // Term results
-    const termResultsWhere: any = { classId: classId as string };
-    if (cls.academicTerm) termResultsWhere.termId = cls.academicTerm.id;
+    const termResultsWhere: any = { classId: classId as string, termId: academicTermId };
     if (subjectId) termResultsWhere.subjectId = subjectId as string;
 
     const termResults = await prisma.termResult.findMany({
@@ -794,7 +845,7 @@ export const getStudentInsights = async (req: AuthRequest, res: Response) => {
     }
 
     // Build student insights
-    const students = cls.students.map((s: any) => {
+    const students = studentsInTerm.map((s: any) => {
       const att = attByStudent[s.id] || { present: 0, late: 0, absent: 0, total: 0 };
       const scores = scoresByStudent[s.id] || { subjects: {}, total: 0, count: 0 };
       const avgScore = scores.count > 0 ? scores.total / scores.count : null;
@@ -820,7 +871,7 @@ export const getStudentInsights = async (req: AuthRequest, res: Response) => {
       className: cls.name,
       gradeLevel: cls.gradeLevel,
       term: cls.academicTerm?.name || null,
-      totalStudents: cls.students.length,
+      totalStudents: studentsInTerm.length,
       classAverage: overallAvg ? Number(overallAvg.toFixed(1)) : null,
       atRiskCount: students.filter((s: any) => s.riskLevel === 'high').length,
       students,
@@ -861,10 +912,12 @@ export const generateReportRemarks = async (req: AuthRequest, res: Response) => 
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      include: { class: true },
     });
 
     if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (!termId) return res.status(400).json({ error: 'termId is required' });
+    const placement = await getStudentPlacementForTerm(studentId, termId);
+    if (!placement) return res.status(404).json({ error: 'Student has no placement in the requested term' });
 
     const termResults = await prisma.termResult.findMany({
       where: { studentId, termId },
@@ -872,7 +925,7 @@ export const generateReportRemarks = async (req: AuthRequest, res: Response) => 
     });
 
     const attendance = await prisma.attendance.findMany({
-      where: { studentId },
+      where: { studentId, academicTermId: termId },
     });
 
     const totalRecords = attendance.length;
@@ -892,7 +945,7 @@ export const generateReportRemarks = async (req: AuthRequest, res: Response) => 
     const prompt = `Generate a teacher's report card remark for this student:
 
 Student: ${student.firstName} ${student.lastName}
-Class: ${student.class.name}
+Class: ${placement.class.name}
 Average Score: ${avgScore.toFixed(1)}%
 Attendance Rate: ${attendanceRate}%
 Subjects: ${subjects.map((s: { name: string; score: number; grade: string }) => `${s.name}: ${s.score}% (${s.grade})`).join(', ')}
@@ -924,6 +977,9 @@ Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`;
 
     res.json(remarks);
   } catch (error: any) {
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Generate remarks error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate remarks' });
   }
@@ -978,7 +1034,7 @@ async function getSubjectTopics(subjectId: string, gradeLevel?: number): Promise
   }
 }
 
-async function getTeacherContext(userId: string): Promise<{
+async function getTeacherContext(userId: string, academicTermId: string): Promise<{
   classes: any[];
   subjects: any[];
   summary: string;
@@ -986,21 +1042,26 @@ async function getTeacherContext(userId: string): Promise<{
   try {
     // Get classes where user is class teacher
     const classTeacher = await prisma.class.findMany({
-      where: { teacherId: userId },
+      where: { teacherId: userId, academicTermId },
       include: {
         subjects: { select: { id: true, name: true, code: true } },
-        _count: { select: { students: true } },
+        _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } },
         academicTerm: { select: { name: true, isActive: true } },
       },
     });
 
     // Get subjects assigned via TeacherSubject
     const teacherSubjects = await prisma.teacherSubject.findMany({
-      where: { teacherId: userId },
+      where: { teacherId: userId, class: { academicTermId } },
       include: {
         subject: { select: { id: true, name: true, code: true } },
         class: {
-          select: { id: true, name: true, gradeLevel: true, _count: { select: { students: true } } },
+          select: {
+            id: true,
+            name: true,
+            gradeLevel: true,
+            _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } },
+          },
         },
       },
     });
@@ -1012,7 +1073,7 @@ async function getTeacherContext(userId: string): Promise<{
         id: c.id,
         name: c.name,
         gradeLevel: c.gradeLevel,
-        studentCount: c._count.students,
+        studentCount: c._count.termEnrollments,
         isClassTeacher: true,
         subjects: c.subjects.map((s: any) => s.name),
         term: c.academicTerm?.name,
@@ -1024,7 +1085,7 @@ async function getTeacherContext(userId: string): Promise<{
           id: ts.classId,
           name: ts.class.name,
           gradeLevel: ts.class.gradeLevel,
-          studentCount: ts.class._count.students,
+          studentCount: ts.class._count.termEnrollments,
           isClassTeacher: false,
           subjects: [],
           term: null,
@@ -1047,7 +1108,7 @@ async function getTeacherContext(userId: string): Promise<{
 
     // Fetch recent lesson plans for this teacher
     const recentPlans = await prisma.lessonPlan.findMany({
-      where: { teacherId: userId },
+      where: { teacherId: userId, termId: academicTermId },
       orderBy: { weekStartDate: 'desc' },
       take: 10,
       include: {
@@ -1081,21 +1142,24 @@ async function getTeacherContext(userId: string): Promise<{
   }
 }
 
-async function getClassInsights(classId: string): Promise<string> {
+async function getClassInsights(classId: string, academicTermId: string): Promise<string> {
   try {
-    const cls = await prisma.class.findUnique({
-      where: { id: classId },
+    const cls = await prisma.class.findFirst({
+      where: { id: classId, academicTermId },
       include: {
-        students: {
+        termEnrollments: {
           where: { status: 'ACTIVE' },
-          select: { id: true, firstName: true, lastName: true },
+          select: {
+            student: { select: { id: true, firstName: true, lastName: true } },
+          },
         },
         academicTerm: true,
       },
     });
     if (!cls) return '';
 
-    const studentIds = cls.students.map((s: any) => s.id);
+    const studentsInTerm = cls.termEnrollments.map(enrollment => enrollment.student);
+    const studentIds = studentsInTerm.map(student => student.id);
 
     // Get recent attendance stats
     const thirtyDaysAgo = new Date();
@@ -1103,6 +1167,7 @@ async function getClassInsights(classId: string): Promise<string> {
     const attendance = await prisma.attendance.findMany({
       where: {
         studentId: { in: studentIds },
+        academicTermId,
         date: { gte: thirtyDaysAgo },
       },
     });
@@ -1115,13 +1180,13 @@ async function getClassInsights(classId: string): Promise<string> {
     // Get term results if available
     const termResults = cls.academicTerm
       ? await prisma.termResult.findMany({
-          where: { classId, termId: cls.academicTerm.id },
+          where: { classId, termId: academicTermId },
           include: { student: { select: { firstName: true, lastName: true } }, subject: { select: { name: true } } },
         })
       : [];
 
     let insights = `\n\nClass Data for ${cls.name}:\n`;
-    insights += `- Students: ${cls.students.length} active\n`;
+    insights += `- Students: ${studentsInTerm.length} active\n`;
     insights += `- Attendance (last 30 days): ${totalAttRecords} records — ${presentCount} present, ${lateCount} late, ${absentCount} absent`;
     if (totalAttRecords > 0) {
       insights += ` (${Math.round((presentCount / totalAttRecords) * 100)}% attendance rate)`;

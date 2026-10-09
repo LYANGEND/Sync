@@ -66,6 +66,7 @@ interface ConceptExplanation {
  */
 export async function generatePracticeQuestions(
   studentId: string,
+  academicTermId: string,
   subjectId: string,
   topicId?: string,
   count: number = 5,
@@ -75,11 +76,17 @@ export async function generatePracticeQuestions(
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
-      class: { select: { name: true, gradeLevel: true } },
+      termEnrollments: {
+        where: { academicTermId },
+        select: { class: { select: { name: true, gradeLevel: true } } },
+        take: 1,
+      },
     },
   });
 
   if (!student) throw new Error('Student not found');
+  const placement = student.termEnrollments[0];
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
 
   // 2. Get subject and topic info
   const subject = await prisma.subject.findUnique({
@@ -128,7 +135,7 @@ export async function generatePracticeQuestions(
   // 4. Generate questions using AI
   const prompt = `Generate ${count} practice questions for a Zambian student.
 
-STUDENT LEVEL: ${student.class?.name || 'Unknown'} (Grade ${student.class?.gradeLevel || 'Unknown'})
+STUDENT LEVEL: ${placement.class.name} (Grade ${placement.class.gradeLevel})
 SUBJECT: ${subject.name}
 ${topicInfo ? `TOPIC: ${topicInfo.title}` : ''}
 ${topicInfo?.description ? `TOPIC DESCRIPTION: ${topicInfo.description}` : ''}
@@ -244,6 +251,7 @@ Make learning engaging and accessible.`,
  */
 export async function createStudyPlan(
   studentId: string,
+  academicTermId: string,
   examDate: Date,
   subjectIds: string[]
 ): Promise<StudyPlan> {
@@ -251,11 +259,17 @@ export async function createStudyPlan(
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
-      class: { select: { name: true, gradeLevel: true } },
+      termEnrollments: {
+        where: { academicTermId },
+        select: { class: { select: { name: true, gradeLevel: true } } },
+        take: 1,
+      },
     },
   });
 
   if (!student) throw new Error('Student not found');
+  const placement = student.termEnrollments[0];
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
 
   // 2. Get subjects and student's performance
   const subjects = await Promise.all(
@@ -302,7 +316,7 @@ export async function createStudyPlan(
   }
 
   // 4. Generate study plan using AI
-  const prompt = `Create a comprehensive study plan for a Zambian ${student.class?.name || 'student'} preparing for exams.
+  const prompt = `Create a comprehensive study plan for a Zambian ${placement.class.name} student preparing for exams.
 
 STUDENT: ${student.firstName} ${student.lastName}
 EXAM DATE: ${examDate.toLocaleDateString()} (${daysUntilExam} days from now)

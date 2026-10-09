@@ -90,14 +90,14 @@ const Profile = () => {
           <div className="absolute bottom-0 right-0 flex gap-2">
             <button 
               onClick={() => setShowCamera(true)}
-              className="p-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
+              className="p-2 bg-primary text-white rounded-full shadow-lg hover:bg-primary-hover transition-colors"
               title="Take Photo"
             >
               <Camera size={18} />
             </button>
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+              className="p-2 bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 rounded-full shadow-lg hover:bg-surface-hover transition-colors"
               title="Upload Photo"
             >
               <Upload size={18} />

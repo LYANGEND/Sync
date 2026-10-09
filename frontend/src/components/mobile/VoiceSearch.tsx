@@ -157,7 +157,7 @@ export const VoiceSearchButton: React.FC<VoiceSearchButtonProps> = ({
             onClick={isListening ? stopListening : startListening}
             className={`p-2 rounded-xl transition-all duration-200 ${isListening
                     ? 'bg-red-100 text-red-600 animate-pulse'
-                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                    : 'text-gray-400 hover:text-gray-600 hover:bg-surface-hover'
                 } ${className}`}
             title={isListening ? 'Stop listening' : 'Voice search'}
         >

@@ -811,7 +811,7 @@ export default function VirtualClassroom() {
       <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
         <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
         <p className="text-lg">{error || 'Classroom not found'}</p>
-        <button onClick={() => navigate('/virtual-classroom')} className="mt-4 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700">
+        <button onClick={() => navigate('/virtual-classroom')} className="mt-4 px-4 py-2 bg-primary rounded-lg hover:bg-primary-hover">
           Back to Classrooms
         </button>
       </div>
@@ -1138,7 +1138,7 @@ export default function VirtualClassroom() {
                         <button
                           onClick={advancePhase}
                           disabled={tutor.loading}
-                          className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                          className="w-full flex items-center justify-center gap-2 py-2 bg-primary rounded-lg hover:bg-primary-hover disabled:opacity-50 text-sm"
                         >
                           <SkipForward size={16} /> Next Phase
                         </button>

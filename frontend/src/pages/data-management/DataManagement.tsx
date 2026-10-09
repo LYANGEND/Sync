@@ -336,7 +336,7 @@ const DataManagement = () => {
               <p className="font-semibold">The vault stopped this action</p>
               <p className="mt-1 break-words text-sm text-slate-600 dark:text-slate-300">{actionError}</p>
             </div>
-            <button type="button" onClick={() => setActionError(null)} aria-label="Dismiss error" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-700">
+            <button type="button" onClick={() => setActionError(null)} aria-label="Dismiss error" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-500 transition hover:bg-surface-hover">
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
@@ -424,7 +424,7 @@ const DataManagement = () => {
                     <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{selectedFile.name}</p>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{formatFileSize(selectedFile.size)}</p>
                   </div>
-                  <button type="button" onClick={clearSelection} disabled={isImporting} aria-label="Remove selected archive" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-white">
+                  <button type="button" onClick={clearSelection} disabled={isImporting} aria-label="Remove selected archive" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-surface-hover hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:text-white">
                     <X className="h-5 w-5" aria-hidden="true" />
                   </button>
                 </div>
@@ -561,7 +561,7 @@ const DataManagement = () => {
                   const filename = detailText(entry.details, 'filename');
                   const sourceSchool = detailText(entry.details, 'sourceSchoolName');
                   return (
-                    <div key={entry.id} className="grid gap-3 px-4 py-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-5">
+                    <div key={entry.id} className="grid gap-3 px-4 py-4 transition-colors hover:bg-surface-hover sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-5">
                       <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${isExport ? 'data-vault-export-activity' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>{isExport ? <Download className="h-4 w-4" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}</div>
                       <div className="min-w-0"><p className="text-sm font-bold text-slate-900 dark:text-white">{isExport ? 'School archive exported' : 'School archive imported'}</p><p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{filename || (sourceSchool ? `Source: ${sourceSchool}` : 'Verified school data transfer')}{records ? ` · ${formatNumber(Number(records))} records` : ''}</p></div>
                       <div className="text-left sm:text-right"><p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{formatDate(entry.createdAt)}</p><p className="mt-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 sm:justify-end dark:text-emerald-300"><Link2 className="h-3 w-3" aria-hidden="true" /> Audited</p></div>

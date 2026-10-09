@@ -17,6 +17,7 @@ const StudentIntelligence = () => {
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [loadingRecs, setLoadingRecs] = useState(false);
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
+  const [academicTermId, setAcademicTermId] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -31,10 +32,16 @@ const StudentIntelligence = () => {
         const termRes = await api.get('/terms/active');
         termId = termRes.data?.id;
       } catch { /* no active term */ }
+      if (!termId) {
+        setAtRiskStudents([]);
+        setAlerts([]);
+        return;
+      }
+      setAcademicTermId(termId);
 
       const [riskData, alertsData] = await Promise.all([
         intelligenceService.getAtRiskStudents({ termId, minLevel: 'MEDIUM' }).catch(() => []),
-        intelligenceService.getAttendanceAlerts({ resolved: false }).catch(() => []),
+        intelligenceService.getAttendanceAlerts({ academicTermId: termId, resolved: false }).catch(() => []),
       ]);
       setAtRiskStudents(riskData);
       setAlerts(alertsData);
@@ -48,7 +55,7 @@ const StudentIntelligence = () => {
   const fetchRecommendations = async (studentId: string) => {
     setLoadingRecs(true);
     try {
-      const data = await intelligenceService.getAIRecommendations(studentId, '');
+      const data = await intelligenceService.getAIRecommendations(studentId, academicTermId);
       setRecommendations(data.recommendations || []);
     } catch {
       toast.error('Could not load recommendations');
@@ -199,7 +206,7 @@ const StudentIntelligence = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                   {filteredStudents.map(student => (
-                    <tr key={student.studentId} className="hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <tr key={student.studentId} className="hover:bg-surface-hover transition-colors">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{student.studentName}</p>
                       </td>
@@ -235,7 +242,7 @@ const StudentIntelligence = () => {
                             setSelectedStudent(student);
                             fetchRecommendations(student.studentId);
                           }}
-                          className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                          className="p-2 text-blue-600 hover:bg-surface-hover-accent rounded-lg transition-colors"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -270,14 +277,15 @@ const StudentIntelligence = () => {
               <button
                 onClick={async () => {
                   try {
-                    await api.post('/intelligence/attendance/analyze');
+                    await api.post('/intelligence/attendance/analyze', {}, { params: { termId: academicTermId } });
                     toast.success('Analysis running...');
                     fetchData();
                   } catch {
                     toast.error('Failed to run analysis');
                   }
                 }}
-                className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+                disabled={!academicTermId}
+                className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-50"
               >
                 Run Attendance Analysis
               </button>
@@ -405,7 +413,7 @@ const StudentIntelligence = () => {
 
             <button
               onClick={() => setSelectedStudent(null)}
-              className="w-full py-2.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors font-medium"
+              className="w-full py-2.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-surface-hover-strong transition-colors font-medium"
             >
               Close
             </button>

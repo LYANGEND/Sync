@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { TermLifecycleError, runTermWriteTransaction } from './termLifecycleService';
 
 /**
  * ADAPT WORKSPACE SERVICE
@@ -30,6 +31,7 @@ interface CreateFromActionInput {
 
 interface GenerateActivitiesInput {
   lessonId: string;
+  teacherId: string;
   additionalContext?: string;  // Teacher can add notes like "my class responds to songs"
 }
 
@@ -45,12 +47,13 @@ export class AdaptWorkspaceService {
     // 1. Load the approved action
     const action = await prisma.pendingTeacherAction.findUnique({
       where: { id: actionId },
-      include: { class: true },
+      include: { class: { select: { academicTermId: true } } },
     });
 
     if (!action) throw new Error('Action not found');
     if (action.teacherId !== teacherId) throw new Error('Not your action');
     if (action.status !== 'APPROVED') throw new Error('Action must be APPROVED before creating a lesson');
+    if (!action.classId || !action.class) throw new Error('Action is not linked to a term-owned class');
 
     // 2. Extract the draft payload written by the AI diagnosis step
     const draft = action.draftPayload as any;
@@ -109,22 +112,40 @@ export class AdaptWorkspaceService {
       .filter((id): id is string => id !== null);
 
     // 6. Create the AdaptedLesson
-    const lesson = await prisma.adaptedLesson.create({
-      data: {
-        teacherId,
-        classId: action.classId!,
-        subTopicId,
-        title: draft?.diagnosisTitle || action.title,
-        objective: draft?.explanation || action.description,
-        activities: activities as any,
-        targetStudentIds,
-        sourceActionId: action.id,
-        status: 'DRAFT',
-      },
-      include: {
-        class: { select: { name: true } },
-        subTopic: { select: { title: true, topic: { select: { title: true } } } },
-      },
+    const lesson = await runTermWriteTransaction(action.class.academicTermId, 'SETUP', async tx => {
+      const persistedAction = await tx.pendingTeacherAction.findUnique({
+        where: { id: actionId },
+        include: { class: { select: { academicTermId: true } } },
+      });
+      if (!persistedAction
+        || !persistedAction.classId
+        || persistedAction.teacherId !== teacherId
+        || persistedAction.status !== 'APPROVED'
+        || persistedAction.classId !== action.classId
+        || persistedAction.class?.academicTermId !== action.class!.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Approved teacher action changed while the adapted lesson was being created',
+        );
+      }
+
+      return tx.adaptedLesson.create({
+        data: {
+          teacherId,
+          classId: persistedAction.classId,
+          subTopicId,
+          title: draft?.diagnosisTitle || persistedAction.title,
+          objective: draft?.explanation || persistedAction.description,
+          activities: activities as any,
+          targetStudentIds,
+          sourceActionId: persistedAction.id,
+          status: 'DRAFT',
+        },
+        include: {
+          class: { select: { name: true } },
+          subTopic: { select: { title: true, topic: { select: { title: true } } } },
+        },
+      });
     });
 
     console.log(`[AdaptWorkspace] Lesson created: ${lesson.id} from action ${actionId}`);
@@ -136,16 +157,17 @@ export class AdaptWorkspaceService {
    * Takes the current lesson context and generates differentiated activities.
    * Teacher MUST review before deploying.
    */
-  static async generateActivities({ lessonId, additionalContext }: GenerateActivitiesInput) {
+  static async generateActivities({ lessonId, teacherId, additionalContext }: GenerateActivitiesInput) {
     const lesson = await prisma.adaptedLesson.findUnique({
       where: { id: lessonId },
       include: {
         subTopic: { select: { title: true, topic: { select: { title: true } } } },
-        class: { select: { name: true, gradeLevel: true } },
+        class: { select: { name: true, gradeLevel: true, academicTermId: true } },
       },
     });
 
     if (!lesson) throw new Error('Lesson not found');
+    if (lesson.teacherId !== teacherId) throw new Error('Not your lesson');
 
     // Gather mastery data for context
     const masteryData = await prisma.learningObjectiveMastery.findMany({
@@ -203,15 +225,31 @@ Respond ONLY with this JSON structure:
     }));
 
     // Update the lesson with the combined activities
-    const updated = await prisma.adaptedLesson.update({
-      where: { id: lessonId },
-      data: {
-        activities: [...existingActivities, ...aiActivities] as any,
-      },
-      include: {
-        class: { select: { name: true } },
-        subTopic: { select: { title: true, topic: { select: { title: true } } } },
-      },
+    const updated = await runTermWriteTransaction(lesson.class.academicTermId, 'SETUP', async tx => {
+      const persistedLesson = await tx.adaptedLesson.findUnique({
+        where: { id: lessonId },
+        include: { class: { select: { academicTermId: true } } },
+      });
+      if (!persistedLesson
+        || persistedLesson.teacherId !== teacherId
+        || persistedLesson.class.academicTermId !== lesson.class.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Adapted lesson ownership changed while activities were being generated',
+        );
+      }
+
+      const currentActivities = (persistedLesson.activities as any[]) || [];
+      return tx.adaptedLesson.update({
+        where: { id: lessonId },
+        data: {
+          activities: [...currentActivities, ...aiActivities] as any,
+        },
+        include: {
+          class: { select: { name: true } },
+          subTopic: { select: { title: true, topic: { select: { title: true } } } },
+        },
+      });
     });
 
     console.log(`[AdaptWorkspace] Generated ${aiActivities.length} activities for lesson ${lessonId}`);
@@ -228,7 +266,10 @@ Respond ONLY with this JSON structure:
     targetStudentIds?: string[];
     scheduledDate?: string;
   }) {
-    const lesson = await prisma.adaptedLesson.findUnique({ where: { id: lessonId } });
+    const lesson = await prisma.adaptedLesson.findUnique({
+      where: { id: lessonId },
+      include: { class: { select: { academicTermId: true } } },
+    });
     if (!lesson) throw new Error('Lesson not found');
     if (lesson.teacherId !== teacherId) throw new Error('Not your lesson');
 
@@ -239,13 +280,28 @@ Respond ONLY with this JSON structure:
     if (updates.targetStudentIds !== undefined) data.targetStudentIds = updates.targetStudentIds;
     if (updates.scheduledDate !== undefined) data.scheduledDate = new Date(updates.scheduledDate);
 
-    const updated = await prisma.adaptedLesson.update({
-      where: { id: lessonId },
-      data,
-      include: {
-        class: { select: { name: true } },
-        subTopic: { select: { title: true, topic: { select: { title: true } } } },
-      },
+    const updated = await runTermWriteTransaction(lesson.class.academicTermId, 'SETUP', async tx => {
+      const persistedLesson = await tx.adaptedLesson.findUnique({
+        where: { id: lessonId },
+        include: { class: { select: { academicTermId: true } } },
+      });
+      if (!persistedLesson
+        || persistedLesson.teacherId !== teacherId
+        || persistedLesson.class.academicTermId !== lesson.class.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Adapted lesson ownership changed while it was being updated',
+        );
+      }
+
+      return tx.adaptedLesson.update({
+        where: { id: lessonId },
+        data,
+        include: {
+          class: { select: { name: true } },
+          subTopic: { select: { title: true, topic: { select: { title: true } } } },
+        },
+      });
     });
 
     return updated;
@@ -255,7 +311,10 @@ Respond ONLY with this JSON structure:
    * Change lesson status: DRAFT → READY → DEPLOYED → COMPLETED
    */
   static async changeStatus(lessonId: string, teacherId: string, newStatus: string) {
-    const lesson = await prisma.adaptedLesson.findUnique({ where: { id: lessonId } });
+    const lesson = await prisma.adaptedLesson.findUnique({
+      where: { id: lessonId },
+      include: { class: { select: { academicTermId: true } } },
+    });
     if (!lesson) throw new Error('Lesson not found');
     if (lesson.teacherId !== teacherId) throw new Error('Not your lesson');
 
@@ -266,20 +325,38 @@ Respond ONLY with this JSON structure:
       'COMPLETED': [],
     };
 
-    if (!validTransitions[lesson.status]?.includes(newStatus)) {
-      throw new Error(`Cannot transition from ${lesson.status} to ${newStatus}`);
-    }
+    const category = newStatus === 'DEPLOYED' || newStatus === 'COMPLETED'
+      ? 'ACADEMIC_ACTIVITY'
+      : 'SETUP';
 
-    const data: any = { status: newStatus };
-    if (newStatus === 'COMPLETED') data.completedDate = new Date();
+    const updated = await runTermWriteTransaction(lesson.class.academicTermId, category, async tx => {
+      const persistedLesson = await tx.adaptedLesson.findUnique({
+        where: { id: lessonId },
+        include: { class: { select: { academicTermId: true } } },
+      });
+      if (!persistedLesson
+        || persistedLesson.teacherId !== teacherId
+        || persistedLesson.class.academicTermId !== lesson.class.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Adapted lesson ownership changed while its status was being updated',
+        );
+      }
+      if (!validTransitions[persistedLesson.status]?.includes(newStatus)) {
+        throw new Error(`Cannot transition from ${persistedLesson.status} to ${newStatus}`);
+      }
 
-    const updated = await prisma.adaptedLesson.update({
-      where: { id: lessonId },
-      data,
-      include: {
-        class: { select: { name: true } },
-        subTopic: { select: { title: true, topic: { select: { title: true } } } },
-      },
+      const data: any = { status: newStatus };
+      if (newStatus === 'COMPLETED') data.completedDate = new Date();
+
+      return tx.adaptedLesson.update({
+        where: { id: lessonId },
+        data,
+        include: {
+          class: { select: { name: true } },
+          subTopic: { select: { title: true, topic: { select: { title: true } } } },
+        },
+      });
     });
 
     console.log(`[AdaptWorkspace] Lesson ${lessonId} → ${newStatus}`);

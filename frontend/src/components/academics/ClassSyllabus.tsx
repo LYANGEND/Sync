@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Circle, Clock, FileText, Plus, Calendar, Sparkles, Loader2, Lightbulb } from 'lucide-react';
+import { CheckCircle, Circle, Clock, Plus, Calendar, Sparkles, Loader2, Lightbulb } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import api from '../../utils/api';
+import { useAuth } from '../../context/AuthContext';
+import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
+import { dateInputToIso, formatDateInputValue } from '../../utils/dateInput';
 
 interface Topic {
   id: string;
@@ -27,10 +30,14 @@ interface ClassSyllabusProps {
 }
 
 const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => {
+  const { user } = useAuth();
+  const canManageSyllabus = user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER';
   const [activeTab, setActiveTab] = useState<'progress' | 'plans'>('progress');
   const [topics, setTopics] = useState<Topic[]>([]);
   const [plans, setPlans] = useState<LessonPlan[]>([]);
   const [loading, setLoading] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   
   // New Plan Form
@@ -41,6 +48,10 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
     termId: '' // This needs to be fetched or passed
   });
   const [terms, setTerms] = useState<{id: string, name: string}[]>([]);
+  const closePlanDialog = () => {
+    if (!savingPlan) setShowPlanModal(false);
+  };
+  const planDialogRef = useDialogAccessibility(showPlanModal, closePlanDialog);
 
   useEffect(() => {
     if (classId && subjectId) {
@@ -68,11 +79,13 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
 
   const fetchProgress = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await api.get(`/syllabus/progress?classId=${classId}&subjectId=${subjectId}`);
       setTopics(response.data);
     } catch (error) {
       console.error('Error fetching progress:', error);
+      setError('Curriculum progress could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -80,17 +93,20 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
 
   const fetchPlans = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await api.get(`/syllabus/lesson-plans?classId=${classId}&subjectId=${subjectId}`);
       setPlans(response.data);
     } catch (error) {
       console.error('Error fetching plans:', error);
+      setError('Lesson plans could not be loaded.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleStatusUpdate = async (topicId: string, newStatus: string) => {
+    if (!canManageSyllabus) return;
     try {
       await api.put(`/syllabus/progress/${topicId}/${classId}`, { status: newStatus });
       fetchProgress();
@@ -101,19 +117,25 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
 
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageSyllabus) return;
     try {
+      setSavingPlan(true);
+      setError(null);
       await api.post('/syllabus/lesson-plans', {
         ...newPlan,
         classId,
         subjectId,
-        weekStartDate: new Date(newPlan.weekStartDate).toISOString()
+        weekStartDate: dateInputToIso(newPlan.weekStartDate)
       });
       setShowPlanModal(false);
-      setNewPlan(prev => ({ ...prev, title: '', content: '' }));
-      fetchPlans();
-    } catch (error) {
+      setNewPlan(prev => ({ ...prev, weekStartDate: '', title: '', content: '' }));
+      await fetchPlans();
+    } catch (error: any) {
       console.error('Error creating plan:', error);
-      alert('Failed to create lesson plan');
+      const apiError = error.response?.data?.message || error.response?.data?.error;
+      setError(typeof apiError === 'string' ? apiError : 'Failed to create lesson plan.');
+    } finally {
+      setSavingPlan(false);
     }
   };
 
@@ -139,13 +161,21 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
   };
 
   const handleAIGeneratePlan = async (topicId: string) => {
+    if (!canManageSyllabus) return;
     setGeneratingPlan(topicId);
     try {
       const res = await api.post('/syllabus/generate-lesson-plan', { topicId, subjectId });
-      // The generated plan should be saved by the backend, just refresh
-      fetchPlans();
-      setActiveTab('plans');
-      alert(`AI lesson plan generated: "${res.data.title || 'New Plan'}"`);
+      const generatedTitle = res.data.topic?.title
+        ? `${res.data.topic.title} lesson plan`
+        : 'AI-generated lesson plan';
+      setNewPlan((previous) => ({
+        ...previous,
+        weekStartDate: previous.weekStartDate || formatDateInputValue(new Date()),
+        title: generatedTitle,
+        content: res.data.lessonPlan || '',
+      }));
+      setError(null);
+      setShowPlanModal(true);
     } catch (error) {
       console.error('Error generating AI plan:', error);
       alert('AI plan generation failed. Try again.');
@@ -180,10 +210,13 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
       </div>
 
       <div className="p-6">
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</div>
+        )}
         {activeTab === 'progress' ? (
           <div className="space-y-4">
             {/* AI Suggest Next Topic */}
-            <div className="flex justify-end">
+            {canManageSyllabus && <div className="flex justify-end">
               <button
                 onClick={handleSuggestNext}
                 disabled={suggestingNext}
@@ -192,7 +225,7 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
                 {suggestingNext ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
                 {suggestingNext ? 'Thinking...' : 'AI Suggest Next Topic'}
               </button>
-            </div>
+            </div>}
 
             {/* AI Suggestion banner */}
             {nextTopicSuggestion && (
@@ -218,58 +251,61 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
                       <p className="text-sm text-gray-500 mt-1">{topic.description}</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  {canManageSyllabus && <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleAIGeneratePlan(topic.id)}
                       disabled={generatingPlan === topic.id}
                       className="p-1.5 rounded-full text-purple-400 hover:bg-purple-100 hover:text-purple-600 transition-colors"
-                      title="AI Generate Lesson Plan"
+                      aria-label={`Generate an AI lesson plan for ${topic.title}`}
                     >
                       {generatingPlan === topic.id ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
                     </button>
                     <button
                       onClick={() => handleStatusUpdate(topic.id, 'PENDING')}
                       className={`p-1.5 rounded-full transition-colors ${
-                        topic.status === 'PENDING' ? 'bg-gray-200 text-gray-600' : 'text-gray-300 hover:bg-gray-100'
+                        topic.status === 'PENDING' ? 'bg-gray-200 text-gray-600' : 'text-gray-300 hover:bg-surface-hover'
                       }`}
                       title="Pending"
+                      aria-label={`Mark ${topic.title} as pending`}
                     >
                       <Circle size={20} />
                     </button>
                     <button
                       onClick={() => handleStatusUpdate(topic.id, 'IN_PROGRESS')}
                       className={`p-1.5 rounded-full transition-colors ${
-                        topic.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-600' : 'text-gray-300 hover:bg-gray-100'
+                        topic.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-600' : 'text-gray-300 hover:bg-surface-hover'
                       }`}
                       title="In Progress"
+                      aria-label={`Mark ${topic.title} as in progress`}
                     >
                       <Clock size={20} />
                     </button>
                     <button
                       onClick={() => handleStatusUpdate(topic.id, 'COMPLETED')}
                       className={`p-1.5 rounded-full transition-colors ${
-                        topic.status === 'COMPLETED' ? 'bg-green-100 text-green-600' : 'text-gray-300 hover:bg-gray-100'
+                        topic.status === 'COMPLETED' ? 'bg-green-100 text-green-600' : 'text-gray-300 hover:bg-surface-hover'
                       }`}
                       title="Completed"
+                      aria-label={`Mark ${topic.title} as completed`}
                     >
                       <CheckCircle size={20} />
                     </button>
-                  </div>
+                  </div>}
                 </div>
               ))
             )}
           </div>
         ) : (
           <div>
-            <div className="flex justify-end mb-4">
+            {canManageSyllabus && <div className="flex justify-end mb-4">
               <button
-                onClick={() => setShowPlanModal(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                onClick={() => { setError(null); setShowPlanModal(true); }}
+                className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
               >
                 <Plus size={18} />
                 Add Lesson Plan
               </button>
-            </div>
+            </div>}
 
             <div className="space-y-4">
               {loading ? (
@@ -302,37 +338,57 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
         )}
       </div>
 
-      {showPlanModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg">
-            <h2 className="text-xl font-bold mb-4">Add Lesson Plan</h2>
+      {showPlanModal && canManageSyllabus && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePlanDialog(); }}>
+          <div ref={planDialogRef} className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="class-syllabus-plan-dialog-title">
+            <h2 id="class-syllabus-plan-dialog-title" className="text-xl font-bold mb-4 dark:text-white">Add Lesson Plan</h2>
             <form onSubmit={handleCreatePlan} className="space-y-4">
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{error}</div>
+              )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Week Start Date</label>
-                <input
-                  type="date"
+                <label htmlFor="class-syllabus-term" className="block text-sm font-medium text-gray-700 mb-1">Academic Term</label>
+                <select
+                  id="class-syllabus-term"
+                  data-dialog-autofocus="true"
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  value={newPlan.termId}
+                  onChange={(e) => setNewPlan({ ...newPlan, termId: e.target.value })}
+                >
+                  <option value="">Select term</option>
+                  {terms.map((term) => <option key={term.id} value={term.id}>{term.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="class-syllabus-week-start" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Week Start Date</label>
+                <input
+                  id="class-syllabus-week-start"
+                  type="date"
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-700 dark:text-white"
                   value={newPlan.weekStartDate}
                   onChange={(e) => setNewPlan({ ...newPlan, weekStartDate: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <label htmlFor="class-syllabus-plan-title" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
                 <input
+                  id="class-syllabus-plan-title"
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-700 dark:text-white"
                   value={newPlan.title}
                   onChange={(e) => setNewPlan({ ...newPlan, title: e.target.value })}
                   placeholder="e.g. Week 3: Quadratic Equations"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Content</label>
+                <label htmlFor="class-syllabus-plan-content" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Content</label>
                 <textarea
+                  id="class-syllabus-plan-content"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-700 dark:text-white"
                   rows={6}
                   value={newPlan.content}
                   onChange={(e) => setNewPlan({ ...newPlan, content: e.target.value })}
@@ -342,16 +398,18 @@ const ClassSyllabus: React.FC<ClassSyllabusProps> = ({ classId, subjectId }) => 
               <div className="flex justify-end space-x-3 mt-6">
                 <button 
                   type="button"
-                  onClick={() => setShowPlanModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  onClick={closePlanDialog}
+                  disabled={savingPlan}
+                  className="min-h-11 px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={savingPlan}
+                  className="min-h-11 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Plan
+                  {savingPlan ? 'Saving…' : 'Save Plan'}
                 </button>
               </div>
             </form>

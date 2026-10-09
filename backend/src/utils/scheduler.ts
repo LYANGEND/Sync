@@ -1,4 +1,12 @@
 import { runScheduledCollection, reconcileCampaignPayments } from '../services/debtCollectionService';
+import { getActiveTerm } from '../services/termLifecycleService';
+import { processAccountingPostingOutbox } from '../services/accountingOutboxService';
+
+async function reconcileActiveTermPayments() {
+  const activeTerm = await getActiveTerm();
+  if (!activeTerm) return 0;
+  return reconcileCampaignPayments(activeTerm.id);
+}
 
 /**
  * Simple interval-based scheduler for debt collection.
@@ -26,7 +34,7 @@ async function runDailyTasks() {
     await runScheduledCollection();
 
     // 2. Reconcile payments (detect which contacted debtors have paid)
-    const reconciled = await reconcileCampaignPayments();
+    const reconciled = await reconcileActiveTermPayments();
     if (reconciled > 0) {
       console.log(`[Scheduler] Reconciled ${reconciled} campaign payments`);
     }
@@ -63,10 +71,25 @@ export function initScheduler() {
 
   console.log(`[Scheduler] Initialized — debt collection runs daily at ${TARGET_HOUR}:00`);
 
+  const drainAccountingOutbox = async () => {
+    try {
+      const result = await processAccountingPostingOutbox();
+      if (result.claimed > 0) {
+        console.log(
+          `[Scheduler] Accounting outbox: ${result.completed} completed, ${result.failed} failed`,
+        );
+      }
+    } catch (error) {
+      console.error('[Scheduler] Accounting outbox processing failed:', error);
+    }
+  };
+  void drainAccountingOutbox();
+  setInterval(drainAccountingOutbox, 60 * 1000);
+
   // Also run reconciliation every 6 hours (to detect payments quickly)
   setInterval(async () => {
     try {
-      await reconcileCampaignPayments();
+      await reconcileActiveTermPayments();
     } catch (error) {
       console.error('[Scheduler] Reconciliation failed:', error);
     }

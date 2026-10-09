@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { Prisma } from '@prisma/client';
+import { TermWriteCategory } from '../utils/termLifecycleRules';
+import { TermLifecycleError, runTermWriteTransaction } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // ========================================
 // BUDGET MANAGEMENT
@@ -25,6 +29,14 @@ const budgetSchema = z.object({
     allocated: z.number().positive(),
   })).min(1),
 });
+
+const runBudgetTransaction = async <T>(
+  termId: string | null | undefined,
+  category: TermWriteCategory,
+  operation: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> => termId
+  ? runTermWriteTransaction(termId, category, operation)
+  : prisma.$transaction(operation);
 
 export const getBudgets = async (req: Request, res: Response) => {
   try {
@@ -98,37 +110,43 @@ export const createBudget = async (req: Request, res: Response) => {
     const data = budgetSchema.parse(req.body);
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (data.period === 'term' && !data.termId) {
+      return res.status(400).json({ error: 'termId is required for a term budget' });
+    }
 
     const totalBudget = data.items.reduce((sum, item) => sum + item.allocated, 0);
 
-    const budget = await prisma.budget.create({
-      data: {
-        name: data.name,
-        period: data.period,
-        year: data.year,
-        termId: data.termId,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        totalBudget,
-        notes: data.notes,
-        createdBy: user.userId,
-        branchId: user.branchId,
-        status: 'DRAFT',
-        items: {
-          create: data.items.map(item => ({
-            category: item.category,
-            description: item.description,
-            allocated: item.allocated,
-            remaining: item.allocated,
-          })),
+    const budget = await runBudgetTransaction(data.termId, 'SETUP', async tx => {
+      return tx.budget.create({
+        data: {
+          name: data.name,
+          period: data.period,
+          year: data.year,
+          termId: data.termId,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          totalBudget,
+          notes: data.notes,
+          createdBy: user.userId,
+          branchId: user.branchId,
+          status: 'DRAFT',
+          items: {
+            create: data.items.map(item => ({
+              category: item.category,
+              description: item.description,
+              allocated: item.allocated,
+              remaining: item.allocated,
+            })),
+          },
         },
-      },
-      include: { items: true },
+        include: { items: true },
+      });
     });
 
     res.status(201).json(budget);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Create budget error:', error);
     res.status(500).json({ error: 'Failed to create budget' });
   }
@@ -143,46 +161,77 @@ export const updateBudget = async (req: Request, res: Response) => {
     }
 
     const data = budgetSchema.partial().parse(req.body);
-    const user = (req as AuthRequest).user;
+    const targetTermId = data.termId ?? existing.termId;
+    const targetPeriod = data.period ?? existing.period;
 
-    if (data.items) {
-      // Delete old items and create new ones
-      await prisma.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
-      const totalBudget = data.items.reduce((sum, item) => sum + item.allocated, 0);
+    if (existing.termId && data.termId && data.termId !== existing.termId) {
+      return res.status(409).json({ error: 'A budget cannot be reassigned to another academic term; create a new budget instead' });
+    }
+    if (targetPeriod === 'term' && !targetTermId) {
+      return res.status(400).json({ error: 'termId is required for a term budget' });
+    }
 
-      const budget = await prisma.budget.update({
+    const budget = await runBudgetTransaction(targetTermId, 'SETUP', async tx => {
+      const persistedBudget = await tx.budget.findUnique({
+        where: { id: req.params.id },
+        select: { status: true, termId: true },
+      });
+      if (!persistedBudget
+        || persistedBudget.status !== 'DRAFT'
+        || persistedBudget.termId !== existing.termId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Budget status or term ownership changed while it was being edited',
+        );
+      }
+
+      if (data.items) {
+        await tx.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
+        const totalBudget = data.items.reduce((sum, item) => sum + item.allocated, 0);
+
+        return tx.budget.update({
+          where: { id: req.params.id },
+          data: {
+            name: data.name,
+            period: data.period,
+            year: data.year,
+            termId: targetTermId,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            totalBudget,
+            notes: data.notes,
+            items: {
+              create: data.items.map(item => ({
+                category: item.category,
+                description: item.description,
+                allocated: item.allocated,
+                remaining: item.allocated,
+              })),
+            },
+          },
+          include: { items: true },
+        });
+      }
+
+      return tx.budget.update({
         where: { id: req.params.id },
         data: {
           name: data.name,
           period: data.period,
           year: data.year,
+          termId: targetTermId,
           startDate: data.startDate,
           endDate: data.endDate,
-          totalBudget,
           notes: data.notes,
-          items: {
-            create: data.items.map(item => ({
-              category: item.category,
-              description: item.description,
-              allocated: item.allocated,
-              remaining: item.allocated,
-            })),
-          },
         },
         include: { items: true },
       });
-      return res.json(budget);
-    }
-
-    const budget = await prisma.budget.update({
-      where: { id: req.params.id },
-      data: { name: data.name, period: data.period, year: data.year, notes: data.notes },
-      include: { items: true },
     });
 
     res.json(budget);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to update budget' });
   }
 };
@@ -192,24 +241,68 @@ export const activateBudget = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const budget = await prisma.budget.update({
-      where: { id: req.params.id },
-      data: { status: 'ACTIVE', approvedBy: user.userId, approvedAt: new Date() },
+    const existing = await prisma.budget.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Budget not found' });
+    if (existing.status !== 'DRAFT') {
+      return res.status(400).json({ error: 'Can only activate draft budgets' });
+    }
+
+    const budget = await runBudgetTransaction(existing.termId, 'FINANCIAL_OBLIGATION', async tx => {
+      const persistedBudget = await tx.budget.findUnique({
+        where: { id: req.params.id },
+        select: { status: true, termId: true },
+      });
+      if (!persistedBudget
+        || persistedBudget.status !== 'DRAFT'
+        || persistedBudget.termId !== existing.termId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Budget status or term ownership changed while it was being activated',
+        );
+      }
+
+      return tx.budget.update({
+        where: { id: req.params.id },
+        data: { status: 'ACTIVE', approvedBy: user.userId, approvedAt: new Date() },
+      });
     });
     res.json(budget);
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to activate budget' });
   }
 };
 
 export const closeBudget = async (req: Request, res: Response) => {
   try {
-    const budget = await prisma.budget.update({
-      where: { id: req.params.id },
-      data: { status: 'CLOSED' },
+    const existing = await prisma.budget.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Budget not found' });
+    if (existing.status !== 'ACTIVE') {
+      return res.status(400).json({ error: 'Can only close active budgets' });
+    }
+
+    const budget = await runBudgetTransaction(existing.termId, 'FINALIZATION', async tx => {
+      const persistedBudget = await tx.budget.findUnique({
+        where: { id: req.params.id },
+        select: { status: true, termId: true },
+      });
+      if (!persistedBudget
+        || persistedBudget.status !== 'ACTIVE'
+        || persistedBudget.termId !== existing.termId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Budget status or term ownership changed while it was being closed',
+        );
+      }
+
+      return tx.budget.update({
+        where: { id: req.params.id },
+        data: { status: 'CLOSED' },
+      });
     });
     res.json(budget);
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to close budget' });
   }
 };
@@ -222,11 +315,27 @@ export const deleteBudget = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Can only delete draft budgets' });
     }
 
-    await prisma.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
-    await prisma.budget.delete({ where: { id: req.params.id } });
+    await runBudgetTransaction(existing.termId, 'SETUP', async tx => {
+      const persistedBudget = await tx.budget.findUnique({
+        where: { id: req.params.id },
+        select: { status: true, termId: true },
+      });
+      if (!persistedBudget
+        || persistedBudget.status !== 'DRAFT'
+        || persistedBudget.termId !== existing.termId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Budget status or term ownership changed while it was being deleted',
+        );
+      }
+
+      await tx.budgetItem.deleteMany({ where: { budgetId: req.params.id } });
+      await tx.budget.delete({ where: { id: req.params.id } });
+    });
 
     res.json({ message: 'Budget deleted' });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to delete budget' });
   }
 };

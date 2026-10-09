@@ -70,6 +70,7 @@ export default function VirtualClassrooms() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+  const [selectedAcademicTermId, setSelectedAcademicTermId] = useState('');
 
   // Syllabus-driven scheduling state
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -107,18 +108,28 @@ export default function VirtualClassrooms() {
   // FETCH DATA
   // ==========================================
   useEffect(() => {
-    fetchClassrooms();
+    api.get('/academic-terms').then(response => {
+      const terms = Array.isArray(response.data) ? response.data : [];
+      const activeTerm = terms.find((term: any) => term.isActive) || terms[0];
+      if (!activeTerm) {
+        setLoading(false);
+        return;
+      }
+      setSelectedAcademicTermId(activeTerm.id);
+      void fetchClassrooms(activeTerm.id);
+      if (canCreate) void fetchClasses(activeTerm.id);
+    }).catch(() => setLoading(false));
     if (canCreate) {
-      fetchVoices();
-      fetchClasses();
-      fetchSubjects();
+      void fetchVoices();
+      void fetchSubjects();
     }
   }, []);
 
-  const fetchClassrooms = async () => {
+  const fetchClassrooms = async (academicTermId = selectedAcademicTermId) => {
+    if (!academicTermId) return;
     try {
       setLoading(true);
-      const res = await api.get('/virtual-classroom');
+      const res = await api.get('/virtual-classroom', { params: { academicTermId } });
       setClassrooms(res.data);
     } catch (err) {
       console.error('Fetch classrooms error:', err);
@@ -136,9 +147,10 @@ export default function VirtualClassrooms() {
     }
   };
 
-  const fetchClasses = async () => {
+  const fetchClasses = async (academicTermId = selectedAcademicTermId) => {
+    if (!academicTermId) return;
     try {
-      const res = await api.get('/classes');
+      const res = await api.get('/classes', { params: { academicTermId } });
       const data = res.data;
       setClasses(Array.isArray(data) ? data : data.classes || []);
     } catch (err) {
@@ -528,7 +540,7 @@ export default function VirtualClassrooms() {
                     </button>
                     <button
                       onClick={() => navigate(`/virtual-classroom/${classroom.id}`)}
-                      className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-surface-hover rounded-lg"
                     >
                       <Edit size={14} />
                     </button>
@@ -547,7 +559,7 @@ export default function VirtualClassrooms() {
                 {isAdmin && (
                   <button
                     onClick={() => deleteClassroom(classroom.id)}
-                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
+                    className="p-2 text-red-400 hover:text-red-600 hover:bg-surface-hover-danger rounded-lg"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -570,7 +582,7 @@ export default function VirtualClassrooms() {
                 <Sparkles className="text-purple-500" size={20} />
                 Create Virtual Classroom
               </h2>
-              <button onClick={() => { setShowCreate(false); resetForm(); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <button onClick={() => { setShowCreate(false); resetForm(); }} className="p-1 hover:bg-surface-hover rounded-lg">
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
@@ -739,7 +751,7 @@ export default function VirtualClassrooms() {
                                     className={`w-full text-left flex items-start gap-2 p-2 rounded-lg transition text-sm ${
                                       isSelected
                                         ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700'
-                                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
+                                        : 'hover:bg-surface-hover border border-transparent'
                                     }`}
                                   >
                                     {isSelected ? (
@@ -945,7 +957,7 @@ export default function VirtualClassrooms() {
                 <button
                   type="button"
                   onClick={() => { setShowCreate(false); resetForm(); }}
-                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"
+                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-xl"
                 >
                   Cancel
                 </button>

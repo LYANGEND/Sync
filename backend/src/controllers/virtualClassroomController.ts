@@ -13,6 +13,9 @@ import {
 import { emitClassroomUpdated } from '../services/classroomRealtimeService';
 import crypto from 'crypto';
 import { AcademicScopeError, ensureAcademicClassAccess, ensureTopicMatchesClassGrade } from '../utils/academicScope';
+import { TermLifecycleError, runTermWriteTransaction } from '../services/termLifecycleService';
+import { runClassroomTermWriteTransaction } from '../services/classroomTermService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // ==========================================
 // HELPERS
@@ -181,13 +184,18 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
     if (!title || !scheduledStart || !scheduledEnd) {
       return res.status(400).json({ error: 'Title, scheduledStart, and scheduledEnd are required' });
     }
-
-    if (classId) {
-      await ensureAcademicClassAccess(req, classId, subjectId ? { subjectId } : undefined);
+    if (!classId) {
+      return res.status(400).json({ error: 'classId is required so the classroom has explicit academic-term ownership' });
     }
 
+    await ensureAcademicClassAccess(req, classId, subjectId ? { subjectId } : undefined);
+
     if (classId && topicId) {
-      await ensureTopicMatchesClassGrade(topicId, classId);
+      const { topic } = await ensureTopicMatchesClassGrade(topicId, classId);
+      if (subjectId && topic.subjectId !== subjectId) {
+        return res.status(400).json({ error: 'Selected topic does not belong to the selected subject' });
+      }
+      await ensureAcademicClassAccess(req, classId, { subjectId: topic.subjectId });
     }
 
     // If topic is selected, build a consistent lesson plan from the runtime segments
@@ -206,30 +214,49 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
     // Generate a unique Jitsi room name
     const roomName = `sync-${crypto.randomBytes(4).toString('hex')}-${title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20)}`;
 
-    const classroom = await prisma.virtualClassroom.create({
-      data: {
-        title,
-        description: description || null,
-        classId: classId || null,
-        subjectId: subjectId || null,
-        teacherId: userId,
-        roomName,
-        roomPassword: roomPassword || null,
-        jitsiDomain: jitsiDomain || 'meet.jit.si',
-        scheduledStart: new Date(scheduledStart),
-        scheduledEnd: new Date(scheduledEnd),
-        topicId: topicId || null,
-        selectedSubTopicIds: selectedSubTopicIds || null,
-        aiTutorEnabled: aiTutorEnabled || false,
-        aiTutorVoiceId: aiTutorVoiceId || null,
-        aiTutorName: aiTutorName || 'AI Teacher',
-        aiTutorPersona: aiTutorPersona || null,
-        lessonPlanContent: finalLessonPlan,
-        aiTutorLanguage: aiTutorLanguage || 'en',
-        maxParticipants: maxParticipants || 50,
-        isRecordingEnabled: isRecordingEnabled || false,
-        createdById: userId,
-      } as any,
+    const targetClass = await prisma.class.findUnique({
+      where: { id: classId },
+      select: { academicTermId: true },
+    });
+    if (!targetClass) return res.status(404).json({ error: 'Class not found' });
+
+    const classroom = await runTermWriteTransaction(targetClass.academicTermId, 'SETUP', async tx => {
+      const persistedClass = await tx.class.findUnique({
+        where: { id: classId },
+        select: { academicTermId: true },
+      });
+      if (!persistedClass || persistedClass.academicTermId !== targetClass.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Class term ownership changed while the virtual classroom was being created',
+        );
+      }
+
+      return tx.virtualClassroom.create({
+        data: {
+          title,
+          description: description || null,
+          classId,
+          subjectId: subjectId || null,
+          teacherId: userId,
+          roomName,
+          roomPassword: roomPassword || null,
+          jitsiDomain: jitsiDomain || 'meet.jit.si',
+          scheduledStart: new Date(scheduledStart),
+          scheduledEnd: new Date(scheduledEnd),
+          topicId: topicId || null,
+          selectedSubTopicIds: selectedSubTopicIds || null,
+          aiTutorEnabled: aiTutorEnabled || false,
+          aiTutorVoiceId: aiTutorVoiceId || null,
+          aiTutorName: aiTutorName || 'AI Teacher',
+          aiTutorPersona: aiTutorPersona || null,
+          lessonPlanContent: finalLessonPlan,
+          aiTutorLanguage: aiTutorLanguage || 'en',
+          maxParticipants: maxParticipants || 50,
+          isRecordingEnabled: isRecordingEnabled || false,
+          createdById: userId,
+        } as any,
+      });
     });
 
     res.status(201).json(classroom);
@@ -237,6 +264,7 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] Create error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -247,17 +275,27 @@ export const createClassroom = async (req: AuthRequest, res: Response) => {
  */
 export const getClassrooms = async (req: AuthRequest, res: Response) => {
   try {
-    const { status, classId, upcoming } = req.query;
+    const { status, classId, upcoming, academicTermId } = req.query;
     const userId = req.user?.userId;
     const role = req.user?.role;
 
-    const where: any = {};
+    if (!academicTermId || typeof academicTermId !== 'string') {
+      return res.status(400).json({ error: 'academicTermId is required' });
+    }
+
+    const termClasses = await prisma.class.findMany({
+      where: { academicTermId },
+      select: { id: true },
+    });
+    const termClassIds = termClasses.map(classRecord => classRecord.id);
+
+    const where: any = { classId: { in: termClassIds } };
 
     if (status) where.status = status;
     if (classId) where.classId = classId;
 
     if (classId && typeof classId === 'string') {
-      await ensureAcademicClassAccess(req, classId);
+      await ensureAcademicClassAccess(req, classId, { academicTermId });
     }
 
     // If upcoming, get only future scheduled classes
@@ -269,7 +307,7 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
     // Teachers only see their own classrooms unless admin
     if (role === 'TEACHER') {
       const myClasses = await prisma.class.findMany({
-        where: { teacherId: userId },
+        where: { teacherId: userId, academicTermId },
         select: { id: true },
       });
       const myTeacherSubjects = await prisma.teacherSubject.findMany({
@@ -287,11 +325,20 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
         ...(accessibleClassIds.length > 0 ? [{ classId: { in: accessibleClassIds } }] : []),
       ];
     } else if (role === 'STUDENT') {
-      const student = await prisma.student.findFirst({ where: { userId }, select: { classId: true } });
-      where.classId = student?.classId || '__NO_CLASS__';
+      const student = await prisma.student.findFirst({ where: { userId }, select: { id: true } });
+      const placement = student
+        ? await prisma.studentTermEnrollment.findUnique({
+          where: { studentId_academicTermId: { studentId: student.id, academicTermId } },
+          select: { classId: true },
+        })
+        : null;
+      where.classId = placement?.classId || '__NO_CLASS__';
     } else if (role === 'PARENT') {
-      const childClasses = await prisma.student.findMany({ where: { parentId: userId }, select: { classId: true } });
-      where.classId = { in: [...new Set(childClasses.map((item) => item.classId))] };
+      const childPlacements = await prisma.studentTermEnrollment.findMany({
+        where: { academicTermId, student: { parentId: userId } },
+        select: { classId: true },
+      });
+      where.classId = { in: [...new Set(childPlacements.map(item => item.classId))] };
     }
 
     const classrooms = await prisma.virtualClassroom.findMany({
@@ -447,6 +494,10 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
     delete updates.roomName;
     delete updates.createdById;
 
+    if (updates.classId === null) {
+      return res.status(400).json({ error: 'A virtual classroom cannot be detached from its term-owned class' });
+    }
+
     // Convert dates if present
     if (updates.scheduledStart) updates.scheduledStart = new Date(updates.scheduledStart);
     if (updates.scheduledEnd) updates.scheduledEnd = new Date(updates.scheduledEnd);
@@ -459,12 +510,49 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
     }
 
     if (targetClassId && (updates.topicId || req.body.topicId)) {
-      await ensureTopicMatchesClassGrade(updates.topicId || req.body.topicId, targetClassId);
+      const { topic } = await ensureTopicMatchesClassGrade(updates.topicId || req.body.topicId, targetClassId);
+      if (targetSubjectId && topic.subjectId !== targetSubjectId) {
+        return res.status(400).json({ error: 'Selected topic does not belong to the selected subject' });
+      }
+      await ensureAcademicClassAccess(req, targetClassId, { subjectId: topic.subjectId });
     }
 
-    const classroom = await prisma.virtualClassroom.update({
-      where: { id },
-      data: updates,
+    const updateCategory = updates.status === 'LIVE'
+      || updates.status === 'ENDED'
+      || updates.actualStart !== undefined
+      || updates.actualEnd !== undefined
+      ? 'ACADEMIC_ACTIVITY'
+      : 'SETUP';
+
+    const classroom = await runClassroomTermWriteTransaction(id, updateCategory, async (tx, context) => {
+      const persistedClassroom = await tx.virtualClassroom.findUnique({
+        where: { id },
+        select: { classId: true },
+      });
+      if (!persistedClassroom || persistedClassroom.classId !== context.classId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Virtual classroom ownership changed while it was being updated',
+        );
+      }
+
+      if (targetClassId) {
+        const persistedTargetClass = await tx.class.findUnique({
+          where: { id: targetClassId },
+          select: { academicTermId: true },
+        });
+        if (!persistedTargetClass || persistedTargetClass.academicTermId !== context.academicTermId) {
+          throw new TermLifecycleError(
+            'TERM_LIFECYCLE_CONFLICT',
+            'A virtual classroom cannot move to a class owned by another academic term',
+          );
+        }
+      }
+
+      return tx.virtualClassroom.update({
+        where: { id },
+        data: updates,
+      });
     });
 
     res.json(classroom);
@@ -472,6 +560,7 @@ export const updateClassroom = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] Update error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -486,12 +575,15 @@ export const deleteClassroom = async (req: AuthRequest, res: Response) => {
 
     await ensureClassroomAccess(req, id, { requireManage: true });
 
-    await prisma.virtualClassroom.delete({ where: { id } });
+    await runClassroomTermWriteTransaction(id, 'SETUP', async tx => {
+      await tx.virtualClassroom.delete({ where: { id } });
+    });
     res.json({ message: 'Classroom deleted' });
   } catch (error: any) {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] Delete error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -505,12 +597,14 @@ export const startClassroom = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     await ensureClassroomAccess(req, id, { requireManage: true });
 
-    const classroom = await prisma.virtualClassroom.update({
-      where: { id },
-      data: {
-        status: 'LIVE',
-        actualStart: new Date(),
-      },
+    const classroom = await runClassroomTermWriteTransaction(id, 'ACADEMIC_ACTIVITY', async tx => {
+      return tx.virtualClassroom.update({
+        where: { id },
+        data: {
+          status: 'LIVE',
+          actualStart: new Date(),
+        },
+      });
     });
 
     if (classroom.aiTutorEnabled) {
@@ -543,6 +637,7 @@ export const startClassroom = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] Start error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -565,12 +660,14 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
       await aiTutorService.endSession(session.id);
     }
 
-    const classroom = await prisma.virtualClassroom.update({
-      where: { id },
-      data: {
-        status: 'ENDED',
-        actualEnd: new Date(),
-      },
+    const classroom = await runClassroomTermWriteTransaction(id, 'ACADEMIC_ACTIVITY', async tx => {
+      return tx.virtualClassroom.update({
+        where: { id },
+        data: {
+          status: 'ENDED',
+          actualEnd: new Date(),
+        },
+      });
     });
 
     const attendanceSync = await syncClassroomAttendance(id);
@@ -584,6 +681,7 @@ export const endClassroom = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] End error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -628,6 +726,7 @@ export const startAITutor = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Start error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -654,6 +753,7 @@ export const stopAITutor = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Stop error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -698,6 +798,7 @@ export const chatWithAITutor = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Chat error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -736,6 +837,7 @@ export const advanceTutorPhase = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Advance phase error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -773,6 +875,7 @@ export const tutorSpeak = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Speak error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -811,6 +914,7 @@ export const tutorQuiz = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AITutor] Quiz error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -864,14 +968,16 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
           : 'OBSERVER');
 
     if (action === 'join') {
-      const participant = await prisma.classroomParticipant.create({
-        data: {
-          classroomId: id,
-          displayName: displayName || 'Anonymous',
-          userId: userId || null,
-          studentId: studentId || null,
-          role: resolvedRole,
-        },
+      const participant = await runClassroomTermWriteTransaction(id, 'ACADEMIC_ACTIVITY', async tx => {
+        return tx.classroomParticipant.create({
+          data: {
+            classroomId: id,
+            displayName: displayName || 'Anonymous',
+            userId: userId || null,
+            studentId: studentId || null,
+            role: resolvedRole,
+          },
+        });
       });
       emitClassroomUpdated(id, { reason: 'participant_joined' });
       return res.json(participant);
@@ -879,21 +985,23 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
 
     if (action === 'leave') {
       // Update the most recent participant entry that hasn't left
-      const participant = await prisma.classroomParticipant.findFirst({
-        where: {
-          classroomId: id,
-          displayName,
-          leftAt: null,
-        },
-        orderBy: { joinedAt: 'desc' },
-      });
-
-      if (participant) {
-        await prisma.classroomParticipant.update({
-          where: { id: participant.id },
-          data: { leftAt: new Date() },
+      await runClassroomTermWriteTransaction(id, 'ACADEMIC_ACTIVITY', async tx => {
+        const participant = await tx.classroomParticipant.findFirst({
+          where: {
+            classroomId: id,
+            displayName,
+            leftAt: null,
+          },
+          orderBy: { joinedAt: 'desc' },
         });
-      }
+
+        if (participant) {
+          await tx.classroomParticipant.update({
+            where: { id: participant.id },
+            data: { leftAt: new Date() },
+          });
+        }
+      });
       emitClassroomUpdated(id, { reason: 'participant_left' });
       return res.json({ message: 'Participant left recorded' });
     }
@@ -903,6 +1011,7 @@ export const recordParticipant = async (req: AuthRequest, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[VirtualClassroom] Participant error:', error);
     res.status(500).json({ error: error.message });
   }

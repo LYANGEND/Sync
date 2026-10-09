@@ -6,13 +6,26 @@ export const getDashboardStats = async (req: Request, res: Response) => {
   try {
     const userRole = (req as any).user?.role;
     const userId = (req as any).user?.userId;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : '';
+    if (!academicTermId || !await prisma.academicTerm.findUnique({ where: { id: academicTermId }, select: { id: true } })) {
+      return res.status(400).json({ error: 'A valid academicTermId is required' });
+    }
 
     if (userRole === 'TEACHER') {
       // 1. My Classes
-      const myClasses = await prisma.class.findMany({
-        where: { teacherId: userId },
-        include: { _count: { select: { students: true } } }
+      const myClassRows = await prisma.class.findMany({
+        where: { teacherId: userId, academicTermId },
+        include: {
+          termEnrollments: {
+            where: { status: 'ACTIVE' },
+            select: { studentId: true },
+          },
+        },
       });
+      const myClasses = myClassRows.map(({ termEnrollments, ...classRecord }) => ({
+        ...classRecord,
+        _count: { students: termEnrollments.length },
+      }));
 
       const totalStudents = myClasses.reduce((acc, curr) => acc + curr._count.students, 0);
 
@@ -23,6 +36,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       const todaySchedule = await prisma.timetablePeriod.findMany({
         where: {
           teacherId: userId,
+          academicTermId,
           dayOfWeek: todayDay as any
         },
         include: {
@@ -40,7 +54,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       const classIds = myClasses.map(c => c.id);
       const recentAssessments = await prisma.assessment.findMany({
         where: {
-          classId: { in: classIds }
+          classId: { in: classIds },
         },
         take: 5,
         orderBy: { date: 'desc' },
@@ -67,28 +81,47 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     // --- ADMIN / BURSAR View — uses shared metricsService for canonical numbers ---
 
     const [health, recentPayments] = await Promise.all([
-      metrics.getSchoolHealthSnapshot(),
+      metrics.getSchoolHealthSnapshot(academicTermId),
       prisma.payment.findMany({
+        where: { academicTermId, status: 'COMPLETED' },
         take: 5,
         orderBy: { createdAt: 'desc' },
         include: {
           student: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
-              class: { select: { name: true } },
             },
           },
         },
       }),
     ]);
 
+    const paymentPlacements = await prisma.studentTermEnrollment.findMany({
+      where: {
+        academicTermId,
+        studentId: { in: recentPayments.map(payment => payment.studentId) },
+      },
+      include: { class: { select: { name: true } } },
+    });
+    const classByStudentId = new Map(
+      paymentPlacements.map(placement => [placement.studentId, placement.class]),
+    );
+
     res.json({
       role: 'ADMIN',
       dailyRevenue: health.revenue.todayRevenue,
       activeStudents: health.enrollment.activeStudents,
       outstandingFees: health.fees.outstanding,
-      recentPayments: recentPayments.map(p => ({ ...p, amount: Number(p.amount) })),
+      recentPayments: recentPayments.map(payment => ({
+        ...payment,
+        amount: Number(payment.amount),
+        student: {
+          ...payment.student,
+          class: classByStudentId.get(payment.studentId) ?? null,
+        },
+      })),
       intelligence: {
         atRiskCount: health.risk.critical + health.risk.high,
         unresolvedAlerts: health.unresolvedAlerts,

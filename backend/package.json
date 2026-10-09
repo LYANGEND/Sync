@@ -10,7 +10,18 @@
     "migrate:dev": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
-    "test": "npm run build && node --test tests/schoolDataArchiveService.test.js"
+    "test": "npm run build && node --test tests/schoolDataArchiveService.test.js tests/academicValidation.test.js dist/tests/termLifecycleRules.test.js dist/tests/termBackfillPlanner.test.js dist/tests/termRolloverReadiness.test.js dist/tests/termRolloverAzureBlobBackupStore.test.js dist/tests/studentDuplicateService.test.js",
+    "test:term-lifecycle:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termLifecycleService.integration.test.js",
+    "test:term-backfill:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termBackfillDataSource.integration.test.js",
+    "test:student-placement:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/studentPlacement.integration.test.js",
+    "test:payment-settlement:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/paymentSettlement.integration.test.js",
+    "test:report-finalization:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/reportFinalization.integration.test.js",
+    "test:term-rollover-preparation:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termRolloverPreparation.integration.test.js",
+    "test:term-rollover-enrollment:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termRolloverEnrollment.integration.test.js",
+    "test:term-rollover-readiness:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termRolloverReadiness.integration.test.js",
+    "finance-settlement:reconcile": "ts-node src/scripts/reconcile-finance-settlement.ts",
+    "term-backfill:plan": "ts-node src/scripts/backfill-term-rollover.ts",
+    "term-backfill:apply": "ts-node src/scripts/backfill-term-rollover.ts --apply"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -19,6 +30,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@azure/identity": "^4.13.3",
+    "@azure/storage-blob": "^12.34.0",
     "@prisma/client": "^5.10.0",
     "@types/nodemailer": "^7.0.4",
     "axios": "^1.13.6",

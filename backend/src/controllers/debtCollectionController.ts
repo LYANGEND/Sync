@@ -11,6 +11,8 @@ import {
   DebtorProfile,
 } from '../services/debtCollectionService';
 import { prisma } from '../utils/prisma';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // ========================================
 // DEBTOR SEGMENTATION
@@ -22,9 +24,11 @@ import { prisma } from '../utils/prisma';
  */
 export const getDebtors = async (req: Request, res: Response) => {
   try {
-    const { minAmount, minDaysOverdue, gradeLevels, segment } = req.query;
+    const { academicTermId, minAmount, minDaysOverdue, gradeLevels, segment } = req.query;
+    if (!academicTermId || typeof academicTermId !== 'string') return res.status(400).json({ error: 'academicTermId is required' });
 
     let debtors = await segmentDebtors({
+      academicTermId,
       minAmount: minAmount ? Number(minAmount) : undefined,
       minDaysOverdue: minDaysOverdue ? Number(minDaysOverdue) : undefined,
       gradeLevels: gradeLevels ? String(gradeLevels).split(',').map(Number) : undefined,
@@ -69,7 +73,10 @@ export const getDebtors = async (req: Request, res: Response) => {
  */
 export const listCampaigns = async (req: Request, res: Response) => {
   try {
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : '';
+    if (!academicTermId) return res.status(400).json({ error: 'academicTermId is required' });
     const campaigns = await (prisma as any).debtCollectionCampaign.findMany({
+      where: { academicTermId },
       orderBy: { createdAt: 'desc' },
       include: {
         createdBy: { select: { id: true, fullName: true } },
@@ -91,12 +98,13 @@ export const createNewCampaign = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { name, description, minAmountOwed, minDaysOverdue, targetSegments, targetGradeLevels } = req.body;
+    const { academicTermId, name, description, minAmountOwed, minDaysOverdue, targetSegments, targetGradeLevels } = req.body;
 
-    if (!name) return res.status(400).json({ error: 'Campaign name is required' });
+    if (!name || !academicTermId) return res.status(400).json({ error: 'Campaign name and academicTermId are required' });
 
     const campaign = await createCampaign({
       name,
+      academicTermId,
       description,
       minAmountOwed: minAmountOwed ? Number(minAmountOwed) : undefined,
       minDaysOverdue: minDaysOverdue ? Number(minDaysOverdue) : undefined,
@@ -107,6 +115,7 @@ export const createNewCampaign = async (req: Request, res: Response) => {
 
     res.status(201).json(campaign);
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Create campaign error:', error);
     res.status(500).json({ error: 'Failed to create campaign' });
   }
@@ -125,6 +134,7 @@ export const executeExistingCampaign = async (req: Request, res: Response) => {
 
     res.json({ message: `Campaign executed. ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`, ...result });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Execute campaign error:', error);
     res.status(500).json({ error: error.message || 'Failed to execute campaign' });
   }
@@ -151,7 +161,7 @@ export const getCampaignDetails = async (req: Request, res: Response) => {
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     // Analytics for this campaign
-    const analytics = await getCampaignAnalytics(id);
+    const analytics = await getCampaignAnalytics(campaign.academicTermId, id);
 
     res.json({ campaign, analytics });
   } catch (error: any) {
@@ -173,12 +183,13 @@ export const sendReminders = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { studentIds, segments, minDaysOverdue, channels } = req.body;
+    const { academicTermId, studentIds, segments, minDaysOverdue, channels } = req.body;
 
-    if (!channels?.length) return res.status(400).json({ error: 'At least one channel is required' });
+    if (!academicTermId || !channels?.length) return res.status(400).json({ error: 'academicTermId and at least one channel are required' });
 
     const result = await sendQuickReminders({
       studentIds,
+      academicTermId,
       segments,
       minDaysOverdue,
       channels,
@@ -187,6 +198,7 @@ export const sendReminders = async (req: Request, res: Response) => {
 
     res.json({ message: `Sent ${result.sent} reminders, ${result.failed} failed.`, ...result });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Send reminders error:', error);
     res.status(500).json({ error: 'Failed to send reminders' });
   }
@@ -202,13 +214,13 @@ export const sendReminders = async (req: Request, res: Response) => {
  */
 export const previewMessage = async (req: Request, res: Response) => {
   try {
-    const { studentId, channel } = req.body;
+    const { studentId, channel, academicTermId } = req.body;
 
-    if (!studentId || !channel) {
-      return res.status(400).json({ error: 'studentId and channel are required' });
+    if (!studentId || !channel || !academicTermId) {
+      return res.status(400).json({ error: 'studentId, channel, and academicTermId are required' });
     }
 
-    const debtors = await segmentDebtors();
+    const debtors = await segmentDebtors({ academicTermId });
     const debtor = debtors.find(d => d.studentId === studentId);
 
     if (!debtor) return res.status(404).json({ error: 'Student not found in debtors list' });
@@ -244,7 +256,9 @@ export const previewMessage = async (req: Request, res: Response) => {
  */
 export const getCollectionAnalytics = async (req: Request, res: Response) => {
   try {
-    const analytics = await getCampaignAnalytics();
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : '';
+    if (!academicTermId) return res.status(400).json({ error: 'academicTermId is required' });
+    const analytics = await getCampaignAnalytics(academicTermId);
     res.json(analytics);
   } catch (error: any) {
     console.error('Analytics error:', error);
@@ -258,9 +272,12 @@ export const getCollectionAnalytics = async (req: Request, res: Response) => {
  */
 export const reconcilePayments = async (req: Request, res: Response) => {
   try {
-    const reconciled = await reconcileCampaignPayments();
+    const academicTermId = typeof req.body?.academicTermId === 'string' ? req.body.academicTermId : '';
+    if (!academicTermId) return res.status(400).json({ error: 'academicTermId is required' });
+    const reconciled = await reconcileCampaignPayments(academicTermId);
     res.json({ message: `Reconciled ${reconciled} payments.`, reconciled });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Reconcile error:', error);
     res.status(500).json({ error: 'Failed to reconcile payments' });
   }

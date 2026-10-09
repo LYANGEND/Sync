@@ -109,7 +109,7 @@ const Scholarships = () => {
               setFormData({ name: '', percentage: '', description: '' });
               setShowModal(true);
             }}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+            className="bg-primary text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-primary-hover transition-colors"
           >
             <Plus size={20} />
             <span>Add Scholarship</span>
@@ -127,13 +127,13 @@ const Scholarships = () => {
               <div className="flex space-x-2">
                 <button
                   onClick={() => handleEdit(scholarship)}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-surface-hover-accent rounded-lg transition-colors"
                 >
                   <Edit2 size={16} />
                 </button>
                 <button
                   onClick={() => handleDelete(scholarship.id)}
-                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-surface-hover-danger rounded-lg transition-colors"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -214,13 +214,13 @@ const Scholarships = () => {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   {editingId ? 'Update' : 'Create'}
                 </button>

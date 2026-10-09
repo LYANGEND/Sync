@@ -3,6 +3,7 @@ import { prisma } from '../utils/prisma';
 import aiService from '../services/aiService';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { getActiveTerm } from '../services/termLifecycleService';
 
 // ==========================================
 // PROACTIVE AI ALERTS
@@ -33,16 +34,14 @@ export const runProactiveScan = async (req: Request, res: Response) => {
 
     // ---- 1. ACADEMIC ALERTS ----
     // Find students with failing grades (avg < 40%)
-    const currentTerm = await prisma.academicTerm.findFirst({
-      where: { isActive: true },
-      select: { id: true, name: true },
-    });
+    const currentTerm = await getActiveTerm();
 
     if (currentTerm) {
       const termResults = await prisma.termResult.findMany({
         where: { termId: currentTerm.id },
         include: {
-          student: { select: { id: true, firstName: true, lastName: true, class: { select: { name: true } } } },
+          student: { select: { id: true, firstName: true, lastName: true } },
+          class: { select: { name: true } },
           subject: { select: { name: true } },
         },
       });
@@ -52,7 +51,11 @@ export const runProactiveScan = async (req: Request, res: Response) => {
       for (const result of termResults) {
         const key = result.studentId;
         if (!studentScores.has(key)) {
-          studentScores.set(key, { student: result.student, scores: [], failingSubjects: [] });
+          studentScores.set(key, {
+            student: { ...result.student, class: result.class },
+            scores: [],
+            failingSubjects: [],
+          });
         }
         const entry = studentScores.get(key)!;
         const score = Number(result.totalScore || 0);
@@ -85,7 +88,7 @@ export const runProactiveScan = async (req: Request, res: Response) => {
       // Classes with low average
       const classScores = new Map<string, { name: string; scores: number[] }>();
       for (const result of termResults) {
-        const className = result.student.class?.name || 'Unknown';
+        const className = result.class?.name || 'Unknown';
         if (!classScores.has(className)) classScores.set(className, { name: className, scores: [] });
         classScores.get(className)!.scores.push(Number(result.totalScore || 0));
       }
@@ -215,9 +218,12 @@ export const runProactiveScan = async (req: Request, res: Response) => {
     // ---- 4. OPERATIONAL ALERTS ----
     // Teacher coverage — classes without enough teacher-subject allocations
     const classes = await prisma.class.findMany({
-      include: { _count: { select: { students: true } } },
+      where: currentTerm ? { academicTermId: currentTerm.id } : { id: { in: [] } },
+      include: { _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } } },
     });
-    const teacherSubjects = await prisma.teacherSubject.findMany();
+    const teacherSubjects = await prisma.teacherSubject.findMany({
+      where: { classId: { in: classes.map(classRecord => classRecord.id) } },
+    });
     const classTeacherCount = new Map<string, number>();
     for (const ts of teacherSubjects) {
       classTeacherCount.set(ts.classId, (classTeacherCount.get(ts.classId) || 0) + 1);
@@ -225,7 +231,7 @@ export const runProactiveScan = async (req: Request, res: Response) => {
 
     const understaffedClasses = classes.filter(c => {
       const allocated = classTeacherCount.get(c.id) || 0;
-      return allocated < 3 && c._count.students > 0; // Less than 3 subjects allocated
+      return allocated < 3 && c._count.termEnrollments > 0; // Less than 3 subjects allocated
     });
 
     if (understaffedClasses.length > 0) {
@@ -316,7 +322,7 @@ export const runAIScan = async (req: Request, res: Response) => {
       prisma.student.count(),
       prisma.user.count({ where: { role: 'TEACHER' } }),
       prisma.class.count(),
-      prisma.academicTerm.findFirst({ where: { isActive: true } }),
+      getActiveTerm(),
       prisma.payment.findMany({
         where: { createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
         select: { amount: true, status: true },

@@ -155,16 +155,19 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
   const fetchInitialData = async () => {
     try {
-      const [classesRes, subjectsRes, termsRes] = await Promise.all([
-        api.get('/classes'),
+      const [subjectsRes, termsRes] = await Promise.all([
         api.get('/subjects'),
         api.get('/academic-terms')
       ]);
 
+      const activeTerm = termsRes.data.find((t: any) => t.isActive) || termsRes.data[0];
+      const classesRes = activeTerm
+        ? await api.get('/classes', { params: { academicTermId: activeTerm.id } })
+        : { data: [] };
+
       setClasses(classesRes.data);
       setSubjects(subjectsRes.data);
 
-      const activeTerm = termsRes.data.find((t: any) => t.isActive) || termsRes.data[0];
       setCurrentTerm(activeTerm);
 
       const firstClass = classesRes.data[0];
@@ -543,7 +546,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 </button>
                 <button
                   onClick={() => setShowAddTopicModal(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 text-sm"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-surface-hover text-sm"
                 >
                   <Plus size={16} /> Add manually
                 </button>
@@ -560,7 +563,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                   </h3>
                   <button
                     onClick={() => setShowAddTopicModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs font-medium"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-hover text-xs font-medium"
                   >
                     <Plus size={14} /> Add Topic
                   </button>
@@ -740,7 +743,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
               </button>
               <button
                 onClick={() => setShowAddPlanModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors text-sm"
               >
                 <Plus size={16} />
                 Create Plan
@@ -840,13 +843,13 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 <button
                   type="button"
                   onClick={() => setShowAddTopicModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   Add Topic
                 </button>
@@ -898,13 +901,13 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 <button
                   type="button"
                   onClick={() => setShowAddPlanModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   Create Plan
                 </button>
@@ -1036,7 +1039,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 <div className="flex justify-end gap-3 pt-2">
                   <button
                     onClick={() => setShowAIModal(false)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                   >
                     Cancel
                   </button>
@@ -1083,7 +1086,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                     <button
                       type="button"
                       onClick={() => setPreviewMode(!previewMode)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition"
                     >
                       {previewMode ? <><Edit3 size={12} /> Edit</> : <><Eye size={12} /> Preview</>}
                     </button>
@@ -1105,7 +1108,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                 <div className="flex justify-between gap-3 pt-2">
                   <button
                     onClick={() => setGeneratedPlan(null)}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg flex items-center gap-2"
+                    className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg flex items-center gap-2"
                   >
                     <Sparkles size={16} />
                     Regenerate
@@ -1113,7 +1116,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowAIModal(false)}
-                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                      className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                     >
                       Discard
                     </button>

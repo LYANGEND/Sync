@@ -43,7 +43,7 @@ export const ShareButton: React.FC<ShareButtonProps> = ({
         return (
             <button
                 onClick={handleShare}
-                className={`p-2 rounded-lg hover:bg-slate-100 transition-colors ${className}`}
+                className={`p-2 rounded-lg hover:bg-surface-hover transition-colors ${className}`}
                 title={shareSupported ? 'Share' : 'Copy link'}
             >
                 {copied ? <Check size={20} className="text-green-600" /> : <Share2 size={20} className="text-slate-600" />}
@@ -54,7 +54,7 @@ export const ShareButton: React.FC<ShareButtonProps> = ({
     return (
         <button
             onClick={handleShare}
-            className={`flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors ${className}`}
+            className={`flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-surface-hover-strong text-slate-700 font-medium rounded-xl transition-colors ${className}`}
         >
             {copied ? <Check size={18} /> : <Share2 size={18} />}
             {shareSupported ? 'Share' : copied ? 'Copied!' : 'Copy Link'}
@@ -103,7 +103,7 @@ Paid via Sync — Run your school. In sync.
     return (
         <button
             onClick={handleShare}
-            className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors ${className}`}
+            className={`flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-xl transition-colors ${className}`}
         >
             <Share2 size={18} />
             Share Receipt

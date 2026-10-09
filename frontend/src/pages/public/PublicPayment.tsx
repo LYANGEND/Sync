@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Search, User, Check, Loader2, School, CreditCard, Phone, ArrowRight, ShieldCheck, ChevronRight, GraduationCap, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Check, Loader2, School, CreditCard, Phone, ArrowRight, ShieldCheck, GraduationCap, CheckCircle } from 'lucide-react';
 import api from '../../utils/api';
 import { toast } from 'react-hot-toast';
+
+const createPublicPaymentIdempotencyKey = () => (
+    globalThis.crypto?.randomUUID?.() || `public-payment-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
 
 const PublicPayment = () => {
     const [step, setStep] = useState(1);
@@ -12,6 +16,7 @@ const PublicPayment = () => {
     const [phone, setPhone] = useState('');
     const [operator, setOperator] = useState('airtel');
     const [result, setResult] = useState<any>(null);
+    const [idempotencyKey, setIdempotencyKey] = useState(createPublicPaymentIdempotencyKey);
 
     // Fees
     const [fees, setFees] = useState({ processing: 0, total: 0 });
@@ -33,6 +38,7 @@ const PublicPayment = () => {
         try {
             const res = await api.get(`/payments/public/students/${identifier}`);
             setStudent(res.data);
+            setIdempotencyKey(createPublicPaymentIdempotencyKey());
             setStep(2);
             if (res.data.balance > 0) {
                 setAmount(res.data.balance.toString());
@@ -54,12 +60,16 @@ const PublicPayment = () => {
         try {
             const payload = {
                 studentId: student.id,
+                academicTermId: student.academicTerm.id,
                 amount: parseFloat(amount),
                 phone,
                 operator,
-                country: 'zm'
+                country: 'zm',
+                idempotencyKey,
             };
-            const res = await api.post('/payments/public/mobile-money/initiate', payload);
+            const res = await api.post('/payments/public/mobile-money/initiate', payload, {
+                headers: { 'Idempotency-Key': idempotencyKey },
+            });
             setResult(res.data);
             setStep(3);
         } catch (error: any) {
@@ -108,7 +118,7 @@ const PublicPayment = () => {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-200 dark:shadow-blue-900/30 flex items-center justify-center gap-2 transform active:scale-[0.98]"
+                                className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-200 dark:shadow-blue-900/30 flex items-center justify-center gap-2 transform active:scale-[0.98]"
                             >
                                 {loading ? <Loader2 className="animate-spin" /> : <>Verify Student <ArrowRight size={20} /></>}
                             </button>
@@ -157,7 +167,9 @@ const PublicPayment = () => {
 
                         <div className="mb-8">
                             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Make Payment</h2>
-                            <p className="text-slate-500 dark:text-slate-400">Complete the transaction securely.</p>
+                            <p className="text-slate-500 dark:text-slate-400">
+                                The receipt is recorded in {student.academicTerm?.name || 'the active term'} and applied to the oldest outstanding fees first.
+                            </p>
                         </div>
 
                         {/* Profile Card & Balance */}
@@ -172,7 +184,7 @@ const PublicPayment = () => {
                                 </div>
                             </div>
                             <div className="text-left sm:text-right">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Outstanding</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total account outstanding</p>
                                 <p className="text-2xl font-black text-blue-600 dark:text-blue-400">
                                     ZMW {Number(student.balance).toLocaleString()}
                                 </p>
@@ -246,14 +258,14 @@ const PublicPayment = () => {
                                 <button
                                     type="button"
                                     onClick={() => setStep(1)}
-                                    className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 font-bold px-6 rounded-2xl transition-all"
+                                    className="bg-slate-100 dark:bg-slate-700 hover:bg-surface-hover-strong text-slate-600 dark:text-slate-300 font-bold px-6 rounded-2xl transition-all"
                                 >
                                     Back
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={loading || !amount}
-                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-200 dark:shadow-blue-900/30 flex items-center justify-center gap-2"
+                                    className="flex-1 bg-primary hover:bg-primary-hover text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-200 dark:shadow-blue-900/30 flex items-center justify-center gap-2"
                                 >
                                     {loading ? <Loader2 className="animate-spin" /> : <>Pay ZMW {fees.total.toLocaleString()} <ArrowRight size={20} /></>}
                                 </button>

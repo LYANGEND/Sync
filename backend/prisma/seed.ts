@@ -1,5 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { AcademicTermStatus, Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { activateTermInTransaction } from '../src/services/termLifecycleService';
+import { upsertStudentPlacement } from '../src/services/studentPlacementService';
 
 const prisma = new PrismaClient();
 
@@ -95,19 +97,25 @@ async function main() {
 
   // Create default academic term if none exists
   let currentTerm = await prisma.academicTerm.findFirst({
-    where: { isActive: true }
+    where: { status: AcademicTermStatus.ACTIVE }
   });
 
   if (!currentTerm) {
     const currentYear = new Date().getFullYear();
-    currentTerm = await prisma.academicTerm.create({
-      data: {
-        name: `Term 1 ${currentYear}`,
-        startDate: new Date(`${currentYear}-01-15`),
-        endDate: new Date(`${currentYear}-04-15`),
-        isActive: true,
-      }
-    });
+    currentTerm = await prisma.$transaction(async tx => {
+      const createdTerm = await tx.academicTerm.create({
+        data: {
+          name: `Term 1 ${currentYear}`,
+          startDate: new Date(`${currentYear}-01-15`),
+          endDate: new Date(`${currentYear}-04-15`),
+          status: AcademicTermStatus.DRAFT,
+          isActive: false,
+        },
+      });
+      return activateTermInTransaction(tx, createdTerm.id, {
+        createSettingsIfMissing: false,
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     console.log('✅ Created default academic term:', currentTerm.name);
   } else {
     console.log('✅ Academic term already exists:', currentTerm.name);
@@ -287,7 +295,6 @@ async function main() {
         feeReminderDaysBefore: 7,
         overdueReminderEnabled: true,
         overdueReminderFrequency: 7,
-        currentTermId: currentTerm.id,
       }
     });
     console.log('✅ Created school settings');
@@ -306,6 +313,13 @@ async function main() {
     });
     console.log('✅ Updated school settings');
   }
+
+  currentTerm = await prisma.$transaction(
+    tx => activateTermInTransaction(tx, currentTerm!.id, {
+      createSettingsIfMissing: false,
+    }),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 
   // Create Fee Templates
   const feeTemplatesData = [
@@ -388,8 +402,9 @@ async function main() {
       console.log(`✅ Created student: ${studentData.firstName} ${studentData.lastName}`);
 
       // Get applicable fee template based on grade level
-      const feeTemplate = createdFeeTemplates.find(ft => ft.applicableGrade === classForStudent.gradeLevel)
-        || createdFeeTemplates.find(ft => ft.applicableGrade <= classForStudent.gradeLevel);
+      const feeTemplate = createdFeeTemplates
+        .filter(ft => ft.applicableGrade <= classForStudent.gradeLevel)
+        .sort((a, b) => b.applicableGrade - a.applicableGrade)[0];
 
       if (feeTemplate) {
         // Create student fee structure
@@ -399,14 +414,14 @@ async function main() {
             feeTemplateId: feeTemplate.id,
             academicTermId: currentTerm.id,
             amountDue: feeTemplate.amount,
-            amountPaid: studentData.paidAmount ?? (studentData.feeStatus === 'PAID' ? feeTemplate.amount : 0),
+            amountPaid: Math.min(Number(feeTemplate.amount), studentData.paidAmount ?? (studentData.feeStatus === 'PAID' ? Number(feeTemplate.amount) : 0)),
             dueDate: studentData.dueDate ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           }
         });
 
         // Create payment records for students who have paid
         if (studentData.feeStatus === 'PAID' || (studentData.paidAmount && studentData.paidAmount > 0)) {
-          const paymentAmount = studentData.feeStatus === 'PAID' ? feeTemplate.amount : studentData.paidAmount;
+          const paymentAmount = Math.min(Number(feeTemplate.amount), studentData.feeStatus === 'PAID' ? Number(feeTemplate.amount) : (studentData.paidAmount ?? 0));
           await prisma.payment.create({
             data: {
               studentId: student.id,
@@ -424,6 +439,21 @@ async function main() {
       }
     } else {
       console.log(`✅ Student already exists: ${studentData.firstName} ${studentData.lastName}`);
+    }
+
+    // Rosters are term-scoped: every seeded student needs a placement in the active term.
+    const studentId = student.id;
+    const placement = await prisma.studentTermEnrollment.findUnique({
+      where: { studentId_academicTermId: { studentId, academicTermId: currentTerm.id } },
+      select: { id: true },
+    });
+    if (!placement) {
+      await prisma.$transaction(tx => upsertStudentPlacement(tx, {
+        studentId,
+        academicTermId: currentTerm!.id,
+        classId: classForStudent.id,
+        status: 'ACTIVE',
+      }));
     }
 
     // Create Parent User Account and Link

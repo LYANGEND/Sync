@@ -243,14 +243,14 @@ const Users = () => {
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+            className="flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-surface-hover transition-colors"
           >
             <Upload size={20} />
             <span>Import Users</span>
           </button>
           <button
             onClick={openAddModal}
-            className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center justify-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors"
           >
             <Plus size={20} />
             <span>Add User</span>
@@ -314,7 +314,7 @@ const Users = () => {
               <button
                 onClick={handleApplyBulkAccess}
                 disabled={bulkSaving}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors text-sm"
+                className="px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-blue-300 transition-colors text-sm"
               >
                 Apply
               </button>
@@ -363,7 +363,7 @@ const Users = () => {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                 {filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                  <tr key={user.id} className="hover:bg-surface-hover">
                     <td className="px-6 py-4">
                       <input
                         type="checkbox"
@@ -525,13 +525,13 @@ const Users = () => {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   {editingUser ? 'Update User' : 'Create User'}
                 </button>

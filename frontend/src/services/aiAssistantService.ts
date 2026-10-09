@@ -124,15 +124,17 @@ const aiAssistantService = {
     api.post<{ remarks: string }>('/ai-assistant/report-remarks', { studentId, termId }).then(r => r.data),
 
   // Teaching Context
-  getTeachingContext: () =>
-    api.get<{ classes: any[]; subjects: any[] }>('/ai-assistant/teaching-context').then(r => r.data),
+  getTeachingContext: (academicTermId: string) =>
+    api.get<{ classes: any[]; subjects: any[] }>('/ai-assistant/teaching-context', {
+      params: { academicTermId },
+    }).then(r => r.data),
 
   // All subjects with grade grouping and topics
   getAllSubjects: () =>
     api.get<SubjectsContextResponse>('/ai-assistant/subjects').then(r => r.data),
 
   // Student Insights
-  getStudentInsights: (params: { classId: string; subjectId?: string }) =>
+  getStudentInsights: (params: { academicTermId: string; classId: string; subjectId?: string }) =>
     api.get('/ai-assistant/student-insights', { params }).then(r => r.data),
 };
 

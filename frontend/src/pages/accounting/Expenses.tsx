@@ -279,7 +279,7 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
               </select>
             </div>
             <button onClick={() => { resetExpenseForm(); setShowExpenseModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <Plus size={16} /><span>New Expense</span>
             </button>
           </div>
@@ -320,7 +320,7 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
                 {filteredExpenses.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No expenses found</td></tr>
                 ) : filteredExpenses.map(exp => (
-                  <tr key={exp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <tr key={exp.id} className="hover:bg-surface-hover">
                     <td className="px-4 py-3 font-mono text-blue-600 dark:text-blue-400">{exp.expenseNumber}</td>
                     <td className="px-4 py-3">{new Date(exp.date).toLocaleDateString()}</td>
                     <td className="px-4 py-3"><span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-xs">{exp.category.replace(/_/g, ' ')}</span></td>
@@ -337,16 +337,16 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
                         {exp.status === 'PENDING_APPROVAL' && (
                           <>
                             <button onClick={() => handleApprove(exp.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Approve"><CheckCircle size={16} /></button>
-                            <button onClick={() => handleReject(exp.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Reject"><XCircle size={16} /></button>
+                            <button onClick={() => handleReject(exp.id)} className="p-1 text-red-600 hover:bg-surface-hover-danger rounded" title="Reject"><XCircle size={16} /></button>
                           </>
                         )}
                         {exp.status === 'APPROVED' && (
-                          <button onClick={() => handleMarkPaid(exp.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Mark Paid"><DollarSign size={16} /></button>
+                          <button onClick={() => handleMarkPaid(exp.id)} className="p-1 text-blue-600 hover:bg-surface-hover-accent rounded" title="Mark Paid"><DollarSign size={16} /></button>
                         )}
                         {(exp.status === 'DRAFT' || exp.status === 'PENDING_APPROVAL') && (
                           <>
-                            <button onClick={() => { setEditingExpense(exp); setExpenseForm({ date: exp.date?.split('T')[0] || '', category: exp.category, description: exp.description, amount: String(exp.amount), taxAmount: String(exp.taxAmount), vendorId: exp.vendorId || '', paymentMethod: exp.paymentMethod || 'CASH', paymentRef: exp.paymentRef || '', notes: exp.notes || '', isRecurring: exp.isRecurring, recurringFrequency: exp.recurringFrequency || '' }); setShowExpenseModal(true); }} className="p-1 text-gray-600 hover:bg-gray-50 rounded"><Edit2 size={16} /></button>
-                            <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
+                            <button onClick={() => { setEditingExpense(exp); setExpenseForm({ date: exp.date?.split('T')[0] || '', category: exp.category, description: exp.description, amount: String(exp.amount), taxAmount: String(exp.taxAmount), vendorId: exp.vendorId || '', paymentMethod: exp.paymentMethod || 'CASH', paymentRef: exp.paymentRef || '', notes: exp.notes || '', isRecurring: exp.isRecurring, recurringFrequency: exp.recurringFrequency || '' }); setShowExpenseModal(true); }} className="p-1 text-gray-600 hover:bg-surface-hover rounded"><Edit2 size={16} /></button>
+                            <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-red-500 hover:bg-surface-hover-danger rounded"><Trash2 size={16} /></button>
                           </>
                         )}
                       </div>
@@ -364,7 +364,7 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
         <div className="space-y-4">
           <div className="flex justify-end">
             <button onClick={() => { setEditingVendor(null); setVendorForm({ name: '', contactName: '', email: '', phone: '', address: '', taxId: '', bankName: '', bankAccount: '', bankBranch: '', notes: '' }); setShowVendorModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <Plus size={16} /><span>New Vendor</span>
             </button>
           </div>
@@ -508,9 +508,9 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => { setShowExpenseModal(false); resetExpenseForm(); }}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleSaveExpense}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">
                 {editingExpense ? 'Update' : 'Create'} Expense
               </button>
             </div>
@@ -584,9 +584,9 @@ const Expenses = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowVendorModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleSaveVendor}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">
                 {editingVendor ? 'Update' : 'Create'} Vendor
               </button>
             </div>

@@ -4,6 +4,10 @@ import api from '../utils/api';
 import ExportDropdown from './ExportDropdown';
 import StudentSelector from './StudentSelector';
 
+const createMobileMoneyIdempotencyKey = () => (
+    globalThis.crypto?.randomUUID?.() || `mobile-money-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
+
 interface Student {
     id: string;
     firstName: string;
@@ -41,16 +45,18 @@ interface MobileMoneyCollection {
 
 interface MobileMoneyPaymentProps {
     students: Student[];
+    academicTermId: string;
     onPaymentSuccess?: () => void;
 }
 
-const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPaymentSuccess }) => {
+const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, academicTermId, onPaymentSuccess }) => {
     const [collections, setCollections] = useState<MobileMoneyCollection[]>([]);
     const [loading, setLoading] = useState(true);
     const [showInitiateModal, setShowInitiateModal] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
     const [selectedCollection, setSelectedCollection] = useState<MobileMoneyCollection | null>(null);
+    const [idempotencyKey, setIdempotencyKey] = useState(createMobileMoneyIdempotencyKey);
 
     // Form state
     const [form, setForm] = useState({
@@ -66,12 +72,12 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
 
     useEffect(() => {
         fetchCollections();
-    }, []);
+    }, [academicTermId]);
 
     const fetchCollections = async () => {
         try {
             setLoading(true);
-            const response = await api.get('/payments/mobile-money');
+            const response = await api.get('/payments/mobile-money', { params: { academicTermId } });
             setCollections(response.data.data || []);
         } catch (error) {
             console.error('Error fetching mobile money collections:', error);
@@ -88,10 +94,14 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
         try {
             const response = await api.post('/payments/mobile-money/initiate', {
                 studentId: form.studentId,
+                academicTermId,
                 amount: Number(form.amount),
                 phone: form.phone,
                 country: form.country,
                 operator: form.operator,
+                idempotencyKey,
+            }, {
+                headers: { 'Idempotency-Key': idempotencyKey },
             });
 
             alert(
@@ -103,6 +113,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
 
             setShowInitiateModal(false);
             setForm({ studentId: '', amount: '', phone: '', country: 'zm', operator: 'airtel' });
+            setIdempotencyKey(createMobileMoneyIdempotencyKey());
             fetchCollections();
         } catch (error: any) {
             console.error('Error initiating mobile money payment:', error);
@@ -249,7 +260,10 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                         filename={`mobile_money_collections_${new Date().toISOString().split('T')[0]}`}
                     />
                     <button
-                        onClick={() => setShowInitiateModal(true)}
+                        onClick={() => {
+                            setIdempotencyKey(createMobileMoneyIdempotencyKey());
+                            setShowInitiateModal(true);
+                        }}
                         className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
                     >
                         <Send size={18} />
@@ -266,7 +280,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                         onClick={() => setStatusFilter(status)}
                         className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === status
                             ? 'bg-blue-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-surface-hover-strong'
                             }`}
                     >
                         {status === 'ALL' ? 'All' : status === 'PAY_OFFLINE' ? 'Awaiting Auth' : status.charAt(0) + status.slice(1).toLowerCase()}
@@ -312,7 +326,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                                 </tr>
                             ) : (
                                 filteredCollections.map((collection) => (
-                                    <tr key={collection.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                                    <tr key={collection.id} className="hover:bg-surface-hover transition-colors">
                                         <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
                                             {new Date(collection.initiatedAt).toLocaleDateString()}
                                             <div className="text-xs text-slate-400">
@@ -352,7 +366,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                                                         onClick={() => handleCheckStatus(collection.reference)}
                                                         disabled={checkingStatus === collection.reference}
                                                         title="Check Status"
-                                                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                                                        className="p-1.5 text-blue-600 hover:bg-surface-hover-accent rounded-lg transition-colors disabled:opacity-50"
                                                     >
                                                         <RefreshCw size={18} className={checkingStatus === collection.reference ? "animate-spin" : ""} />
                                                     </button>
@@ -360,7 +374,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
 
                                                 <button
                                                     onClick={() => setSelectedCollection(collection)}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-gray-300 bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 rounded-lg transition-colors border border-slate-200 dark:border-slate-600"
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-gray-300 bg-slate-50 dark:bg-slate-700 hover:bg-surface-hover rounded-lg transition-colors border border-slate-200 dark:border-slate-600"
                                                 >
                                                     <Eye size={16} />
                                                     View
@@ -386,7 +400,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                             </h2>
                             <button
                                 onClick={() => setShowInitiateModal(false)}
-                                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                className="p-1 hover:bg-surface-hover rounded-lg transition-colors"
                             >
                                 <X size={20} className="text-slate-500" />
                             </button>
@@ -495,7 +509,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                                 <button
                                     type="button"
                                     onClick={() => setShowInitiateModal(false)}
-                                    className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                    className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg transition-colors"
                                 >
                                     Cancel
                                 </button>
@@ -530,7 +544,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                             <h3 className="font-bold text-slate-800 dark:text-white text-lg">Transaction Details</h3>
                             <button
                                 onClick={() => setSelectedCollection(null)}
-                                className="text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full p-1 transition-colors"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-surface-hover rounded-full p-1 transition-colors"
                             >
                                 <X size={20} />
                             </button>
@@ -593,7 +607,7 @@ const MobileMoneyPayment: React.FC<MobileMoneyPaymentProps> = ({ students, onPay
                             <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-700 flex justify-end">
                                 <button
                                     onClick={() => setSelectedCollection(null)}
-                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 font-medium rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 font-medium rounded-lg hover:bg-surface-hover-strong transition-colors"
                                 >
                                     Close
                                 </button>

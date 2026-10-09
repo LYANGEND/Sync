@@ -12,6 +12,10 @@ import * as XLSX from 'xlsx';
 interface Props {
     classId: string;
     className: string;
+    academicTermId: string;
+    termName: string;
+    termStartDate: string;
+    termEndDate: string;
     onBack: () => void;
 }
 
@@ -56,11 +60,27 @@ interface DashboardData {
     unresolvedAlerts: number;
 }
 
-const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) => {
+const AttendanceAnalytics: React.FC<Props> = ({
+    classId,
+    className,
+    academicTermId,
+    termName,
+    termStartDate,
+    termEndDate,
+    onBack,
+}) => {
     const { prompt } = useAppDialog();
     const [loading, setLoading] = useState(true);
-    const [month, setMonth] = useState(new Date().getMonth());
-    const [year, setYear] = useState(new Date().getFullYear());
+    const initialReportDate = useMemo(() => {
+        const today = new Date();
+        const start = new Date(termStartDate);
+        const end = new Date(termEndDate);
+        if (today < start) return start;
+        if (today > end) return end;
+        return today;
+    }, [termStartDate, termEndDate]);
+    const [month, setMonth] = useState(initialReportDate.getMonth());
+    const [year, setYear] = useState(initialReportDate.getFullYear());
     const [dailyData, setDailyData] = useState<DayData[]>([]);
     const [studentSummaries, setStudentSummaries] = useState<StudentSummary[]>([]);
     const [alerts, setAlerts] = useState<AttendanceAlert[]>([]);
@@ -71,30 +91,44 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
         'July', 'August', 'September', 'October', 'November', 'December'];
 
     useEffect(() => {
-        if (!classId) {
+        if (!classId || !academicTermId) {
             setDailyData([]);
             setStudentSummaries([]);
             setLoading(false);
             return;
         }
         fetchAnalytics();
-    }, [classId, month, year]);
+    }, [classId, academicTermId, month, year]);
     useEffect(() => {
-        if (!classId) {
+        if (!classId || !academicTermId) {
             setAlerts([]);
             return;
         }
         fetchAlerts();
-    }, [classId]);
-    useEffect(() => { fetchDashboard(); }, []);
+    }, [classId, academicTermId]);
+    useEffect(() => { if (academicTermId) fetchDashboard(); }, [academicTermId]);
 
     const fetchAnalytics = async () => {
         setLoading(true);
         try {
-            const startDate = new Date(year, month, 1);
-            const endDate = new Date(year, month + 1, 0);
+            const monthStart = new Date(Date.UTC(year, month, 1));
+            const monthEnd = new Date(Date.UTC(year, month + 1, 0));
+            const termStart = new Date(termStartDate);
+            const termEnd = new Date(termEndDate);
+            const startDate = monthStart > termStart ? monthStart : termStart;
+            const endDate = monthEnd < termEnd ? monthEnd : termEnd;
+            if (startDate > endDate) {
+                setDailyData([]);
+                setStudentSummaries([]);
+                return;
+            }
             const res = await api.get('/attendance/analytics', {
-                params: { classId, startDate: startDate.toISOString().split('T')[0], endDate: endDate.toISOString().split('T')[0] }
+                params: {
+                    classId,
+                    academicTermId,
+                    startDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0],
+                }
             });
             setDailyData(res.data.dailyData || []);
             setStudentSummaries(res.data.studentSummaries || []);
@@ -107,14 +141,14 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
 
     const fetchAlerts = async () => {
         try {
-            const res = await api.get('/attendance/alerts', { params: { classId, resolved: false } });
+            const res = await api.get('/attendance/alerts', { params: { classId, academicTermId, resolved: false } });
             setAlerts(res.data || []);
         } catch { /* alerts endpoint may not exist yet */ }
     };
 
     const fetchDashboard = async () => {
         try {
-            const res = await api.get('/attendance/dashboard');
+            const res = await api.get('/attendance/dashboard', { params: { academicTermId } });
             setDashboard(res.data);
         } catch { /* dashboard endpoint may not exist yet */ }
     };
@@ -192,7 +226,7 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
 
     const handleExport = () => {
         const wsData: any[][] = [
-            [`Attendance Report: ${className} - ${monthNames[month]} ${year}`],
+            [`Attendance Report: ${className} - ${termName} - ${monthNames[month]} ${year}`],
             [],
             ['Date', 'Present', 'Absent', 'Late', 'Rate %']
         ];
@@ -207,7 +241,7 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         XLSX.utils.book_append_sheet(wb, ws, "Attendance");
-        XLSX.writeFile(wb, `Attendance_${className}_${monthNames[month]}_${year}.xlsx`);
+        XLSX.writeFile(wb, `Attendance_${className}_${termName}_${monthNames[month]}_${year}.xlsx`);
     };
 
     const changeMonth = (delta: number) => {
@@ -215,6 +249,12 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
         let newYear = year;
         if (newMonth < 0) { newMonth = 11; newYear--; }
         if (newMonth > 11) { newMonth = 0; newYear++; }
+        const candidate = new Date(Date.UTC(newYear, newMonth, 1));
+        const firstTermMonth = new Date(termStartDate);
+        const lastTermMonth = new Date(termEndDate);
+        const firstAllowed = Date.UTC(firstTermMonth.getUTCFullYear(), firstTermMonth.getUTCMonth(), 1);
+        const lastAllowed = Date.UTC(lastTermMonth.getUTCFullYear(), lastTermMonth.getUTCMonth(), 1);
+        if (candidate.getTime() < firstAllowed || candidate.getTime() > lastAllowed) return;
         setMonth(newMonth);
         setYear(newYear);
     };
@@ -261,18 +301,18 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
                         <BarChart2 className="text-purple-600" />
                         Attendance Analytics
                     </h2>
-                    <p className="text-gray-500 dark:text-gray-400">{className}</p>
+                    <p className="text-gray-500 dark:text-gray-400">{className} · {termName}</p>
                 </div>
 
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-1 shadow-sm">
-                        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+                        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-surface-hover rounded">
                             <ChevronLeft size={18} className="text-gray-600 dark:text-gray-400" />
                         </button>
                         <span className="font-medium text-gray-800 dark:text-white min-w-[140px] text-center">
                             {monthNames[month]} {year}
                         </span>
-                        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+                        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-surface-hover rounded">
                             <ChevronRight size={18} className="text-gray-600 dark:text-gray-400" />
                         </button>
                     </div>
@@ -431,7 +471,7 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                                 {studentSummaries.map(s => (
-                                    <tr key={s.studentId} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50">
+                                    <tr key={s.studentId} className="hover:bg-surface-hover">
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-3">
                                                 {s.profileImageUrl ? (
@@ -561,7 +601,7 @@ const AttendanceAnalytics: React.FC<Props> = ({ classId, className, onBack }) =>
                                         {dashboard.classBreakdown.map(cls => {
                                             const rate = cls.total > 0 ? (cls.present / cls.total * 100) : 0;
                                             return (
-                                                <tr key={cls.classId} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50">
+                                                <tr key={cls.classId} className="hover:bg-surface-hover">
                                                     <td className="px-4 py-3 font-medium text-gray-900 dark:text-white text-sm">{cls.className}</td>
                                                     <td className="px-4 py-3 text-center text-sm text-green-600 font-medium">{cls.present}</td>
                                                     <td className="px-4 py-3 text-center text-sm text-red-600 font-medium">{cls.absent}</td>

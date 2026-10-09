@@ -5,6 +5,13 @@ import toast from 'react-hot-toast';
 
 type Tab = 'trial-balance' | 'income' | 'balance-sheet' | 'cash-flow' | 'receivables' | 'accounts' | 'refunds' | 'audit';
 
+interface FinancialStatementTerm {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+}
+
 const toInputDate = (date: Date) => date.toISOString().split('T')[0];
 
 const normalizeTrialBalance = (raw: any) => {
@@ -79,7 +86,7 @@ const calculateChange = (current: number, previous: number) => {
   return ((current - previous) / Math.abs(previous)) * 100;
 };
 
-const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
+const FinancialStatements = ({ embedded = false, academicTerm }: { embedded?: boolean; academicTerm?: FinancialStatementTerm }) => {
   const [activeTab, setActiveTab] = useState<Tab>('trial-balance');
   const [loading, setLoading] = useState(false);
 
@@ -100,8 +107,8 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
   const [refundForm, setRefundForm] = useState({ paymentId: '', studentId: '', amount: '', reason: '', method: 'CASH' });
 
   // Date filters
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = useState(academicTerm?.startDate.split('T')[0] || '');
+  const [dateTo, setDateTo] = useState(academicTerm?.endDate.split('T')[0] || '');
   const [comparisonLabel, setComparisonLabel] = useState('');
   const [comparisonIncome, setComparisonIncome] = useState<any>(null);
   const [comparisonBalanceSheet, setComparisonBalanceSheet] = useState<any>(null);
@@ -110,6 +117,15 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
   useEffect(() => {
     loadTabData(activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!academicTerm) return;
+    const startDate = academicTerm.startDate.split('T')[0];
+    const endDate = academicTerm.endDate.split('T')[0];
+    setDateFrom(startDate);
+    setDateTo(endDate);
+    loadTabData(activeTab, { startDate, endDate });
+  }, [academicTerm?.id]);
 
   const applyDatePreset = (preset: 'this-month' | 'last-month' | 'ytd' | 'clear') => {
     const today = new Date();
@@ -140,13 +156,16 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
     setDateTo(toInputDate(today));
   };
 
-  const loadTabData = async (tab: Tab) => {
+  const loadTabData = async (tab: Tab, dateOverride?: { startDate: string; endDate: string }) => {
     setLoading(true);
     try {
       const params: any = {};
-      if (dateFrom) params.startDate = dateFrom;
-      if (dateTo) params.endDate = dateTo;
-      const comparisonWindow = buildComparisonWindow(dateFrom, dateTo);
+      const effectiveDateFrom = dateOverride?.startDate ?? dateFrom;
+      const effectiveDateTo = dateOverride?.endDate ?? dateTo;
+      if (effectiveDateFrom) params.startDate = effectiveDateFrom;
+      if (effectiveDateTo) params.endDate = effectiveDateTo;
+      if (academicTerm) params.academicTermId = academicTerm.id;
+      const comparisonWindow = buildComparisonWindow(effectiveDateFrom, effectiveDateTo);
 
       switch (tab) {
         case 'trial-balance': {
@@ -216,7 +235,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           break;
         }
         case 'receivables': {
-          const rec = await financialApi.getAgedReceivables();
+          const rec = await financialApi.getAgedReceivables(params);
           const raw = rec.data;
           // Backend returns { receivables: [...], summary, studentCount }
           setReceivables(raw.receivables || raw || []);
@@ -238,7 +257,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
           break;
         }
         case 'refunds': {
-          const ref = await financialApi.getRefunds();
+          const ref = await financialApi.getRefunds(params);
           // Backend returns array directly
           const raw = ref.data;
           setRefunds(Array.isArray(raw) ? raw : (raw.refunds || []));
@@ -526,7 +545,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
               <button
                 key={preset.key}
                 onClick={() => applyDatePreset(preset.key as 'this-month' | 'last-month' | 'ytd' | 'clear')}
-                className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
+                className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600"
               >
                 {preset.label}
               </button>
@@ -544,7 +563,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
               className="px-3 py-1.5 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white" />
           </div>
           <button onClick={() => loadTabData(activeTab)}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Apply</button>
+            className="px-3 py-1.5 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Apply</button>
           {comparisonLabel && (
             <span className="text-xs text-gray-500 dark:text-gray-400">Comparing current period against {comparisonLabel}</span>
           )}
@@ -939,7 +958,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                   {receivables.length === 0 ? (
                     <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No outstanding receivables</td></tr>
                   ) : receivables.map((r: any, i) => (
-                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                    <tr key={i} className="hover:bg-surface-hover">
                       <td className="px-4 py-2">
                         <p className="font-medium dark:text-white">{r.studentName}</p>
                         <p className="text-xs text-gray-400">{r.admissionNumber}</p>
@@ -978,7 +997,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                   <RefreshCw size={16} /><span>Seed Defaults</span>
                 </button>
                 <button onClick={() => setShowAccountModal(true)}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                  className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
                   <Plus size={16} /><span>New Account</span>
                 </button>
               </div>
@@ -998,7 +1017,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                     {accounts.length === 0 ? (
                       <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No accounts. Click "Seed Defaults" to create standard accounts.</td></tr>
                     ) : accounts.map(acct => (
-                      <tr key={acct.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <tr key={acct.id} className="hover:bg-surface-hover">
                         <td className="px-4 py-2 font-mono text-blue-600">{acct.code}</td>
                         <td className="px-4 py-2 font-medium dark:text-white">{acct.name}</td>
                         <td className="px-4 py-2">
@@ -1038,7 +1057,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
               </div>
               <div className="flex justify-end">
                 <button onClick={() => setShowRefundModal(true)}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                  className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
                   <Plus size={16} /><span>New Refund</span>
                 </button>
               </div>
@@ -1060,7 +1079,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                     {refunds.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No refunds</td></tr>
                     ) : refunds.map(r => (
-                      <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <tr key={r.id} className="hover:bg-surface-hover">
                         <td className="px-4 py-2 font-mono text-blue-600">{r.refundNumber}</td>
                         <td className="px-4 py-2 dark:text-gray-200">
                           {r.payment?.student ? `${r.payment.student.firstName} ${r.payment.student.lastName}` : r.studentId}
@@ -1125,7 +1144,7 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
                   {auditLog.length === 0 ? (
                     <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No audit entries</td></tr>
                   ) : auditLog.map(entry => (
-                    <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                    <tr key={entry.id} className="hover:bg-surface-hover">
                       <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{new Date(entry.createdAt).toLocaleString()}</td>
                       <td className="px-4 py-2 dark:text-gray-200">{entry.userName || entry.userId}</td>
                       <td className="px-4 py-2"><span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-xs">{entry.action}</span></td>
@@ -1182,9 +1201,9 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowAccountModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateAccount}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Create</button>
             </div>
           </div>
         </div>
@@ -1233,9 +1252,9 @@ const FinancialStatements = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowRefundModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateRefund}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Submit Refund</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Submit Refund</button>
             </div>
           </div>
         </div>

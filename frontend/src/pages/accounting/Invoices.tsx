@@ -43,22 +43,38 @@ interface StudentOption {
 interface TermOption {
   id: string;
   name: string;
-  isCurrent?: boolean;
+  isActive?: boolean;
+}
+
+interface StudentFeeOption {
+  id: string;
+  feeTemplateId: string;
+  description: string;
+  amountDue: number;
+  amountPaid: number;
+  invoiced: boolean;
 }
 
 interface ClassOption {
   id: string;
   name: string;
   gradeLevel?: number;
+  academicTermId?: string;
 }
 
 const emptyInvoiceItem = { description: '', quantity: '1', unitPrice: '', feeTemplateId: '' };
+
+const createIdempotencyKey = () => (
+  globalThis.crypto?.randomUUID?.() || `invoice-payment-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
 
 const getDefaultDueDate = () => {
   const nextMonth = new Date();
   nextMonth.setDate(nextMonth.getDate() + 30);
   return nextMonth.toISOString().split('T')[0];
 };
+
+const fmt = (n: number | string | null | undefined) => `K${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const buildInvoicePdf = (invoice: Invoice) => {
   const doc = new jsPDF();
@@ -150,7 +166,7 @@ const buildInvoicePdf = (invoice: Invoice) => {
   doc.save(`${invoice.invoiceNumber}.pdf`);
 };
 
-const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
+const Invoices = ({ embedded = false, initialTermId = '' }: { embedded?: boolean; initialTermId?: string }) => {
   const { confirm } = useAppDialog();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,41 +178,59 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MOBILE_MONEY' | 'BANK_DEPOSIT'>('CASH');
+  const [receiptTermId, setReceiptTermId] = useState('');
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(createIdempotencyKey);
   const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
   const [creditNoteForm, setCreditNoteForm] = useState({ invoiceId: '', amount: '', reason: '' });
   const [showBulkGenerateModal, setShowBulkGenerateModal] = useState(false);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [terms, setTerms] = useState<TermOption[]>([]);
+  const [selectedTermId, setSelectedTermId] = useState(initialTermId);
   const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [studentFeeOptions, setStudentFeeOptions] = useState<StudentFeeOption[]>([]);
   const [createClassFilter, setCreateClassFilter] = useState('');
   const [bulkForm, setBulkForm] = useState({ termId: '', classId: '' });
 
   // Create form
   const [createForm, setCreateForm] = useState({
-    studentId: '', termId: '', dueDate: getDefaultDueDate(), discount: '0', notes: '',
+    studentId: '', termId: '', dueDate: getDefaultDueDate(), notes: '',
     items: [{ ...emptyInvoiceItem }],
   });
 
   useEffect(() => {
-    loadData();
     loadReferenceData();
   }, []);
 
   useEffect(() => {
+    if (!initialTermId) return;
+    setSelectedTermId(initialTermId);
+    setCreateForm(prev => ({ ...prev, termId: initialTermId }));
+    setBulkForm(prev => ({ ...prev, termId: initialTermId, classId: '' }));
+  }, [initialTermId]);
+
+  useEffect(() => {
+    if (selectedTermId) {
+      loadData();
+      loadTermReferenceData(selectedTermId);
+    }
+  }, [selectedTermId]);
+
+  useEffect(() => {
     if (!createForm.termId && terms.length > 0) {
-      const currentTerm = terms.find(term => term.isCurrent) || terms[0];
+      const currentTerm = terms.find(term => term.id === selectedTermId) || terms.find(term => term.isActive) || terms[0];
       if (currentTerm) {
         setCreateForm(prev => ({ ...prev, termId: currentTerm.id }));
       }
     }
 
     if (!bulkForm.termId && terms.length > 0) {
-      const currentTerm = terms.find(term => term.isCurrent) || terms[0];
+      const currentTerm = terms.find(term => term.id === selectedTermId) || terms.find(term => term.isActive) || terms[0];
       if (currentTerm) {
         setBulkForm(prev => ({ ...prev, termId: currentTerm.id }));
       }
     }
-  }, [terms, createForm.termId, bulkForm.termId]);
+  }, [terms, selectedTermId, createForm.termId, bulkForm.termId]);
 
   useEffect(() => {
     if (!createClassFilter) return;
@@ -207,12 +241,44 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
     }
   }, [createClassFilter, createForm.studentId, students]);
 
+  useEffect(() => {
+    if (!createForm.studentId || !createForm.termId) {
+      setStudentFeeOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    api.get(`/fees/statement/${createForm.studentId}`, {
+      params: { academicTermId: createForm.termId },
+    }).then(response => {
+      if (cancelled) return;
+      const options = (response.data?.transactions || [])
+        .filter((transaction: any) => transaction.type === 'DEBIT')
+        .map((transaction: any) => ({
+          id: transaction.id,
+          feeTemplateId: transaction.feeTemplateId,
+          description: transaction.description,
+          amountDue: Number(transaction.amount || 0),
+          amountPaid: Number(transaction.amountPaid || 0),
+          invoiced: Boolean(transaction.invoiced),
+        }));
+      setStudentFeeOptions(options);
+    }).catch(() => {
+      if (!cancelled) {
+        setStudentFeeOptions([]);
+        toast.error('Failed to load student fee obligations');
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [createForm.studentId, createForm.termId]);
+
   const loadData = async () => {
     setLoading(true);
     try {
       const [invRes, sumRes] = await Promise.all([
-        invoiceApi.getAll(),
-        invoiceApi.getSummary(),
+        invoiceApi.getAll({ termId: selectedTermId }),
+        invoiceApi.getSummary({ termId: selectedTermId }),
       ]);
       setInvoices(invRes.data.invoices || invRes.data || []);
       setSummary(sumRes.data);
@@ -225,25 +291,40 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
 
   const loadReferenceData = async () => {
     try {
-      const [studentRes, termRes, classRes] = await Promise.all([
-        api.get('/students'),
-        api.get('/academic-terms'),
-        api.get('/classes'),
-      ]);
-
-      setStudents((studentRes.data || []).filter((student: StudentOption) => student.status !== 'ARCHIVED'));
-      setTerms((termRes.data || []).map((term: any) => ({
+      const termRes = await api.get('/academic-terms');
+      const nextTerms: TermOption[] = (termRes.data || []).map((term: any) => ({
         id: term.id,
         name: term.name || term.termName || `Term ${term.id}`,
-        isCurrent: term.isCurrent,
-      })));
+        isActive: term.isActive,
+      }));
+      const defaultTerm = nextTerms.find(term => term.isActive) || nextTerms[0];
+      setTerms(nextTerms);
+      if (defaultTerm) {
+        const resolvedTermId = initialTermId || defaultTerm.id;
+        setSelectedTermId(resolvedTermId);
+        setCreateForm(prev => ({ ...prev, termId: prev.termId || resolvedTermId }));
+        setBulkForm(prev => ({ ...prev, termId: prev.termId || resolvedTermId }));
+      }
+    } catch (error) {
+      toast.error('Failed to load invoice setup data');
+    }
+  };
+
+  const loadTermReferenceData = async (academicTermId: string) => {
+    try {
+      const [studentRes, classRes] = await Promise.all([
+        api.get('/students', { params: { academicTermId } }),
+        api.get('/classes', { params: { academicTermId } }),
+      ]);
+      setStudents((studentRes.data || []).filter((student: StudentOption) => student.status !== 'ARCHIVED'));
       setClasses((classRes.data || []).map((cls: any) => ({
         id: cls.id,
         name: cls.name,
         gradeLevel: cls.gradeLevel,
+        academicTermId: cls.academicTermId,
       })));
     } catch (error) {
-      toast.error('Failed to load invoice setup data');
+      toast.error('Failed to load term student and class options');
     }
   };
 
@@ -293,11 +374,21 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
       toast.error('Payment cannot exceed the balance due');
       return;
     }
+    if (!receiptTermId) {
+      toast.error('Select the term in which the cash was received');
+      return;
+    }
     try {
-      await invoiceApi.recordPayment(selectedInvoice.id, amount);
+      await invoiceApi.recordPayment(selectedInvoice.id, {
+        amount,
+        method: paymentMethod,
+        receiptTermId,
+        idempotencyKey: paymentIdempotencyKey,
+      });
       toast.success('Payment recorded');
       setShowPaymentModal(false);
       setPaymentAmount('');
+      setPaymentIdempotencyKey(createIdempotencyKey());
       loadData();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to record payment');
@@ -310,8 +401,8 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
       return;
     }
 
-    if (createForm.items.some(item => !item.description || !item.unitPrice || Number(item.quantity) <= 0)) {
-      toast.error('Complete all line items before creating the invoice');
+    if (createForm.items.some(item => !item.feeTemplateId)) {
+      toast.error('Select a canonical fee obligation for every invoice line');
       return;
     }
 
@@ -321,20 +412,20 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
         termId: createForm.termId,
         dueDate: createForm.dueDate,
         notes: createForm.notes,
-        discount: parseFloat(createForm.discount) || 0,
+        discount: 0,
         taxAmount: 0,
         items: createForm.items.map(i => ({
           description: i.description,
           quantity: parseInt(i.quantity),
           unitPrice: parseFloat(i.unitPrice),
-          feeTemplateId: i.feeTemplateId || undefined,
+          feeTemplateId: i.feeTemplateId,
         })),
       };
       await invoiceApi.create(payload);
       toast.success('Invoice created');
       setShowCreateModal(false);
       setCreateClassFilter('');
-      setCreateForm({ studentId: '', termId: terms.find(term => term.isCurrent)?.id || '', dueDate: getDefaultDueDate(), discount: '0', notes: '', items: [{ ...emptyInvoiceItem }] });
+      setCreateForm({ studentId: '', termId: terms.find(term => term.isActive)?.id || '', dueDate: getDefaultDueDate(), notes: '', items: [{ ...emptyInvoiceItem }] });
       loadData();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to create invoice');
@@ -398,10 +489,27 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
     });
   };
 
-  const updateItem = (idx: number, field: string, value: string) => {
+  const selectFeeItem = (idx: number, feeTemplateId: string) => {
+    const fee = studentFeeOptions.find(option => option.feeTemplateId === feeTemplateId);
     const items = [...createForm.items];
-    (items[idx] as any)[field] = value;
+    items[idx] = fee
+      ? {
+        description: fee.description,
+        quantity: '1',
+        unitPrice: String(fee.amountDue),
+        feeTemplateId: fee.feeTemplateId,
+      }
+      : { ...emptyInvoiceItem };
     setCreateForm({ ...createForm, items });
+  };
+
+  const openPaymentModal = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setPaymentAmount('');
+    setPaymentMethod('CASH');
+    setReceiptTermId(terms.find(term => term.isActive)?.id || selectedTermId);
+    setPaymentIdempotencyKey(createIdempotencyKey());
+    setShowPaymentModal(true);
   };
 
   const filteredInvoices = invoices.filter(inv => {
@@ -423,8 +531,6 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
     { label: 'Overdue', value: summary.totalOverdue, color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-900/20' },
   ] : [];
 
-  const fmt = (n: number | string | null | undefined) => `K${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>;
   }
@@ -439,14 +545,28 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
           </div>
         ) : <div />}
         <div className="flex flex-wrap gap-2">
+          <select
+            value={selectedTermId}
+            disabled={embedded && Boolean(initialTermId)}
+            onChange={(event) => {
+              const termId = event.target.value;
+              setSelectedTermId(termId);
+              setCreateForm(prev => ({ ...prev, termId }));
+              setBulkForm(prev => ({ ...prev, termId, classId: '' }));
+            }}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-600 dark:bg-slate-800 dark:text-gray-200"
+            aria-label="Invoice reporting term"
+          >
+            {terms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+          </select>
           <button
             onClick={() => setShowBulkGenerateModal(true)}
-            className="flex items-center space-x-2 border border-blue-200 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/20"
+            className="flex items-center space-x-2 border border-blue-200 text-blue-700 px-4 py-2 rounded-lg hover:bg-surface-hover-accent text-sm dark:border-blue-800 dark:text-blue-300"
           >
             <Layers size={16} /><span>Generate Invoices</span>
           </button>
           <button onClick={() => setShowCreateModal(true)}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+            className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
             <Plus size={16} /><span>New Invoice</span>
           </button>
         </div>
@@ -498,7 +618,7 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
             {filteredInvoices.length === 0 ? (
               <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No invoices found</td></tr>
             ) : filteredInvoices.map(inv => (
-              <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+              <tr key={inv.id} className="hover:bg-surface-hover">
                 <td className="px-4 py-3 font-mono text-blue-600 dark:text-blue-400">{inv.invoiceNumber}</td>
                 <td className="px-4 py-3">
                   {inv.student ? `${inv.student.firstName} ${inv.student.lastName}` : '—'}
@@ -516,20 +636,20 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-center space-x-1">
-                    <button onClick={() => handleViewDetail(inv.id)} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="View"><Eye size={16} /></button>
-                    <button onClick={() => handleDownloadInvoice(inv)} className="p-1 text-slate-600 hover:bg-slate-50 rounded" title="Download PDF"><Download size={16} /></button>
+                    <button onClick={() => handleViewDetail(inv.id)} className="p-1 text-gray-600 hover:bg-surface-hover rounded" title="View"><Eye size={16} /></button>
+                    <button onClick={() => handleDownloadInvoice(inv)} className="p-1 text-slate-600 hover:bg-surface-hover rounded" title="Download PDF"><Download size={16} /></button>
                     {inv.status === 'DRAFT' && (
-                      <button onClick={() => handleSend(inv.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Send"><Send size={16} /></button>
+                      <button onClick={() => handleSend(inv.id)} className="p-1 text-blue-600 hover:bg-surface-hover-accent rounded" title="Send"><Send size={16} /></button>
                     )}
                     {(inv.status === 'SENT' || inv.status === 'PARTIALLY_PAID' || inv.status === 'OVERDUE') && (
-                      <button onClick={() => { setSelectedInvoice(inv); setPaymentAmount(''); setShowPaymentModal(true); }} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Record Payment"><DollarSign size={16} /></button>
+                      <button onClick={() => openPaymentModal(inv)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Record Payment"><DollarSign size={16} /></button>
                     )}
                     {inv.status !== 'CANCELLED' && inv.status !== 'CREDITED' && (
                       <button onClick={() => { setCreditNoteForm({ invoiceId: inv.id, amount: '', reason: '' }); setShowCreditNoteModal(true); }}
                         className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Credit Note"><FileText size={16} /></button>
                     )}
                     {inv.status === 'DRAFT' && (
-                      <button onClick={() => handleCancel(inv.id)} className="p-1 text-red-500 hover:bg-red-50 rounded" title="Cancel"><XCircle size={16} /></button>
+                      <button onClick={() => handleCancel(inv.id)} className="p-1 text-red-500 hover:bg-surface-hover-danger rounded" title="Cancel"><XCircle size={16} /></button>
                     )}
                   </div>
                 </td>
@@ -573,7 +693,7 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
               <div className="flex justify-end">
                 <button
                   onClick={() => handleDownloadInvoice(selectedInvoice)}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-lg text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:border-gray-600 dark:hover:bg-gray-700"
+                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-lg text-sm text-slate-700 hover:bg-surface-hover dark:text-slate-200 dark:border-gray-600"
                 >
                   <Download size={16} /> Download PDF
                 </button>
@@ -663,7 +783,7 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                     className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   >
                     <option value="">All Classes</option>
-                    {classes.map(cls => (
+                    {classes.filter(cls => cls.academicTermId === createForm.termId).map(cls => (
                       <option key={cls.id} value={cls.id}>
                         {cls.gradeLevel !== undefined ? `Grade ${cls.gradeLevel} • ` : ''}{cls.name}
                       </option>
@@ -674,12 +794,17 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
                   <select
                     value={createForm.termId}
-                    onChange={e => setCreateForm({ ...createForm, termId: e.target.value })}
+                    onChange={e => {
+                      const termId = e.target.value;
+                      setCreateClassFilter('');
+                      setCreateForm({ ...createForm, termId, studentId: '', items: [{ ...emptyInvoiceItem }] });
+                      if (termId) void loadTermReferenceData(termId);
+                    }}
                     className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   >
                     <option value="">Select term</option>
                     {terms.map(term => (
-                      <option key={term.id} value={term.id}>{term.name}{term.isCurrent ? ' • Current' : ''}</option>
+                      <option key={term.id} value={term.id}>{term.name}{term.isActive ? ' • Active' : ''}</option>
                     ))}
                   </select>
                 </div>
@@ -688,7 +813,11 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student</label>
                 <select
                   value={createForm.studentId}
-                  onChange={e => setCreateForm({ ...createForm, studentId: e.target.value })}
+                  onChange={e => setCreateForm({
+                    ...createForm,
+                    studentId: e.target.value,
+                    items: [{ ...emptyInvoiceItem }],
+                  })}
                   className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 >
                   <option value="">Select student</option>
@@ -702,17 +831,13 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">No students match the selected class.</p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
-                  <input type="date" value={createForm.dueDate} onChange={e => setCreateForm({ ...createForm, dueDate: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Discount (ZMW)</label>
-                  <input type="number" step="0.01" value={createForm.discount} onChange={e => setCreateForm({ ...createForm, discount: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
+                <input type="date" value={createForm.dueDate} onChange={e => setCreateForm({ ...createForm, dueDate: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Invoice values come from assigned fee obligations. Use a credit note for an approved adjustment after issue.
+                </p>
               </div>
 
               <div>
@@ -722,14 +847,29 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                 </div>
                 {createForm.items.map((item, idx) => (
                   <div key={idx} className="flex gap-2 mb-2">
-                    <input type="text" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)}
-                      className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Description" />
-                    <input type="number" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)}
-                      className="w-20 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Qty" />
-                    <input type="number" step="0.01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
-                      className="w-32 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Price" />
+                    <select
+                      value={item.feeTemplateId}
+                      onChange={event => selectFeeItem(idx, event.target.value)}
+                      className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    >
+                      <option value="">Select fee obligation</option>
+                      {studentFeeOptions
+                        .filter(option => !option.invoiced && (
+                          option.feeTemplateId === item.feeTemplateId
+                          || !createForm.items.some((other, otherIndex) => otherIndex !== idx && other.feeTemplateId === option.feeTemplateId)
+                        ))
+                        .map(option => (
+                          <option key={option.id} value={option.feeTemplateId}>
+                            {option.description} • {fmt(option.amountDue)}{option.amountPaid > 0 ? ` • ${fmt(option.amountPaid)} paid` : ''}
+                          </option>
+                        ))}
+                    </select>
+                    <input type="number" value={item.quantity} readOnly
+                      className="w-20 px-3 py-2 border rounded-lg text-sm bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white" aria-label="Quantity" />
+                    <input type="number" step="0.01" value={item.unitPrice} readOnly
+                      className="w-32 px-3 py-2 border rounded-lg text-sm bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white" aria-label="Amount" />
                     {createForm.items.length > 1 && (
-                      <button onClick={() => removeItem(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><X size={16} /></button>
+                      <button onClick={() => removeItem(idx)} className="p-2 text-red-500 hover:bg-surface-hover-danger rounded"><X size={16} /></button>
                     )}
                   </div>
                 ))}
@@ -743,9 +883,9 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateInvoice}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Invoice</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Create Invoice</button>
             </div>
           </div>
         </div>
@@ -764,12 +904,16 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Academic Term</label>
                 <select
                   value={bulkForm.termId}
-                  onChange={e => setBulkForm({ ...bulkForm, termId: e.target.value })}
+                  onChange={e => {
+                    const termId = e.target.value;
+                    setBulkForm({ ...bulkForm, termId, classId: '' });
+                    if (termId) void loadTermReferenceData(termId);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 >
                   <option value="">Select term</option>
                   {terms.map(term => (
-                    <option key={term.id} value={term.id}>{term.name}{term.isCurrent ? ' • Current' : ''}</option>
+                    <option key={term.id} value={term.id}>{term.name}{term.isActive ? ' • Active' : ''}</option>
                   ))}
                 </select>
               </div>
@@ -781,7 +925,7 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 >
                   <option value="">All active students</option>
-                  {classes.map(cls => (
+                  {classes.filter(cls => cls.academicTermId === bulkForm.termId).map(cls => (
                     <option key={cls.id} value={cls.id}>
                       {cls.gradeLevel !== undefined ? `Grade ${cls.gradeLevel} • ` : ''}{cls.name}
                     </option>
@@ -794,9 +938,9 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowBulkGenerateModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleGenerateBulkInvoices}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Generate</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Generate</button>
             </div>
           </div>
         </div>
@@ -821,10 +965,42 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
                   max={selectedInvoice.balanceDue}
                   className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="0.00" />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Payment Method</label>
+                  <select
+                    value={paymentMethod}
+                    onChange={event => setPaymentMethod(event.target.value as typeof paymentMethod)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  >
+                    <option value="CASH">Cash</option>
+                    <option value="MOBILE_MONEY">Mobile Money</option>
+                    <option value="BANK_DEPOSIT">Bank Deposit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Receipt Term</label>
+                  <select
+                    value={receiptTermId}
+                    onChange={event => setReceiptTermId(event.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  >
+                    <option value="">Select term</option>
+                    {terms.map(term => (
+                      <option key={term.id} value={term.id}>
+                        {term.name}{term.isActive ? ' • Active' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                The receipt term records when cash was received; the invoice remains tied to its original obligation term.
+              </p>
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowPaymentModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleRecordPayment}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Record Payment</button>
             </div>
@@ -854,7 +1030,7 @@ const Invoices = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowCreditNoteModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateCreditNote}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">Issue Credit Note</button>
             </div>

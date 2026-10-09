@@ -365,7 +365,7 @@ const DashboardAnalytics = ({
           </div>
           <Link
             to="/analytics"
-            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded-xl px-2.5 text-sm font-semibold text-primary transition-colors duration-150 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 motion-reduce:transition-none dark:text-blue-300 dark:hover:bg-blue-950/40 dark:focus-visible:ring-offset-slate-800"
+            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded-xl px-2.5 text-sm font-semibold text-primary transition-colors duration-150 hover:bg-surface-hover-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 motion-reduce:transition-none dark:text-blue-300 dark:focus-visible:ring-offset-slate-800"
           >
             Details
             <ArrowUpRight className="size-4" aria-hidden="true" />
@@ -487,7 +487,7 @@ const DashboardAnalytics = ({
             </figure>
 
             <details className="group mt-2 rounded-lg">
-              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg px-2 text-xs font-semibold text-gray-600 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none [&::-webkit-details-marker]:hidden dark:text-gray-300 dark:hover:bg-slate-700 dark:hover:text-white">
+              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg px-2 text-xs font-semibold text-gray-600 transition-colors duration-150 hover:bg-surface-hover hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none [&::-webkit-details-marker]:hidden dark:text-gray-300 dark:hover:text-white">
                 View chart data
                 <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
               </summary>
@@ -504,7 +504,7 @@ const DashboardAnalytics = ({
                   </thead>
                   <tbody className="divide-y divide-gray-200 text-gray-700 dark:divide-slate-700 dark:text-gray-200">
                     {trendData.map(point => (
-                      <tr key={point.week} className="transition-colors duration-150 hover:bg-gray-50 motion-reduce:transition-none dark:hover:bg-slate-700/50">
+                      <tr key={point.week} className="transition-colors duration-150 hover:bg-surface-hover motion-reduce:transition-none">
                         <td className="px-3 py-2">{formatWeek(point.week)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{fullCurrencyFormatter.format(point.amount)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{fullCurrencyFormatter.format(point.average)}</td>

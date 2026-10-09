@@ -11,6 +11,7 @@
 
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { getStudentPlacementForTerm } from './studentPlacementService';
 
 // ==========================================
 // TYPES
@@ -60,7 +61,8 @@ export interface Intervention {
  * Generate a personalized weekly update for parents
  */
 export async function generateWeeklyUpdate(
-  studentId: string
+  studentId: string,
+  academicTermId: string,
 ): Promise<WeeklyUpdateResponse> {
   // 1. Get student with recent data
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -71,7 +73,6 @@ export async function generateWeeklyUpdate(
       id: true,
       firstName: true,
       lastName: true,
-      classId: true,
     },
   });
 
@@ -79,16 +80,15 @@ export async function generateWeeklyUpdate(
     throw new Error('Student not found');
   }
 
-  // Get class info separately
-  const classInfo = student.classId ? await prisma.class.findUnique({
-    where: { id: student.classId },
-    select: { name: true, gradeLevel: true },
-  }) : null;
+  const placement = await getStudentPlacementForTerm(studentId, academicTermId);
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
+  const classInfo = placement.class;
 
   // Get attendance records
   const attendanceRecords = await prisma.attendance.findMany({
     where: {
       studentId,
+      academicTermId,
       date: { gte: weekAgo },
     },
     select: { status: true, date: true },
@@ -184,7 +184,8 @@ Use the student's actual data - don't make things up.`,
  * Detect early warning signs for a student
  */
 export async function detectEarlyWarnings(
-  studentId: string
+  studentId: string,
+  academicTermId: string,
 ): Promise<EarlyWarning[]> {
   // 1. Get comprehensive student data
   const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
@@ -196,7 +197,6 @@ export async function detectEarlyWarnings(
       id: true,
       firstName: true,
       lastName: true,
-      classId: true,
     },
   });
 
@@ -204,16 +204,14 @@ export async function detectEarlyWarnings(
     throw new Error('Student not found');
   }
 
-  // Get class info
-  const classInfo = student.classId ? await prisma.class.findUnique({
-    where: { id: student.classId },
-    select: { name: true },
-  }) : null;
+  const placement = await getStudentPlacementForTerm(studentId, academicTermId);
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
 
   // Get attendance records
   const attendanceRecords = await prisma.attendance.findMany({
     where: {
       studentId,
+      academicTermId,
       date: { gte: oneMonthAgo },
     },
     select: { status: true, date: true },
@@ -235,6 +233,7 @@ export async function detectEarlyWarnings(
   const invoices = await prisma.invoice.findMany({
     where: {
       studentId,
+      termId: academicTermId,
       status: { in: ['DRAFT', 'SENT', 'OVERDUE'] },
     },
     select: {
@@ -334,6 +333,7 @@ export async function detectEarlyWarnings(
  */
 export async function suggestInterventions(
   studentId: string,
+  academicTermId: string,
   issueType?: 'attendance' | 'academic' | 'behavior' | 'general'
 ): Promise<Intervention[]> {
   // 1. Get student data and warnings
@@ -343,7 +343,6 @@ export async function suggestInterventions(
       id: true,
       firstName: true,
       lastName: true,
-      classId: true,
     },
   });
 
@@ -351,12 +350,11 @@ export async function suggestInterventions(
     throw new Error('Student not found');
   }
 
-  const classInfo = student.classId ? await prisma.class.findUnique({
-    where: { id: student.classId },
-    select: { name: true, gradeLevel: true },
-  }) : null;
+  const placement = await getStudentPlacementForTerm(studentId, academicTermId);
+  if (!placement) throw new Error('Student is not enrolled in the selected academic term');
+  const classInfo = placement.class;
 
-  const warnings = await detectEarlyWarnings(studentId);
+  const warnings = await detectEarlyWarnings(studentId, academicTermId);
 
   // 2. Filter warnings by issue type if specified
   const relevantWarnings = issueType

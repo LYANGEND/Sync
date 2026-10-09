@@ -1,5 +1,7 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { runTermWriteTransaction, TermLifecycleError } from './termLifecycleService';
+import { getClassEnrollmentsForTerm } from './studentPlacementService';
 
 interface RiskFactors {
   academic: { score: number; details: string };
@@ -27,12 +29,18 @@ class StudentRiskService {
    * Assess risk for all active students in a class
    */
   async assessClass(classId: string, termId: string): Promise<RiskAssessment[]> {
+    const enrollments = await getClassEnrollmentsForTerm(classId, termId, {
+      statuses: ['ACTIVE'],
+    });
     const students = await prisma.student.findMany({
-      where: { classId, status: 'ACTIVE' },
+      where: {
+        id: { in: enrollments.map(enrollment => enrollment.studentId) },
+        status: 'ACTIVE',
+      },
       include: {
         termResults: { where: { termId } },
         attendance: true,
-        feeStructures: true,
+        feeStructures: { where: { academicTermId: termId } },
         parent: { select: { email: true } },
       },
     });
@@ -62,7 +70,7 @@ class StudentRiskService {
         include: {
           termResults: { where: { termId } },
           attendance: true,
-          feeStructures: true,
+          feeStructures: { where: { academicTermId: termId } },
           parent: { select: { email: true } },
         },
       });
@@ -149,12 +157,20 @@ class StudentRiskService {
     const students = await prisma.student.findMany({
       where: { id: { in: studentIds } },
       include: {
-        class: true,
         parent: { select: { fullName: true, email: true } },
+        termEnrollments: {
+          where: { academicTermId: termId },
+          include: { class: true },
+          take: 1,
+        },
       },
     });
 
-    const studentMap = new Map(students.map(s => [s.id, s]));
+    const studentMap = new Map(students.map(student => [student.id, {
+      ...student,
+      class: student.termEnrollments[0]?.class ?? null,
+      termEnrollments: undefined,
+    }]));
 
     return assessments.map((a: any) => ({
       ...a,
@@ -174,7 +190,11 @@ class StudentRiskService {
       where: { id: studentId },
       include: {
         termResults: { where: { termId }, include: { subject: true } },
-        class: true,
+        termEnrollments: {
+          where: { academicTermId: termId },
+          include: { class: true },
+          take: 1,
+        },
       },
     });
 
@@ -190,7 +210,7 @@ class StudentRiskService {
     const prompt = `You are an educational advisor for a Zambian school. Analyze this student's data and provide 5 specific, actionable recommendations:
 
 Student: ${student.firstName} ${student.lastName}
-Grade/Class: ${student.class.name}
+Grade/Class: ${student.termEnrollments[0]?.class.name || 'Not placed'}
 Subjects: ${JSON.stringify(subjects)}
 Attendance Rate: ${100 - attendanceData.score}%
 Attendance Details: ${attendanceData.details}
@@ -380,32 +400,35 @@ Provide recommendations as a JSON array of strings. Focus on practical intervent
 
   private async saveAssessment(studentId: string, termId: string, data: any) {
     try {
-      await (prisma as any).studentRiskAssessment.upsert({
-        where: { studentId_termId: { studentId, termId } },
-        update: {
-          riskLevel: data.riskLevel,
-          riskScore: data.riskScore,
-          academicScore: data.factors.academic.score,
-          attendanceScore: data.factors.attendance.score,
-          financialScore: data.factors.financial.score,
-          trendScore: data.factors.trend.score,
-          factors: data.factors,
-          recommendations: data.recommendations,
-        },
-        create: {
-          studentId,
-          termId,
-          riskLevel: data.riskLevel,
-          riskScore: data.riskScore,
-          academicScore: data.factors.academic.score,
-          attendanceScore: data.factors.attendance.score,
-          financialScore: data.factors.financial.score,
-          trendScore: data.factors.trend.score,
-          factors: data.factors,
-          recommendations: data.recommendations,
-        },
-      });
+      await runTermWriteTransaction(termId, 'ACADEMIC_ACTIVITY', tx => (
+        tx.studentRiskAssessment.upsert({
+          where: { studentId_termId: { studentId, termId } },
+          update: {
+            riskLevel: data.riskLevel,
+            riskScore: data.riskScore,
+            academicScore: data.factors.academic.score,
+            attendanceScore: data.factors.attendance.score,
+            financialScore: data.factors.financial.score,
+            trendScore: data.factors.trend.score,
+            factors: data.factors,
+            recommendations: data.recommendations,
+          },
+          create: {
+            studentId,
+            termId,
+            riskLevel: data.riskLevel,
+            riskScore: data.riskScore,
+            academicScore: data.factors.academic.score,
+            attendanceScore: data.factors.attendance.score,
+            financialScore: data.factors.financial.score,
+            trendScore: data.factors.trend.score,
+            factors: data.factors,
+            recommendations: data.recommendations,
+          },
+        })
+      ));
     } catch (err) {
+      if (err instanceof TermLifecycleError) throw err;
       console.error('Failed to save risk assessment:', err);
     }
   }

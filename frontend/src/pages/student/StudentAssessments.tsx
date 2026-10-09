@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Clock, CheckCircle, PlayCircle, User } from 'lucide-react';
 import api from '../../utils/api';
@@ -28,28 +28,45 @@ const StudentAssessments = () => {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
+  const [academicTermId, setAcademicTermId] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { user } = useAuth();
   const isParent = user?.role === 'PARENT';
 
   useEffect(() => {
-    if (isParent) {
-      fetchMyChildren();
-    } else {
-      fetchAssessments();
-    }
+    fetchAcademicContext();
   }, [user]);
 
   useEffect(() => {
-    if (isParent && selectedChildId) {
+    if (isParent && selectedChildId && academicTermId) {
       fetchAssessments(selectedChildId);
     }
-  }, [selectedChildId]);
+  }, [selectedChildId, academicTermId]);
 
-  const fetchMyChildren = async () => {
+  const fetchAcademicContext = async () => {
     try {
-      const res = await api.get('/students/my-children');
+      const termResponse = await api.get('/academic-terms');
+      const terms = Array.isArray(termResponse.data) ? termResponse.data : [];
+      const activeTerm = terms.find((term: any) => term.isActive) || terms[0];
+      if (!activeTerm) {
+        setLoading(false);
+        return;
+      }
+      setAcademicTermId(activeTerm.id);
+      if (isParent) await fetchMyChildren(activeTerm.id);
+      else await fetchAssessments(undefined, activeTerm.id);
+    } catch (error) {
+      console.error('Failed to fetch academic context', error);
+      setLoading(false);
+    }
+  };
+
+  const fetchMyChildren = async (termId = academicTermId) => {
+    try {
+      const res = await api.get('/students/my-children', {
+        params: { academicTermId: termId },
+      });
       setChildren(res.data);
       if (res.data.length > 0) {
         setSelectedChildId(res.data[0].id); // Auto-select first
@@ -62,7 +79,8 @@ const StudentAssessments = () => {
     }
   };
 
-  const fetchAssessments = async (studentId?: string) => {
+  const fetchAssessments = async (studentId?: string, termId = academicTermId) => {
+    if (!termId) return;
     try {
       setLoading(true);
       // If Parent, append studentId
@@ -70,7 +88,7 @@ const StudentAssessments = () => {
         ? `/online-assessments/student/my-assessments?studentId=${studentId}`
         : '/online-assessments/student/my-assessments';
 
-      const response = await api.get(url);
+      const response = await api.get(url, { params: { termId } });
       setAssessments(response.data);
     } catch (error) {
       console.error('Failed to fetch assessments', error);
@@ -103,7 +121,7 @@ const StudentAssessments = () => {
               onClick={() => setSelectedChildId(child.id)}
               className={`flex items-center space-x-2 px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${selectedChildId === child.id
                   ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600'
+                  : 'bg-white dark:bg-slate-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 hover:bg-surface-hover'
                 }`}
             >
               <User size={16} />
@@ -156,7 +174,7 @@ const StudentAssessments = () => {
                   disabled={isParent}
                   className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg transition-colors font-medium ${isParent
                       ? 'bg-gray-100 dark:bg-slate-700 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-primary text-white hover:bg-primary-hover'
                     }`}
                 >
                   <PlayCircle size={18} />

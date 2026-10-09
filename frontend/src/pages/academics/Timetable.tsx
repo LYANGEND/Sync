@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, User, Plus, Trash2, Users, Download, Printer } from 'lucide-react';
 import api from '../../utils/api';
+import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 
 interface TimetablePeriod {
   id: string;
@@ -32,6 +34,8 @@ interface TimetablePeriod {
 interface Class {
   id: string;
   name: string;
+  academicTermId?: string;
+  subjects?: Subject[];
 }
 
 interface Teacher {
@@ -45,12 +49,25 @@ interface Subject {
   code: string;
 }
 
+interface TeacherAssignment {
+  classId: string;
+  subjectId: string;
+  subject: Subject;
+}
+
 interface AcademicTerm {
   id: string;
   name: string;
 }
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+
+const escapeHtml = (value: unknown) => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
 
 const Timetable = () => {
     const { confirm } = useAppDialog();
@@ -59,15 +76,32 @@ const Timetable = () => {
   const [viewMode, setViewMode] = useState<'CLASS' | 'TEACHER'>('CLASS');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [draftViewMode, setDraftViewMode] = useState<'CLASS' | 'TEACHER'>('CLASS');
+  const [draftClassId, setDraftClassId] = useState<string>('');
+  const [draftTeacherId, setDraftTeacherId] = useState<string>('');
   const [currentTerm, setCurrentTerm] = useState<AcademicTerm | null>(null);
 
   const [periods, setPeriods] = useState<TimetablePeriod[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [savingPeriod, setSavingPeriod] = useState(false);
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const canSwitchView = ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'].includes(user?.role || '');
+  const selectableTeachers = user?.role === 'TEACHER'
+    ? [{ id: user.id, fullName: user.fullName }]
+    : teachers;
+  const selectedViewLabel = viewMode === 'CLASS'
+    ? classes.find(classOption => classOption.id === selectedClassId)?.name
+    : selectableTeachers.find(teacher => teacher.id === selectedTeacherId)?.fullName;
+  const activeFilterCount = selectedViewLabel ? 2 : 1;
 
   // Form State - now with classIds array
   const [newPeriod, setNewPeriod] = useState({
@@ -78,6 +112,31 @@ const Timetable = () => {
     teacherId: '',
     classIds: [] as string[] // Multiple classes
   });
+  const closePeriodDialog = () => {
+    if (!savingPeriod) setShowAddModal(false);
+  };
+  const periodDialogRef = useDialogAccessibility(showAddModal, closePeriodDialog);
+  const selectedPeriodClass = classes.find(classOption => classOption.id === selectedClassId);
+  const activeClassIds = new Set(classes.map(classOption => classOption.id));
+  const allocatedTeacherSubjects = teacherAssignments
+    .filter(assignment => activeClassIds.has(assignment.classId))
+    .map(assignment => assignment.subject)
+    .filter((subject, index, options) => options.findIndex(option => option.id === subject.id) === index);
+  const availablePeriodSubjects = viewMode === 'CLASS'
+    ? (selectedPeriodClass?.subjects || []).filter(subject => (
+        user?.role !== 'TEACHER' || teacherAssignments.some(assignment => (
+          assignment.classId === selectedClassId && assignment.subjectId === subject.id
+        ))
+      ))
+    : allocatedTeacherSubjects;
+  const eligiblePeriodClasses = newPeriod.subjectId
+    ? classes.filter(classOption => (
+        classOption.subjects?.some(subject => subject.id === newPeriod.subjectId)
+        && (viewMode !== 'TEACHER' || teacherAssignments.some(assignment => (
+          assignment.classId === classOption.id && assignment.subjectId === newPeriod.subjectId
+        )))
+      ))
+    : classes;
 
   useEffect(() => {
     fetchInitialData();
@@ -93,25 +152,68 @@ const Timetable = () => {
     }
   }, [viewMode, selectedClassId, selectedTeacherId, currentTerm]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const allocationTeacherId = user?.role === 'TEACHER'
+      ? user.id
+      : (viewMode === 'TEACHER' ? selectedTeacherId : '');
+
+    if (!allocationTeacherId || !['SUPER_ADMIN', 'TEACHER'].includes(user?.role || '')) {
+      setTeacherAssignments([]);
+      setLoadingAssignments(false);
+      setAssignmentError(null);
+      return () => { cancelled = true; };
+    }
+
+    setLoadingAssignments(true);
+    setAssignmentError(null);
+    setNewPeriod(previous => ({ ...previous, subjectId: '', classIds: [] }));
+    api.get(`/academics/teacher/${allocationTeacherId}`)
+      .then(response => {
+        if (!cancelled) setTeacherAssignments(response.data);
+      })
+      .catch(error => {
+        console.error('Error fetching teacher subject allocations:', error);
+        if (!cancelled) {
+          setTeacherAssignments([]);
+          setAssignmentError('Teacher subject allocations could not be loaded.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingAssignments(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [viewMode, selectedTeacherId, user?.id, user?.role]);
+
   const fetchInitialData = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const isParent = user?.role === 'PARENT';
 
-      const [termsRes, subjectsRes] = await Promise.all([
-        api.get('/academic-terms'),
-        api.get('/subjects')
-      ]);
+      const termsRes = await api.get('/academic-terms');
 
       const activeTerm = termsRes.data.find((t: any) => t.isActive) || termsRes.data[0];
+      if (!activeTerm) {
+        setCurrentTerm(null);
+        setClasses([]);
+        setPeriods([]);
+        setLoadError('Create an academic term before managing the timetable.');
+        return;
+      }
       setCurrentTerm(activeTerm);
-      setSubjects(subjectsRes.data);
 
       if (isParent) {
         // For Parents: specific classes only
-        const childrenRes = await api.get('/students/my-children');
+        const childrenRes = await api.get('/students/my-children', {
+          params: { academicTermId: activeTerm.id },
+        });
         const childClasses = childrenRes.data
           .map((c: any) => c.class)
           .filter((c: any) => c) // remove nulls
+          .filter((c: any) => !c.academicTermId || c.academicTermId === activeTerm?.id)
           .reduce((acc: any[], current: any) => {
             const x = acc.find((item: any) => item.id === current.id);
             if (!x) return acc.concat([current]);
@@ -125,23 +227,29 @@ const Timetable = () => {
       } else {
         // For Admin/Teachers: All classes
         const [classesRes, teachersRes] = await Promise.all([
-          api.get('/classes'),
+          api.get('/classes', { params: { academicTermId: activeTerm.id } }),
           api.get('/users/teachers')
         ]);
 
-        setClasses(classesRes.data);
+        const activeTermClasses = classesRes.data.filter((classOption: Class) => (
+          !activeTerm?.id || !classOption.academicTermId || classOption.academicTermId === activeTerm.id
+        ));
+        setClasses(activeTermClasses);
         setTeachers(teachersRes.data);
 
         if (user?.role === 'TEACHER') {
           setViewMode('TEACHER');
           setSelectedTeacherId(user.id);
-        } else if (classesRes.data.length > 0) {
-          setSelectedClassId(classesRes.data[0].id);
+        } else if (activeTermClasses.length > 0) {
+          setSelectedClassId(activeTermClasses[0].id);
         }
       }
 
     } catch (error) {
       console.error('Error fetching initial data:', error);
+      setLoadError('Timetable options could not be loaded.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -149,10 +257,13 @@ const Timetable = () => {
     if (!selectedClassId || !currentTerm) return;
     setLoading(true);
     try {
+      setLoadError(null);
       const response = await api.get(`/timetables/class/${selectedClassId}?termId=${currentTerm.id}`);
       setPeriods(response.data);
     } catch (error) {
       console.error('Error fetching class timetable:', error);
+      setPeriods([]);
+      setLoadError('This class timetable could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -162,26 +273,70 @@ const Timetable = () => {
     if (!selectedTeacherId || !currentTerm) return;
     setLoading(true);
     try {
+      setLoadError(null);
       const response = await api.get(`/timetables/teacher/${selectedTeacherId}?termId=${currentTerm.id}`);
       setPeriods(response.data);
     } catch (error) {
       console.error('Error fetching teacher timetable:', error);
+      setPeriods([]);
+      setLoadError('This teacher timetable could not be loaded.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const openFilters = () => {
+    setDraftViewMode(viewMode);
+    setDraftClassId(selectedClassId);
+    setDraftTeacherId(selectedTeacherId);
+    setShowFilters(true);
+  };
+
+  const resetDraftFilters = () => {
+    if (user?.role === 'TEACHER') {
+      setDraftViewMode('TEACHER');
+      setDraftTeacherId(user.id);
+      setDraftClassId('');
+      return;
+    }
+
+    setDraftViewMode('CLASS');
+    setDraftClassId(classes[0]?.id || '');
+    setDraftTeacherId('');
+  };
+
+  const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (draftViewMode === 'CLASS' && !draftClassId) return;
+    if (draftViewMode === 'TEACHER' && !draftTeacherId) return;
+
+    setViewMode(draftViewMode);
+    setSelectedClassId(draftClassId);
+    setSelectedTeacherId(draftTeacherId);
+    setShowFilters(false);
   };
 
   const handleAddPeriod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentTerm) return;
 
+    if (newPeriod.startTime >= newPeriod.endTime) {
+      setPeriodError('End time must be after start time.');
+      return;
+    }
+
     try {
       // Build classIds array
-      let classIdsToSend = newPeriod.classIds;
-      if (viewMode === 'CLASS' && selectedClassId && classIdsToSend.length === 0) {
-        classIdsToSend = [selectedClassId];
+      const classIdsToSend = viewMode === 'CLASS' && selectedClassId
+        ? [selectedClassId]
+        : newPeriod.classIds;
+      if (classIdsToSend.length === 0) {
+        setPeriodError('Select at least one class.');
+        return;
       }
 
+      setSavingPeriod(true);
+      setPeriodError(null);
       await api.post('/timetables', {
         classIds: classIdsToSend,
         dayOfWeek: newPeriod.dayOfWeek,
@@ -195,14 +350,16 @@ const Timetable = () => {
 
       setShowAddModal(false);
       // Refresh
-      if (viewMode === 'CLASS') fetchClassTimetable();
-      else fetchTeacherTimetable();
+      if (viewMode === 'CLASS') await fetchClassTimetable();
+      else await fetchTeacherTimetable();
 
       // Reset form
       setNewPeriod(prev => ({ ...prev, startTime: prev.endTime, endTime: '', classIds: [] }));
     } catch (error: any) {
       console.error('Error adding period:', error);
-      alert(error.response?.data?.message || 'Failed to add period');
+      setPeriodError(error.response?.data?.message || 'Failed to add period.');
+    } finally {
+      setSavingPeriod(false);
     }
   };
 
@@ -302,7 +459,7 @@ const Timetable = () => {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>${entityType} - ${entityName}</title>
+        <title>${escapeHtml(entityType)} - ${escapeHtml(entityName)}</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -549,16 +706,16 @@ const Timetable = () => {
           <div class="header">
             <div class="school-badge" style="background: transparent; box-shadow: none;">
               ${themeSettings.logoUrl
-        ? `<img src="${themeSettings.logoUrl.startsWith('http') ? themeSettings.logoUrl : window.location.origin + themeSettings.logoUrl}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">`
+        ? `<img src="${escapeHtml(themeSettings.logoUrl.startsWith('http') ? themeSettings.logoUrl : window.location.origin + themeSettings.logoUrl)}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">`
         : `<div style="width: 70px; height: 70px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);">
                      <svg viewBox="0 0 24 24" style="width: 36px; height: 36px; fill: white;"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
                    </div>`
       }
             </div>
-            <p class="school-name">${themeSettings.schoolName || 'School Name'}</p>
-            <h1 class="title">${entityName}</h1>
-            <p class="subtitle">${entityType}</p>
-            <span class="term-badge">📅 ${currentTerm?.name || 'Academic Term'}</span>
+            <p class="school-name">${escapeHtml(themeSettings.schoolName || 'School Name')}</p>
+            <h1 class="title">${escapeHtml(entityName)}</h1>
+            <p class="subtitle">${escapeHtml(entityType)}</p>
+            <span class="term-badge">📅 ${escapeHtml(currentTerm?.name || 'Academic Term')}</span>
           </div>
           
           <div class="week-grid">
@@ -579,16 +736,16 @@ const Timetable = () => {
               const initials = (period.teacher?.fullName || 'NA').split(' ').map(n => n[0]).join('').substring(0, 2);
               return `
                             <div class="period-row">
-                              <div class="time-slot">${period.startTime} - ${period.endTime}</div>
+                              <div class="time-slot">${escapeHtml(period.startTime)} - ${escapeHtml(period.endTime)}</div>
                               <div class="subject-info">
-                                <span class="subject-name">${period.subject.name}</span>
-                                <span class="subject-code">${period.subject.code}</span>
+                                <span class="subject-name">${escapeHtml(period.subject.name)}</span>
+                                <span class="subject-code">${escapeHtml(period.subject.code)}</span>
                               </div>
                               <div class="teacher-info">
-                                <div class="teacher-avatar">${initials}</div>
+                                <div class="teacher-avatar">${escapeHtml(initials)}</div>
                                 ${viewMode === 'CLASS'
-                  ? (period.teacher?.fullName || 'Not Assigned')
-                  : (period.classNames?.join(', ') || 'N/A')}
+                  ? escapeHtml(period.teacher?.fullName || 'Not Assigned')
+                  : escapeHtml(period.classNames?.join(', ') || 'N/A')}
                                 ${period.isCombined ? '<span class="combined-badge">Combined</span>' : ''}
                               </div>
                             </div>
@@ -602,8 +759,8 @@ const Timetable = () => {
           </div>
           
           <div class="footer">
-            <span class="footer-logo">📚 ${themeSettings.schoolName || 'School Name'}</span>
-            <span>Generated on ${currentDate}</span>
+            <span class="footer-logo">📚 ${escapeHtml(themeSettings.schoolName || 'School Name')}</span>
+            <span>Generated on ${escapeHtml(currentDate)}</span>
           </div>
         </div>
       </body>
@@ -635,55 +792,16 @@ const Timetable = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* View Toggles - Only for Admin/Teachers/Staff */}
-          {['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'].includes(user?.role || '') && (
-            <div className="bg-gray-100 dark:bg-slate-700 p-1 rounded-lg flex">
-              <button
-                onClick={() => setViewMode('CLASS')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'CLASS' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-              >
-                Class View
-              </button>
-              <button
-                onClick={() => setViewMode('TEACHER')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'TEACHER' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-              >
-                Teacher View
-              </button>
-            </div>
-          )}
-
-          {viewMode === 'CLASS' ? (
-              <select
-                value={selectedClassId}
-                onChange={(e) => setSelectedClassId(e.target.value)}
-                className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-              >
-                <option value="">Select Class</option>
-                {classes.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-          ) : (
-            <select
-              value={selectedTeacherId}
-              onChange={(e) => setSelectedTeacherId(e.target.value)}
-              className="px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
-            >
-              <option value="">Select Teacher</option>
-              {teachers.map(t => (
-                <option key={t.id} value={t.id}>{t.fullName}</option>
-              ))}
-            </select>
-          )}
+          <AcademicFilterButton onClick={openFilters} activeCount={activeFilterCount} />
+          <span className="hidden max-w-52 truncate rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 sm:inline-block">
+            {viewMode === 'CLASS' ? 'Class' : 'Teacher'}: {selectedViewLabel || 'Not selected'}
+          </span>
 
           {(user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER') && (
             <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              disabled={!selectedClassId && !selectedTeacherId}
+              onClick={() => { setPeriodError(null); setShowAddModal(true); }}
+              className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
+              disabled={!currentTerm || (viewMode === 'CLASS' ? !selectedClassId : !selectedTeacherId)}
             >
               <Plus size={20} />
               Add Period
@@ -714,8 +832,82 @@ const Timetable = () => {
         </div>
       </div>
 
+      <AcademicFilterDialog
+        open={showFilters}
+        title="Filter timetable"
+        description="Choose whether to view a class or teacher schedule, then select the timetable to load."
+        onClose={() => setShowFilters(false)}
+        onApply={applyFilters}
+        onReset={resetDraftFilters}
+        applyDisabled={draftViewMode === 'CLASS' ? !draftClassId : !draftTeacherId}
+      >
+        {canSwitchView && (
+          <fieldset>
+            <legend className="mb-2 block text-sm font-bold text-slate-800 dark:text-slate-200">Schedule type</legend>
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
+              {(['CLASS', 'TEACHER'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  data-filter-autofocus={mode === draftViewMode ? 'true' : undefined}
+                  onClick={() => setDraftViewMode(mode)}
+                  className={`min-h-11 rounded-lg px-4 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E40AF] ${draftViewMode === mode
+                    ? 'bg-white text-[#1E40AF] shadow-sm dark:bg-slate-700 dark:text-blue-300'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                  aria-pressed={draftViewMode === mode}
+                >
+                  {mode === 'CLASS' ? 'Class view' : 'Teacher view'}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        {draftViewMode === 'CLASS' ? (
+          <div>
+            <label htmlFor="timetable-class-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Class</label>
+            <select
+              id="timetable-class-filter"
+              data-filter-autofocus={!canSwitchView ? 'true' : undefined}
+              value={draftClassId}
+              onChange={(event) => setDraftClassId(event.target.value)}
+              className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+            >
+              <option value="">Select class</option>
+              {classes.map(classOption => <option key={classOption.id} value={classOption.id}>{classOption.name}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div>
+            <label htmlFor="timetable-teacher-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Teacher</label>
+            <select
+              id="timetable-teacher-filter"
+              data-filter-autofocus={!canSwitchView ? 'true' : undefined}
+              value={draftTeacherId}
+              onChange={(event) => setDraftTeacherId(event.target.value)}
+              className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+            >
+              <option value="">Select teacher</option>
+              {selectableTeachers.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>)}
+            </select>
+          </div>
+        )}
+      </AcademicFilterDialog>
+
       {/* Timetable Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {loadError && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">
+          <span className="flex-1">{loadError}</span>
+          <button type="button" onClick={fetchInitialData} className="min-h-10 rounded-lg bg-red-100 px-3 font-semibold hover:bg-red-200 dark:bg-red-900/50 dark:hover:bg-red-900">Retry</button>
+        </div>
+      )}
+      {loading && (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300" role="status">
+          Loading timetable…
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {DAYS.map(day => (
           <div key={day} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col h-full">
             <div className="bg-gray-50 dark:bg-slate-700 px-4 py-3 border-b border-gray-200 dark:border-slate-600 font-semibold text-gray-700 dark:text-gray-200 text-center">
@@ -733,10 +925,11 @@ const Timetable = () => {
                       <span className="text-xs font-bold text-blue-800 dark:text-blue-300 bg-blue-100 dark:bg-blue-800/50 px-2 py-0.5 rounded">
                         {period.startTime} - {period.endTime}
                       </span>
-                      {(user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER') && (
+                      {(user?.role === 'SUPER_ADMIN' || (user?.role === 'TEACHER' && period.teacher?.id === user.id)) && (
                         <button
                           onClick={() => handleDeletePeriod(period.id)}
-                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="grid size-9 place-items-center rounded-lg text-red-400 opacity-100 transition-colors hover:bg-red-100 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                          aria-label={`Delete ${period.subject.name} period from ${period.startTime} to ${period.endTime}`}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -776,14 +969,22 @@ const Timetable = () => {
 
       {/* Add Period Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Add Timetable Period</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePeriodDialog(); }}>
+          <div ref={periodDialogRef} className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="timetable-period-dialog-title">
+            <h2 id="timetable-period-dialog-title" className="text-xl font-bold mb-4 dark:text-white">Add Timetable Period</h2>
             <form onSubmit={handleAddPeriod} className="space-y-4">
+              {periodError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{periodError}</div>
+              )}
+              {(viewMode === 'TEACHER' || user?.role === 'TEACHER') && assignmentError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{assignmentError}</div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>
+                  <label htmlFor="timetable-period-day" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day</label>
                   <select
+                    id="timetable-period-day"
+                    data-dialog-autofocus="true"
                     required
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.dayOfWeek}
@@ -795,15 +996,31 @@ const Timetable = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
+                  <label htmlFor="timetable-period-subject" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
                   <select
+                    id="timetable-period-subject"
                     required
+                    disabled={(viewMode === 'TEACHER' || user?.role === 'TEACHER') && (loadingAssignments || Boolean(assignmentError))}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
                     value={newPeriod.subjectId}
-                    onChange={(e) => setNewPeriod({ ...newPeriod, subjectId: e.target.value })}
+                    onChange={(e) => {
+                      const subjectId = e.target.value;
+                      setNewPeriod(previous => ({
+                        ...previous,
+                        subjectId,
+                        classIds: previous.classIds.filter(classId => {
+                          const classOption = classes.find(item => item.id === classId);
+                          const classHasSubject = Boolean(classOption?.subjects?.some(subject => subject.id === subjectId));
+                          const teacherHasAllocation = viewMode !== 'TEACHER' || teacherAssignments.some(assignment => (
+                            assignment.classId === classId && assignment.subjectId === subjectId
+                          ));
+                          return classHasSubject && teacherHasAllocation;
+                        }),
+                      }));
+                    }}
                   >
-                    <option value="">Select Subject</option>
-                    {subjects.map(s => (
+                    <option value="">{loadingAssignments ? 'Loading subjects…' : 'Select Subject'}</option>
+                    {availablePeriodSubjects.map(s => (
                       <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                     ))}
                   </select>
@@ -812,8 +1029,9 @@ const Timetable = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Time</label>
+                  <label htmlFor="timetable-period-start" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Time</label>
                   <input
+                    id="timetable-period-start"
                     type="time"
                     required
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
@@ -822,8 +1040,9 @@ const Timetable = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Time</label>
+                  <label htmlFor="timetable-period-end" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Time</label>
                   <input
+                    id="timetable-period-end"
                     type="time"
                     required
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
@@ -848,13 +1067,16 @@ const Timetable = () => {
                   )}
                 </div>
               ) : (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <fieldset>
+                  <legend className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Classes <span className="text-gray-400 dark:text-gray-500 text-xs">(Select one or more for combined sessions)</span>
-                  </label>
+                  </legend>
                   <div className="border border-gray-300 dark:border-slate-600 rounded-lg max-h-40 overflow-y-auto p-2 space-y-1 bg-white dark:bg-slate-700">
-                    {classes.map(c => (
-                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 dark:hover:bg-slate-600 rounded cursor-pointer">
+                    {!loadingAssignments && newPeriod.subjectId && eligiblePeriodClasses.length === 0 && (
+                      <p className="p-2 text-sm text-gray-500 dark:text-gray-400">This teacher has no class allocation for the selected subject.</p>
+                    )}
+                    {eligiblePeriodClasses.map(c => (
+                      <label key={c.id} className="flex items-center gap-2 p-1 hover:bg-surface-hover rounded cursor-pointer">
                         <input
                           type="checkbox"
                           checked={newPeriod.classIds.includes(c.id)}
@@ -877,22 +1099,24 @@ const Timetable = () => {
                       Combined session: {newPeriod.classIds.length} classes selected
                     </p>
                   )}
-                </div>
+                </fieldset>
               )}
 
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  onClick={closePeriodDialog}
+                  disabled={savingPeriod}
+                  className="min-h-11 px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={savingPeriod || loadingAssignments || Boolean(assignmentError)}
+                  className="min-h-11 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Add Period
+                  {savingPeriod ? 'Adding…' : 'Add Period'}
                 </button>
               </div>
             </form>

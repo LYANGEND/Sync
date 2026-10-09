@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import FinanceReports from './FinanceReports';
 
-import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target, ShieldCheck } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard, Calendar, BookOpen, Users, Edit2, Trash2, Upload, X, Bell, Send, FileText, TrendingUp, Smartphone, Receipt, Calculator, Wallet, PiggyBank, BarChart3, ClipboardList, Sparkles, Target, ShieldCheck, AlertTriangle, ArrowRight, Ban, CheckCircle2, Download, Landmark, StickyNote } from 'lucide-react';
+import { pickActiveTerm } from '../../hooks/useActiveTerm';
 import api from '../../utils/api';
 import Scholarships from './Scholarships';
 import BulkImportModal from '../../components/BulkImportModal';
 import ExportDropdown from '../../components/ExportDropdown';
+import { fmt, fmtWhole, formatMethod, formatPaymentDate, plural, ProgressBar } from './financeFormat';
 import StudentSelector from '../../components/StudentSelector';
 import MobileMoneyPayment from '../../components/MobileMoneyPayment';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
@@ -24,6 +26,10 @@ import AIFinancialAdvisor from '../accounting/AIFinancialAdvisor';
 import DebtCollection from '../accounting/DebtCollection';
 import BankReconciliation from '../accounting/BankReconciliation';
 import { financialApi, paymentControlApi, ReconciliationSummary } from '../../services/accountingService';
+
+const createPaymentIdempotencyKey = () => (
+  globalThis.crypto?.randomUUID?.() || `manual-payment-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
 
 interface Payment {
   id: string;
@@ -89,6 +95,10 @@ interface FeeCategory {
 interface AcademicTerm {
   id: string;
   name: string;
+  startDate: string;
+  endDate: string;
+  status?: string;
+  isActive?: boolean;
 }
 
 interface Class {
@@ -101,7 +111,35 @@ const getGradeLabel = (grade: number) => {
   return `Grade ${grade}`;
 };
 
-const fmt = (amount: number) => `ZMW ${Number(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Each received payment moves through: applied to fees -> bank reference (deposits) -> matched to bank statement.
+type PaymentStage = 'UNALLOCATED' | 'MISSING_REF' | 'UNRECONCILED' | 'COMPLETE';
+
+const getPaymentStage = (payment: Payment): PaymentStage => {
+  if ((payment.unallocatedAmount || 0) > 0.009) return 'UNALLOCATED';
+  if (payment.method === 'BANK_DEPOSIT' && !payment.bankReference) return 'MISSING_REF';
+  if (!payment.isReconciled) return 'UNRECONCILED';
+  return 'COMPLETE';
+};
+
+const PAYMENT_STAGES: Record<PaymentStage, { label: string; chip: string }> = {
+  UNALLOCATED: { label: 'Not applied to fees', chip: 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:ring-orange-800' },
+  MISSING_REF: { label: 'Bank ref missing', chip: 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-800' },
+  UNRECONCILED: { label: 'Awaiting bank match', chip: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800' },
+  COMPLETE: { label: 'Complete', chip: 'bg-green-50 text-green-700 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-800' },
+};
+
+const getPaymentStageHint = (payment: Payment, stage: PaymentStage) => {
+  if (stage === 'UNALLOCATED') return `${fmt(payment.unallocatedAmount || 0)} not linked to a fee`;
+  if (stage === 'MISSING_REF') return 'Add the deposit slip reference';
+  if (stage === 'UNRECONCILED') return 'Match on the bank statement';
+  return payment.allocationLabels?.length ? payment.allocationLabels.join(', ') : 'Applied and matched';
+};
+
+const METHOD_CHIPS: Record<Payment['method'], string> = {
+  CASH: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-gray-200',
+  MOBILE_MONEY: 'bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  BANK_DEPOSIT: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+};
 
 const Finance = () => {
   const { confirm, prompt, notify } = useAppDialog();
@@ -109,7 +147,6 @@ const Finance = () => {
 
   // Determine which section is active for visual grouping
   const revenueTabKeys = ['payments', 'mobile-money', 'fees', 'scholarships', 'reports', 'reminders'];
-  const accountingTabKeys = ['expenses', 'invoices', 'payroll', 'budgets', 'petty-cash', 'bank-reconciliation', 'financial-reports', 'ai-advisor', 'debt-collection'];
   const [activeSection, setActiveSection] = useState<'revenue' | 'accounting'>('revenue');
 
   // Sync section with tab
@@ -120,6 +157,7 @@ const Finance = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [feeTemplates, setFeeTemplates] = useState<FeeTemplate[]>([]);
   const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
+  const [selectedAcademicTermId, setSelectedAcademicTermId] = useState('');
   const [classes, setClasses] = useState<Class[]>([]);
   const [students, setStudents] = useState<{ id: string; firstName: string; lastName: string; admissionNumber: string; guardianPhone?: string; class?: { id: string; name: string } }[]>([]);
 
@@ -136,8 +174,11 @@ const Finance = () => {
   const [stats, setStats] = useState({
     totalRevenue: 0,
     totalTransactions: 0,
+    totalBilled: 0,
     pendingFees: 0,
-    overdueStudentsCount: 0
+    overdueCount: 0,
+    creditBalance: 0,
+    creditCount: 0
   });
   const [paymentControlSummary, setPaymentControlSummary] = useState<ReconciliationSummary>({
     totalPayments: 0,
@@ -161,13 +202,17 @@ const Finance = () => {
   const [assignDueDate, setAssignDueDate] = useState('');
   const [paymentForm, setPaymentForm] = useState({
     studentId: '',
+    academicTermId: '',
     amount: '',
     method: 'CASH',
-    notes: ''
+    notes: '',
+    idempotencyKey: createPaymentIdempotencyKey(),
   });
   const [showImportModal, setShowImportModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [paymentTab, setPaymentTab] = useState<'completed' | 'voided'>('completed'); // 'completed' | 'voided'
+  const [paymentTab, setPaymentTab] = useState<'completed' | 'voided'>('completed');
+  const [stageFilter, setStageFilter] = useState<PaymentStage | 'ALL'>('ALL');
+  const paymentsTableRef = useRef<HTMLElement>(null);
   const [resendingReceiptId, setResendingReceiptId] = useState<string | null>(null);
   const [creatingFeeCategory, setCreatingFeeCategory] = useState(false);
 
@@ -178,20 +223,25 @@ const Finance = () => {
   const [sendingReminders, setSendingReminders] = useState(false);
 
   useEffect(() => {
-    fetchPayments();
     fetchFeeTemplates();
     fetchFeeCategories();
     fetchAcademicTerms();
-    fetchClasses();
-    fetchStudents();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedAcademicTermId) return;
+    setLoading(true);
+    fetchPayments();
     fetchStats();
     fetchPaymentControlSummary();
-  }, []);
+    fetchClasses(selectedAcademicTermId);
+    fetchStudents(selectedAcademicTermId);
+  }, [selectedAcademicTermId]);
 
   const fetchPaymentControlSummary = async () => {
     setPaymentControlLoading(true);
     try {
-      const response = await paymentControlApi.getReconciliationDashboard();
+      const response = await paymentControlApi.getReconciliationDashboard({ academicTermId: selectedAcademicTermId });
       setPaymentControlSummary(response.data.summary);
     } catch (error) {
       console.error('Error fetching payment control summary:', error);
@@ -202,7 +252,7 @@ const Finance = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await api.get('/payments/stats');
+      const response = await api.get('/payments/stats', { params: { academicTermId: selectedAcademicTermId } });
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching finance stats:', error);
@@ -211,7 +261,7 @@ const Finance = () => {
 
   const fetchPayments = async () => {
     try {
-      const response = await api.get('/payments');
+      const response = await api.get('/payments', { params: { academicTermId: selectedAcademicTermId } });
       // Handle paginated response structure
       if (response.data.data && Array.isArray(response.data.data)) {
         setPayments(response.data.data);
@@ -228,9 +278,10 @@ const Finance = () => {
     }
   };
 
-  const fetchStudents = async () => {
+  const fetchStudents = async (academicTermId = selectedAcademicTermId) => {
+    if (!academicTermId) return;
     try {
-      const response = await api.get('/students');
+      const response = await api.get('/students', { params: { academicTermId } });
       // Ensure students have class info and guardianPhone for the StudentSelector and MobileMoneyPayment
       const studentsWithClass = response.data.map((s: any) => ({
         id: s.id,
@@ -267,15 +318,22 @@ const Finance = () => {
   const fetchAcademicTerms = async () => {
     try {
       const response = await api.get('/academic-terms');
-      setAcademicTerms(response.data);
+      const terms: AcademicTerm[] = Array.isArray(response.data) ? response.data : [];
+      const defaultTerm = pickActiveTerm(terms) || terms[0];
+      setAcademicTerms(terms);
+      if (defaultTerm) {
+        setSelectedAcademicTermId(defaultTerm.id);
+        setPaymentForm(current => ({ ...current, academicTermId: current.academicTermId || defaultTerm.id }));
+      }
     } catch (error) {
       console.error('Error fetching academic terms:', error);
     }
   };
 
-  const fetchClasses = async () => {
+  const fetchClasses = async (academicTermId = selectedAcademicTermId) => {
+    if (!academicTermId) return;
     try {
-      const response = await api.get('/classes');
+      const response = await api.get('/classes', { params: { academicTermId } });
       setClasses(response.data);
     } catch (error) {
       console.error('Error fetching classes:', error);
@@ -402,7 +460,7 @@ const Finance = () => {
 
   const [submitting, setSubmitting] = useState(false);
 
-  const handleRecordPayment = async (e: React.FormEvent, forceCreate = false) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return; // Prevent double submission
 
@@ -411,52 +469,23 @@ const Finance = () => {
       await api.post('/payments', {
         ...paymentForm,
         amount: Number(paymentForm.amount),
-        forceCreate // If true, skip duplicate check
+      }, {
+        headers: { 'Idempotency-Key': paymentForm.idempotencyKey },
       });
 
       setShowAddModal(false);
-      setPaymentForm({ studentId: '', amount: '', method: 'CASH', notes: '' });
+      setPaymentForm({
+        studentId: '',
+        academicTermId: selectedAcademicTermId,
+        amount: '',
+        method: 'CASH',
+        notes: '',
+        idempotencyKey: createPaymentIdempotencyKey(),
+      });
       fetchPayments();
     } catch (error: any) {
       console.error('Error recording payment:', error);
-
-      // Check if it's a duplicate warning
-      if (error.response?.status === 409 && error.response?.data?.warning === 'POTENTIAL_DUPLICATE') {
-        const existingPayment = error.response.data.existingPayment;
-        const confirmMessage =
-          `⚠️ Potential Duplicate Detected!\n\n` +
-          `A similar payment was found:\n` +
-          `• Amount: ZMW ${existingPayment.amount}\n` +
-          `• Transaction ID: ${existingPayment.transactionId}\n` +
-          `• Method: ${existingPayment.method}\n` +
-          `• Date: ${new Date(existingPayment.paymentDate).toLocaleString()}\n\n` +
-          `${error.response.data.message}\n\n` +
-          `Do you want to record this payment anyway?`;
-
-        if (await confirm({
-          title: 'Potential duplicate payment',
-          message: confirmMessage,
-          confirmText: 'Record anyway',
-          cancelText: 'Cancel',
-        })) {
-          // User confirmed, retry with forceCreate
-          try {
-            await api.post('/payments', {
-              ...paymentForm,
-              amount: Number(paymentForm.amount),
-              forceCreate: true
-            });
-            setShowAddModal(false);
-            setPaymentForm({ studentId: '', amount: '', method: 'CASH', notes: '' });
-            fetchPayments();
-          } catch (retryError) {
-            console.error('Error on retry:', retryError);
-            alert('Failed to record payment');
-          }
-        }
-      } else {
-        alert('Failed to record payment');
-      }
+      alert(error.response?.data?.error || error.response?.data?.message || 'Failed to record payment');
     } finally {
       setSubmitting(false);
     }
@@ -478,12 +507,12 @@ const Finance = () => {
 
     try {
       await api.post(`/payments/${paymentId}/void`, { reason: reason.trim() });
-      alert('Payment voided successfully');
+      notify('Payment voided', 'success');
       fetchPayments();
       fetchPaymentControlSummary();
     } catch (error: any) {
       console.error('Error voiding payment:', error);
-      alert(error.response?.data?.message || 'Failed to void payment');
+      notify(error.response?.data?.message || 'Failed to void payment', 'error');
     }
   };
 
@@ -518,12 +547,13 @@ const Finance = () => {
     }
   };
 
-  const filteredPayments = payments.filter(payment => {
-    const matchesSearch =
-      payment.student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.student.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.transactionId?.toLowerCase().includes(searchTerm.toLowerCase());
+  const listedPayments = payments.filter(payment => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch = !query ||
+      `${payment.student.firstName} ${payment.student.lastName}`.toLowerCase().includes(query) ||
+      payment.student.admissionNumber.toLowerCase().includes(query) ||
+      Boolean(payment.transactionId?.toLowerCase().includes(query)) ||
+      Boolean(payment.bankReference?.toLowerCase().includes(query));
 
     const matchesMethod = methodFilter === 'ALL' || payment.method === methodFilter;
     const matchesClass = classFilter === 'ALL' || payment.student.class?.id === classFilter;
@@ -541,11 +571,48 @@ const Finance = () => {
     return matchesSearch && matchesMethod && matchesClass && matchesDate && matchesTab;
   });
 
+  const stageCounts = listedPayments.reduce<Record<PaymentStage, number>>((counts, payment) => {
+    counts[getPaymentStage(payment)] += 1;
+    return counts;
+  }, { UNALLOCATED: 0, MISSING_REF: 0, UNRECONCILED: 0, COMPLETE: 0 });
+
+  const filteredPayments = paymentTab === 'completed' && stageFilter !== 'ALL'
+    ? listedPayments.filter(payment => getPaymentStage(payment) === stageFilter)
+    : listedPayments;
+  const filteredTotal = filteredPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const receivedCount = payments.filter(payment => payment.status === 'COMPLETED').length;
+  const voidedCount = payments.filter(payment => payment.status === 'VOIDED').length;
+  const advancedFilterCount = [classFilter !== 'ALL', methodFilter !== 'ALL', Boolean(dateRange.start || dateRange.end)].filter(Boolean).length;
+  const hasPaymentFilters = Boolean(searchTerm.trim()) || advancedFilterCount > 0 || stageFilter !== 'ALL';
+
+  const clearPaymentFilters = () => {
+    setSearchTerm('');
+    setMethodFilter('ALL');
+    setClassFilter('ALL');
+    setDateRange({ start: '', end: '' });
+    setStageFilter('ALL');
+  };
+
+  const showPaymentsAtStage = (stage: PaymentStage) => {
+    setPaymentTab('completed');
+    setStageFilter(stage);
+    paymentsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const billedThisTerm = stats.totalBilled;
+  const settledRate = billedThisTerm > 0 ? Math.round(((billedThisTerm - stats.pendingFees) / billedThisTerm) * 100) : 0;
+  const reconciledRate = paymentControlSummary.totalPayments > 0
+    ? Math.round((paymentControlSummary.reconciledPayments / paymentControlSummary.totalPayments) * 100)
+    : 0;
+
   // Fetch students with outstanding fees
   const fetchDebtors = async () => {
+    if (!selectedAcademicTermId) return;
     setLoadingDebtors(true);
     try {
-      const response = await api.get('/fee-reminders/outstanding');
+      const response = await api.get('/fee-reminders/outstanding', {
+        params: { academicTermId: selectedAcademicTermId },
+      });
       setDebtors(response.data);
     } catch (error) {
       console.error('Error fetching debtors:', error);
@@ -575,6 +642,10 @@ const Finance = () => {
   };
 
   const sendFeeReminders = async (studentIds?: string[], isOverdue = false) => {
+    if (!selectedAcademicTermId) {
+      alert('Select an academic term first.');
+      return;
+    }
     const targetIds = studentIds || selectedDebtors;
     if (targetIds.length === 0) {
       alert('Select at least one student to remind.');
@@ -585,7 +656,8 @@ const Finance = () => {
     try {
       const response = await api.post('/fee-reminders/send', {
         studentIds: targetIds,
-        isOverdue
+        isOverdue,
+        academicTermId: selectedAcademicTermId,
       });
       const message = formatReminderResult(response.data);
       alert(message);
@@ -840,20 +912,39 @@ const Finance = () => {
   };
 
   const overdueDebtors = debtors.filter(d => d.isOverdue);
+  const selectedAcademicTerm = academicTerms.find(term => term.id === selectedAcademicTermId);
 
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Finance & Payments</h1>
-          <p className="text-slate-500 dark:text-gray-400">Manage school fees and transactions</p>
+          <p className="text-slate-500 dark:text-gray-400">What was billed, what came in, and what still needs follow-up for the term</p>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-gray-200">
+            <Calendar size={18} className="text-slate-400" aria-hidden="true" />
+            <span className="text-slate-500 dark:text-gray-400">Showing</span>
+            <select
+              value={selectedAcademicTermId}
+              onChange={(event) => {
+                const academicTermId = event.target.value;
+                setSelectedAcademicTermId(academicTermId);
+                setPaymentForm(current => ({ ...current, academicTermId }));
+              }}
+              className="bg-transparent font-semibold outline-none"
+              aria-label="Reporting term"
+            >
+              {academicTerms.map(term => (
+                <option key={term.id} value={term.id}>{term.name}</option>
+              ))}
+            </select>
+          </label>
           {activeTab === 'fees' && (
             <>
               <button
                 onClick={() => setShowFeeCategoryModal(true)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-surface-hover transition-colors"
               >
                 <ClipboardList size={20} />
                 <span>Fee Categories</span>
@@ -871,7 +962,7 @@ const Finance = () => {
                   setNewFee({ name: '', amount: '', academicTermId: '', categoryId: '', applicableGrade: '' });
                   setShowCreateFeeModal(true);
                 }}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+                className="bg-primary text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-primary-hover transition-colors"
               >
                 <Plus size={20} />
                 <span>Create Fee Template</span>
@@ -880,8 +971,15 @@ const Finance = () => {
           )}
           {activeTab === 'payments' && (
             <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors"
+              onClick={() => {
+                setPaymentForm(current => ({
+                  ...current,
+                  academicTermId: current.academicTermId || selectedAcademicTermId,
+                  idempotencyKey: createPaymentIdempotencyKey(),
+                }));
+                setShowAddModal(true);
+              }}
+              className="bg-primary text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-primary-hover transition-colors"
             >
               <Plus size={20} />
               <span>Record Payment</span>
@@ -896,8 +994,8 @@ const Finance = () => {
           onClick={() => { setActiveSection('revenue'); setActiveTab('payments'); }}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
             activeSection === 'revenue'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-surface-hover-strong'
           }`}
         >
           <CreditCard size={16} />
@@ -907,8 +1005,8 @@ const Finance = () => {
           onClick={() => { setActiveSection('accounting'); setActiveTab('expenses'); }}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
             activeSection === 'accounting'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-gray-300 hover:bg-surface-hover-strong'
           }`}
         >
           <BarChart3 size={16} />
@@ -1030,12 +1128,18 @@ const Finance = () => {
       </div>
 
       {activeTab === 'reports' ? (
-        <FinanceReports />
+        selectedAcademicTerm ? (
+          <FinanceReports
+            academicTerm={selectedAcademicTerm}
+            onOpenReminders={() => { setActiveTab('reminders'); fetchDebtors(); }}
+          />
+        ) : null
       ) : activeTab === 'scholarships' ? (
         <Scholarships />
       ) : activeTab === 'mobile-money' ? (
         <MobileMoneyPayment
           students={students}
+          academicTermId={selectedAcademicTermId}
           onPaymentSuccess={fetchPayments}
         />
       ) : activeTab === 'reminders' ? (
@@ -1052,7 +1156,7 @@ const Finance = () => {
                 <button
                   onClick={() => sendFeeReminders()}
                   disabled={sendingReminders}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50 transition-colors"
                 >
                   <Send size={18} />
                   Send Reminder ({selectedDebtors.length})
@@ -1110,7 +1214,7 @@ const Finance = () => {
                     </tr>
                   ) : (
                     debtors.map((debtor) => (
-                      <tr key={debtor.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedDebtors.includes(debtor.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
+                      <tr key={debtor.id} className={`hover:bg-surface-hover transition-colors ${selectedDebtors.includes(debtor.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
                         <td className="px-6 py-4">
                           <input
                             type="checkbox"
@@ -1188,7 +1292,7 @@ const Finance = () => {
       ) : activeTab === 'expenses' ? (
         <Expenses embedded />
       ) : activeTab === 'invoices' ? (
-        <Invoices embedded />
+        <Invoices embedded initialTermId={selectedAcademicTermId} />
       ) : activeTab === 'payroll' ? (
         <Payroll embedded />
       ) : activeTab === 'budgets' ? (
@@ -1196,311 +1300,400 @@ const Finance = () => {
       ) : activeTab === 'petty-cash' ? (
         <PettyCash embedded />
       ) : activeTab === 'bank-reconciliation' ? (
-        <BankReconciliation embedded />
+        <BankReconciliation embedded academicTermId={selectedAcademicTermId} />
       ) : activeTab === 'financial-reports' ? (
-        <FinancialStatements embedded />
+        <FinancialStatements embedded academicTerm={selectedAcademicTerm} />
       ) : activeTab === 'ai-advisor' ? (
         <AIFinancialAdvisor embedded />
       ) : activeTab === 'debt-collection' ? (
         <DebtCollection embedded />
       ) : activeTab === 'payments' ? (
         <>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg">
-                  <DollarSign size={24} />
-                </div>
-                <span className="text-sm text-slate-500 dark:text-gray-400">Total Revenue</span>
+          {/* Term position: what came in, what is still owed, and how much is proven against the bank */}
+          <section aria-label="Term position" className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <article className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400">
+                <DollarSign size={16} className="text-green-600" aria-hidden="true" />
+                Collected this term
               </div>
-              <h3 className="text-2xl font-bold text-slate-800 dark:text-white">ZMW {stats.totalRevenue.toLocaleString()}</h3>
-              <p className="text-sm text-green-600 mt-1">All time revenue</p>
-            </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{fmtWhole(stats.totalRevenue)}</p>
+              <ProgressBar value={settledRate} label="Share of billed fees settled" tone="bg-green-500" />
+              <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
+                {billedThisTerm > 0 ? `${settledRate}% of ${fmtWhole(billedThisTerm)} billed is settled` : 'No fees billed this term yet'}
+                {' · '}{plural(stats.totalTransactions, 'payment')}
+              </p>
+            </article>
 
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
-                  <CreditCard size={24} />
-                </div>
-                <span className="text-sm text-slate-500 dark:text-gray-400">Transactions</span>
+            <article className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400">
+                <Wallet size={16} className="text-orange-600" aria-hidden="true" />
+                Still owed
               </div>
-              <h3 className="text-2xl font-bold text-slate-800 dark:text-white">{stats.totalTransactions}</h3>
-              <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">Total transactions</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-3 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-lg">
-                  <Calendar size={24} />
-                </div>
-                <span className="text-sm text-slate-500 dark:text-gray-400">Pending Fees</span>
-              </div>
-              <h3 className="text-2xl font-bold text-slate-800 dark:text-white">ZMW {stats.pendingFees.toLocaleString()}</h3>
-              <p className="text-sm text-red-500 mt-1">{stats.overdueStudentsCount} students overdue</p>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
-                <div className="rounded-lg bg-orange-50 dark:bg-orange-900/20 p-4">
-                  <p className="text-sm text-slate-500 dark:text-gray-400">Unreconciled receipts</p>
-                  <p className="text-xl font-bold text-orange-600">{paymentControlLoading ? '…' : paymentControlSummary.unreconciledPayments}</p>
-                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unreconciledAmount || 0)}</p>
-                </div>
-                <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-4">
-                  <p className="text-sm text-slate-500 dark:text-gray-400">Unallocated payments</p>
-                  <p className="text-xl font-bold text-purple-600">{paymentControlLoading ? '…' : paymentControlSummary.unallocatedPayments}</p>
-                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">{fmt(paymentControlSummary.unallocatedAmount || 0)}</p>
-                </div>
-                <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
-                  <p className="text-sm text-slate-500 dark:text-gray-400">Missing bank refs</p>
-                  <p className="text-xl font-bold text-red-600">{paymentControlLoading ? '…' : paymentControlSummary.missingBankReference}</p>
-                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">Bank deposits need statement evidence</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
+              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{fmtWhole(stats.pendingFees)}</p>
+              <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
+                {stats.overdueCount > 0 ? `${plural(stats.overdueCount, 'student')} with an unpaid balance` : 'Every billed student is paid up'}
+              </p>
+              {stats.creditCount > 0 && (
+                <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">
+                  {plural(stats.creditCount, 'student')} paid ahead · {fmtWhole(stats.creditBalance)} in credit
+                </p>
+              )}
+              {stats.overdueCount > 0 && (
                 <button
-                  onClick={handleAutoAllocatePayments}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  type="button"
+                  onClick={() => { setActiveTab('reminders'); fetchDebtors(); }}
+                  className="mt-auto inline-flex w-fit items-center gap-1 pt-3 text-sm font-semibold text-primary hover:underline"
                 >
-                  Auto-allocate open payments
+                  Send fee reminders <ArrowRight size={14} aria-hidden="true" />
                 </button>
+              )}
+            </article>
+
+            <article className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400">
+                <Landmark size={16} className="text-blue-600" aria-hidden="true" />
+                Matched to bank
+              </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+                {paymentControlLoading ? '…' : `${paymentControlSummary.reconciledPayments} of ${paymentControlSummary.totalPayments}`}
+                <span className="ml-1 text-sm font-medium text-slate-500 dark:text-gray-400">payments</span>
+              </p>
+              <ProgressBar value={reconciledRate} label="Share of payments matched to bank statements" tone="bg-blue-500" />
+              <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
+                {paymentControlSummary.unreconciledPayments > 0
+                  ? `${fmt(paymentControlSummary.unreconciledAmount)} still to match on bank statements`
+                  : 'Every payment is matched to the bank'}
+              </p>
+              {paymentControlSummary.unreconciledPayments > 0 && (
                 <button
+                  type="button"
                   onClick={() => setActiveTab('bank-reconciliation')}
-                  className="px-4 py-2 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+                  className="mt-auto inline-flex w-fit items-center gap-1 pt-3 text-sm font-semibold text-primary hover:underline"
                 >
-                  Open reconciliation queue
+                  Open bank reconciliation <ArrowRight size={14} aria-hidden="true" />
                 </button>
+              )}
+            </article>
+          </section>
+
+          {/* Needs attention: only problems that block a payment from being complete, each with its fix */}
+          {!paymentControlLoading && (paymentControlSummary.unallocatedPayments > 0 || paymentControlSummary.missingBankReference > 0) && (
+            <section aria-labelledby="payments-attention-title" className="mb-6 rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-900/10">
+              <h2 id="payments-attention-title" className="px-5 pt-4 text-sm font-semibold text-amber-900 dark:text-amber-200">Needs attention</h2>
+              <ul className="divide-y divide-amber-200/70 dark:divide-amber-900/40">
+                {paymentControlSummary.unallocatedPayments > 0 && (
+                  <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex gap-3">
+                      <AlertTriangle size={20} className="mt-0.5 shrink-0 text-orange-600" aria-hidden="true" />
+                      <div>
+                        <p className="font-medium text-slate-900 dark:text-white">{plural(paymentControlSummary.unallocatedPayments, 'payment')} not applied to fees</p>
+                        <p className="text-sm text-slate-600 dark:text-gray-400">{fmt(paymentControlSummary.unallocatedAmount)} was received but is not yet linked to any fee item.</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => showPaymentsAtStage('UNALLOCATED')}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-surface-hover-accent dark:border-slate-600 dark:bg-slate-800 dark:text-gray-200"
+                      >
+                        Review
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAutoAllocatePayments}
+                        className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+                      >
+                        Apply to fees
+                      </button>
+                    </div>
+                  </li>
+                )}
+                {paymentControlSummary.missingBankReference > 0 && (
+                  <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex gap-3">
+                      <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
+                      <div>
+                        <p className="font-medium text-slate-900 dark:text-white">{plural(paymentControlSummary.missingBankReference, 'bank deposit')} without a bank reference</p>
+                        <p className="text-sm text-slate-600 dark:text-gray-400">Add the deposit slip reference so each deposit can be matched to the bank statement.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => showPaymentsAtStage('MISSING_REF')}
+                      className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-surface-hover-accent dark:border-slate-600 dark:bg-slate-800 dark:text-gray-200"
+                    >
+                      Review
+                    </button>
+                  </li>
+                )}
+              </ul>
+            </section>
+          )}
+
+          {/* Payments ledger: who paid, how, and what is left to do with each payment */}
+          <section
+            ref={paymentsTableRef}
+            aria-labelledby="payments-ledger-title"
+            className="scroll-mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
+          >
+            <header className="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-700 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <h2 id="payments-ledger-title" className="text-base font-semibold text-slate-900 dark:text-white">
+                  {paymentTab === 'completed' ? 'Payments received' : 'Voided payments'}
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-gray-400">
+                  {loading ? 'Loading…' : `${plural(filteredPayments.length, 'payment')} · ${fmt(filteredTotal)}`}
+                  {selectedAcademicTerm ? ` · ${selectedAcademicTerm.name}` : ''}
+                </p>
               </div>
-            </div>
-          </div>
 
-          {/* Tabs */}
-          <div className="flex space-x-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg mb-6 w-fit">
-            <button
-              onClick={() => setPaymentTab('completed')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'completed' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-                }`}
-            >
-              Valid Payments
-            </button>
-            <button
-              onClick={() => setPaymentTab('voided')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${paymentTab === 'voided' ? 'bg-white dark:bg-slate-800 text-red-600 shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200'
-                }`}
-            >
-              Voided Transactions
-            </button>
-          </div>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-slate-700" role="group" aria-label="Payment status">
+                  {([
+                    { key: 'completed', label: 'Received', count: receivedCount },
+                    { key: 'voided', label: 'Voided', count: voidedCount },
+                  ] as const).map(option => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      aria-pressed={paymentTab === option.key}
+                      onClick={() => { setPaymentTab(option.key); setStageFilter('ALL'); }}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${paymentTab === option.key
+                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                        : 'text-slate-500 hover:bg-surface-hover dark:text-gray-400'}`}
+                    >
+                      {option.label} <span className="tabular-nums text-slate-400">{option.count}</span>
+                    </button>
+                  ))}
+                </div>
 
-          {/* Search and Action Bar */}
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6">
-            <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
-                <input
-                  type="text"
-                  placeholder="Search by student name, ID, or reference..."
-                  className="w-full pl-10 pr-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+                <div className="relative md:w-72">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} aria-hidden="true" />
+                  <input
+                    type="search"
+                    aria-label="Search payments"
+                    placeholder="Student, admission no. or reference"
+                    className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowFilterModal(true)}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${advancedFilterCount > 0
+                      ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-surface-hover dark:border-slate-700 dark:bg-slate-800 dark:text-gray-300'}`}
+                  >
+                    <Filter size={16} aria-hidden="true" />
+                    Filter
+                    {advancedFilterCount > 0 && (
+                      <span className="rounded-full bg-primary px-1.5 py-0.5 text-xs text-white">{advancedFilterCount}</span>
+                    )}
+                  </button>
+                  <ExportDropdown
+                    data={filteredPayments.map(p => ({
+                      date: new Date(p.paymentDate).toLocaleDateString(),
+                      studentName: `${p.student.firstName} ${p.student.lastName}`,
+                      admissionNumber: p.student.admissionNumber,
+                      className: p.student.class?.name || 'No Class',
+                      amount: Number(p.amount).toFixed(2),
+                      method: p.method.replace('_', ' '),
+                      transactionId: p.transactionId || '-',
+                      bankReference: p.bankReference || '-',
+                      status: p.status === 'VOIDED' ? 'Voided' : PAYMENT_STAGES[getPaymentStage(p)].label,
+                      notes: p.notes || '-',
+                      recordedBy: p.recordedBy.fullName
+                    }))}
+                    columns={[
+                      { key: 'date', header: 'Date' },
+                      { key: 'studentName', header: 'Student Name' },
+                      { key: 'admissionNumber', header: 'Admission #' },
+                      { key: 'className', header: 'Class' },
+                      { key: 'amount', header: 'Amount (ZMW)' },
+                      { key: 'method', header: 'Method' },
+                      { key: 'transactionId', header: 'Transaction ID' },
+                      { key: 'bankReference', header: 'Bank Reference' },
+                      { key: 'status', header: 'Status' },
+                      { key: 'notes', header: 'Notes' },
+                      { key: 'recordedBy', header: 'Recorded By' }
+                    ]}
+                    filename={`payments_export_${new Date().toISOString().split('T')[0]}`}
+                  />
+                </div>
               </div>
+            </header>
 
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setShowFilterModal(true)}
-                  className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors border ${(classFilter !== 'ALL' || methodFilter !== 'ALL' || dateRange.start || dateRange.end)
-                    ? 'bg-blue-50 border-blue-300 text-blue-700'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                >
-                  <Filter size={18} />
-                  <span>Filter</span>
-                  {(classFilter !== 'ALL' || methodFilter !== 'ALL' || dateRange.start || dateRange.end) && (
-                    <span className="ml-1 px-1.5 py-0.5 bg-blue-600 text-white text-xs rounded-full">
-                      {[classFilter !== 'ALL', methodFilter !== 'ALL', dateRange.start || dateRange.end].filter(Boolean).length}
-                    </span>
-                  )}
-                </button>
-                <ExportDropdown
-                  data={filteredPayments.map(p => ({
-                    date: new Date(p.paymentDate).toLocaleDateString(),
-                    studentName: `${p.student.firstName} ${p.student.lastName}`,
-                    admissionNumber: p.student.admissionNumber,
-                    className: p.student.class?.name || 'No Class',
-                    amount: Number(p.amount).toFixed(2),
-                    method: p.method.replace('_', ' '),
-                    transactionId: p.transactionId || '-',
-                    reconciliationStatus: p.isReconciled ? 'Reconciled' : 'Open',
-                    allocationStatus: (p.unallocatedAmount || 0) > 0 ? `Open ${Number(p.unallocatedAmount || 0).toFixed(2)}` : 'Allocated',
-                    notes: p.notes || '-',
-                    recordedBy: p.recordedBy.fullName
-                  }))}
-                  columns={[
-                    { key: 'date', header: 'Date' },
-                    { key: 'studentName', header: 'Student Name' },
-                    { key: 'admissionNumber', header: 'Admission #' },
-                    { key: 'className', header: 'Class' },
-                    { key: 'amount', header: 'Amount (ZMW)' },
-                    { key: 'method', header: 'Method' },
-                    { key: 'transactionId', header: 'Transaction ID' },
-                    { key: 'reconciliationStatus', header: 'Reconciliation' },
-                    { key: 'allocationStatus', header: 'Allocation' },
-                    { key: 'notes', header: 'Notes' },
-                    { key: 'recordedBy', header: 'Recorded By' }
-                  ]}
-                  filename={`payments_export_${new Date().toISOString().split('T')[0]}`}
-                />
+            {paymentTab === 'completed' && listedPayments.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700" role="group" aria-label="Filter by progress">
+                {([
+                  { key: 'ALL', label: 'All', count: listedPayments.length },
+                  ...(Object.keys(PAYMENT_STAGES) as PaymentStage[]).map(stage => ({ key: stage, label: PAYMENT_STAGES[stage].label, count: stageCounts[stage] })),
+                ] as { key: PaymentStage | 'ALL'; label: string; count: number }[])
+                  .filter(option => option.key === 'ALL' || option.count > 0 || stageFilter === option.key)
+                  .map(option => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      aria-pressed={stageFilter === option.key}
+                      onClick={() => setStageFilter(option.key)}
+                      className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${stageFilter === option.key
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                        : 'bg-slate-100 text-slate-600 hover:bg-surface-hover-strong dark:bg-slate-700 dark:text-gray-300'}`}
+                    >
+                      {option.label} <span className="tabular-nums opacity-70">{option.count}</span>
+                    </button>
+                  ))}
               </div>
-            </div>
-          </div>
+            )}
 
-          {/* Payments Table */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-700 border-b border-slate-200 dark:border-slate-600">
+              <table className="w-full min-w-[56rem] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-700/60 dark:text-gray-400">
                   <tr>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Date</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Student</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Class</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Amount (ZMW)</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Method</th>
-                    <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Transaction ID</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Date</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Student</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Amount (ZMW)</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Method</th>
                     {paymentTab === 'voided' ? (
                       <>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Void Reason</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Voided By</th>
+                        <th scope="col" className="px-4 py-3 font-semibold">Why it was voided</th>
+                        <th scope="col" className="px-4 py-3 font-semibold">Voided by</th>
                       </>
                     ) : (
                       <>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Allocation</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Reconciliation</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Notes</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300">Recorded By</th>
-                        <th className="px-6 py-4 font-semibold text-slate-600 dark:text-gray-300 text-right">Actions</th>
+                        <th scope="col" className="px-4 py-3 font-semibold">Progress</th>
+                        <th scope="col" className="px-4 py-3 text-right font-semibold"><span className="sr-only">Actions</span></th>
                       </>
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {loading ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center text-slate-500 dark:text-gray-400">Loading payments...</td>
-                    </tr>
-                  ) : filteredPayments.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-8 text-center text-slate-500 dark:text-gray-400">No payments found</td>
-                    </tr>
-                  ) : (
-                    filteredPayments.map((payment) => (
-                      <tr key={payment.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                        <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
-                          {new Date(payment.paymentDate).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-slate-800 dark:text-white">
-                            {payment.student.firstName} {payment.student.lastName}
-                          </div>
-                          <div className="text-xs text-slate-500 dark:text-gray-400">
-                            {payment.student.admissionNumber}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
-                          {payment.student.class?.name || 'No Class'}
-                        </td>
-                        <td className={`px-6 py-4 font-medium ${payment.status === 'VOIDED' ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-white'}`}>
-                          {Number(payment.amount).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                            ${payment.method === 'CASH' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
-                              payment.method === 'MOBILE_MONEY' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
-                                'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'}`}>
-                            {payment.method.replace('_', ' ')}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-600 dark:text-gray-300 font-mono text-sm">
-                          {payment.transactionId || '-'}
-                        </td>
-                        {paymentTab === 'voided' ? (
-                          <>
-                            <td className="px-6 py-4 text-red-600 dark:text-red-400 text-sm italic">
-                              {payment.voidReason || 'No reason'}
-                            </td>
-                            <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
-                              {payment.voidedBy?.fullName || 'Unknown'}
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-6 py-4">
-                              <div className="text-sm">
-                                <span className={`font-medium ${(payment.unallocatedAmount || 0) > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                                  {(payment.unallocatedAmount || 0) > 0 ? `Open ZMW ${Number(payment.unallocatedAmount || 0).toLocaleString()}` : 'Allocated'}
-                                </span>
-                                <div className="text-xs text-slate-500 dark:text-gray-400">
-                                  {payment.allocationCount || 0} fee item(s)
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${payment.isReconciled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'}`}>
-                                  {payment.isReconciled ? 'Reconciled' : 'Open'}
-                                </span>
-                                <div className="text-xs text-slate-500 dark:text-gray-400 mt-1">
-                                  {payment.bankReference || 'No bank ref'}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-slate-500 dark:text-gray-400 text-sm max-w-xs truncate">
-                              {payment.notes || '-'}
-                            </td>
-                            <td className="px-6 py-4 text-slate-600 dark:text-gray-300">
-                              {payment.recordedBy.fullName}
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => generatePaymentReceipt(payment)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                                  title="Download Receipt"
-                                >
-                                  <FileText size={14} />
-                                  Receipt
-                                </button>
-                                <button
-                                  onClick={() => handleResendReceipt(payment.id)}
-                                  disabled={resendingReceiptId === payment.id}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                  title="Resend receipt to parent"
-                                >
-                                  <Send size={14} />
-                                  {resendingReceiptId === payment.id ? 'Sending...' : 'Resend'}
-                                </button>
-                                <button
-                                  onClick={() => handleVoidPayment(payment.id)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
-                                  title="Void this payment"
-                                >
-                                  <X size={14} />
-                                  Void
-                                </button>
-                              </div>
-                            </td>
-                          </>
-                        )}
+                    Array.from({ length: 5 }).map((_, index) => (
+                      <tr key={index} aria-hidden="true">
+                        {Array.from({ length: 6 }).map((__, cell) => (
+                          <td key={cell} className="px-4 py-4">
+                            <div className="h-4 w-full max-w-[8rem] animate-pulse rounded bg-slate-100 dark:bg-slate-700" />
+                          </td>
+                        ))}
                       </tr>
                     ))
+                  ) : filteredPayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center">
+                        {hasPaymentFilters ? (
+                          <>
+                            <p className="font-medium text-slate-800 dark:text-white">No payments match these filters</p>
+                            <button type="button" onClick={clearPaymentFilters} className="mt-2 text-sm font-semibold text-primary hover:underline">
+                              Clear filters
+                            </button>
+                          </>
+                        ) : paymentTab === 'voided' ? (
+                          <p className="text-slate-500 dark:text-gray-400">No payments have been voided this term.</p>
+                        ) : (
+                          <>
+                            <p className="font-medium text-slate-800 dark:text-white">No payments recorded for this term yet</p>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">Payments you record, and mobile money collections, appear here.</p>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPayments.map((payment) => {
+                      const stage = getPaymentStage(payment);
+                      const isVoided = payment.status === 'VOIDED';
+                      return (
+                        <tr key={payment.id} className="align-top transition-colors hover:bg-surface-hover">
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <div className="font-medium text-slate-800 dark:text-white">{formatPaymentDate(payment.paymentDate)}</div>
+                            <div className="text-xs text-slate-500 dark:text-gray-400">by {payment.recordedBy.fullName}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-800 dark:text-white">
+                              {payment.student.firstName} {payment.student.lastName}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-gray-400">
+                              {payment.student.admissionNumber} · {payment.student.class?.name || 'No class'}
+                            </div>
+                            {payment.notes && (
+                              <div className="mt-1 flex max-w-[18rem] items-center gap-1 text-xs text-slate-500 dark:text-gray-400" title={payment.notes}>
+                                <StickyNote size={12} className="shrink-0" aria-hidden="true" />
+                                <span className="truncate">{payment.notes}</span>
+                              </div>
+                            )}
+                          </td>
+                          <td className={`whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums ${isVoided ? 'text-slate-400 line-through dark:text-slate-500' : 'text-slate-900 dark:text-white'}`}>
+                            {Number(payment.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${METHOD_CHIPS[payment.method]}`}>
+                              {formatMethod(payment.method)}
+                            </span>
+                            <div className="mt-1 font-mono text-xs text-slate-500 dark:text-gray-400">
+                              {payment.bankReference || payment.transactionId || '—'}
+                            </div>
+                          </td>
+                          {paymentTab === 'voided' ? (
+                            <>
+                              <td className="px-4 py-3 text-slate-600 dark:text-gray-300">{payment.voidReason || 'No reason recorded'}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-gray-300">{payment.voidedBy?.fullName || 'Unknown'}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${PAYMENT_STAGES[stage].chip}`}>
+                                  {stage === 'COMPLETE' && <CheckCircle2 size={12} aria-hidden="true" />}
+                                  {PAYMENT_STAGES[stage].label}
+                                </span>
+                                <div className="mt-1 max-w-[16rem] truncate text-xs text-slate-500 dark:text-gray-400" title={getPaymentStageHint(payment, stage)}>
+                                  {getPaymentStageHint(payment, stage)}
+                                </div>
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                                <div className="inline-flex items-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => generatePaymentReceipt(payment)}
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-surface-hover-accent hover:text-slate-800 dark:text-gray-400 dark:hover:text-white"
+                                    title="Download receipt"
+                                    aria-label={`Download receipt for ${payment.student.firstName} ${payment.student.lastName}`}
+                                  >
+                                    <Download size={18} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleResendReceipt(payment.id)}
+                                    disabled={resendingReceiptId === payment.id}
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-surface-hover-accent hover:text-slate-800 disabled:cursor-wait disabled:opacity-50 dark:text-gray-400 dark:hover:text-white"
+                                    title="Send receipt to parent"
+                                    aria-label={`Send receipt to the parent of ${payment.student.firstName} ${payment.student.lastName}`}
+                                  >
+                                    <Send size={18} className={resendingReceiptId === payment.id ? 'animate-pulse' : ''} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVoidPayment(payment.id)}
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-surface-hover-danger hover:text-red-600 dark:text-gray-500"
+                                    title="Void payment"
+                                    aria-label={`Void payment from ${payment.student.firstName} ${payment.student.lastName}`}
+                                  >
+                                    <Ban size={18} />
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
         </>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1539,7 +1732,7 @@ const Finance = () => {
                   setSelectedTemplateId(template.id);
                   setShowAssignFeeModal(true);
                 }}
-                className="w-full py-2 px-4 bg-white border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center space-x-2"
+                className="w-full py-2 px-4 bg-white border border-blue-600 text-blue-600 rounded-lg hover:bg-surface-hover-accent transition-colors flex items-center justify-center space-x-2"
               >
                 <Users size={18} />
                 <span>Assign to Class</span>
@@ -1568,7 +1761,7 @@ const Finance = () => {
                 <h2 className="text-xl font-bold dark:text-white">Filter Payments</h2>
                 <button
                   onClick={() => setShowFilterModal(false)}
-                  className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="p-1 hover:bg-surface-hover rounded-lg transition-colors"
                 >
                   <X size={20} className="text-slate-500" />
                 </button>
@@ -1626,13 +1819,13 @@ const Finance = () => {
                     setMethodFilter('ALL');
                     setDateRange({ start: '', end: '' });
                   }}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg transition-colors"
                 >
                   Clear All
                 </button>
                 <button
                   onClick={() => setShowFilterModal(false)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
                 >
                   Apply Filters
                 </button>
@@ -1654,7 +1847,7 @@ const Finance = () => {
                 </div>
                 <button
                   onClick={() => setShowFeeCategoryModal(false)}
-                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="p-1 hover:bg-surface-hover rounded-lg transition-colors"
                 >
                   <X size={20} className="text-slate-500" />
                 </button>
@@ -1681,7 +1874,7 @@ const Finance = () => {
                                 setNewFee((current) => ({ ...current, categoryId: category.id }));
                                 setShowFeeCategoryModal(false);
                               }}
-                              className="px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                              className="px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-200 rounded-lg hover:bg-surface-hover-strong transition-colors"
                             >
                               Use in template
                             </button>
@@ -1731,7 +1924,7 @@ const Finance = () => {
                     <button
                       onClick={handleCreateFeeCategory}
                       disabled={creatingFeeCategory}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {creatingFeeCategory ? 'Creating...' : 'Create Category'}
                     </button>
@@ -1750,6 +1943,18 @@ const Finance = () => {
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md">
               <h2 className="text-xl font-bold mb-4 dark:text-white">Record New Payment</h2>
               <form onSubmit={handleRecordPayment} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-1">Academic Term</label>
+                  <select
+                    required
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                    value={paymentForm.academicTermId}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, academicTermId: e.target.value })}
+                  >
+                    <option value="">Select term</option>
+                    {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-gray-200 mb-2">Find Student</label>
                   <StudentSelector
@@ -1798,14 +2003,14 @@ const Finance = () => {
                   <button
                     type="button"
                     onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                    className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submitting}
-                    className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className={`px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover flex items-center gap-2 ${submitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     {submitting ? 'Saving...' : 'Save Payment'}
                   </button>
@@ -1894,13 +2099,13 @@ const Finance = () => {
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={() => setShowCreateFeeModal(false)}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSaveFee}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   {editingTemplate ? 'Update Template' : 'Create Template'}
                 </button>
@@ -1958,13 +2163,13 @@ const Finance = () => {
                     setShowAssignFeeModal(false);
                     setAssignDueDate('');
                   }}
-                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-slate-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAssignFee}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
                 >
                   Assign Fee
                 </button>

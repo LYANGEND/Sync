@@ -11,6 +11,7 @@
 
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { getActiveTerm } from './termLifecycleService';
 
 export interface StudentDefaultRisk {
   studentId: string;
@@ -53,7 +54,7 @@ export async function predictFeeDefaulters(
   if (termId) {
     term = await prisma.academicTerm.findUnique({ where: { id: termId } });
   } else {
-    term = await prisma.academicTerm.findFirst({ where: { isActive: true } });
+    term = await getActiveTerm();
   }
   if (!term) throw new Error('No active academic term found');
 
@@ -65,7 +66,11 @@ export async function predictFeeDefaulters(
     include: {
       student: {
         include: {
-          class: { select: { name: true, gradeLevel: true } },
+          termEnrollments: {
+            where: { academicTermId: resolvedTermId },
+            select: { class: { select: { name: true, gradeLevel: true } } },
+            take: 1,
+          },
         },
       },
     },
@@ -107,7 +112,7 @@ export async function predictFeeDefaulters(
 
   // ── 4. Check prior term defaults ─────────────────────────────────────
   const priorTerms = await prisma.academicTerm.findMany({
-    where: { isActive: false },
+    where: { status: { not: 'ACTIVE' } },
     orderBy: { startDate: 'desc' },
     take: 3,
     select: { id: true },
@@ -188,6 +193,8 @@ export async function predictFeeDefaulters(
   for (const fs of feeStructures as any[]) {
     const student = fs.student;
     if (!student) continue;
+    const placement = student.termEnrollments?.[0];
+    if (!placement) continue;
 
     const totalFees = Number(fs.totalAmount || 0);
     const totalPaid = paidByStudent[fs.studentId] || 0;
@@ -202,7 +209,7 @@ export async function predictFeeDefaulters(
     studentProfiles.push({
       studentId: fs.studentId,
       studentName: `${student.firstName} ${student.lastName}`,
-      className: student.class?.name || 'Unknown',
+      className: placement.class.name,
       totalFees,
       totalPaid,
       outstanding,

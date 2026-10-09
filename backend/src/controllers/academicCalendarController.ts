@@ -1,18 +1,29 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { hasValidDateRange } from '../utils/academicValidation';
 
-const eventSchema = z.object({
-  title: z.string().min(2),
-  description: z.string().optional(),
+const eventFields = z.object({
+  title: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(5000).optional(),
   eventType: z.enum([
     'HOLIDAY', 'EXAM_PERIOD', 'PARENT_MEETING', 'SPORTS_DAY',
     'CULTURAL_EVENT', 'DEADLINE', 'STAFF_DEVELOPMENT', 'SCHOOL_CLOSURE', 'OTHER'
   ]),
-  startDate: z.string(),
-  endDate: z.string(),
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime(),
   isAllDay: z.boolean().optional(),
-  color: z.string().optional(),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i, 'Color must be a six-digit hex value').optional().or(z.literal('')),
+});
+
+const eventSchema = eventFields.superRefine((event, ctx) => {
+  if (!hasValidDateRange(event.startDate, event.endDate, true)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['endDate'],
+      message: 'End date must be on or after start date',
+    });
+  }
 });
 
 export const getEvents = async (req: Request, res: Response) => {
@@ -78,7 +89,15 @@ export const createEvent = async (req: Request, res: Response) => {
 export const updateEvent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const data = eventSchema.partial().parse(req.body);
+    const data = eventFields.partial().parse(req.body);
+    const existing = await prisma.academicEvent.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Academic event not found' });
+
+    const nextStartDate = data.startDate || existing.startDate;
+    const nextEndDate = data.endDate || existing.endDate;
+    if (!hasValidDateRange(nextStartDate, nextEndDate, true)) {
+      return res.status(400).json({ error: 'End date must be on or after start date' });
+    }
 
     const updateData: any = { ...data };
     if (data.startDate) updateData.startDate = new Date(data.startDate);

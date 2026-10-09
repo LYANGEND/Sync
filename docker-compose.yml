@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,18 +17,31 @@ services:
     container_name: sync_backend
     ports:
       - "3000:3000"
+    env_file:
+      - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql://sync_user:sync_password@postgres:5432/sync_db?schema=public
       - PORT=3000
-      - JWT_SECRET=supersecretkeychangeinproduction
     depends_on:
       - postgres
+    # Use the configured database/credentials, translating host-local addresses
+    # for Docker Desktop. Never silently substitute another project's database.
+    command:
+      - node
+      - -e
+      - >-
+        const url = new URL(process.env.DATABASE_URL);
+        if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) url.hostname = 'host.docker.internal';
+        process.env.DATABASE_URL = url.toString();
+        require('./dist/src/server.js');
     volumes:
       - ./backend:/app
       - /app/node_modules
 
   frontend:
-    build: ./frontend
+    # The final Dockerfile stage is Nginx; development needs Node/Vite.
+    build:
+      context: ./frontend
+      target: deps
     container_name: sync_frontend
     ports:
       - "5173:5173"

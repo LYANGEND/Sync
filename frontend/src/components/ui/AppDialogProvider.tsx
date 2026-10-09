@@ -155,7 +155,7 @@ export const AppDialogProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     <button
                       type="button"
                       onClick={() => closeNotice(notice.id)}
-                      className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                      className="rounded-full p-1 text-slate-400 transition hover:bg-surface-hover hover:text-slate-600 dark:hover:text-slate-200"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -210,14 +210,14 @@ export const AppDialogProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 <button
                   type="button"
                   onClick={() => handleCloseDialog(dialog.type === 'confirm' ? false : null)}
-                  className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-surface-hover dark:border-slate-700 dark:text-slate-200"
                 >
                   {dialog.cancelText || 'Cancel'}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCloseDialog(dialog.type === 'confirm' ? true : promptValue)}
-                  className="rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover"
                 >
                   {dialog.confirmText || (dialog.type === 'prompt' ? 'Submit' : 'Continue')}
                 </button>

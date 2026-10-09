@@ -4,7 +4,13 @@ async function main() {
     console.log('Fetching students...');
     const students = await prisma.student.findMany({
       take: 5,
-      include: { class: true }
+      include: {
+        termEnrollments: {
+          where: { academicTerm: { status: 'ACTIVE' } },
+          include: { class: true },
+          take: 1,
+        },
+      },
     });
     console.log('Successfully fetched students:', students.length);
     console.log(students);

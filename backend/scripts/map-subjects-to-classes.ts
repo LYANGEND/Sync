@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '../src/utils/prisma';
+import { getActiveTerm } from '../src/services/termLifecycleService';
 
 // ─── ZAMBIAN CURRICULUM SUBJECT MAPPING ───
 // Key = grade level range, Value = subject codes that should be offered
@@ -94,7 +95,7 @@ async function main() {
   console.log('╚══════════════════════════════════════════════════════════╝\n');
 
   // Get a teacher and active term for creating new classes
-  const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
+  const activeTerm = await getActiveTerm();
   if (!activeTerm) {
     console.error('❌ No active academic term found!');
     return process.exit(1);

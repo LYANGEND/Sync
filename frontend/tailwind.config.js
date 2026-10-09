@@ -9,8 +9,18 @@ export default {
     extend: {
       colors: {
         primary: 'var(--primary-color)',
+        // primary-hover: hover fill for solid primary buttons (bg-primary hover:bg-primary-hover).
+        'primary-hover': 'var(--primary-hover)',
         secondary: 'var(--secondary-color)',
         accent: 'var(--accent-color)',
+        // Standard hover backgrounds shared by every page. Light/dark values live in index.css.
+        // surface-hover: rows, list items, menu items, ghost and icon buttons.
+        // surface-hover-strong: secondary buttons and chips that already rest on a gray fill.
+        // surface-hover-accent: outlined/ghost action buttons (edit, view, send). surface-hover-danger: outlined/ghost delete buttons.
+        'surface-hover': 'var(--bg-hover)',
+        'surface-hover-strong': 'var(--bg-hover-strong)',
+        'surface-hover-accent': 'var(--bg-hover-accent)',
+        'surface-hover-danger': 'var(--bg-hover-danger)',
       },
       spacing: {
         'header-safe': 'calc(4rem + env(safe-area-inset-top))',

@@ -83,6 +83,14 @@ export interface InvoiceItem {
   feeTemplateId?: string;
 }
 
+export interface InvoicePaymentInput {
+  amount: number;
+  method: 'CASH' | 'MOBILE_MONEY' | 'BANK_DEPOSIT';
+  receiptTermId: string;
+  idempotencyKey: string;
+  notes?: string;
+}
+
 export interface CreditNote {
   id: string;
   creditNoteNumber: string;
@@ -313,11 +321,13 @@ export const invoiceApi = {
   getById: (id: string) => api.get(`/invoices/${id}`),
   create: (data: any) => api.post('/invoices', data),
   send: (id: string) => api.post(`/invoices/${id}/send`),
-  recordPayment: (id: string, amount: number) => api.post(`/invoices/${id}/payment`, { amount }),
+  recordPayment: (id: string, data: InvoicePaymentInput) => api.post(`/invoices/${id}/payment`, data, {
+    headers: { 'Idempotency-Key': data.idempotencyKey },
+  }),
   cancel: (id: string) => api.post(`/invoices/${id}/cancel`),
   generateBulk: (termId: string, classId?: string) => api.post('/invoices/generate-bulk', { termId, classId }),
   createCreditNote: (data: any) => api.post('/invoices/credit-note', data),
-  getSummary: () => api.get('/invoices/summary'),
+  getSummary: (params?: any) => api.get('/invoices/summary', { params }),
 };
 
 // ========================================
@@ -374,7 +384,7 @@ export const financialApi = {
   getIncomeStatement: (params?: any) => api.get('/financial/income-statement', { params }),
   getBalanceSheet: (params?: any) => api.get('/financial/balance-sheet', { params }),
   getCashFlow: (params?: any) => api.get('/financial/cash-flow', { params }),
-  getAgedReceivables: () => api.get('/financial/aged-receivables'),
+  getAgedReceivables: (params?: any) => api.get('/financial/aged-receivables', { params }),
   // Chart of Accounts
   getAccounts: () => api.get('/financial/accounts'),
   createAccount: (data: any) => api.post('/financial/accounts', data),
@@ -383,7 +393,7 @@ export const financialApi = {
   getFeeCategories: () => api.get('/financial/fee-categories'),
   createFeeCategory: (data: any) => api.post('/financial/fee-categories', data),
   // Refunds
-  getRefunds: () => api.get('/financial/refunds'),
+  getRefunds: (params?: any) => api.get('/financial/refunds', { params }),
   createRefund: (data: any) => api.post('/financial/refunds', data),
   approveRefund: (id: string) => api.post(`/financial/refunds/${id}/approve`),
   processRefund: (id: string) => api.post(`/financial/refunds/${id}/process`),

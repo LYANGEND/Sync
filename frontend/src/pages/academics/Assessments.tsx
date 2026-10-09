@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, FileText, Calendar, BookOpen, Users, ChevronRight, ArrowLeft, Save, Edit3, Trash2, Sparkles, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
 import QuestionBuilder from '../../components/academics/QuestionBuilder';
-import SubjectGradebook from '../../components/academics/SubjectGradebook';
+import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import { BarChart2, TrendingUp, Award, Calculator, Download, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
@@ -16,6 +17,7 @@ interface Assessment {
   weight: number;
   class: { id: string; name: string };
   subject: { id: string; name: string };
+  termId: string;
   _count?: { results: number };
   isOnline?: boolean;
 }
@@ -40,19 +42,14 @@ interface Student {
   admissionNumber: string;
 }
 
-interface AssessmentResult {
-  studentId: string;
-  score: number;
-  remarks: string;
-}
-
 interface AssessmentsProps {
   subjectId?: string;
 }
 
 const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) => {
   const { confirm } = useAppDialog();
-  const [view, setView] = useState<'list' | 'create' | 'grade' | 'questions' | 'gradebook'>('list');
+  const navigate = useNavigate();
+  const [view, setView] = useState<'list' | 'create' | 'grade' | 'questions'>('list');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
@@ -62,6 +59,9 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   // Filters
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [draftClass, setDraftClass] = useState('');
+  const [draftSubject, setDraftSubject] = useState('');
 
   // Selected Assessment for Grading
   const [currentAssessment, setCurrentAssessment] = useState<Assessment | null>(null);
@@ -93,6 +93,11 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
   const filteredCreateSubjects = newAssessment.classId
     ? (selectedCreateClassOption?.subjects?.length ? selectedCreateClassOption.subjects : subjects)
     : subjects;
+  const draftClassOption = classes.find(c => c.id === draftClass);
+  const draftFilteredSubjects = draftClass
+    ? (draftClassOption?.subjects?.length ? draftClassOption.subjects : subjects)
+    : subjects;
+  const activeFilterCount = [selectedClass, selectedSubject || propSubjectId].filter(Boolean).length;
 
   useEffect(() => {
     fetchInitialData();
@@ -135,14 +140,18 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
 
   const fetchInitialData = async () => {
     try {
-      const [classesRes, subjectsRes, termsRes] = await Promise.all([
-        api.get('/classes'),
+      const [subjectsRes, termsRes] = await Promise.all([
         api.get('/subjects'),
         api.get('/academic-terms') // Assuming this endpoint exists or similar
       ]);
+      const activeTerm = termsRes.data.find((term: any) => term.isActive) || termsRes.data[0];
+      const classesRes = activeTerm
+        ? await api.get('/classes', { params: { academicTermId: activeTerm.id } })
+        : { data: [] };
       setClasses(classesRes.data);
       setSubjects(subjectsRes.data);
       setTerms(termsRes.data);
+      setNewAssessment(prev => ({ ...prev, termId: prev.termId || activeTerm?.id || '' }));
 
       if (classesRes.data.length > 0) {
         const firstClass = classesRes.data[0];
@@ -162,6 +171,29 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
     }
   };
 
+  const handleAssessmentTermChange = async (termId: string) => {
+    setNewAssessment(prev => ({ ...prev, termId, classId: '', subjectId: propSubjectId || '' }));
+    if (!termId) {
+      setClasses([]);
+      return;
+    }
+    try {
+      const response = await api.get('/classes', { params: { academicTermId: termId } });
+      setClasses(response.data);
+      const firstClass = response.data[0];
+      if (firstClass) {
+        setNewAssessment(prev => ({
+          ...prev,
+          classId: firstClass.id,
+          subjectId: propSubjectId || firstClass.subjects?.[0]?.id || '',
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching classes for term:', error);
+      setClasses([]);
+    }
+  };
+
   const fetchAssessments = async () => {
     setLoading(true);
     try {
@@ -176,6 +208,43 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
     } finally {
       setLoading(false);
     }
+  };
+
+  const openFilters = () => {
+    setDraftClass(selectedClass);
+    setDraftSubject(propSubjectId || selectedSubject);
+    setShowFilters(true);
+  };
+
+  const handleDraftClassChange = (classId: string) => {
+    const nextClass = classes.find(classOption => classOption.id === classId);
+    const nextSubjects = classId
+      ? (nextClass?.subjects?.length ? nextClass.subjects : subjects)
+      : subjects;
+
+    setDraftClass(classId);
+    if (propSubjectId) {
+      setDraftSubject(propSubjectId);
+      return;
+    }
+    setDraftSubject(currentSubject =>
+      nextSubjects.some(subject => subject.id === currentSubject)
+        ? currentSubject
+        : (classId ? nextSubjects[0]?.id || '' : '')
+    );
+  };
+
+  const resetDraftFilters = () => {
+    setDraftClass('');
+    setDraftSubject(propSubjectId || '');
+  };
+
+  const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSelectedClass(draftClass);
+    setSelectedSubject(propSubjectId || draftSubject);
+    setSelectedAssessments(new Set());
+    setShowFilters(false);
   };
 
   const handleAIGenerateAssessment = async () => {
@@ -194,7 +263,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       const activeTerm = terms.find((t: any) => t.isActive);
       const termId = newAssessment.termId || activeTerm?.id;
       
-      const res = await api.post('/master-ai/chat', {
+      await api.post('/master-ai/chat', {
         message: `Generate a ${newAssessment.type || 'QUIZ'} assessment with questions for the class and subject I selected. Include 10 varied questions.`,
         context: { classId, subjectId, termId, assessmentType: newAssessment.type || 'QUIZ' }
       });
@@ -297,7 +366,9 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
     setLoading(true);
     try {
       // Fetch students in the class
-      const studentsRes = await api.get(`/classes/${assessment.class.id}/students`);
+      const studentsRes = await api.get(`/classes/${assessment.class.id}/students`, {
+        params: { academicTermId: assessment.termId },
+      });
       setStudents(studentsRes.data);
 
       // Fetch existing results
@@ -380,24 +451,6 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
 
         />
       </div>
-    );
-  }
-
-  if (view === 'gradebook') {
-    // These variables are not used here, they seem to be part of a different context.
-    // const wsData: any[][] = [
-    //    [`Subject Gradebook: ${subjectNameStr} - ${classNameStr}`],
-    //    headers
-    // ];
-    return (
-      <SubjectGradebook
-        classId={selectedClass}
-        subjectId={selectedSubject}
-        termId={''}
-        onBack={() => setView('list')}
-        classNameStr={classes.find(c => c.id === selectedClass)?.name || 'Class'}
-        subjectNameStr={subjects.find(s => s.id === selectedSubject)?.name || 'Subject'}
-      />
     );
   }
 
@@ -523,7 +576,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
               <select
                 required
                 value={newAssessment.termId}
-                onChange={e => setNewAssessment({ ...newAssessment, termId: e.target.value })}
+                onChange={e => handleAssessmentTermChange(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 dark:text-white"
               >
                 <option value="">Select Term</option>
@@ -572,7 +625,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
             <div className="pt-4">
               <button
                 type="submit"
-                className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="w-full bg-primary text-white py-2 rounded-lg hover:bg-primary-hover transition-colors font-medium"
               >
                 Create Assessment
               </button>
@@ -608,7 +661,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
           <button
             onClick={saveGrades}
             disabled={savingGrades}
-            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="flex items-center bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
           >
             <Save size={20} className="mr-2" />
             {savingGrades ? 'Saving...' : 'Save Grades'}
@@ -674,7 +727,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                 {students.map(student => (
-                  <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                  <tr key={student.id} className="hover:bg-surface-hover">
                     <td className="px-6 py-4 font-medium text-gray-800 dark:text-white">
                       {student.firstName} {student.lastName}
                     </td>
@@ -719,45 +772,22 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
       </div>
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm">
-        <div className="flex flex-1 gap-4 w-full sm:w-auto">
-          <div className="relative flex-1 sm:flex-none sm:w-64">
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <select
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
-            >
-              <option value="">All Classes</option>
-              {classes.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
-          </div>
-          {!propSubjectId && (
-          <div className="relative flex-1 sm:flex-none sm:w-64">
-            <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <select
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-slate-700 focus:bg-white dark:focus:bg-slate-600 dark:text-white transition-colors appearance-none cursor-pointer"
-            >
-              <option value="">All Subjects</option>
-              {filteredListSubjects.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={14} />
-          </div>
-          )}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <AcademicFilterButton onClick={openFilters} activeCount={activeFilterCount} />
+          <span className="hidden max-w-48 truncate rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300 lg:inline-block">
+            {classes.find(classOption => classOption.id === selectedClass)?.name || 'All classes'}
+          </span>
+          <span className="hidden max-w-48 truncate rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 lg:inline-block">
+            {subjects.find(subject => subject.id === (propSubjectId || selectedSubject))?.name || 'All subjects'}
+          </span>
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto">
           {selectedClass && selectedSubject && (
             <button
-              onClick={() => setView('gradebook')}
+              onClick={() => navigate('/academics/gradebook')}
               className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors shadow-sm"
-              title="View full subject matrix"
+              title="Open the gradebook"
             >
               <Calculator size={18} />
               <span className="hidden sm:inline">Gradebook</span>
@@ -775,7 +805,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
           )}
           <button
             onClick={() => setView('create')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-sm w-full sm:w-auto"
+            className="bg-primary text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-primary-hover transition-colors shadow-sm w-full sm:w-auto"
           >
             <Plus size={18} />
             <span className="hidden sm:inline">New Assessment</span>
@@ -793,6 +823,43 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
           )}
         </div>
       </div>
+
+      <AcademicFilterDialog
+        open={showFilters}
+        title="Filter assessments"
+        description="Choose a class and subject. The assessment list updates only after you apply the filters."
+        onClose={() => setShowFilters(false)}
+        onApply={applyFilters}
+        onReset={resetDraftFilters}
+      >
+        <div>
+          <label htmlFor="assessment-class-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Class</label>
+          <select
+            id="assessment-class-filter"
+            data-filter-autofocus="true"
+            value={draftClass}
+            onChange={(event) => handleDraftClassChange(event.target.value)}
+            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+          >
+            <option value="">All classes</option>
+            {classes.map(classOption => <option key={classOption.id} value={classOption.id}>{classOption.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="assessment-subject-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Subject</label>
+          <select
+            id="assessment-subject-filter"
+            value={draftSubject}
+            onChange={(event) => setDraftSubject(event.target.value)}
+            disabled={Boolean(propSubjectId)}
+            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950"
+          >
+            <option value="">All subjects</option>
+            {draftFilteredSubjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+          </select>
+          {propSubjectId && <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">This subject is fixed by the page you opened.</p>}
+        </div>
+      </AcademicFilterDialog>
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
@@ -880,7 +947,7 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
                     {(assessment.type === 'QUIZ' || assessment.type === 'TEST' || assessment.type === 'EXAM') && (
                       <button
                         onClick={() => openQuestionBuilder(assessment)}
-                        className="p-2 text-gray-500 hover:text-blue-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-200"
+                        className="p-2 text-gray-500 hover:text-blue-600 hover:bg-surface-hover rounded-lg transition-colors border border-transparent hover:border-gray-200"
                         title="Manage Questions"
                       >
                         <Edit3 size={18} />

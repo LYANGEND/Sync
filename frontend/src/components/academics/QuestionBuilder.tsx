@@ -182,7 +182,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
               AI Generate
             </button>
           )}
-          <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+          <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-surface-hover rounded-lg">
             Close
           </button>
           <button 
@@ -321,7 +321,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
 
           <button
             onClick={handleAddQuestion}
-            className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            className="w-full py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors font-medium"
           >
             Add Question to List
           </button>
@@ -454,7 +454,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
                         className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                           aiQuestionTypes.includes(type.value)
                             ? 'bg-purple-100 text-purple-700 border-2 border-purple-400'
-                            : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                            : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-surface-hover-strong'
                         }`}
                       >
                         {type.label}
@@ -466,7 +466,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
                 <div className="flex justify-end gap-3 pt-2">
                   <button
                     onClick={() => setShowAIModal(false)}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    className="px-4 py-2 text-gray-600 hover:bg-surface-hover rounded-lg"
                   >
                     Cancel
                   </button>
@@ -527,7 +527,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
                 <div className="flex justify-between gap-3 pt-2">
                   <button
                     onClick={() => setAIGeneratedQuestions([])}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg flex items-center gap-2"
+                    className="px-4 py-2 text-gray-600 hover:bg-surface-hover rounded-lg flex items-center gap-2"
                   >
                     <Sparkles size={16} />
                     Regenerate
@@ -535,7 +535,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowAIModal(false)}
-                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                      className="px-4 py-2 text-gray-600 hover:bg-surface-hover rounded-lg"
                     >
                       Discard
                     </button>

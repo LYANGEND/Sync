@@ -4,6 +4,8 @@ import { BranchStatus, TransferEntityType } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { runTermLifecycleTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // Schemas
 const createBranchSchema = z.object({
@@ -189,6 +191,10 @@ export const deleteBranch = async (req: Request, res: Response) => {
 export const getBranchAnalytics = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : '';
+        if (!academicTermId || !await prisma.academicTerm.findUnique({ where: { id: academicTermId }, select: { id: true } })) {
+            return res.status(400).json({ message: 'A valid academicTermId is required' });
+        }
 
         const branch = await prisma.branch.findUnique({ where: { id } });
         if (!branch) {
@@ -196,14 +202,16 @@ export const getBranchAnalytics = async (req: Request, res: Response) => {
         }
 
         // Get counts
-        const [studentCount, userCount, classCount, paymentStats, attendanceStats, recentEnrollments] = await Promise.all([
-            prisma.student.count({ where: { branchId: id } }),
+        const [termClasses, userCount, paymentStats, attendanceStats] = await Promise.all([
+            prisma.class.findMany({
+                where: { branchId: id, academicTermId },
+                select: { id: true, termEnrollments: { select: { studentId: true } } },
+            }),
             prisma.user.count({ where: { branchId: id } }),
-            prisma.class.count({ where: { branchId: id } }),
 
             // Payment stats
             prisma.payment.aggregate({
-                where: { branchId: id, status: 'COMPLETED' },
+                where: { branchId: id, academicTermId, status: 'COMPLETED' },
                 _sum: { amount: true },
                 _count: true
             }),
@@ -212,22 +220,17 @@ export const getBranchAnalytics = async (req: Request, res: Response) => {
             prisma.attendance.groupBy({
                 by: ['status'],
                 where: {
-                    student: { branchId: id },
-                    date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-                },
-                _count: true
-            }),
-
-            // Recent enrollments (last 6 months by month)
-            prisma.student.groupBy({
-                by: ['createdAt'],
-                where: {
-                    branchId: id,
-                    createdAt: { gte: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000) }
+                    academicTermId,
+                    class: { branchId: id },
                 },
                 _count: true
             })
         ]);
+        const studentIds = new Set([
+            ...termClasses.flatMap(classRecord => classRecord.termEnrollments.map(enrollment => enrollment.studentId)),
+        ]);
+        const studentCount = studentIds.size;
+        const classCount = termClasses.length;
 
         // Calculate attendance rate
         const totalAttendance = attendanceStats.reduce((acc, curr) => acc + curr._count, 0);
@@ -250,7 +253,7 @@ export const getBranchAnalytics = async (req: Request, res: Response) => {
                 attendanceRate: parseFloat(attendanceRate as string),
                 capacityUtilization: capacityUtilization ? parseFloat(capacityUtilization) : null,
             },
-            enrollmentTrend: recentEnrollments
+            enrollmentTrend: []
         });
     } catch (error) {
         console.error('Get branch analytics error:', error);
@@ -262,6 +265,9 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
     try {
         const { id } = req.params;
         const { startDate, endDate } = req.query;
+        const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : '';
+        const term = academicTermId ? await prisma.academicTerm.findUnique({ where: { id: academicTermId } }) : null;
+        if (!term) return res.status(400).json({ message: 'A valid academicTermId is required' });
 
         const branch = await prisma.branch.findUnique({ where: { id } });
         if (!branch) {
@@ -269,14 +275,17 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
         }
 
         const dateFilter: any = {};
-        if (startDate) dateFilter.gte = new Date(startDate as string);
-        if (endDate) dateFilter.lte = new Date(endDate as string);
+        dateFilter.gte = startDate ? new Date(startDate as string) : term.startDate;
+        dateFilter.lte = endDate ? new Date(endDate as string) : term.endDate;
+        if (dateFilter.gte < term.startDate) dateFilter.gte = term.startDate;
+        if (dateFilter.lte > term.endDate) dateFilter.lte = term.endDate;
 
         const [totalCollected, paymentsByMethod, outstandingFees, monthlyTrend] = await Promise.all([
             // Total collected
             prisma.payment.aggregate({
                 where: {
                     branchId: id,
+                    academicTermId,
                     status: 'COMPLETED',
                     ...(Object.keys(dateFilter).length && { paymentDate: dateFilter })
                 },
@@ -289,6 +298,7 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
                 by: ['method'],
                 where: {
                     branchId: id,
+                    academicTermId,
                     status: 'COMPLETED',
                     ...(Object.keys(dateFilter).length && { paymentDate: dateFilter })
                 },
@@ -299,6 +309,7 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
             // Outstanding fees (students in this branch)
             prisma.studentFeeStructure.aggregate({
                 where: {
+                    academicTermId,
                     student: { branchId: id }
                 },
                 _sum: { amountDue: true, amountPaid: true }
@@ -312,8 +323,10 @@ export const getBranchFinancialSummary = async (req: Request, res: Response) => 
                     COUNT(*) as count
                 FROM payments
                 WHERE "branchId" = ${id}
+                AND "academicTermId" = ${academicTermId}
                 AND status = 'COMPLETED'
-                AND "paymentDate" >= NOW() - INTERVAL '12 months'
+                AND "paymentDate" >= ${dateFilter.gte}
+                AND "paymentDate" <= ${dateFilter.lte}
                 GROUP BY DATE_TRUNC('month', "paymentDate")
                 ORDER BY month DESC
             `
@@ -372,7 +385,15 @@ export const transferStudent = async (req: AuthRequest, res: Response) => {
 
         // Verify student exists and belongs to source branch
         const student = await prisma.student.findFirst({
-            where: { id: studentId, branchId: id }
+            where: { id: studentId, branchId: id },
+            select: {
+                id: true,
+                branchId: true,
+                termEnrollments: {
+                    where: { status: 'ACTIVE' },
+                    select: { id: true }
+                }
+            }
         });
 
         if (!student) {
@@ -385,15 +406,35 @@ export const transferStudent = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'Target branch not found' });
         }
 
-        // Perform transfer
-        await prisma.$transaction([
-            // Update student's branch
-            prisma.student.update({
+        const hasActivePlacement = student.termEnrollments.length > 0;
+        if (hasActivePlacement) {
+            return res.status(409).json({
+                code: 'ACTIVE_PLACEMENT_BRANCH_TRANSFER_FORBIDDEN',
+                message: 'Transfer or withdraw the active academic placement before changing the student branch'
+            });
+        }
+        await runTermLifecycleTransaction(async tx => {
+            const current = await tx.student.findFirst({
+                where: { id: studentId, branchId: id },
+                select: {
+                    termEnrollments: {
+                        where: { status: 'ACTIVE' },
+                        select: { id: true }
+                    }
+                }
+            });
+            if (!current
+                || current.termEnrollments.length > 0) {
+                throw new TermLifecycleError(
+                    'TERM_LIFECYCLE_CONFLICT',
+                    'Student placement changed while the branch transfer was being processed',
+                );
+            }
+            await tx.student.update({
                 where: { id: studentId },
                 data: { branchId: toBranchId }
-            }),
-            // Create transfer record
-            prisma.branchTransfer.create({
+            });
+            await tx.branchTransfer.create({
                 data: {
                     entityType: 'STUDENT',
                     entityId: studentId,
@@ -402,11 +443,12 @@ export const transferStudent = async (req: AuthRequest, res: Response) => {
                     reason,
                     transferredByUserId: userId
                 }
-            })
-        ]);
+            });
+        });
 
         res.json({ message: 'Student transferred successfully' });
     } catch (error) {
+        if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
         console.error('Transfer student error:', error);
         res.status(500).json({ message: 'Internal server error' });
     }

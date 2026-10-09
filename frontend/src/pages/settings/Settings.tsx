@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
@@ -67,6 +68,17 @@ interface Term {
   endDate: string;
 }
 
+const SETTINGS_TABS = [
+  { id: 'general', label: 'General' },
+  { id: 'academic', label: 'Academic' },
+  { id: 'theme', label: 'Theme & Branding' },
+  { id: 'communication', label: 'Communication' },
+  { id: 'payments', label: 'Payments' },
+  { id: 'ai', label: 'AI & Intelligence' },
+] as const;
+
+type SettingsTab = typeof SETTINGS_TABS[number]['id'];
+
 const Settings = () => {
   const { confirm } = useAppDialog();
   const { refreshSettings } = useTheme();
@@ -119,7 +131,11 @@ const Settings = () => {
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'academic' | 'communication' | 'theme' | 'payments' | 'ai'>('general');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
+    const requested = searchParams.get('tab');
+    return SETTINGS_TABS.find(tab => tab.id === requested)?.id ?? 'general';
+  });
 
   // Logo upload state
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -280,42 +296,17 @@ const Settings = () => {
       <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">System Settings</h1>
 
       <div className="flex space-x-4 mb-6 border-b border-gray-200 dark:border-slate-700 overflow-x-auto scrollbar-hide">
-        <button
-          onClick={() => setActiveTab('general')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'general' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          General
-        </button>
-        <button
-          onClick={() => setActiveTab('academic')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'academic' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          Academic
-        </button>
-        <button
-          onClick={() => setActiveTab('theme')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'theme' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          Theme & Branding
-        </button>
-        <button
-          onClick={() => setActiveTab('communication')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'communication' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          Communication
-        </button>
-        <button
-          onClick={() => setActiveTab('payments')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'payments' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          Payments
-        </button>
-        <button
-          onClick={() => setActiveTab('ai')}
-          className={`pb-2 px-1 whitespace-nowrap ${activeTab === 'ai' ? 'border-b-2 border-blue-600 text-blue-600 font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
-        >
-          AI & Intelligence
-        </button>
+        {SETTINGS_TABS.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            aria-current={activeTab === tab.id ? 'page' : undefined}
+            className={`pb-2 px-1 whitespace-nowrap ${activeTab === tab.id ? 'border-b-2 border-primary text-primary font-medium' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -370,7 +361,7 @@ const Settings = () => {
                       htmlFor="logo-upload"
                       className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploadingLogo
                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-primary text-white hover:bg-primary-hover'
                         }`}
                     >
                       <Upload size={16} />
@@ -380,7 +371,7 @@ const Settings = () => {
                       <button
                         type="button"
                         onClick={handleDeleteLogo}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-surface-hover-danger transition-colors"
                       >
                         <Trash2 size={16} />
                         Remove
@@ -456,9 +447,10 @@ const Settings = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Current Academic Term</label>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">This sets the active term for attendance, grading, and fees.</p>
+              <label htmlFor="settings-current-term" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Active Academic Term</label>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">This is the only place the active term is set. Attendance, grading, fees, and the dashboard all use it.</p>
               <select
+                id="settings-current-term"
                 value={settings.currentTermId}
                 onChange={(e) => setSettings({ ...settings, currentTermId: e.target.value })}
                 className="w-full md:w-1/2 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white"
@@ -1064,7 +1056,7 @@ const Settings = () => {
           <button
             type="submit"
             disabled={saving}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors"
+            className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-blue-300 transition-colors"
           >
             <Save size={20} />
             {saving ? 'Saving...' : 'Save Settings'}

@@ -4,8 +4,8 @@ import {
   ArrowLeft, ListTree, GraduationCap, Layers, Target, Clock,
   Loader2, AlertCircle, Sparkles,
 } from 'lucide-react';
+import { useAppDialog } from '../ui/AppDialogProvider';
 import syllabusService, {
-  import { useAppDialog } from '../ui/AppDialogProvider';
   SubjectSyllabusOverview, Topic, SubTopic, parseLearningObjectives,
 } from '../../services/syllabusService';
 
@@ -51,7 +51,7 @@ function subjectIcon(name: string): string {
 // ==========================================
 
 const SyllabusDefinition: React.FC = () => {
-    const { confirm } = useAppDialog();
+  const { confirm } = useAppDialog();
   // ---- State ----
   const [overview, setOverview] = useState<SubjectSyllabusOverview[]>([]);
   const [loadingOverview, setLoadingOverview] = useState(true);
@@ -291,7 +291,7 @@ const SyllabusDefinition: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <button onClick={goBack} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition">
+            <button onClick={goBack} className="p-2 rounded-lg hover:bg-surface-hover transition">
               <ArrowLeft size={20} className="text-gray-500 dark:text-gray-400" />
             </button>
             <span className="text-2xl">{subjectIcon(selectedSubject.name)}</span>
@@ -305,13 +305,13 @@ const SyllabusDefinition: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={expandAll}
-              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition"
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition"
             >
               Expand All
             </button>
             <button
               onClick={collapseAll}
-              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition"
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition"
             >
               Collapse All
             </button>
@@ -330,7 +330,7 @@ const SyllabusDefinition: React.FC = () => {
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
                   active
                     ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
+                    : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-surface-hover-strong'
                 }`}
               >
                 {gradeLabel(gl)}
@@ -397,7 +397,7 @@ const SyllabusDefinition: React.FC = () => {
               </button>
               <button
                 onClick={() => setAddingTopic(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 text-sm"
+                className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-surface-hover text-sm"
               >
                 <Plus size={16} /> Add manually
               </button>
@@ -534,11 +534,11 @@ const SyllabusDefinition: React.FC = () => {
                                     className="mt-2 w-full px-2 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                                   />
                                   <div className="flex justify-end gap-2 mt-2">
-                                    <button onClick={() => setEditingSubId(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
+                                    <button onClick={() => setEditingSubId(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
                                     <button
                                       onClick={() => handleEditSubTopic(st.id)}
                                       disabled={saving}
-                                      className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                      className="text-xs px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
                                     >
                                       {saving ? 'Saving...' : 'Save'}
                                     </button>
@@ -548,7 +548,7 @@ const SyllabusDefinition: React.FC = () => {
                             }
 
                             return (
-                              <div key={st.id} className="px-6 py-3 hover:bg-white dark:hover:bg-slate-750 transition group/sub">
+                              <div key={st.id} className="px-6 py-3 hover:bg-surface-hover transition group/sub">
                                 <div className="flex items-start gap-3">
                                   <div className="mt-0.5 flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold flex-shrink-0">
                                     {stIdx + 1}
@@ -627,11 +627,11 @@ const SyllabusDefinition: React.FC = () => {
                             className="mt-2 w-full px-2 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                           <div className="flex justify-end gap-2 mt-2">
-                            <button onClick={() => setAddingSubTopicFor(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
+                            <button onClick={() => setAddingSubTopicFor(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
                             <button
                               onClick={() => handleAddSubTopic(topic.id)}
                               disabled={saving || !newSubTitle.trim()}
-                              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                              className="text-xs px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
                             >
                               {saving ? 'Adding...' : 'Add SubTopic'}
                             </button>
@@ -677,11 +677,11 @@ const SyllabusDefinition: React.FC = () => {
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <div className="flex justify-end gap-2 mt-3">
-              <button onClick={() => setAddingTopic(false)} className="text-sm px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
+              <button onClick={() => setAddingTopic(false)} className="text-sm px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
               <button
                 onClick={handleAddTopic}
                 disabled={saving || !newTopicTitle.trim()}
-                className="text-sm px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                className="text-sm px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
               >
                 {saving ? 'Adding...' : 'Add Topic'}
               </button>

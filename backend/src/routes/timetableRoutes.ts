@@ -13,9 +13,9 @@ const router = Router();
 
 router.use(authenticateToken);
 
-router.get('/', authorizeRole(['SUPER_ADMIN', 'TEACHER']), getAllPeriods);
+router.get('/', authorizeRole(['SUPER_ADMIN']), getAllPeriods);
 router.get('/class/:classId', getTimetableByClass);
-router.get('/teacher/:teacherId', getTimetableByTeacher);
+router.get('/teacher/:teacherId', authorizeRole(['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']), getTimetableByTeacher);
 router.post('/', authorizeRole(['SUPER_ADMIN', 'TEACHER']), createTimetablePeriod);
 router.put('/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), updateTimetablePeriod);
 router.delete('/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), deleteTimetablePeriod);

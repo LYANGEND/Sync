@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { z } from 'zod';
 import {
   getTrialBalance,
   getIncomeStatement,
@@ -8,6 +9,16 @@ import {
   getCashFlowSummary,
   getAgedReceivables,
 } from '../services/accountingService';
+import {
+  approveRefundRequest,
+  createRefundRequest,
+  PaymentSettlementError,
+  processApprovedRefund,
+} from '../services/paymentSettlementService';
+import { sendPaymentSettlementError } from '../utils/paymentSettlementHttp';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { onRefundProcessed } from '../services/accountingBridge';
 
 // ========================================
 // FINANCIAL STATEMENTS
@@ -84,8 +95,10 @@ export const agedReceivables = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     const branchId = user?.role === 'SUPER_ADMIN' ? undefined : user?.branchId;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ error: 'Academic term ID is required' });
 
-    const result = await getAgedReceivables(branchId);
+    const result = await getAgedReceivables(branchId, academicTermId);
     res.json(result);
   } catch (error) {
     console.error('Aged receivables error:', error);
@@ -201,9 +214,11 @@ export const getRefunds = async (req: Request, res: Response) => {
   try {
     const user = (req as AuthRequest).user;
     const branchFilter = user?.role === 'SUPER_ADMIN' ? {} : { branchId: user?.branchId };
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+    if (!academicTermId) return res.status(400).json({ error: 'Academic term ID is required' });
 
     const refunds = await prisma.refund.findMany({
-      where: branchFilter,
+      where: { ...branchFilter, payment: { academicTermId } },
       include: {
         payment: {
           include: {
@@ -222,36 +237,34 @@ export const getRefunds = async (req: Request, res: Response) => {
 
 export const createRefund = async (req: Request, res: Response) => {
   try {
-    const { paymentId, amount, reason, method } = req.body;
+    const data = z.object({
+      paymentId: z.string().uuid(),
+      amount: z.number().positive(),
+      reason: z.string().min(3).max(500),
+      method: z.string().min(2).max(50),
+      notes: z.string().max(500).optional(),
+      idempotencyKey: z.string().min(8).max(200).optional(),
+    }).parse(req.body);
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId },
-      include: { student: true },
-    });
-    if (!payment) return res.status(404).json({ error: 'Payment not found' });
-    if (amount > Number(payment.amount)) {
-      return res.status(400).json({ error: 'Refund amount exceeds payment amount' });
-    }
-
-    const refundNumber = await (await import('../services/accountingService')).generateSequenceNumber('REF', user.branchId);
-
-    const refund = await prisma.refund.create({
-      data: {
-        refundNumber,
-        paymentId,
-        studentId: payment.studentId,
-        amount,
-        reason,
-        method,
-        requestedBy: user.userId,
-        branchId: user.branchId || payment.branchId,
-      },
+    const result = await createRefundRequest({
+      paymentId: data.paymentId,
+      amount: data.amount,
+      reason: data.reason,
+      method: data.method,
+      notes: data.notes,
+      requestedByUserId: user.userId,
+      actorBranchId: user.role === 'SUPER_ADMIN' ? null : user.branchId,
+      idempotencyKey: data.idempotencyKey ?? req.header?.('Idempotency-Key')?.trim(),
     });
 
-    res.status(201).json(refund);
+    res.status(result.reused ? 200 : 201).json({ ...result.refund, reused: result.reused });
   } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
+    console.error('Create refund error:', error);
     res.status(500).json({ error: 'Failed to create refund' });
   }
 };
@@ -261,12 +274,16 @@ export const approveRefund = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const refund = await prisma.refund.update({
-      where: { id: req.params.id },
-      data: { status: 'APPROVED', approvedBy: user.userId, approvedAt: new Date() },
-    });
+    const refund = await approveRefundRequest(
+      req.params.id,
+      user.userId,
+      user.role === 'SUPER_ADMIN' ? null : user.branchId,
+    );
     res.json(refund);
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
+    console.error('Approve refund error:', error);
     res.status(500).json({ error: 'Failed to approve refund' });
   }
 };
@@ -276,17 +293,21 @@ export const processRefund = async (req: Request, res: Response) => {
     const user = (req as AuthRequest).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const refund = await prisma.refund.findUnique({ where: { id: req.params.id } });
-    if (!refund) return res.status(404).json({ error: 'Refund not found' });
-    if (refund.status !== 'APPROVED') return res.status(400).json({ error: 'Refund must be approved first' });
+    const updated = await processApprovedRefund(
+      req.params.id,
+      user.userId,
+      user.role === 'SUPER_ADMIN' ? null : user.branchId,
+    );
 
-    const updated = await prisma.refund.update({
-      where: { id: req.params.id },
-      data: { status: 'PROCESSED', processedBy: user.userId, processedAt: new Date() },
-    });
+    onRefundProcessed(updated.id, user.userId).catch(error =>
+      console.error('Background refund journal failed:', error)
+    );
 
     res.json(updated);
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
+    console.error('Process refund error:', error);
     res.status(500).json({ error: 'Failed to process refund' });
   }
 };

@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { getStudentPlacementForTerm, StudentPlacementError } from '../services/studentPlacementService';
 
 // Schema for creating/updating questions
 const questionSchema = z.object({
@@ -28,8 +31,7 @@ export const addQuestionsToAssessment = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Assessment not found' });
     }
 
-    // Create questions in transaction
-    await prisma.$transaction(async (tx: any) => {
+    await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
       for (const q of questions) {
         const questionData = questionSchema.parse(q);
 
@@ -53,16 +55,17 @@ export const addQuestionsToAssessment = async (req: Request, res: Response) => {
           });
         }
       }
-    });
 
-    // Enable online mode for assessment
-    await prisma.assessment.update({
-      where: { id: assessmentId },
-      data: { isOnline: true }
+      // Enable online mode in the same transaction as its questions.
+      await tx.assessment.update({
+        where: { id: assessmentId },
+        data: { isOnline: true }
+      });
     });
 
     res.json({ message: 'Questions added successfully' });
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Add questions error:', error);
     res.status(500).json({ error: 'Failed to add questions' });
   }
@@ -163,8 +166,15 @@ export const submitQuiz = async (req: Request, res: Response) => {
       actualStudentId = studentProfile.id;
     }
 
-    // Start transaction
-    const result = await prisma.$transaction(async (tx: any) => {
+    const assessment = await prisma.assessment.findUnique({
+      where: { id: assessmentId },
+      select: { termId: true },
+    });
+    if (!assessment) {
+      return res.status(404).json({ error: 'Assessment not found' });
+    }
+
+    const result = await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', async tx => {
       // 1. Create Submission
       const submission = await tx.assessmentSubmission.create({
         data: {
@@ -234,6 +244,7 @@ export const submitQuiz = async (req: Request, res: Response) => {
     res.json(result);
 
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Submit quiz error:', error);
     res.status(500).json({ error: 'Failed to submit quiz' });
   }
@@ -242,6 +253,10 @@ export const submitQuiz = async (req: Request, res: Response) => {
 export const getStudentAssessments = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    const termId = typeof req.query.termId === 'string' ? req.query.termId : '';
+    if (!termId) {
+      return res.status(400).json({ error: 'termId is required' });
+    }
 
     // Determine which student to fetch for
     let student;
@@ -275,11 +290,16 @@ export const getStudentAssessments = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Student profile not found' });
     }
 
+    const placement = await getStudentPlacementForTerm(student.id, termId);
+    if (!placement) {
+      return res.json([]);
+    }
+
     // Get assessments for student's class
     const assessments = await prisma.assessment.findMany({
       where: {
-        classId: student.classId,
-        // Optional: Filter by active term
+        classId: placement.classId,
+        termId,
       },
       include: {
         subject: true,
@@ -309,6 +329,9 @@ export const getStudentAssessments = async (req: Request, res: Response) => {
     res.json(formattedAssessments);
 
   } catch (error) {
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Get student assessments error:', error);
     res.status(500).json({ error: 'Failed to fetch assessments' });
   }

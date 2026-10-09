@@ -142,7 +142,7 @@ const BranchAssignmentModal = ({ entityType, entityId, entityName, onClose }: Pr
                         </h2>
                         <p className="text-sm text-gray-500">{entityName}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+                    <button onClick={onClose} className="p-2 hover:bg-surface-hover rounded-lg">
                         <X size={20} />
                     </button>
                 </div>
@@ -193,14 +193,14 @@ const BranchAssignmentModal = ({ entityType, entityId, entityName, onClose }: Pr
                                                     <>
                                                         <button
                                                             onClick={() => handleSetPrimary(assignment.branchId)}
-                                                            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-surface-hover-accent rounded transition-colors"
                                                             title="Set as primary"
                                                         >
                                                             <Star size={16} />
                                                         </button>
                                                         <button
                                                             onClick={() => handleRemove(assignment.branchId)}
-                                                            className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                            className="p-2 text-gray-500 hover:text-red-600 hover:bg-surface-hover-danger rounded transition-colors"
                                                             title="Remove"
                                                         >
                                                             <Trash2 size={16} />
@@ -250,14 +250,14 @@ const BranchAssignmentModal = ({ entityType, entityId, entityName, onClose }: Pr
                                     <div className="flex justify-end gap-2">
                                         <button
                                             onClick={() => setShowAddForm(false)}
-                                            className="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                                            className="px-3 py-2 text-gray-600 hover:bg-surface-hover rounded-lg"
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             onClick={handleAdd}
                                             disabled={!selectedBranchId || saving}
-                                            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                            className="px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
                                         >
                                             {saving ? 'Adding...' : 'Add Assignment'}
                                         </button>

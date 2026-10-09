@@ -13,7 +13,7 @@ interface Student {
   guardianPhone?: string;
   class: {
     name: string;
-  };
+  } | null;
   balance: number;
   attendance: {
     date: string;
@@ -81,14 +81,30 @@ const MyChildren = () => {
   const [children, setChildren] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedFees, setExpandedFees] = useState<Record<string, boolean>>({});
+  const [academicTerms, setAcademicTerms] = useState<Array<{ id: string; name: string; isActive?: boolean }>>([]);
+  const [selectedAcademicTermId, setSelectedAcademicTermId] = useState('');
 
   useEffect(() => {
-    fetchChildren();
+    api.get('/academic-terms').then(response => {
+      const terms = Array.isArray(response.data) ? response.data : [];
+      const defaultTerm = terms.find((term: any) => term.isActive) || terms[0];
+      setAcademicTerms(terms);
+      setSelectedAcademicTermId(defaultTerm?.id || '');
+      if (!defaultTerm) setLoading(false);
+    }).catch(error => {
+      console.error('Error fetching academic terms:', error);
+      setLoading(false);
+    });
   }, []);
 
-  const fetchChildren = async () => {
+  useEffect(() => {
+    if (selectedAcademicTermId) fetchChildren(selectedAcademicTermId);
+  }, [selectedAcademicTermId]);
+
+  const fetchChildren = async (academicTermId: string) => {
+    setLoading(true);
     try {
-      const response = await api.get('/students/my-children');
+      const response = await api.get('/students/my-children', { params: { academicTermId } });
       setChildren(response.data);
     } catch (error) {
       console.error('Error fetching children:', error);
@@ -125,11 +141,14 @@ const MyChildren = () => {
 
   const handleDownloadStatement = async (studentId: string) => {
     const child = children.find(c => c.id === studentId);
-    if (!child) return;
+    if (!child || !selectedAcademicTermId) return;
 
     try {
-      // 1. Fetch full payment history
-      const response = await api.get(`/payments/student/${studentId}`);
+      const selectedTerm = academicTerms.find(term => term.id === selectedAcademicTermId);
+      // 1. Fetch payment history for the selected reporting term
+      const response = await api.get(`/payments/student/${studentId}`, {
+        params: { academicTermId: selectedAcademicTermId },
+      });
       const payments = response.data;
 
       // 2. Prepare Statement Data
@@ -184,6 +203,7 @@ const MyChildren = () => {
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.text(`Generated on: ${new Date().toLocaleString()}`, 105, 28, { align: 'center' });
+      doc.text(`Academic term: ${selectedTerm?.name || 'Selected term'}`, 105, 33, { align: 'center' });
 
       // Student Details
       doc.setFontSize(12);
@@ -224,7 +244,7 @@ const MyChildren = () => {
       doc.setTextColor(100);
       doc.text('This is a computer-generated document and does not require a signature.', 105, finalY, { align: 'center' });
 
-      doc.save(`${child.firstName}_${child.lastName}_Statement.pdf`);
+      doc.save(`${child.firstName}_${child.lastName}_${selectedTerm?.name || 'Term'}_Statement.pdf`);
 
     } catch (error) {
       console.error('Failed to generate statement:', error);
@@ -244,7 +264,9 @@ const MyChildren = () => {
   const fetchTransactions = async (studentId: string) => {
     setLoadingTransactions(true);
     try {
-      const res = await api.get('/payments/mobile-money', { params: { studentId } });
+      const res = await api.get('/payments/mobile-money', {
+        params: { studentId, academicTermId: selectedAcademicTermId },
+      });
       setHistoryTransactions(res.data.data || []);
     } catch (error) {
       console.error(error);
@@ -263,7 +285,9 @@ const MyChildren = () => {
     fetchTransactions(child.id);
 
     try {
-      const res = await api.get(`/payments/student/${child.id}`);
+      const res = await api.get(`/payments/student/${child.id}`, {
+        params: { academicTermId: selectedAcademicTermId },
+      });
       setHistoryPayments(res.data);
     } catch (err) {
       console.error(err);
@@ -297,6 +321,7 @@ const MyChildren = () => {
     try {
       await api.post('/payments/mobile-money/initiate', {
         studentId: selectedChildForPayment.id,
+        academicTermId: selectedAcademicTermId,
         amount: parseFloat(paymentAmount),
         phone: paymentPhone,
         operator: paymentOperator,
@@ -307,9 +332,7 @@ const MyChildren = () => {
       // Close modal and show success (simple alert for now)
       setShowPaymentModal(false);
       alert('Payment initiated successfully! Please check your phone to authorize the transaction.');
-
-      // Optionally refresh children to see pending?
-      // fetchChildren(); 
+      fetchChildren(selectedAcademicTermId);
     } catch (error: any) {
       console.error('Payment Error:', error);
       alert(error.response?.data?.message || 'Failed to initiate payment. Please try again.');
@@ -324,7 +347,22 @@ const MyChildren = () => {
 
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">My Children</h1>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">My Children</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">All balances, attendance, results, and payment history below belong to one term.</p>
+        </div>
+        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          Reporting term
+          <select
+            value={selectedAcademicTermId}
+            onChange={(event) => setSelectedAcademicTermId(event.target.value)}
+            className="mt-1 block min-w-56 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-800 outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+          >
+            {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+          </select>
+        </label>
+      </div>
 
       <div className="space-y-8">
         {children.map((child) => (
@@ -392,7 +430,7 @@ const MyChildren = () => {
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                       {child.todaysClasses && child.todaysClasses.length > 0 ? (
                         child.todaysClasses.map(period => (
-                          <div key={period.id} className="flex items-center gap-3 p-2 rounded hover:bg-slate-50 dark:hover:bg-slate-700 border border-transparent hover:border-slate-100 dark:hover:border-slate-600 transition-all">
+                          <div key={period.id} className="flex items-center gap-3 p-2 rounded hover:bg-surface-hover border border-transparent hover:border-slate-100 dark:hover:border-slate-600 transition-all">
                             <div className="w-14 text-center bg-blue-50 dark:bg-blue-900/30 rounded p-1">
                               <span className="block text-xs font-bold text-blue-700 dark:text-blue-400">{period.startTime}</span>
                               <span className="block text-[10px] text-blue-400 dark:text-blue-500">{period.endTime}</span>
@@ -510,7 +548,7 @@ const MyChildren = () => {
                     <div className="space-y-3">
                       {child.assessmentResults && child.assessmentResults.length > 0 ? (
                         child.assessmentResults.slice(0, 5).map((result) => (
-                          <div key={result.id} className="flex justify-between items-center p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-600">
+                          <div key={result.id} className="flex justify-between items-center p-2 hover:bg-surface-hover rounded-lg transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-600">
                             <div>
                               <span className="font-medium text-slate-700 dark:text-slate-200 block text-sm">{result.assessment?.subject?.name}</span>
                               <span className="text-xs text-slate-500 dark:text-slate-400">{result.assessment?.title}</span>
@@ -552,7 +590,7 @@ const MyChildren = () => {
                               </div>
                               <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{report.term?.name}</span>
                             </div>
-                            <button className="text-blue-600 hover:text-blue-800 text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-600 border border-blue-100 dark:border-slate-500 rounded-md hover:bg-blue-50 dark:hover:bg-slate-500 transition-colors shadow-sm">
+                            <button className="text-blue-600 hover:text-blue-800 text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-600 border border-blue-100 dark:border-slate-500 rounded-md hover:bg-surface-hover-accent transition-colors shadow-sm">
                               View
                             </button>
                           </div>
@@ -573,7 +611,7 @@ const MyChildren = () => {
                 {/* Fee Structure */}
                 <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
                   <div
-                    className="p-4 bg-slate-50 dark:bg-slate-700 border-b border-slate-100 dark:border-slate-600 flex justify-between items-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                    className="p-4 bg-slate-50 dark:bg-slate-700 border-b border-slate-100 dark:border-slate-600 flex justify-between items-center cursor-pointer hover:bg-surface-hover transition-colors"
                     onClick={() => toggleFeeDetails(child.id)}
                   >
                     <div className="flex items-center space-x-2">
@@ -614,14 +652,14 @@ const MyChildren = () => {
                   <div className="space-y-3">
                     {(child.payments?.length ?? 0) > 0 ? (
                       child.payments.slice(0, 3).map((payment, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-sm p-2 rounded hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                        <div key={idx} className="flex justify-between items-center text-sm p-2 rounded hover:bg-surface-hover transition-colors">
                           <div>
                             <span className="text-slate-500 dark:text-slate-400 text-xs block mb-0.5">{new Date(payment.paymentDate).toLocaleDateString()}</span>
                             <span className="font-bold text-slate-800 dark:text-white">ZMW {Number(payment.amount).toLocaleString()}</span>
                           </div>
                           <button
                             onClick={() => generateReceipt(child, payment)}
-                            className="text-slate-400 hover:text-blue-600 p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                            className="text-slate-400 hover:text-blue-600 p-2 rounded-full hover:bg-surface-hover-accent transition-colors"
                             title="Download Receipt"
                           >
                             <Download size={18} />
@@ -690,9 +728,11 @@ const MyChildren = () => {
               <div className="flex justify-between items-center mb-4">
                 <div>
                   <h3 className="text-xl font-bold text-slate-800 dark:text-white">Payment History</h3>
-                  <p className="text-slate-500 dark:text-slate-400 text-sm">{historyChild.firstName} {historyChild.lastName}</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">
+                    {historyChild.firstName} {historyChild.lastName} · {academicTerms.find(term => term.id === selectedAcademicTermId)?.name}
+                  </p>
                 </div>
-                <button onClick={() => setShowHistoryModal(false)} className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 p-2 rounded-full transition-colors">
+                <button onClick={() => setShowHistoryModal(false)} className="bg-slate-100 dark:bg-slate-700 hover:bg-surface-hover-strong p-2 rounded-full transition-colors">
                   <X size={20} className="text-slate-600 dark:text-slate-300" />
                 </button>
               </div>
@@ -829,6 +869,18 @@ const MyChildren = () => {
 
             <form onSubmit={handleInitiatePayment} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Academic Term</label>
+                <select
+                  required
+                  value={selectedAcademicTermId}
+                  disabled
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-slate-800 outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                >
+                  <option value="">Select term</option>
+                  {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fee Amount (ZMW)</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">ZMW</span>
@@ -915,7 +967,7 @@ const MyChildren = () => {
               <button
                 type="submit"
                 disabled={isProcessingPayment}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-200 disabled:opacity-70 disabled:cursor-not-allowed mt-4 flex items-center justify-center"
+                className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-200 disabled:opacity-70 disabled:cursor-not-allowed mt-4 flex items-center justify-center"
               >
                 {isProcessingPayment ? (
                   <>

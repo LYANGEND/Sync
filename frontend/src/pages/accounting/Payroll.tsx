@@ -186,7 +186,7 @@ const Payroll = ({ embedded = false }: { embedded?: boolean }) => {
           <div className="flex justify-between items-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">{staffPayrolls.length} staff member(s) configured</p>
             <button onClick={() => { resetStaffForm(); setShowStaffModal(true); }}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <Plus size={16} /><span>Add Staff</span>
             </button>
           </div>
@@ -226,7 +226,7 @@ const Payroll = ({ embedded = false }: { embedded?: boolean }) => {
                 {staffPayrolls.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No staff payroll configured</td></tr>
                 ) : staffPayrolls.map(sp => (
-                  <tr key={sp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <tr key={sp.id} className="hover:bg-surface-hover">
                     <td className="px-4 py-3">
                       <p className="font-medium dark:text-white">{sp.user?.fullName || sp.userId}</p>
                       <p className="text-xs text-gray-400">{sp.user?.role}</p>
@@ -267,7 +267,7 @@ const Payroll = ({ embedded = false }: { embedded?: boolean }) => {
         <div className="space-y-4">
           <div className="flex justify-end">
             <button onClick={() => setShowRunModal(true)}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+              className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover text-sm">
               <PlayCircle size={16} /><span>Create Payroll Run</span>
             </button>
           </div>
@@ -398,9 +398,9 @@ const Payroll = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleSaveStaff}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">
                 {editingStaff ? 'Update' : 'Create'}
               </button>
             </div>
@@ -442,9 +442,9 @@ const Payroll = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t dark:border-gray-700">
               <button onClick={() => setShowRunModal(false)}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">Cancel</button>
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-surface-hover dark:text-gray-300 dark:border-gray-600">Cancel</button>
               <button onClick={handleCreateRun}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create Run</button>
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover">Create Run</button>
             </div>
           </div>
         </div>

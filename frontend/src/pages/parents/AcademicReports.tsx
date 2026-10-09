@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Download, User, Share2, Award, BookOpen } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileText, Download, User, Award, BookOpen } from 'lucide-react';
 import api from '../../utils/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -28,22 +28,44 @@ interface Student {
     admissionNumber: string;
     class: {
         name: string;
-    };
+    } | null;
     termResults: TermResult[];
+}
+
+interface AcademicTermOption {
+    id: string;
+    name: string;
+    isActive?: boolean;
 }
 
 const AcademicReports = () => {
     const [children, setChildren] = useState<Student[]>([]);
     const [selectedChildId, setSelectedChildId] = useState<string>('');
+    const [academicTerms, setAcademicTerms] = useState<AcademicTermOption[]>([]);
+    const [selectedAcademicTermId, setSelectedAcademicTermId] = useState('');
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetchChildren();
+        api.get('/academic-terms').then(response => {
+            const terms = Array.isArray(response.data) ? response.data : [];
+            const defaultTerm = terms.find((term: AcademicTermOption) => term.isActive) || terms[0];
+            setAcademicTerms(terms);
+            setSelectedAcademicTermId(defaultTerm?.id || '');
+            if (!defaultTerm) setLoading(false);
+        }).catch(error => {
+            console.error('Error fetching academic terms:', error);
+            setLoading(false);
+        });
     }, []);
 
-    const fetchChildren = async () => {
+    useEffect(() => {
+        if (selectedAcademicTermId) fetchChildren(selectedAcademicTermId);
+    }, [selectedAcademicTermId]);
+
+    const fetchChildren = async (academicTermId: string) => {
+        setLoading(true);
         try {
-            const response = await api.get('/students/my-children');
+            const response = await api.get('/students/my-children', { params: { academicTermId } });
             setChildren(response.data);
             if (response.data.length > 0) {
                 setSelectedChildId(response.data[0].id);
@@ -161,12 +183,24 @@ const AcademicReports = () => {
 
     return (
         <div className="p-4 md:p-6 pb-24 md:pb-6 max-w-7xl mx-auto">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
-                    <Award className="text-blue-600" size={32} />
-                    Academic Reports
-                </h1>
-                <p className="text-gray-500 dark:text-gray-400 mt-2">View and download term performance reports for your children.</p>
+            <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
+                        <Award className="text-blue-600" size={32} />
+                        Academic Reports
+                    </h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-2">View and download one term's performance reports for your children.</p>
+                </div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Reporting term
+                    <select
+                        value={selectedAcademicTermId}
+                        onChange={(event) => setSelectedAcademicTermId(event.target.value)}
+                        className="mt-1 block min-w-56 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-gray-800 outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                    >
+                        {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+                    </select>
+                </label>
             </div>
 
             {children.length > 0 ? (
@@ -179,7 +213,7 @@ const AcademicReports = () => {
                                 onClick={() => setSelectedChildId(child.id)}
                                 className={`flex items-center space-x-2 px-6 py-3 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap border-b-2 ${selectedChildId === child.id
                                         ? 'border-blue-600 text-blue-600 bg-blue-50/50 dark:bg-blue-900/30'
-                                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700'
+                                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-surface-hover'
                                     }`}
                             >
                                 <User size={18} />
@@ -206,7 +240,7 @@ const AcademicReports = () => {
                                             </div>
                                             <button
                                                 onClick={() => generateReportCard(termId)}
-                                                className="flex items-center gap-2 bg-white dark:bg-slate-600 border border-gray-300 dark:border-slate-500 hover:bg-gray-50 dark:hover:bg-slate-500 text-gray-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                                className="flex items-center gap-2 bg-white dark:bg-slate-600 border border-gray-300 dark:border-slate-500 hover:bg-surface-hover text-gray-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
                                             >
                                                 <Download size={16} />
                                                 Download Report PDF
@@ -226,7 +260,7 @@ const AcademicReports = () => {
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
                                                         {termData.results.map((result) => (
-                                                            <tr key={result.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                                            <tr key={result.id} className="hover:bg-surface-hover transition-colors">
                                                                 <td className="py-3 px-4">
                                                                     <div className="flex items-center gap-2">
                                                                         <BookOpen size={14} className="text-gray-400" />

@@ -89,7 +89,7 @@ const ClassAnalytics: React.FC<Props> = ({ classId, termId, className }) => {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${
               activeView === tab.id
                 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700'
+                : 'text-gray-500 hover:bg-surface-hover'
             }`}
           >
             <tab.icon className="w-3.5 h-3.5" />

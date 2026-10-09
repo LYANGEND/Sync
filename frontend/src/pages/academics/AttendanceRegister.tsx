@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     Calendar, Save, CheckCircle, XCircle, Clock, UserCheck,
-    Search, BarChart2, Download, ChevronLeft, ChevronRight,
+    Search, BarChart2, Download,
     MessageSquare, Printer, Undo2, AlertTriangle, LayoutGrid,
     List, Volume2, VolumeX, Eye, Shield, Zap, Users, Pencil,
     X, Loader2, RefreshCw
@@ -9,7 +9,10 @@ import {
 import api from '../../utils/api';
 import { toast } from 'react-hot-toast';
 import AttendanceAnalytics from '../../components/academics/AttendanceAnalytics';
+import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { pickActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 import * as XLSX from 'xlsx';
 
 interface Student {
@@ -35,6 +38,20 @@ interface UndoEntry {
     timestamp: number;
 }
 
+interface AcademicTerm {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+    status?: string;
+    isActive?: boolean;
+}
+
+interface InstructionalDay {
+    date: string;
+    isInstructional: boolean;
+}
+
 type ViewMode = 'daily' | 'weekly' | 'analytics';
 
 const AUTO_SAVE_KEY = 'attendance_draft';
@@ -42,6 +59,9 @@ const AUTO_SAVE_KEY = 'attendance_draft';
 const AttendanceRegister = () => {
     const { confirm, notify } = useAppDialog();
     const [classes, setClasses] = useState<any[]>([]);
+    const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
+    const [instructionalDates, setInstructionalDates] = useState<Record<string, string[]>>({});
+    const [selectedTermId, setSelectedTermId] = useState('');
     const [selectedClassId, setSelectedClassId] = useState('');
     const [selectedClassName, setSelectedClassName] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -52,6 +72,11 @@ const AttendanceRegister = () => {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [showFilters, setShowFilters] = useState(false);
+    const [draftTermId, setDraftTermId] = useState('');
+    const [draftClassId, setDraftClassId] = useState('');
+    const [draftDate, setDraftDate] = useState('');
+    const [draftSearchQuery, setDraftSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<ViewMode>('daily');
     const [displayMode, setDisplayMode] = useState<'list' | 'photo'>('list');
 
@@ -83,17 +108,32 @@ const AttendanceRegister = () => {
 
     useEffect(() => { fetchClasses(); }, []);
 
-    useEffect(() => {
-        if (selectedClassId && date && viewMode === 'daily') {
-            fetchAttendanceData();
-        }
-    }, [selectedClassId, date, viewMode]);
+    const selectedTerm = useMemo(
+        () => academicTerms.find(term => term.id === selectedTermId),
+        [academicTerms, selectedTermId],
+    );
+    const draftTerm = useMemo(
+        () => academicTerms.find(term => term.id === draftTermId),
+        [academicTerms, draftTermId],
+    );
+    const draftTermClasses = useMemo(
+        () => classes.filter(classOption => classOption.academicTermId === draftTermId),
+        [classes, draftTermId],
+    );
+    const selectedTermInstructionalDates = instructionalDates[selectedTermId] || [];
+    const draftTermInstructionalDates = instructionalDates[draftTermId] || [];
 
     useEffect(() => {
-        if (selectedClassId && viewMode === 'weekly') {
+        if (selectedTermId && selectedClassId && date && viewMode === 'daily') {
+            fetchAttendanceData();
+        }
+    }, [selectedTermId, selectedClassId, date, viewMode]);
+
+    useEffect(() => {
+        if (selectedTermId && selectedClassId && viewMode === 'weekly') {
             generateWeekDates();
         }
-    }, [selectedClassId, date, viewMode]);
+    }, [selectedTermId, selectedClassId, date, viewMode]);
 
     useEffect(() => {
         if (selectedClassId && viewMode === 'weekly' && weekDates.length > 0) {
@@ -106,30 +146,58 @@ const AttendanceRegister = () => {
         if (isDirty && selectedClassId && Object.keys(attendance).length > 0) {
             if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
             autoSaveTimerRef.current = setTimeout(() => {
-                const draft = { classId: selectedClassId, date, attendance, savedAt: Date.now() };
+                const draft = { academicTermId: selectedTermId, classId: selectedClassId, date, attendance, savedAt: Date.now() };
                 localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(draft));
             }, 2000);
         }
         return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
-    }, [attendance, isDirty]);
+    }, [attendance, isDirty, selectedTermId, selectedClassId, date]);
 
     // Fetch student streaks/sparklines when class loads
     useEffect(() => {
-        if (selectedClassId && students.length > 0) {
+        if (selectedTermId && selectedClassId && students.length > 0) {
             fetchStudentHistory();
         }
-    }, [selectedClassId, students]);
+    }, [selectedTermId, selectedClassId, students]);
 
     const fetchClasses = async () => {
         setClassesLoading(true);
         setLoadError(null);
         try {
-            const response = await api.get('/classes');
-            const nextClasses = Array.isArray(response.data) ? response.data : [];
+            const termResponse = await api.get('/academic-terms');
+            const allTerms: AcademicTerm[] = Array.isArray(termResponse.data) ? termResponse.data : [];
+            const activeTerm = pickActiveTerm(allTerms);
+            const nextTerms: AcademicTerm[] = activeTerm ? [activeTerm] : [];
+            const [classResponses, calendarResponses] = await Promise.all([
+                Promise.all(nextTerms.map(term => api.get('/classes', { params: { academicTermId: term.id } }))),
+                Promise.all(nextTerms.map(term => api.get<InstructionalDay[]>(`/academic-terms/${term.id}/instructional-days`))),
+            ]);
+            const nextClasses = classResponses.flatMap(response => (
+                Array.isArray(response.data) ? response.data : []
+            ));
+            const nextInstructionalDates = Object.fromEntries(nextTerms.map((term, index) => [
+                term.id,
+                calendarResponses[index].data
+                    .filter(day => day.isInstructional)
+                    .map(day => day.date.split('T')[0])
+                    .sort(),
+            ]));
+            const defaultTerm = nextTerms[0];
+            const defaultClasses = defaultTerm
+                ? nextClasses.filter((classOption: any) => classOption.academicTermId === defaultTerm.id)
+                : [];
             setClasses(nextClasses);
-            if (nextClasses.length > 0) {
-                setSelectedClassId(nextClasses[0].id);
-                setSelectedClassName(nextClasses[0].name);
+            setAcademicTerms(nextTerms);
+            setInstructionalDates(nextInstructionalDates);
+            if (defaultTerm) {
+                setSelectedTermId(defaultTerm.id);
+                const today = new Date().toISOString().split('T')[0];
+                const termDays = nextInstructionalDates[defaultTerm.id] || [];
+                setDate(termDays.includes(today) ? today : (termDays[0] || ''));
+            }
+            if (defaultClasses.length > 0) {
+                setSelectedClassId(defaultClasses[0].id);
+                setSelectedClassName(defaultClasses[0].name);
             }
         } catch (error) {
             console.error('Error fetching classes:', error);
@@ -141,15 +209,21 @@ const AttendanceRegister = () => {
     };
 
     const fetchStudentHistory = async () => {
+        if (!selectedTerm) return;
         try {
             // Use analytics to get streak + sparkline data
-            const endDate = new Date();
-            const startDate = new Date();
+            const termStart = new Date(selectedTerm.startDate);
+            const termEnd = new Date(selectedTerm.endDate);
+            const selectedDate = new Date(`${date}T00:00:00`);
+            const endDate = selectedDate < termEnd ? selectedDate : termEnd;
+            const startDate = new Date(endDate);
             startDate.setDate(startDate.getDate() - 30);
+            if (startDate < termStart) startDate.setTime(termStart.getTime());
 
             const res = await api.get('/attendance/analytics', {
                 params: {
                     classId: selectedClassId,
+                    academicTermId: selectedTermId,
                     startDate: startDate.toISOString().split('T')[0],
                     endDate: endDate.toISOString().split('T')[0],
                 },
@@ -181,7 +255,12 @@ const AttendanceRegister = () => {
         for (let i = 0; i < 5; i++) {
             const d = new Date(monday);
             d.setDate(monday.getDate() + i);
-            dates.push(d.toISOString().split('T')[0]);
+            const dateValue = d.toISOString().split('T')[0];
+            const termStart = selectedTerm?.startDate.split('T')[0];
+            const termEnd = selectedTerm?.endDate.split('T')[0];
+            if (termStart && termEnd && dateValue >= termStart && dateValue <= termEnd && selectedTermInstructionalDates.includes(dateValue)) {
+                dates.push(dateValue);
+            }
         }
         setWeekDates(dates);
     };
@@ -194,7 +273,7 @@ const AttendanceRegister = () => {
             const draftStr = localStorage.getItem(AUTO_SAVE_KEY);
             if (draftStr) {
                 const draft = JSON.parse(draftStr);
-                if (draft.classId === selectedClassId && draft.date === date && Date.now() - draft.savedAt < 3600000) {
+                if (draft.academicTermId === selectedTermId && draft.classId === selectedClassId && draft.date === date && Date.now() - draft.savedAt < 3600000) {
                     const useDraft = await confirm({
                         title: 'Restore saved draft?',
                         message: 'We found unsaved attendance changes for this class and date. Would you like to restore them?',
@@ -202,7 +281,9 @@ const AttendanceRegister = () => {
                         cancelText: 'Discard',
                     });
                     if (useDraft) {
-                        const classRes = await api.get(`/classes/${selectedClassId}`);
+                        const classRes = await api.get(`/classes/${selectedClassId}`, {
+                            params: { academicTermId: selectedTermId },
+                        });
                         const classStudents = classRes.data.students || [];
                         classStudents.sort((a: any, b: any) => a.lastName.localeCompare(b.lastName));
                         setStudents(classStudents);
@@ -216,13 +297,25 @@ const AttendanceRegister = () => {
                 }
             }
 
-            const classRes = await api.get(`/classes/${selectedClassId}`);
+            const classRes = await api.get(`/classes/${selectedClassId}`, {
+                params: { academicTermId: selectedTermId },
+            });
             const classStudents = classRes.data.students || [];
             classStudents.sort((a: any, b: any) => a.lastName.localeCompare(b.lastName));
             setStudents(classStudents);
 
-            const attendanceRes = await api.get(`/attendance?classId=${selectedClassId}&date=${date}`);
+            const attendanceRes = await api.get('/attendance', {
+                params: { classId: selectedClassId, academicTermId: selectedTermId, date },
+            });
             const existingRecords = attendanceRes.data;
+
+            existingRecords.forEach((record: any) => {
+                if (record.student && !classStudents.some((student: any) => student.id === record.studentId)) {
+                    classStudents.push({ id: record.studentId, ...record.student });
+                }
+            });
+            classStudents.sort((a: any, b: any) => a.lastName.localeCompare(b.lastName));
+            setStudents([...classStudents]);
 
             const initialAttendance: Record<string, AttendanceRecord> = {};
             classStudents.forEach((student: any) => {
@@ -251,19 +344,28 @@ const AttendanceRegister = () => {
         setLoading(true);
         setLoadError(null);
         try {
-            const classRes = await api.get(`/classes/${selectedClassId}`);
+            const classRes = await api.get(`/classes/${selectedClassId}`, {
+                params: { academicTermId: selectedTermId },
+            });
             const classStudents = classRes.data.students || [];
             classStudents.sort((a: any, b: any) => a.lastName.localeCompare(b.lastName));
             setStudents(classStudents);
 
             const weekData: Record<string, Record<string, 'PRESENT' | 'ABSENT' | 'LATE'>> = {};
             for (const d of weekDates) {
-                const res = await api.get(`/attendance?classId=${selectedClassId}&date=${d}`);
+                const res = await api.get('/attendance', {
+                    params: { classId: selectedClassId, academicTermId: selectedTermId, date: d },
+                });
                 res.data.forEach((r: any) => {
+                    if (r.student && !classStudents.some((student: any) => student.id === r.studentId)) {
+                        classStudents.push({ id: r.studentId, ...r.student });
+                    }
                     if (!weekData[r.studentId]) weekData[r.studentId] = {};
                     weekData[r.studentId][d] = r.status;
                 });
             }
+            classStudents.sort((a: any, b: any) => a.lastName.localeCompare(b.lastName));
+            setStudents([...classStudents]);
             setWeeklyAttendance(weekData);
         } catch (error) {
             console.error('Error fetching weekly data:', error);
@@ -367,6 +469,7 @@ const AttendanceRegister = () => {
 
             await api.post('/attendance', {
                 classId: selectedClassId,
+                academicTermId: selectedTermId,
                 date: new Date(date).toISOString(),
                 records,
             });
@@ -404,6 +507,66 @@ const AttendanceRegister = () => {
         );
     }, [students, searchQuery]);
 
+    const activeFilterCount = [selectedClassId, date, searchQuery.trim()].filter(Boolean).length;
+
+    const openFilters = () => {
+        setDraftTermId(selectedTermId);
+        setDraftClassId(selectedClassId);
+        setDraftDate(date);
+        setDraftSearchQuery(searchQuery);
+        setShowFilters(true);
+    };
+
+    const resetDraftFilters = () => {
+        const resetTerm = academicTerms[0];
+        const resetClasses = resetTerm
+            ? classes.filter(classOption => classOption.academicTermId === resetTerm.id)
+            : [];
+        const today = new Date().toISOString().split('T')[0];
+        const resetDays = resetTerm ? (instructionalDates[resetTerm.id] || []) : [];
+        setDraftTermId(resetTerm?.id || '');
+        setDraftClassId(resetClasses[0]?.id || '');
+        setDraftDate(resetDays.includes(today) ? today : (resetDays[0] || ''));
+        setDraftSearchQuery('');
+    };
+
+    const applyFilters = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (!draftTermId || !draftClassId || !draftDate) {
+            toast.error('Select a class and register date');
+            return;
+        }
+
+        const termStart = draftTerm?.startDate.split('T')[0];
+        const termEnd = draftTerm?.endDate.split('T')[0];
+        if (!termStart || !termEnd || draftDate < termStart || draftDate > termEnd) {
+            toast.error('Register date must fall within the active term');
+            return;
+        }
+        if (!draftTermInstructionalDates.includes(draftDate)) {
+            toast.error('Select a configured instructional day for this term');
+            return;
+        }
+
+        const registerChanged = draftTermId !== selectedTermId || draftClassId !== selectedClassId || draftDate !== date;
+        if (isDirty && registerChanged) {
+            const shouldChangeRegister = await confirm({
+                title: 'Change attendance register?',
+                message: 'This register has unsaved changes. A local draft has been kept, but the current marks have not been submitted.',
+                confirmText: 'Change register',
+                cancelText: 'Keep editing',
+            });
+            if (!shouldChangeRegister) return;
+        }
+
+        setSelectedTermId(draftTermId);
+        setSelectedClassId(draftClassId);
+        setSelectedClassName(classes.find(classOption => classOption.id === draftClassId)?.name || '');
+        setDate(draftDate);
+        setSearchQuery(draftSearchQuery.trim());
+        setShowFilters(false);
+    };
+
     const stats = useMemo(() => {
         const total = students.length;
         const present = Object.values(attendance).filter(a => a.status === 'PRESENT').length;
@@ -428,12 +591,6 @@ const AttendanceRegister = () => {
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         XLSX.utils.book_append_sheet(wb, ws, "Attendance");
         XLSX.writeFile(wb, `Attendance_${selectedClassName}_${date}.xlsx`);
-    };
-
-    const changeDate = (delta: number) => {
-        const d = new Date(date);
-        d.setDate(d.getDate() + delta);
-        setDate(d.toISOString().split('T')[0]);
     };
 
     // Sparkline SVG component
@@ -513,7 +670,12 @@ const AttendanceRegister = () => {
                 studentId: s.id,
                 status: weeklyAttendance[s.id]?.[dateStr] || 'PRESENT',
             }));
-            await api.post('/attendance', { classId: selectedClassId, date: new Date(dateStr).toISOString(), records });
+            await api.post('/attendance', {
+                classId: selectedClassId,
+                academicTermId: selectedTermId,
+                date: new Date(dateStr).toISOString(),
+                records,
+            });
             toast.success(`Saved attendance for ${dateStr}`);
         } catch {
             toast.error('Failed to save');
@@ -579,10 +741,22 @@ const AttendanceRegister = () => {
         }
     };
 
+    if (!classesLoading && !loadError && academicTerms.length === 0) {
+        return <div className="p-4 md:p-6"><NoActiveTermNotice /></div>;
+    }
+
     if (viewMode === 'analytics') {
         return (
             <div className="mx-auto max-w-7xl bg-slate-50/70 p-4 dark:bg-slate-950/20 md:p-6">
-                <AttendanceAnalytics classId={selectedClassId} className={selectedClassName} onBack={() => setViewMode('daily')} />
+                <AttendanceAnalytics
+                    classId={selectedClassId}
+                    className={selectedClassName}
+                    academicTermId={selectedTermId}
+                    termName={selectedTerm?.name || 'Academic term'}
+                    termStartDate={selectedTerm?.startDate || ''}
+                    termEndDate={selectedTerm?.endDate || ''}
+                    onBack={() => setViewMode('daily')}
+                />
             </div>
         );
     }
@@ -661,75 +835,93 @@ const AttendanceRegister = () => {
                             <h2 id="register-setup-title" className="text-base font-bold text-slate-900 dark:text-white">Register setup</h2>
                             <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Choose a class and date before marking attendance.</p>
                         </div>
-                        <div className={`inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold ${isDirty ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`} aria-live="polite">
-                            <span className={`h-2 w-2 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                            {isDirty ? 'Draft saved locally' : 'Register up to date'}
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className={`inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold ${isDirty ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`} aria-live="polite">
+                                <span className={`h-2 w-2 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                {isDirty ? 'Draft saved locally' : 'Register up to date'}
+                            </div>
+                            <AcademicFilterButton onClick={openFilters} activeCount={activeFilterCount} />
                         </div>
                     </div>
 
-                    <div className="grid gap-4 lg:grid-cols-12">
-                        <div className="lg:col-span-3">
-                            <label htmlFor="attendance-class" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Class</label>
-                            <div className="relative">
-                                <Users size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                                <select
-                                    id="attendance-class"
-                                    value={selectedClassId}
-                                    disabled={classesLoading || classes.length === 0}
-                                    onChange={(e) => {
-                                        setSelectedClassId(e.target.value);
-                                        setSelectedClassName(classes.find(c => c.id === e.target.value)?.name || '');
-                                    }}
-                                    className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-slate-300 bg-white pl-10 pr-9 text-sm font-medium text-slate-800 outline-none transition-colors focus:border-[#0047AB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
-                                >
-                                    {classes.length === 0 && <option value="">{classesLoading ? 'Loading classes…' : 'No classes available'}</option>}
-                                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                                {classesLoading && <Loader2 size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#0047AB] motion-reduce:animate-none" aria-hidden="true" />}
-                            </div>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300">{selectedClassName || 'No class selected'}</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">{selectedDateLabel}</span>
+                            {searchQuery && <span className="max-w-56 truncate rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">Search: {searchQuery}</span>}
                         </div>
 
-                        <div className="lg:col-span-4">
-                            <label htmlFor="attendance-date" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Register date</label>
-                            <div className="flex h-11 items-center rounded-xl border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900">
-                                <button type="button" onClick={() => changeDate(-1)} className="grid h-full w-11 shrink-0 cursor-pointer place-items-center rounded-l-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-400 dark:hover:bg-slate-700" aria-label="Previous day">
-                                    <ChevronLeft size={18} aria-hidden="true" />
-                                </button>
-                                <div className="relative min-w-0 flex-1 border-x border-slate-200 dark:border-slate-700">
-                                    <Calendar size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                                    <input id="attendance-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-[42px] w-full min-w-0 bg-transparent pl-9 pr-2 text-sm font-medium text-slate-800 outline-none dark:text-white" />
-                                </div>
-                                <button type="button" onClick={() => changeDate(1)} className="grid h-full w-11 shrink-0 cursor-pointer place-items-center rounded-r-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-400 dark:hover:bg-slate-700" aria-label="Next day">
-                                    <ChevronRight size={18} aria-hidden="true" />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="lg:col-span-3">
-                            <label htmlFor="attendance-search" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Find a student</label>
-                            <div className="relative">
-                                <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                                <input id="attendance-search" type="search" placeholder="Name or admission number" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#0047AB] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950" />
-                            </div>
-                        </div>
-
-                        <div className="flex items-end gap-2 lg:col-span-2 print:hidden">
+                        <div className="flex items-center gap-2 print:hidden">
                             {undoStack.length > 0 && (
                                 <button type="button" onClick={handleUndo} className="inline-flex h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 text-sm font-semibold text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300" title="Undo last change">
                                     <Undo2 size={17} aria-hidden="true" /><span className="sr-only xl:not-sr-only">Undo</span>
                                 </button>
                             )}
                             {viewMode === 'daily' && (
-                                <button type="button" onClick={handleExportDaily} disabled={students.length === 0} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-blue-50 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-blue-950/40" title="Export register to Excel" aria-label="Export register to Excel">
+                                <button type="button" onClick={handleExportDaily} disabled={students.length === 0} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-300" title="Export register to Excel" aria-label="Export register to Excel">
                                     <Download size={18} aria-hidden="true" />
                                 </button>
                             )}
-                            <button type="button" onClick={() => window.print()} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-blue-50 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-300 dark:hover:bg-blue-950/40" title="Print register" aria-label="Print register">
+                            <button type="button" onClick={() => window.print()} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-300" title="Print register" aria-label="Print register">
                                 <Printer size={18} aria-hidden="true" />
                             </button>
                         </div>
                     </div>
                 </section>
+
+                <AcademicFilterDialog
+                    open={showFilters}
+                    title="Filter attendance register"
+                    description="Choose a class and date, then optionally search within the register."
+                    onClose={() => setShowFilters(false)}
+                    onApply={applyFilters}
+                    onReset={resetDraftFilters}
+                    applyDisabled={!draftTermId || !draftClassId || !draftDate || classesLoading}
+                >
+                    <div>
+                        <label htmlFor="attendance-class-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Class</label>
+                        <select
+                            id="attendance-class-filter"
+                            data-filter-autofocus="true"
+                            value={draftClassId}
+                            disabled={classesLoading || draftTermClasses.length === 0}
+                            onChange={(event) => setDraftClassId(event.target.value)}
+                            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950"
+                        >
+                            {draftTermClasses.length === 0 && <option value="">{classesLoading ? 'Loading classes…' : 'No classes available for this term'}</option>}
+                            {draftTermClasses.map(classOption => <option key={classOption.id} value={classOption.id}>{classOption.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="attendance-date-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Register date</label>
+                        <select
+                            id="attendance-date-filter"
+                            value={draftDate}
+                            onChange={(event) => setDraftDate(event.target.value)}
+                            disabled={draftTermInstructionalDates.length === 0}
+                            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950"
+                        >
+                            {draftTermInstructionalDates.length === 0 && <option value="">No instructional days configured</option>}
+                            {draftTermInstructionalDates.map(day => (
+                                <option key={day} value={day}>{new Date(`${day}T00:00:00.000Z`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="attendance-student-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Search students <span className="font-normal text-slate-400">(optional)</span></label>
+                        <div className="relative">
+                            <Search size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                            <input
+                                id="attendance-student-filter"
+                                type="search"
+                                value={draftSearchQuery}
+                                onChange={(event) => setDraftSearchQuery(event.target.value)}
+                                placeholder="Name or admission number"
+                                className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+                            />
+                        </div>
+                    </div>
+                </AcademicFilterDialog>
 
                 {/* Live daily summary */}
                 {viewMode === 'daily' && (
@@ -800,7 +992,7 @@ const AttendanceRegister = () => {
                                     <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300"><AlertTriangle size={22} aria-hidden="true" /></span>
                                     <h3 className="mt-3 font-bold text-slate-900 dark:text-white">Unable to open this register</h3>
                                     <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{loadError}</p>
-                                    <button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-[#0047AB] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#003b8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2">
+                                    <button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2">
                                         <RefreshCw size={16} aria-hidden="true" /> Try again
                                     </button>
                                 </div>
@@ -811,7 +1003,7 @@ const AttendanceRegister = () => {
                                     <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300">{searchQuery ? <Search size={22} aria-hidden="true" /> : <Users size={22} aria-hidden="true" />}</span>
                                     <h3 className="mt-3 font-bold text-slate-900 dark:text-white">{searchQuery ? 'No matching learners' : 'No learners in this class'}</h3>
                                     <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{searchQuery ? `No learner matches “${searchQuery}”. Try another name or admission number.` : 'Add learners to this class before taking attendance.'}</p>
-                                    {searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="mt-4 min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">Clear search</button>}
+                                    {searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="mt-4 min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-200">Clear search</button>}
                                 </div>
                             </div>
                         ) : (
@@ -840,7 +1032,7 @@ const AttendanceRegister = () => {
                                                 </div>
                                                 {renderStatusSelector(student, rec, true)}
                                                 {rec?.status === 'ABSENT' && (
-                                                    <button type="button" onClick={() => { setReasonStudent(student); setReasonText(rec.reason || ''); setModalMode('reason'); setShowReasonModal(true); }} className="mt-2 inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-blue-50 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-300 dark:hover:bg-blue-950/40">
+                                                    <button type="button" onClick={() => { setReasonStudent(student); setReasonText(rec.reason || ''); setModalMode('reason'); setShowReasonModal(true); }} className="mt-2 inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-300">
                                                         <MessageSquare size={14} aria-hidden="true" /> {rec.reason || 'Add absence reason'}
                                                     </button>
                                                 )}
@@ -872,7 +1064,7 @@ const AttendanceRegister = () => {
                                                 const sparkline = studentSparklines[student.id];
                                                 const rec = attendance[student.id];
                                                 return (
-                                                    <tr key={student.id} className="transition-colors hover:bg-blue-50/40 dark:hover:bg-slate-700/40">
+                                                    <tr key={student.id} className="transition-colors hover:bg-surface-hover">
                                                         <td className="px-5 py-3 text-sm font-medium text-slate-400">{index + 1}</td>
                                                         <td className="px-4 py-3">
                                                             <div className="flex items-center gap-3">
@@ -897,7 +1089,7 @@ const AttendanceRegister = () => {
                                                         </td>
                                                         <td className="px-5 py-3 print:hidden">
                                                             {rec?.status === 'ABSENT' && (
-                                                                <button type="button" onClick={() => { setReasonStudent(student); setReasonText(rec.reason || ''); setModalMode('reason'); setShowReasonModal(true); }} className="inline-flex min-h-9 max-w-36 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:bg-blue-50 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-300 dark:hover:bg-blue-950/40">
+                                                                <button type="button" onClick={() => { setReasonStudent(student); setReasonText(rec.reason || ''); setModalMode('reason'); setShowReasonModal(true); }} className="inline-flex min-h-9 max-w-36 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-300">
                                                                     <MessageSquare size={14} className="shrink-0" aria-hidden="true" /><span className="truncate">{rec.reason || 'Add reason'}</span>
                                                                 </button>
                                                             )}
@@ -943,7 +1135,7 @@ const AttendanceRegister = () => {
                             </div>
                         ) : loadError ? (
                             <div className="grid min-h-64 place-items-center p-8 text-center" role="alert">
-                                <div className="max-w-sm"><AlertTriangle className="mx-auto text-red-500" size={30} aria-hidden="true" /><p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{loadError}</p><button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-[#0047AB] px-4 text-sm font-semibold text-white hover:bg-[#003b8f]"><RefreshCw size={16} aria-hidden="true" /> Try again</button></div>
+                                <div className="max-w-sm"><AlertTriangle className="mx-auto text-red-500" size={30} aria-hidden="true" /><p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{loadError}</p><button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover"><RefreshCw size={16} aria-hidden="true" /> Try again</button></div>
                             </div>
                         ) : filteredStudents.length === 0 ? (
                             <div className="grid min-h-64 place-items-center p-8 text-center">
@@ -1002,7 +1194,7 @@ const AttendanceRegister = () => {
                                     <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> Absent</span>
                                     <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-500" /> Late</span>
                                 </div>
-                                <button type="button" onClick={() => setWeeklyEditable(!weeklyEditable)} aria-pressed={weeklyEditable} className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${weeklyEditable ? 'border-blue-300 bg-blue-50 text-[#0047AB] dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-300' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700'}`}>
+                                <button type="button" onClick={() => setWeeklyEditable(!weeklyEditable)} aria-pressed={weeklyEditable} className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-4 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${weeklyEditable ? 'border-blue-300 bg-blue-50 text-[#0047AB] dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-300' : 'border-slate-300 bg-white text-slate-700 hover:bg-surface-hover dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'}`}>
                                     {weeklyEditable ? <Pencil size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
                                     {weeklyEditable ? 'Editing enabled' : 'View only'}
                                 </button>
@@ -1015,7 +1207,7 @@ const AttendanceRegister = () => {
                             </div>
                         ) : loadError ? (
                             <div className="grid min-h-64 place-items-center p-8 text-center" role="alert">
-                                <div className="max-w-sm"><span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300"><AlertTriangle size={22} aria-hidden="true" /></span><p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{loadError}</p><button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-[#0047AB] px-4 text-sm font-semibold text-white hover:bg-[#003b8f]"><RefreshCw size={16} aria-hidden="true" /> Try again</button></div>
+                                <div className="max-w-sm"><span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300"><AlertTriangle size={22} aria-hidden="true" /></span><p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{loadError}</p><button type="button" onClick={retryCurrentView} className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover"><RefreshCw size={16} aria-hidden="true" /> Try again</button></div>
                             </div>
                         ) : filteredStudents.length === 0 ? (
                             <div className="grid min-h-64 place-items-center p-8 text-center"><div><Users className="mx-auto text-slate-400" size={30} aria-hidden="true" /><p className="mt-3 font-semibold text-slate-700 dark:text-slate-200">{searchQuery ? 'No matching learners' : 'No learners in this class'}</p>{searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="mt-3 min-h-11 cursor-pointer rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200">Clear search</button>}</div></div>
@@ -1035,7 +1227,7 @@ const AttendanceRegister = () => {
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                         {filteredStudents.map(student => (
-                                            <tr key={student.id} className="transition-colors hover:bg-blue-50/40 dark:hover:bg-slate-700/40">
+                                            <tr key={student.id} className="transition-colors hover:bg-surface-hover">
                                                 <td className="sticky left-0 z-10 bg-white px-5 py-3 dark:bg-slate-800">
                                                     <div className="text-sm font-bold text-slate-900 dark:text-white">{student.firstName} {student.lastName}</div>
                                                     <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{student.admissionNumber}</div>
@@ -1050,7 +1242,7 @@ const AttendanceRegister = () => {
                                                                     {status === 'PRESENT' ? 'P' : status === 'ABSENT' ? 'A' : 'L'}
                                                                 </button>
                                                             ) : weeklyEditable ? (
-                                                                <button type="button" onClick={() => handleWeeklyStatusChange(student.id, d)} aria-label={`Start attendance for ${student.firstName} on ${new Date(`${d}T00:00:00`).toLocaleDateString()}`} className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm font-bold text-slate-400 transition-colors hover:border-[#0047AB] hover:bg-blue-50 hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:hover:bg-blue-950/40">+</button>
+                                                                <button type="button" onClick={() => handleWeeklyStatusChange(student.id, d)} aria-label={`Start attendance for ${student.firstName} on ${new Date(`${d}T00:00:00`).toLocaleDateString()}`} className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm font-bold text-slate-400 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600">+</button>
                                                             ) : <span className="text-slate-300 dark:text-slate-600" aria-label="Not recorded">—</span>}
                                                         </td>
                                                     );
@@ -1067,7 +1259,7 @@ const AttendanceRegister = () => {
                                 <p className="mb-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Save changes for each school day</p>
                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                                     {weekDates.map(d => (
-                                        <button key={d} type="button" onClick={() => saveWeeklyDay(d)} className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0047AB] px-3 text-xs font-bold text-white transition-colors hover:bg-[#003b8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2">
+                                        <button key={d} type="button" onClick={() => saveWeeklyDay(d)} className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-3 text-xs font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2">
                                             <Save size={15} aria-hidden="true" /> {new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' })}
                                         </button>
                                     ))}
@@ -1089,7 +1281,7 @@ const AttendanceRegister = () => {
                                 <p className="truncate text-xs text-slate-500 dark:text-slate-400">{isDirty ? 'A local draft is kept while you work.' : `${selectedClassName || 'Selected class'} · ${selectedDateLabel}`}</p>
                             </div>
                         </div>
-                        <button type="button" onClick={handleSave} disabled={saving || loading || students.length === 0} className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0047AB] px-6 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#003b8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-800 sm:w-auto">
+                        <button type="button" onClick={handleSave} disabled={saving || loading || students.length === 0} className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-bold text-white shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-800 sm:w-auto">
                             {saving ? <Loader2 className="animate-spin motion-reduce:animate-none" size={18} aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
                             {saving ? 'Saving attendance…' : 'Save attendance'}
                         </button>
@@ -1111,7 +1303,7 @@ const AttendanceRegister = () => {
                                     <p className="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">{reasonStudent.firstName} {reasonStudent.lastName} · {reasonStudent.admissionNumber}</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => { setShowReasonModal(false); setReasonStudent(null); }} className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white" aria-label="Close attendance details">
+                            <button type="button" onClick={() => { setShowReasonModal(false); setReasonStudent(null); }} className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-500 transition-colors hover:bg-surface-hover hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:text-slate-400 dark:hover:text-white" aria-label="Close attendance details">
                                 <X size={19} aria-hidden="true" />
                             </button>
                         </div>
@@ -1122,7 +1314,7 @@ const AttendanceRegister = () => {
                                     <legend className="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">How many minutes late?</legend>
                                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                                         {[5, 10, 15, 30, 45, 60].map(mins => (
-                                            <button key={mins} type="button" onClick={() => setLateMinutes(mins)} aria-pressed={lateMinutes === mins} className={`min-h-11 cursor-pointer rounded-xl border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${lateMinutes === mins ? 'border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'}`}>
+                                            <button key={mins} type="button" onClick={() => setLateMinutes(mins)} aria-pressed={lateMinutes === mins} className={`min-h-11 cursor-pointer rounded-xl border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${lateMinutes === mins ? 'border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300' : 'border-slate-300 bg-white text-slate-600 hover:bg-surface-hover dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}>
                                                 {mins}m
                                             </button>
                                         ))}
@@ -1140,7 +1332,7 @@ const AttendanceRegister = () => {
                                         ? ['Sick', 'Family emergency', 'Doctor appointment', 'Transport issue', 'Funeral', 'Other']
                                         : ['Traffic', 'Overslept', 'Transport issue', 'Doctor visit', 'Other']
                                     ).map(reason => (
-                                        <button key={reason} type="button" onClick={() => setReasonText(reason)} aria-pressed={reasonText === reason} className={`min-h-9 cursor-pointer rounded-full border px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${reasonText === reason ? 'border-blue-400 bg-blue-50 text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700'}`}>
+                                        <button key={reason} type="button" onClick={() => setReasonText(reason)} aria-pressed={reasonText === reason} className={`min-h-9 cursor-pointer rounded-full border px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${reasonText === reason ? 'border-blue-400 bg-blue-50 text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-surface-hover dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}>
                                             {reason}
                                         </button>
                                     ))}
@@ -1150,8 +1342,8 @@ const AttendanceRegister = () => {
                         </div>
 
                         <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40 sm:flex-row sm:justify-end">
-                            <button type="button" onClick={() => { setShowReasonModal(false); setReasonStudent(null); }} className="min-h-11 cursor-pointer rounded-xl border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">Cancel</button>
-                            <button type="button" onClick={handleSaveReason} className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0047AB] px-5 text-sm font-bold text-white transition-colors hover:bg-[#003b8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"><Save size={16} aria-hidden="true" /> Save details</button>
+                            <button type="button" onClick={() => { setShowReasonModal(false); setReasonStudent(null); }} className="min-h-11 cursor-pointer rounded-xl border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">Cancel</button>
+                            <button type="button" onClick={handleSaveReason} className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"><Save size={16} aria-hidden="true" /> Save details</button>
                         </div>
                     </div>
                 </div>

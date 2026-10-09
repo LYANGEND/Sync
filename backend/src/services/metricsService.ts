@@ -12,6 +12,7 @@
  */
 
 import { prisma } from '../utils/prisma';
+import { getActiveTerm } from './termLifecycleService';
 
 // ------------------------------------------------------------------
 // Simple in-memory TTL cache (avoids hammering DB for hot dashboards)
@@ -42,11 +43,12 @@ export interface FeeCollectionSummary {
   collectionRatePercent: number;
 }
 
-export function getFeeCollectionSummary(): Promise<FeeCollectionSummary> {
-  return cached('fee-collection', 60_000, async () => {
+export function getFeeCollectionSummary(academicTermId?: string): Promise<FeeCollectionSummary> {
+  return cached(`fee-collection-${academicTermId || 'all'}`, 60_000, async () => {
+    const termWhere = academicTermId ? { academicTermId } : {};
     const [feesAgg, paidAgg] = await Promise.all([
-      prisma.studentFeeStructure.aggregate({ _sum: { amountDue: true } }),
-      prisma.payment.aggregate({ where: { status: 'COMPLETED' }, _sum: { amount: true } }),
+      prisma.studentFeeStructure.aggregate({ where: termWhere, _sum: { amountDue: true } }),
+      prisma.payment.aggregate({ where: { ...termWhere, status: 'COMPLETED' }, _sum: { amount: true } }),
     ]);
 
     const totalDue = Number(feesAgg._sum.amountDue || 0);
@@ -72,13 +74,13 @@ export interface AttendanceSummary {
 /**
  * Attendance for a time window. Defaults to the last 7 days.
  */
-export function getAttendanceSummary(sinceDays = 7): Promise<AttendanceSummary> {
-  return cached(`attendance-${sinceDays}`, 60_000, async () => {
+export function getAttendanceSummary(sinceDays = 7, academicTermId?: string): Promise<AttendanceSummary> {
+  return cached(`attendance-${academicTermId || 'all'}-${sinceDays}`, 60_000, async () => {
     const since = new Date();
     since.setDate(since.getDate() - sinceDays);
 
     const records = await prisma.attendance.findMany({
-      where: { date: { gte: since } },
+      where: { academicTermId, date: { gte: since } },
       select: { status: true },
     });
 
@@ -95,13 +97,15 @@ export function getAttendanceSummary(sinceDays = 7): Promise<AttendanceSummary> 
 /**
  * Attendance for the current active term (used by analytics dashboards).
  */
-export async function getTermAttendanceSummary(): Promise<AttendanceSummary & { termId?: string }> {
-  const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
-  if (!activeTerm) return { totalRecords: 0, present: 0, late: 0, absent: 0, ratePercent: 0 };
+export async function getTermAttendanceSummary(academicTermId?: string): Promise<AttendanceSummary & { termId?: string }> {
+  const term = academicTermId
+    ? await prisma.academicTerm.findUnique({ where: { id: academicTermId } })
+    : await getActiveTerm();
+  if (!term) return { totalRecords: 0, present: 0, late: 0, absent: 0, ratePercent: 0 };
 
-  return cached(`attendance-term-${activeTerm.id}`, 120_000, async () => {
+  return cached(`attendance-term-${term.id}`, 120_000, async () => {
     const records = await prisma.attendance.findMany({
-      where: { date: { gte: activeTerm.startDate, lte: new Date() } },
+      where: { academicTermId: term.id },
       select: { status: true },
     });
 
@@ -111,7 +115,7 @@ export async function getTermAttendanceSummary(): Promise<AttendanceSummary & { 
     const absent = records.filter(r => r.status === 'ABSENT').length;
     const ratePercent = total > 0 ? Math.round(((present + late) / total) * 100) : 0;
 
-    return { totalRecords: total, present, late, absent, ratePercent, termId: activeTerm.id };
+    return { totalRecords: total, present, late, absent, ratePercent, termId: term.id };
   });
 }
 
@@ -126,11 +130,12 @@ export interface RiskSummary {
   total: number;
 }
 
-export function getRiskSummary(): Promise<RiskSummary> {
-  return cached('risk-summary', 120_000, async () => {
+export function getRiskSummary(academicTermId?: string): Promise<RiskSummary> {
+  return cached(`risk-summary-${academicTermId || 'all'}`, 120_000, async () => {
     try {
       const groups = await (prisma as any).studentRiskAssessment.groupBy({
         by: ['riskLevel'],
+        where: academicTermId ? { termId: academicTermId } : undefined,
         _count: true,
       });
 
@@ -155,8 +160,8 @@ export function getRiskSummary(): Promise<RiskSummary> {
 }
 
 /** Convenience: count of HIGH + CRITICAL students */
-export async function getAtRiskCount(): Promise<number> {
-  const s = await getRiskSummary();
+export async function getAtRiskCount(academicTermId?: string): Promise<number> {
+  const s = await getRiskSummary(academicTermId);
   return s.critical + s.high;
 }
 
@@ -170,13 +175,28 @@ export interface EnrollmentSummary {
   studentTeacherRatio: number;
 }
 
-export function getEnrollmentSummary(): Promise<EnrollmentSummary> {
-  return cached('enrollment-summary', 120_000, async () => {
-    const [activeStudents, activeTeachers, totalClasses] = await Promise.all([
-      prisma.student.count({ where: { status: 'ACTIVE' } }),
-      prisma.user.count({ where: { role: 'TEACHER', isActive: true } }),
-      prisma.class.count(),
+export function getEnrollmentSummary(academicTermId?: string): Promise<EnrollmentSummary> {
+  return cached(`enrollment-summary-${academicTermId || 'all'}`, 120_000, async () => {
+    const classWhere = academicTermId ? { academicTermId } : {};
+    const classes = await prisma.class.findMany({
+      where: classWhere,
+      select: {
+        teacherId: true,
+        termEnrollments: {
+          where: { ...(academicTermId ? { academicTermId } : {}), status: 'ACTIVE' },
+          select: { studentId: true },
+        },
+      },
+    });
+    const studentIds = new Set(
+      classes.flatMap(classRecord => classRecord.termEnrollments.map(enrollment => enrollment.studentId)),
+    );
+    const teacherIds = new Set(classes.map(classRecord => classRecord.teacherId));
+    const [activeStudents, activeTeachers] = await Promise.all([
+      prisma.student.count({ where: { status: 'ACTIVE', ...(academicTermId ? { id: { in: [...studentIds] } } : {}) } }),
+      prisma.user.count({ where: { role: 'TEACHER', isActive: true, ...(academicTermId ? { id: { in: [...teacherIds] } } : {}) } }),
     ]);
+    const totalClasses = classes.length;
 
     const studentTeacherRatio = activeTeachers > 0 ? Math.round(activeStudents / activeTeachers) : 0;
     return { activeStudents, activeTeachers, totalClasses, studentTeacherRatio };
@@ -192,14 +212,14 @@ export interface RevenueSummary {
   todayRevenue: number;
 }
 
-export function getRevenueSummary(): Promise<RevenueSummary> {
-  return cached('revenue-summary', 60_000, async () => {
+export function getRevenueSummary(academicTermId?: string): Promise<RevenueSummary> {
+  return cached(`revenue-summary-${academicTermId || 'all'}`, 60_000, async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const [totalAgg, todayAgg] = await Promise.all([
-      prisma.payment.aggregate({ where: { status: 'COMPLETED' }, _sum: { amount: true }, _count: true }),
-      prisma.payment.aggregate({ where: { status: 'COMPLETED', paymentDate: { gte: today } }, _sum: { amount: true } }),
+      prisma.payment.aggregate({ where: { academicTermId, status: 'COMPLETED' }, _sum: { amount: true }, _count: true }),
+      prisma.payment.aggregate({ where: { academicTermId, status: 'COMPLETED', paymentDate: { gte: today } }, _sum: { amount: true } }),
     ]);
 
     return {
@@ -213,9 +233,9 @@ export function getRevenueSummary(): Promise<RevenueSummary> {
 // ------------------------------------------------------------------
 // ALERTS
 // ------------------------------------------------------------------
-export async function getUnresolvedAlertCount(): Promise<number> {
+export async function getUnresolvedAlertCount(academicTermId?: string): Promise<number> {
   try {
-    return await (prisma as any).attendanceAlert.count({ where: { isResolved: false } });
+    return await (prisma as any).attendanceAlert.count({ where: { academicTermId, isResolved: false } });
   } catch {
     return 0;
   }
@@ -233,14 +253,14 @@ export interface SchoolHealthSnapshot {
   unresolvedAlerts: number;
 }
 
-export async function getSchoolHealthSnapshot(): Promise<SchoolHealthSnapshot> {
+export async function getSchoolHealthSnapshot(academicTermId?: string): Promise<SchoolHealthSnapshot> {
   const [enrollment, fees, attendance, risk, revenue, unresolvedAlerts] = await Promise.all([
-    getEnrollmentSummary(),
-    getFeeCollectionSummary(),
-    getAttendanceSummary(7),
-    getRiskSummary(),
-    getRevenueSummary(),
-    getUnresolvedAlertCount(),
+    getEnrollmentSummary(academicTermId),
+    getFeeCollectionSummary(academicTermId),
+    academicTermId ? getTermAttendanceSummary(academicTermId) : getAttendanceSummary(7),
+    getRiskSummary(academicTermId),
+    getRevenueSummary(academicTermId),
+    getUnresolvedAlertCount(academicTermId),
   ]);
 
   return { enrollment, fees, attendance, risk, revenue, unresolvedAlerts };

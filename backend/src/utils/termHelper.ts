@@ -4,18 +4,15 @@
  * Helper functions for term-based operations
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from './prisma';
+import { getActiveTerm } from '../services/termLifecycleService';
 
 /**
  * Get the active term or find the term that contains the given date
  */
 export async function getTermForDate(date: Date = new Date()): Promise<string | null> {
   // First, try to get the active term
-  const activeTerm = await prisma.academicTerm.findFirst({
-    where: { isActive: true }
-  });
+  const activeTerm = await getActiveTerm();
 
   if (activeTerm) {
     return activeTerm.id;
@@ -67,9 +64,24 @@ async function findNearestTerm(date: Date) {
  * Get the current active term
  */
 export async function getCurrentTerm() {
-  return await prisma.academicTerm.findFirst({
-    where: { isActive: true }
-  });
+  return getActiveTerm();
+}
+
+/**
+ * Resolve a caller-provided term for a write. Unlike getTermForDate, this
+ * function never falls back to the active, containing, or nearest term.
+ */
+export async function requireExplicitTerm(termId: string) {
+  if (!termId) {
+    throw new Error('An explicit academic term is required');
+  }
+
+  const term = await prisma.academicTerm.findUnique({ where: { id: termId } });
+  if (!term) {
+    throw new Error('Academic term not found');
+  }
+
+  return term;
 }
 
 /**
@@ -93,5 +105,6 @@ export async function getTermsForYear(year: number) {
 export default {
   getTermForDate,
   getCurrentTerm,
+  requireExplicitTerm,
   getTermsForYear
 };

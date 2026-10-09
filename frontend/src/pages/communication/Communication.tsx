@@ -270,17 +270,17 @@ const Communication = () => {
         </div>
         <div className="flex flex-wrap gap-2">
           {canChat && activeTab !== 'messages' && (
-            <button type="button" onClick={() => setActiveTab('messages')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+            <button type="button" onClick={() => setActiveTab('messages')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-surface-hover transition-colors text-sm font-medium">
               <MessageSquare size={18} /> <span>Message</span>
             </button>
           )}
           {canSendAnnouncements && activeTab !== 'announcements' && (
-            <button type="button" onClick={() => setActiveTab('announcements')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+            <button type="button" onClick={() => setActiveTab('announcements')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-surface-hover transition-colors text-sm font-medium">
               <Megaphone size={18} /> <span>Announce</span>
             </button>
           )}
           {isAdmin && activeTab !== 'sms' && (
-            <button type="button" onClick={() => setActiveTab('sms')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium">
+            <button type="button" onClick={() => setActiveTab('sms')} className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-surface-hover transition-colors text-sm font-medium">
               <Phone size={18} /> <span>SMS</span>
             </button>
           )}
@@ -375,7 +375,7 @@ const Communication = () => {
                     }
                   }}
                   disabled={smsBalanceLoading}
-                  className="px-4 py-2.5 text-sm bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600 font-medium transition-colors shadow-sm flex items-center gap-2"
+                  className="px-4 py-2.5 text-sm bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-surface-hover font-medium transition-colors shadow-sm flex items-center gap-2"
                 >
                   <Wallet size={16} className="text-gray-400" />
                   {smsBalanceLoading ? 'Checking...' : 'Check Credits'}
@@ -675,7 +675,7 @@ const Communication = () => {
                           <button
                             type="button"
                             onClick={() => setSmsBulkRecipients(smsBulkRecipients.filter((_, i) => i !== idx))}
-                            className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                            className="p-1.5 text-red-500 hover:bg-surface-hover-danger rounded"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -686,7 +686,7 @@ const Communication = () => {
                   <button
                     type="button"
                     onClick={() => setSmsBulkRecipients([...smsBulkRecipients, { phone: '', message: '' }])}
-                    className="flex items-center gap-2 px-4 py-2 text-sm border border-dashed border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+                    className="flex items-center gap-2 px-4 py-2 text-sm border border-dashed border-gray-300 dark:border-slate-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-surface-hover"
                   >
                     <Plus size={16} />
                     Add Recipient
@@ -749,7 +749,7 @@ const Communication = () => {
             </div>
             <button
               onClick={() => setShowTemplateForm(!showTemplateForm)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover text-sm font-medium"
             >
               {showTemplateForm ? 'Cancel' : '+ New Template'}
             </button>
@@ -824,7 +824,7 @@ const Communication = () => {
                         </button>
                         <button
                           onClick={() => handleDeleteTemplate(t.id)}
-                          className="px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          className="px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-surface-hover-danger rounded"
                         >
                           Delete
                         </button>
@@ -1011,7 +1011,7 @@ const Communication = () => {
                       }
                     }}
                     disabled={!subject || !message}
-                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-30 flex items-center gap-1.5 transition-colors p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700"
+                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-30 flex items-center gap-1.5 transition-colors p-2 rounded-lg hover:bg-surface-hover"
                   >
                     <FileText size={16} /> Save this as a Template
                   </button>
@@ -1034,7 +1034,7 @@ const Communication = () => {
                             ? p === 'EMERGENCY' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800 ring-1 ring-red-500 shadow-sm'
                               : p === 'URGENT' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800 ring-1 ring-amber-500 shadow-sm'
                               : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800 ring-1 ring-blue-500 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700'
+                            : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-surface-hover'
                         }`}
                       >
                         <span className="flex items-center gap-2">
@@ -1063,7 +1063,7 @@ const Communication = () => {
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
                           targetRoles.includes(role)
                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                            : 'bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600'
+                            : 'bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-slate-600 hover:bg-surface-hover'
                         }`}
                       >
                         {role.replace('_', ' ')}
@@ -1157,7 +1157,7 @@ const Communication = () => {
                 className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-lg active:scale-[0.98] ${
                   sending || (!sendEmail && !sendNotification && !sendSms && !sendWhatsApp) || !subject || !message
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:text-gray-500 shadow-none'
-                    : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-blue-600/30'
+                    : 'bg-primary text-white hover:bg-primary-hover hover:shadow-blue-600/30'
                 }`}
               >
                 {sending ? (

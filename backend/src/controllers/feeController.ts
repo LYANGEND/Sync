@@ -2,6 +2,13 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { syncClassFeesToStudents } from '../services/classFeeAssignmentService';
+import {
+  getActiveTerm,
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { getStudentPlacementForTerm, StudentPlacementError } from '../services/studentPlacementService';
 
 const feeTemplateSchema = z.object({
   name: z.string().min(2),
@@ -39,21 +46,24 @@ export const createFeeTemplate = async (req: Request, res: Response) => {
   try {
     const { name, amount, academicTermId, categoryId, applicableGrade } = feeTemplateSchema.parse(req.body);
 
-    const template = await prisma.feeTemplate.create({
-      data: {
-        name,
-        amount,
-        academicTermId,
-        categoryId,
-        applicableGrade,
-      },
-    });
+    const template = await runTermWriteTransaction(academicTermId, 'SETUP', tx => (
+      tx.feeTemplate.create({
+        data: {
+          name,
+          amount,
+          academicTermId,
+          categoryId,
+          applicableGrade,
+        },
+      })
+    ));
 
     res.status(201).json(template);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to create fee template' });
   }
 };
@@ -125,28 +135,32 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
       });
     }
 
-    await prisma.classFeeAssignment.upsert({
-      where: {
-        classId_feeTemplateId: {
+    await runTermWriteTransaction(feeTemplate.academicTermId, 'SETUP', tx => (
+      tx.classFeeAssignment.upsert({
+        where: {
+          classId_feeTemplateId: {
+            classId,
+            feeTemplateId,
+          },
+        },
+        update: {
+          dueDate,
+          academicTermId: feeTemplate.academicTermId,
+          categoryId: feeTemplate.categoryId,
+        },
+        create: {
           classId,
           feeTemplateId,
+          academicTermId: feeTemplate.academicTermId,
+          categoryId: feeTemplate.categoryId,
+          dueDate,
         },
-      },
-      update: {
-        dueDate,
-        academicTermId: feeTemplate.academicTermId,
-        categoryId: feeTemplate.categoryId,
-      },
-      create: {
-        classId,
-        feeTemplateId,
-        academicTermId: feeTemplate.academicTermId,
-        categoryId: feeTemplate.categoryId,
-        dueDate,
-      },
-    });
+      })
+    ));
 
-    const syncResult = await syncClassFeesToStudents(classId);
+    const syncResult = feeTemplate.academicTerm.status === 'ACTIVE'
+      ? await syncClassFeesToStudents(classId)
+      : { created: 0, studentCount: 0, assignmentCount: 1 };
 
     res.status(200).json({
       message: `Fee assignment saved for class ${classRecord.name}`,
@@ -159,12 +173,13 @@ export const assignFeeToClass = async (req: Request, res: Response) => {
       assigned: syncResult.created,
       alreadyAssigned: Math.max(0, syncResult.studentCount - syncResult.created),
       failed: 0,
-      autoAssignmentEnabled: true,
+      autoAssignmentEnabled: feeTemplate.academicTerm.status === 'ACTIVE',
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Error assigning fee:', error);
     res.status(500).json({ error: 'Failed to assign fee to class' });
   }
@@ -196,20 +211,29 @@ export const updateFeeTemplate = async (req: Request, res: Response) => {
     const { id } = req.params;
     const data = feeTemplateSchema.partial().parse(req.body);
 
-    const template = await prisma.feeTemplate.update({
-      where: { id },
-      data,
-      include: {
-        academicTerm: true,
-        category: true,
-      },
-    });
+    const existing = await prisma.feeTemplate.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Fee template not found' });
+    if (data.academicTermId && data.academicTermId !== existing.academicTermId) {
+      return res.status(400).json({ error: 'A fee template cannot be moved to another academic term' });
+    }
+
+    const template = await runTermWriteTransaction(existing.academicTermId, 'SETUP', tx => (
+      tx.feeTemplate.update({
+        where: { id },
+        data,
+        include: {
+          academicTerm: true,
+          category: true,
+        },
+      })
+    ));
 
     res.json(template);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to update fee template' });
   }
 };
@@ -217,28 +241,31 @@ export const updateFeeTemplate = async (req: Request, res: Response) => {
 export const deleteFeeTemplate = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const template = await prisma.feeTemplate.findUnique({
+      where: { id },
+      select: { academicTermId: true },
+    });
+    if (!template) return res.status(404).json({ error: 'Fee template not found' });
 
-    const [usageCount, classAssignmentCount] = await Promise.all([
-      prisma.studentFeeStructure.count({
-        where: { feeTemplateId: id }
-      }),
-      prisma.classFeeAssignment.count({
-        where: { feeTemplateId: id }
-      }),
-    ]);
+    const deleted = await runTermWriteTransaction(template.academicTermId, 'SETUP', async tx => {
+      const [usageCount, classAssignmentCount] = await Promise.all([
+        tx.studentFeeStructure.count({ where: { feeTemplateId: id } }),
+        tx.classFeeAssignment.count({ where: { feeTemplateId: id } }),
+      ]);
+      if (usageCount > 0 || classAssignmentCount > 0) return false;
+      await tx.feeTemplate.delete({ where: { id } });
+      return true;
+    });
 
-    if (usageCount > 0 || classAssignmentCount > 0) {
+    if (!deleted) {
       return res.status(400).json({
         error: 'Cannot delete fee template as it has already been assigned to students. Consider archiving or modifying it instead.'
       });
     }
 
-    await prisma.feeTemplate.delete({
-      where: { id },
-    });
-
     res.status(204).send();
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to delete fee template' });
   }
 };
@@ -255,10 +282,7 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
     const templatesData = z.array(bulkFeeTemplateSchema).parse(req.body);
 
     // Get current academic term if not provided
-    const currentTerm = await prisma.academicTerm.findFirst({
-      where: { isActive: true },
-      orderBy: { startDate: 'desc' }
-    });
+    const currentTerm = await getActiveTerm();
 
     if (!currentTerm) {
       return res.status(400).json({ error: 'No active academic term found' });
@@ -271,10 +295,17 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
       applicableGrade: t.applicableGrade,
     }));
 
-    const result = await prisma.feeTemplate.createMany({
-      data: dataToCreate,
-      skipDuplicates: true,
-    });
+    const termIds = new Set(dataToCreate.map(template => template.academicTermId));
+    if (termIds.size !== 1) {
+      return res.status(400).json({ error: 'Fee templates can only be imported for one academic term at a time' });
+    }
+
+    const result = await runTermWriteTransaction([...termIds][0], 'SETUP', tx => (
+      tx.feeTemplate.createMany({
+        data: dataToCreate,
+        skipDuplicates: true,
+      })
+    ));
 
     res.status(201).json({
       message: `Successfully imported ${result.count} fee templates`,
@@ -284,6 +315,7 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Bulk create fee templates error:', error);
     res.status(500).json({ error: 'Failed to import fee templates' });
   }
@@ -292,17 +324,27 @@ export const bulkCreateFeeTemplates = async (req: Request, res: Response) => {
 export const getStudentStatement = async (req: Request, res: Response) => {
   try {
     const { studentId } = req.params;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+
+    if (!academicTermId) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
+
+    const academicTerm = await prisma.academicTerm.findUnique({
+      where: { id: academicTermId },
+      select: { id: true, name: true, startDate: true, endDate: true },
+    });
+
+    if (!academicTerm) {
+      return res.status(404).json({ error: 'Academic term not found' });
+    }
 
     // 1. Get School Info
     const settings = await prisma.schoolSettings.findFirst();
 
     // 2. Get Student Info
-    // 2. Get Student Info
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      include: {
-        class: true,
-      }
     });
 
     if (!student) {
@@ -314,29 +356,45 @@ export const getStudentStatement = async (req: Request, res: Response) => {
     if (user.role === 'PARENT' && student.parentId !== user.userId) {
       return res.status(403).json({ error: 'Unauthorized: This student does not belong to your account.' });
     }
+    if (!['SUPER_ADMIN', 'PARENT'].includes(user.role) && student.branchId !== user.branchId) {
+      return res.status(403).json({ error: 'Student does not belong to the current branch' });
+    }
 
     // Restrict other roles if necessary (e.g. STUDENT shouldn't see this)
     if (!['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'PARENT'].includes(user.role)) {
       return res.status(403).json({ error: 'Unauthorized access' });
     }
 
+    const placement = await getStudentPlacementForTerm(studentId, academicTermId);
+    const statementClassName = placement?.class.name || 'Not available';
+
     // 3. Get Fees (Debits)
     const fees = await prisma.studentFeeStructure.findMany({
-      where: { studentId },
+      where: { studentId, academicTermId },
       include: {
         feeTemplate: {
           include: { academicTerm: true }
-        }
+        },
+        invoiceItem: { select: { id: true } },
       }
     });
 
-    // 4. Get Payments (Credits) - Only COMPLETED payments
-    const payments = await prisma.payment.findMany({
+    // 4. Credits are effective allocations against this term's obligations,
+    // regardless of the term in which the source receipt was collected.
+    const allocations = await prisma.paymentAllocation.findMany({
       where: {
-        studentId,
-        status: 'COMPLETED'
+        studentFee: { studentId, academicTermId },
+        payment: { status: 'COMPLETED' },
       },
-      orderBy: { paymentDate: 'asc' }
+      include: {
+        payment: { include: { academicTerm: { select: { name: true } } } },
+        studentFee: { include: { feeTemplate: { select: { name: true } } } },
+        refundAllocations: {
+          where: { refund: { status: 'PROCESSED' } },
+          select: { amount: true },
+        },
+      },
+      orderBy: { payment: { paymentDate: 'asc' } },
     });
 
     // 5. Combine and Sort
@@ -346,19 +404,27 @@ export const getStudentStatement = async (req: Request, res: Response) => {
         date: f.createdAt, // Or dueDate if preferred
         type: 'DEBIT',
         description: f.feeTemplate.name,
+        feeTemplateId: f.feeTemplateId,
+        amountPaid: Number(f.amountPaid),
+        invoiced: Boolean(f.invoiceItem),
         term: f.feeTemplate.academicTerm.name,
         amount: Number(f.amountDue),
         ref: '-'
       })),
-      ...payments.map(p => ({
-        id: p.id,
-        date: p.paymentDate,
+      ...allocations.map(allocation => ({
+        id: allocation.id,
+        date: allocation.payment.paymentDate,
         type: 'CREDIT',
-        description: `Payment (${p.method.replace('_', ' ')})`,
-        term: '-', // Could infer term based on date
-        amount: Number(p.amount),
-        ref: p.transactionId || '-'
-      }))
+        description: `Payment (${allocation.payment.method.replace('_', ' ')}) allocated to ${allocation.studentFee.feeTemplate.name}`,
+        term: academicTerm.name,
+        receiptTerm: allocation.payment.academicTerm.name,
+        amount: Math.max(
+          0,
+          Number(allocation.amount)
+            - allocation.refundAllocations.reduce((sum, reversal) => sum + Number(reversal.amount), 0),
+        ),
+        ref: allocation.payment.transactionId || '-'
+      })).filter(transaction => transaction.amount > 0.005)
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     res.json({
@@ -371,13 +437,17 @@ export const getStudentStatement = async (req: Request, res: Response) => {
       student: {
         name: `${student.firstName} ${student.lastName}`,
         admissionNumber: student.admissionNumber,
-        className: student.class.name,
+        className: statementClassName,
         guardian: student.guardianName
       },
+      academicTerm,
       transactions
     });
 
   } catch (error) {
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Get student statement error:', error);
     res.status(500).json({ error: 'Failed to generate statement' });
   }

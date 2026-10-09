@@ -1,15 +1,15 @@
 import { Request, Response } from 'express';
-import { StudentFeeStructure, FeeTemplate, Student, Class } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { getTermStudentBalances } from '../services/termFinancialService';
 import {
     sendNotification,
     generatePaymentReceiptEmail,
     generateFeeReminderEmail
 } from '../services/notificationService';
 
-type StudentWithFees = Student & {
-    class: Class | null;
-    feeStructures: (StudentFeeStructure & { feeTemplate: FeeTemplate })[];
+const getBranchScope = (req: Request): string | undefined => {
+    const user = (req as any).user;
+    return user?.role !== 'SUPER_ADMIN' ? user?.branchId : (req.query.branchId as string | undefined);
 };
 
 // Send payment receipt notification
@@ -67,57 +67,23 @@ export const sendPaymentReceipt = async (req: Request, res: Response) => {
 // Send fee reminders to students with outstanding fees
 export const sendFeeReminders = async (req: Request, res: Response) => {
     try {
-        const { studentIds, isOverdue = false } = req.body;
+        const { studentIds, isOverdue = false, academicTermId } = req.body;
+        if (!academicTermId || typeof academicTermId !== 'string') {
+            return res.status(400).json({ error: 'academicTermId is required' });
+        }
 
         const settings = await prisma.schoolSettings.findFirst();
         const schoolName = settings?.schoolName || 'School';
 
-        // Get students with outstanding fees
-        let studentsWithFees: StudentWithFees[];
-
-        if (studentIds && studentIds.length > 0) {
-            // Send to specific students
-            studentsWithFees = await prisma.student.findMany({
-                where: {
-                    id: { in: studentIds },
-                    status: 'ACTIVE',
-                },
-                include: {
-                    class: true,
-                    feeStructures: {
-                        include: {
-                            feeTemplate: true,
-                        },
-                    },
-                },
-            });
-        } else {
-            // Send to all students with outstanding fees
-            studentsWithFees = await prisma.student.findMany({
-                where: {
-                    status: 'ACTIVE',
-                },
-                include: {
-                    class: true,
-                    feeStructures: {
-                        include: {
-                            feeTemplate: true,
-                        },
-                    },
-                },
-            });
-        }
-
-        // Filter to only those with outstanding balances
-        studentsWithFees = studentsWithFees.filter(student => {
-            const outstanding = student.feeStructures.reduce((total: number, fee: StudentFeeStructure) => {
-                return total + (Number(fee.amountDue) - Number(fee.amountPaid));
-            }, 0);
-            return outstanding > 0;
-        });
+        const balances = await getTermStudentBalances(
+            academicTermId,
+            getBranchScope(req),
+            Array.isArray(studentIds) ? studentIds : undefined
+        );
+        const studentsWithBalances = balances.filter(student => student.balance > 0);
 
         const results = {
-            total: studentsWithFees.length,
+            total: studentsWithBalances.length,
             delivered: 0,
             emailsSent: 0,
             smsSent: 0,
@@ -126,25 +92,11 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
             details: [] as { studentId: string; studentName: string; status: 'SENT' | 'FAILED' | 'NO_CONTACT'; reason?: string }[],
         };
 
-        for (const student of studentsWithFees) {
-            // Calculate total outstanding amount
-            const outstandingAmount = student.feeStructures.reduce((total: number, fee: StudentFeeStructure) => {
-                return total + (Number(fee.amountDue) - Number(fee.amountPaid));
-            }, 0);
-
-            if (outstandingAmount <= 0) continue;
-
-            // Get earliest due date
-            const feesWithDueDate = student.feeStructures.filter((f: StudentFeeStructure) => f.dueDate);
-            const sortedFees = feesWithDueDate.sort((a: StudentFeeStructure, b: StudentFeeStructure) =>
-                new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime()
-            );
-            const earliestDueDate = sortedFees[0]?.dueDate || null;
-
+        for (const student of studentsWithBalances) {
             const { subject, text, html } = generateFeeReminderEmail(
                 `${student.firstName} ${student.lastName}`,
-                outstandingAmount,
-                earliestDueDate,
+                student.balance,
+                student.earliestDueDate,
                 schoolName,
                 isOverdue
             );
@@ -226,48 +178,29 @@ export const sendFeeReminders = async (req: Request, res: Response) => {
 // Get students with outstanding fees for reminder preview
 export const getStudentsWithOutstandingFees = async (req: Request, res: Response) => {
     try {
-        const students = await prisma.student.findMany({
-            where: {
-                status: 'ACTIVE',
-            },
-            include: {
-                class: true,
-                feeStructures: {
-                    include: {
-                        feeTemplate: true,
-                    },
-                },
-            },
-        });
-
-        const studentsWithBalances = students.map(student => {
-            const outstandingAmount = student.feeStructures.reduce((total: number, fee: StudentFeeStructure) => {
-                return total + (Number(fee.amountDue) - Number(fee.amountPaid));
-            }, 0);
-
-            const feesWithDueDate = student.feeStructures.filter((f: StudentFeeStructure) => f.dueDate);
-            const sortedFees = feesWithDueDate.sort((a: StudentFeeStructure, b: StudentFeeStructure) =>
-                new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime()
-            );
-            const earliestDueDate = sortedFees[0]?.dueDate || null;
-
-            const isOverdue = earliestDueDate && new Date(earliestDueDate) < new Date();
-
-            return {
+        const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
+        if (!academicTermId) {
+            return res.status(400).json({ error: 'academicTermId is required' });
+        }
+        const balances = await getTermStudentBalances(academicTermId, getBranchScope(req));
+        const now = new Date();
+        const studentsWithBalances = balances
+            .filter(student => student.balance > 0)
+            .sort((a, b) => b.balance - a.balance)
+            .map(student => ({
                 id: student.id,
                 firstName: student.firstName,
                 lastName: student.lastName,
                 admissionNumber: student.admissionNumber,
-                className: student.class?.name,
+                className: student.className,
                 guardianName: student.guardianName,
                 guardianEmail: student.guardianEmail,
                 guardianPhone: student.guardianPhone,
-                outstandingAmount,
-                earliestDueDate,
-                isOverdue,
-                feeCount: student.feeStructures.length,
-            };
-        }).filter(s => s.outstandingAmount > 0);
+                outstandingAmount: student.balance,
+                earliestDueDate: student.earliestDueDate,
+                isOverdue: Boolean(student.earliestDueDate && student.earliestDueDate < now),
+                feeCount: student.feeCount,
+            }));
 
         res.json(studentsWithBalances);
     } catch (error) {

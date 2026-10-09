@@ -11,6 +11,15 @@
 
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
+import { runTermWriteTransaction } from './termLifecycleService';
+import { hasValidTimeRange } from '../utils/academicValidation';
+
+export class TimetableSaveError extends Error {
+  constructor(message: string, public readonly statusCode = 400) {
+    super(message);
+    this.name = 'TimetableSaveError';
+  }
+}
 
 export type DayOfWeek = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY';
 
@@ -64,18 +73,25 @@ export async function generateTimetable(
   if (!term) throw new Error('Academic term not found');
 
   // ── 2. Load classes ──────────────────────────────────────────────────
-  const classWhere: any = classIds?.length ? { id: { in: classIds } } : {};
+  const requestedClassIds = classIds ? [...new Set(classIds)] : undefined;
+  const classWhere: any = {
+    academicTermId: termId,
+    ...(requestedClassIds?.length ? { id: { in: requestedClassIds } } : {}),
+  };
   const classes = await prisma.class.findMany({
     where: classWhere,
     include: {
       subjects: { select: { id: true, name: true, code: true } },
-      _count: { select: { students: true } },
+      _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } },
     },
     orderBy: [{ gradeLevel: 'asc' }, { name: 'asc' }],
     take: 20, // Limit to 20 classes per generation to keep prompt manageable
   });
 
   if (classes.length === 0) throw new Error('No classes found');
+  if (requestedClassIds?.length && classes.length !== requestedClassIds.length) {
+    throw new Error('One or more selected classes do not belong to the selected academic term');
+  }
 
   // ── 3. Load teacher assignments (TeacherSubject) ─────────────────────
   const teacherSubjects = await prisma.teacherSubject.findMany({
@@ -104,7 +120,7 @@ export async function generateTimetable(
       const teacherAssignment = assignmentMap[c.id]?.[s.id];
       return `${s.name}${teacherAssignment ? ` (Teacher: ${teacherAssignment.teacherName})` : ' (no teacher assigned)'}`;
     });
-    return `CLASS: ${c.name} (Grade ${c.gradeLevel}, ${c._count.students} students)\n  Subjects: ${subjectList.join(', ')}`;
+    return `CLASS: ${c.name} (Grade ${c.gradeLevel}, ${c._count.termEnrollments} students)\n  Subjects: ${subjectList.join(', ')}`;
   });
 
   // Build all unique teacher names
@@ -238,45 +254,89 @@ export async function saveTimetablePeriods(
   result: TimetableGenerationResult,
   clearExisting = false,
 ): Promise<{ created: number; errors: string[] }> {
-  const errors: string[] = [];
-  let created = 0;
-
-  if (clearExisting) {
-    const classIds = [...new Set(result.periods.map(p => p.classId))];
-    await (prisma.timetablePeriodClass as any).deleteMany({
-      where: { class: { id: { in: classIds } } },
-    });
-    // Then delete orphan periods
-    await (prisma.timetablePeriod as any).deleteMany({
-      where: { academicTermId: result.termId },
-    });
-  }
-
-  for (const p of result.periods) {
-    try {
-      const period = await (prisma.timetablePeriod as any).create({
-        data: {
-          subjectId: p.subjectId,
-          teacherId: p.teacherId,
-          dayOfWeek: p.dayOfWeek,
-          startTime: p.startTime,
-          endTime: p.endTime,
-          academicTermId: result.termId,
-        },
-      });
-
-      await (prisma.timetablePeriodClass as any).create({
-        data: {
-          timetablePeriodId: period.id,
-          classId: p.classId,
-        },
-      });
-
-      created++;
-    } catch (err) {
-      errors.push(`${p.className} ${p.dayOfWeek} P${p.periodNumber}: ${(err as Error).message}`);
+  const classIds = [...new Set(result.periods.map(period => period.classId))];
+  const slotKeys = new Set<string>();
+  for (const period of result.periods) {
+    if (!hasValidTimeRange(period.startTime, period.endTime)) {
+      throw new TimetableSaveError(`Invalid time range for ${period.className} ${period.dayOfWeek}`);
     }
+    const slotKey = `${period.classId}:${period.dayOfWeek}:${period.startTime}:${period.endTime}`;
+    if (slotKeys.has(slotKey)) {
+      throw new TimetableSaveError(`Duplicate timetable slot for ${period.className} ${period.dayOfWeek}`);
+    }
+    slotKeys.add(slotKey);
   }
 
-  return { created, errors };
+  const created = await runTermWriteTransaction(result.termId, 'SETUP', async tx => {
+    const [classes, allocations] = await Promise.all([
+      tx.class.findMany({
+        where: { id: { in: classIds }, academicTermId: result.termId },
+        select: { id: true },
+      }),
+      tx.teacherSubject.findMany({
+        where: { classId: { in: classIds } },
+        select: { classId: true, subjectId: true, teacherId: true },
+      }),
+    ]);
+
+    if (classes.length !== classIds.length) {
+      throw new TimetableSaveError('Every timetable class must belong to the selected academic term');
+    }
+
+    const allocationKeys = new Set(
+      allocations.map(item => `${item.classId}:${item.subjectId}:${item.teacherId}`),
+    );
+    const invalidPeriod = result.periods.find(period => (
+      !allocationKeys.has(`${period.classId}:${period.subjectId}:${period.teacherId}`)
+    ));
+    if (invalidPeriod) {
+      throw new TimetableSaveError(
+        `${invalidPeriod.teacherName} is not assigned to ${invalidPeriod.subjectName} in ${invalidPeriod.className}`,
+      );
+    }
+
+    if (clearExisting && classIds.length > 0) {
+      const links = await tx.timetablePeriodClass.findMany({
+        where: {
+          classId: { in: classIds },
+          timetablePeriod: { academicTermId: result.termId },
+        },
+        select: { timetablePeriodId: true },
+      });
+      const affectedPeriodIds = [...new Set(links.map(link => link.timetablePeriodId))];
+      await tx.timetablePeriodClass.deleteMany({
+        where: {
+          classId: { in: classIds },
+          timetablePeriod: { academicTermId: result.termId },
+        },
+      });
+      if (affectedPeriodIds.length > 0) {
+        await tx.timetablePeriod.deleteMany({
+          where: {
+            id: { in: affectedPeriodIds },
+            academicTermId: result.termId,
+            classes: { none: {} },
+          },
+        });
+      }
+    }
+
+    for (const period of result.periods) {
+      await tx.timetablePeriod.create({
+        data: {
+          subjectId: period.subjectId,
+          teacherId: period.teacherId,
+          dayOfWeek: period.dayOfWeek,
+          startTime: period.startTime,
+          endTime: period.endTime,
+          academicTermId: result.termId,
+          classes: { create: { classId: period.classId } },
+        },
+      });
+    }
+
+    return result.periods.length;
+  });
+
+  return { created, errors: [] };
 }

@@ -321,22 +321,22 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Link to="/academics/attendance" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
+              <Link to="/academics/attendance" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-surface-hover transition-colors">
                 <ClipboardCheck size={18} className="text-blue-600 dark:text-blue-400 mb-2" />
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Mark Attendance</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Open today’s register</p>
               </Link>
-              <Link to="/academics/gradebook" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
+              <Link to="/academics/gradebook" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-surface-hover transition-colors">
                 <BookOpen size={18} className="text-emerald-600 dark:text-emerald-400 mb-2" />
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Open Gradebook</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Enter or review scores</p>
               </Link>
-              <Link to="/students" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
+              <Link to="/students" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-surface-hover transition-colors">
                 <Search size={18} className="text-purple-600 dark:text-purple-400 mb-2" />
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Find Student</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Open learner profiles</p>
               </Link>
-              <button onClick={() => setActiveTab('PLAN')} className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 text-left hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors">
+              <button onClick={() => setActiveTab('PLAN')} className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 text-left hover:bg-surface-hover transition-colors">
                 <BrainCircuit size={18} className="text-amber-600 dark:text-amber-400 mb-2" />
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Continue Planning</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{readyLessonsCount} ready • {draftLessonsCount} draft</p>
@@ -400,7 +400,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                     <button
                       onClick={() => handleDismissAction(action.id)}
                       disabled={actionBusy === action.id}
-                      className="px-3 py-2 bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-600 transition disabled:opacity-50"
+                      className="px-3 py-2 bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-surface-hover-strong transition disabled:opacity-50"
                     >
                       <X size={12} />
                     </button>
@@ -413,13 +413,13 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
 
         {/* Workspace Navigation Tabs (Hard-coded to Insights for Phase 1) */}
         <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-6 pb-1">
-          <button onClick={() => setActiveTab('INSIGHTS')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'INSIGHTS' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
+          <button onClick={() => setActiveTab('INSIGHTS')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'INSIGHTS' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-surface-hover border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
             Intelligence & Insights
           </button>
-          <button onClick={() => setActiveTab('PLAN')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'PLAN' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
+          <button onClick={() => setActiveTab('PLAN')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'PLAN' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-surface-hover border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
             Adapt & Plan
           </button>
-          <button onClick={() => setActiveTab('ASSESS')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'ASSESS' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
+          <button onClick={() => setActiveTab('ASSESS')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'ASSESS' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white text-gray-600 hover:bg-surface-hover border border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-700'}`}>
             Assessments
           </button>
         </div>
@@ -456,7 +456,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                        </thead>
                        <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
                          {objectives.slice(0, 8).map(obj => (
-                           <tr key={obj.id} onClick={() => setSelectedObjective(obj)} className={`hover:bg-gray-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer ${selectedObjective?.id === obj.id ? 'bg-blue-50/70 dark:bg-blue-900/10' : ''}`}>
+                           <tr key={obj.id} onClick={() => setSelectedObjective(obj)} className={`hover:bg-surface-hover transition-colors cursor-pointer ${selectedObjective?.id === obj.id ? 'bg-blue-50/70 dark:bg-blue-900/10' : ''}`}>
                              <td className="p-4 text-gray-900 dark:text-white font-medium">{obj.subTopic.topic.title}</td>
                              <td className="p-4 text-gray-600 dark:text-gray-400 truncate max-w-[200px]">{obj.subTopic.title}</td>
                              <td className="p-4">
@@ -557,10 +557,10 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                         Weak: {student.weakTopics[0]} {student.weakTopics.length > 1 && `+${student.weakTopics.length - 1} more`}
                       </div>
                        <div className="grid grid-cols-2 gap-2 mt-auto">
-                        <Link to={`/students/${student.studentId}`} className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-[11px] font-bold py-1.5 rounded-xl hover:bg-gray-50 transition-colors flex justify-center items-center gap-1">
+                        <Link to={`/students/${student.studentId}`} className="bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-[11px] font-bold py-1.5 rounded-xl hover:bg-surface-hover transition-colors flex justify-center items-center gap-1">
                           <Eye size={12}/> View Student
                         </Link>
-                        <Link to="/academics/gradebook" className="bg-blue-600 text-white text-[11px] font-bold py-1.5 rounded-xl hover:bg-blue-700 transition-colors flex justify-center items-center gap-1">
+                        <Link to="/academics/gradebook" className="bg-primary text-white text-[11px] font-bold py-1.5 rounded-xl hover:bg-primary-hover transition-colors flex justify-center items-center gap-1">
                           <BookOpen size={12}/> Gradebook
                         </Link>
                       </div>
@@ -584,7 +584,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
               {(['ALL', 'DRAFT', 'READY', 'DEPLOYED', 'COMPLETED'] as const).map(s => {
                 const count = s === 'ALL' ? lessons.length : lessons.filter(l => l.status === s).length;
                 return (
-                  <button key={s} onClick={() => setLessonStatusFilter(s)} className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors ${lessonStatusFilter === s ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-50'}`}>
+                  <button key={s} onClick={() => setLessonStatusFilter(s)} className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors ${lessonStatusFilter === s ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-surface-hover'}`}>
                     {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()} <span className="ml-1 opacity-60">{count}</span>
                   </button>
                 );
@@ -640,7 +640,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                     <div key={lesson.id} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
                       {/* Lesson Header */}
                       <div
-                        className="p-4 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-slate-700/50 transition-colors"
+                        className="p-4 cursor-pointer hover:bg-surface-hover transition-colors"
                         onClick={() => setExpandedLessonId(isExpanded ? null : lesson.id)}
                       >
                         <div className="flex justify-between items-start mb-2">
@@ -708,7 +708,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                                 </button>
                                 <button
                                   onClick={() => handleStatusChange(lesson.id, 'READY')}
-                                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition"
+                                  className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary-hover transition"
                                 >
                                   <Check size={12} /> Mark Ready
                                 </button>
@@ -724,7 +724,7 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                                 </button>
                                 <button
                                   onClick={() => handleStatusChange(lesson.id, 'DRAFT')}
-                                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-gray-200 transition"
+                                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-surface-hover-strong transition"
                                 >
                                   <Edit3 size={12} /> Back to Draft
                                 </button>
@@ -804,10 +804,10 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                       <p className="text-xs text-gray-500 dark:text-gray-400">{assessment.class.name} • {new Date(assessment.date).toLocaleDateString()} • {assessment._count.results} result{assessment._count.results !== 1 ? 's' : ''} recorded</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Link to="/academics/gradebook" className="inline-flex items-center gap-1 rounded-xl bg-blue-600 text-white px-3 py-2 text-xs font-bold hover:bg-blue-700 transition-colors">
+                      <Link to="/academics/gradebook" className="inline-flex items-center gap-1 rounded-xl bg-primary text-white px-3 py-2 text-xs font-bold hover:bg-primary-hover transition-colors">
                         <ClipboardCheck size={12} /> Grade Results
                       </Link>
-                      <Link to="/academics" className="inline-flex items-center gap-1 rounded-xl bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-3 py-2 text-xs font-bold hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors">
+                      <Link to="/academics" className="inline-flex items-center gap-1 rounded-xl bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-3 py-2 text-xs font-bold hover:bg-surface-hover transition-colors">
                         <Eye size={12} /> Open Academics
                       </Link>
                     </div>

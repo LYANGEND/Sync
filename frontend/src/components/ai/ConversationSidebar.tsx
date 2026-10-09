@@ -32,7 +32,7 @@ const activeBg = {
 const newBtnBg = {
   purple: 'bg-purple-600 hover:bg-purple-700',
   emerald: 'bg-emerald-600 hover:bg-emerald-700',
-  blue: 'bg-blue-600 hover:bg-blue-700',
+  blue: 'bg-primary hover:bg-primary-hover',
 } as const;
 
 export default function ConversationSidebar({
@@ -75,7 +75,7 @@ export default function ConversationSidebar({
               className={`group w-full text-left px-3 py-2.5 rounded-lg mb-1 transition-colors ${
                 activeId === conv.id
                   ? activeBg[accentColor]
-                  : 'hover:bg-gray-100 dark:hover:bg-slate-800'
+                  : 'hover:bg-surface-hover'
               }`}
             >
               <div className="flex items-start justify-between gap-2">

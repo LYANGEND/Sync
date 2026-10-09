@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, School, Phone, Mail, MapPin } from 'lucide-react';
+import { Clock3, LockKeyhole, Mail, MapPin, Phone, Printer, School, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
 import { StudentReport } from '../../services/reportCardService';
 
@@ -23,6 +23,8 @@ interface StudentReportCardProps {
     onPrincipalRemarkChange?: (value: string) => void;
     onSaveRemarks?: () => void;
     saving?: boolean;
+    principalRemarkEditable?: boolean;
+    showPrintAction?: boolean;
     className?: string; // For adding page-break logic
 }
 
@@ -35,25 +37,38 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
     onPrincipalRemarkChange,
     onSaveRemarks,
     saving = false,
+    principalRemarkEditable = false,
+    showPrintAction = true,
     className = ''
 }) => {
     const [qrCodeUrl, setQrCodeUrl] = useState('');
+    const canEdit = editable && report.status === 'DRAFT';
 
     useEffect(() => {
-        if (report) {
+        if (report?.status === 'PUBLISHED') {
             // Updated to link to verification page
             const verifyUrl = `${window.location.origin}/verify/report/${report.id}`;
             QRCode.toDataURL(verifyUrl, { margin: 1, width: 100 })
                 .then(url => setQrCodeUrl(url))
                 .catch(err => console.error(err));
+            } else {
+                setQrCodeUrl('');
         }
-    }, [report]);
+            }, [report.id, report.status, report.currentVersion]);
 
     return (
-        <div className={`bg-white mx-auto print:w-full max-w-4xl p-8 print:p-0 print:m-0 ${className}`}>
+        <div className={`min-w-0 bg-white mx-auto print:w-full max-w-4xl p-2 sm:p-4 lg:p-8 print:p-0 print:m-0 ${className}`}>
 
             {/* Print Wrapper to force A4-like constraints if needed, mostly handled by @media print */}
-            <div className="relative border-4 border-double border-slate-800 p-8 print:border-4 print:border-double print:border-slate-800 h-full">
+            <div className="relative min-w-0 border-4 border-double border-slate-800 p-3 sm:p-4 lg:p-8 print:p-8 print:border-4 print:border-double print:border-slate-800 h-full">
+
+                <div className="relative z-10 mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3 print:border-slate-300">
+                    <div className="flex items-center gap-2">
+                        {report.status === 'PUBLISHED' ? <ShieldCheck size={17} className="text-emerald-700" /> : report.status === 'FINALIZED' ? <LockKeyhole size={17} className="text-blue-700" /> : <Clock3 size={17} className="text-amber-700" />}
+                        <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-700">{report.status} report</span>
+                    </div>
+                    <span className="font-mono text-xs text-slate-500">Version {report.currentVersion}</span>
+                </div>
 
                 {/* Watermark */}
                 <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none overflow-hidden">
@@ -62,7 +77,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
 
                 {/* Header Section */}
                 <div className="relative z-10 border-b-2 border-slate-800 pb-6 mb-6">
-                    <div className="flex justify-between items-center gap-6">
+                    <div className="flex flex-col lg:flex-row print:flex-row justify-between items-center gap-4 lg:gap-6">
                         <div className="w-24 h-24 flex items-center justify-center bg-slate-900 text-white rounded-full print:bg-slate-900 print:text-white shrink-0 overflow-hidden">
                             {report.school?.logoUrl ? (
                                 <img
@@ -74,8 +89,8 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                                 <School size={48} />
                             )}
                         </div>
-                        <div className="text-center flex-1">
-                            <h1 className="text-3xl font-serif font-bold text-slate-900 uppercase tracking-widest mb-2">
+                        <div className="min-w-0 text-center flex-1 break-words">
+                            <h1 className="text-xl sm:text-2xl lg:text-3xl print:text-3xl font-serif font-bold text-slate-900 uppercase tracking-wide lg:tracking-widest mb-2">
                                 {report.school?.schoolName || 'Sync International School'}
                             </h1>
                             <div className="text-sm font-medium text-slate-600 flex flex-wrap justify-center gap-4">
@@ -84,7 +99,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                                 <span className="flex items-center gap-1"><Mail size={12} /> {report.school?.schoolEmail || 'info@syncschool.edu.zm'}</span>
                             </div>
                         </div>
-                        <div className="w-24 shrink-0 text-right hidden sm:block">
+                        <div className="w-24 shrink-0 text-right hidden lg:block print:block">
                             {/* Placeholder for Photo or Motto */}
                             <div className="text-xs font-serif italic text-slate-500">"Excellence in Everything"</div>
                         </div>
@@ -98,7 +113,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                 </div>
 
                 {/* Student Details Grid */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-y-4 gap-x-8 text-sm mb-8 p-4 bg-slate-50 border border-slate-200 rounded-sm print:bg-slate-50 print:border-slate-200">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-y-4 gap-x-3 lg:gap-x-8 break-words text-sm mb-8 p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-sm print:bg-slate-50 print:border-slate-200">
                     <div>
                         <span className="block text-xs font-bold text-slate-500 uppercase">Student Name</span>
                         <span className="font-bold text-slate-900 text-base">{report.student?.firstName} {report.student?.lastName}</span>
@@ -142,8 +157,8 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                 </div>
 
                 {/* Results Table */}
-                <div className="mb-8 overflow-hidden border border-slate-200 rounded-sm">
-                    <table className="w-full text-left text-sm">
+                <div role="region" aria-label="Student report results" tabIndex={0} className="mb-8 max-w-full overflow-x-auto border border-slate-200 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary print:overflow-visible">
+                    <table className="w-full min-w-[420px] print:min-w-0 text-left text-sm">
                         <thead>
                             <tr className="bg-slate-800 text-white print:bg-slate-800 print:text-white">
                                 <th className="px-4 py-2 font-bold uppercase tracking-wider text-xs w-1/3">Subject</th>
@@ -177,7 +192,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                     <div className="border border-slate-200 p-4 rounded-sm bg-slate-50 print:bg-slate-50 relative">
                         <div className="flex justify-between items-center mb-2">
                             <h4 className="font-bold text-slate-800 uppercase text-xs">Class Teacher's Remarks</h4>
-                            {editable && (
+                            {canEdit && (
                                 <select
                                     className="text-xs border border-gray-300 rounded px-2 py-1 print:hidden bg-white text-gray-700 focus:border-blue-500 focus:outline-none"
                                     onChange={(e) => {
@@ -191,7 +206,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                             )}
                         </div>
 
-                        {editable ? (
+                        {canEdit ? (
                             <>
                                 <textarea
                                     value={teacherRemark}
@@ -223,7 +238,7 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                     {/* Principal Remarks */}
                     <div className="border border-slate-200 p-4 rounded-sm bg-slate-50 print:bg-slate-50">
                         <h4 className="font-bold text-slate-800 uppercase text-xs mb-3">Head Teacher's Remarks</h4>
-                        {editable ? (
+                        {canEdit && principalRemarkEditable ? (
                             <>
                                 <textarea
                                     value={principalRemark}
@@ -267,8 +282,10 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
                             <div className="text-[10px] uppercase font-bold text-slate-400">Scan to Verify</div>
                             <div className="text-[10px] text-slate-400">Sync School System</div>
                         </div>
-                        {qrCodeUrl && (
+                        {qrCodeUrl ? (
                             <img src={qrCodeUrl} alt="Report QR Code" className="w-16 h-16 border border-slate-200 p-1 bg-white" />
+                        ) : (
+                            <div className="grid h-16 w-16 place-items-center border border-dashed border-slate-300 p-1 text-center text-[8px] font-bold uppercase leading-tight text-slate-400">Publish to verify</div>
                         )}
                     </div>
                 </div>
@@ -276,22 +293,26 @@ const StudentReportCard: React.FC<StudentReportCardProps> = ({
             </div>
 
             {/* UI: Print/Save Buttons (Outside the report border) */}
-            {editable && (
+            {(canEdit || showPrintAction) && (
                 <div className="mt-6 flex justify-end gap-3 print:hidden">
-                    <button
-                        onClick={onSaveRemarks}
-                        disabled={saving}
-                        className="px-6 py-2 bg-slate-800 text-white rounded hover:bg-slate-900 transition-colors disabled:opacity-50 text-sm font-medium"
-                    >
-                        {saving ? 'Saving...' : 'Save Remarks'}
-                    </button>
-                    <button
-                        onClick={() => window.print()}
-                        className="px-6 py-2 border border-slate-300 text-slate-700 bg-white rounded hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
-                    >
-                        <Printer size={16} />
-                        Print Official Report
-                    </button>
+                    {canEdit && (
+                        <button
+                            onClick={onSaveRemarks}
+                            disabled={saving}
+                            className="px-6 py-2 bg-slate-800 text-white rounded hover:bg-slate-900 transition-colors disabled:opacity-50 text-sm font-medium"
+                        >
+                            {saving ? 'Saving...' : 'Save Remarks'}
+                        </button>
+                    )}
+                    {showPrintAction && (
+                        <button
+                            onClick={() => window.print()}
+                            className="px-6 py-2 border border-slate-300 text-slate-700 bg-white rounded hover:bg-surface-hover transition-colors text-sm font-medium flex items-center gap-2"
+                        >
+                            <Printer size={16} />
+                            Print Official Report
+                        </button>
+                    )}
                 </div>
             )}
         </div>

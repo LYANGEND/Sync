@@ -16,16 +16,17 @@ export const generatePracticeQuestions = async (req: AuthRequest, res: Response)
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { studentId, subjectId, topicId, count, difficulty } = req.body;
+    const { studentId, academicTermId, subjectId, topicId, count, difficulty } = req.body;
 
-    if (!studentId || !subjectId) {
+    if (!studentId || !academicTermId || !subjectId) {
       return res.status(400).json({ 
-        error: 'studentId and subjectId are required' 
+        error: 'studentId, academicTermId, and subjectId are required' 
       });
     }
 
     const questions = await studyBuddyService.generatePracticeQuestions(
       studentId,
+      academicTermId,
       subjectId,
       topicId,
       count || 5,
@@ -90,11 +91,11 @@ export const createStudyPlan = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { studentId, examDate, subjectIds } = req.body;
+    const { studentId, academicTermId, examDate, subjectIds } = req.body;
 
-    if (!studentId || !examDate || !subjectIds || !Array.isArray(subjectIds)) {
+    if (!studentId || !academicTermId || !examDate || !subjectIds || !Array.isArray(subjectIds)) {
       return res.status(400).json({ 
-        error: 'studentId, examDate, and subjectIds (array) are required' 
+        error: 'studentId, academicTermId, examDate, and subjectIds (array) are required' 
       });
     }
 
@@ -106,6 +107,7 @@ export const createStudyPlan = async (req: AuthRequest, res: Response) => {
 
     const plan = await studyBuddyService.createStudyPlan(
       studentId,
+      academicTermId,
       new Date(examDate),
       subjectIds
     );

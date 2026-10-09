@@ -4,6 +4,8 @@ import { elevenLabsService } from './elevenLabsService';
 import { Prisma } from '@prisma/client';
 import { buildRuntimeLessonPlan } from './lessonPlanRuntimeService';
 import { emitClassroomAIMessage } from './classroomRealtimeService';
+import { TermLifecycleError } from './termLifecycleService';
+import { runClassroomTermWriteTransaction } from './classroomTermService';
 
 // ==========================================
 // AI TUTOR SERVICE — The Teaching Brain
@@ -80,6 +82,34 @@ interface PromptSegmentContext {
   talkingPoints: string[];
   segmentIndex?: number;
   totalSegments?: number;
+}
+
+async function runTutorSessionWriteTransaction<T>(
+  sessionId: string,
+  classroomId: string,
+  operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  options: { requireActive?: boolean } = {},
+): Promise<T> {
+  return runClassroomTermWriteTransaction(classroomId, 'ACADEMIC_ACTIVITY', async tx => {
+    const persistedSession = await tx.aITutorSession.findUnique({
+      where: { id: sessionId },
+      select: { classroomId: true, status: true },
+    });
+    if (!persistedSession || persistedSession.classroomId !== classroomId) {
+      throw new TermLifecycleError(
+        'TERM_LIFECYCLE_CONFLICT',
+        'AI tutor session ownership changed while it was being updated',
+      );
+    }
+    if (options.requireActive !== false && persistedSession.status !== 'ACTIVE') {
+      throw new TermLifecycleError(
+        'TERM_LIFECYCLE_CONFLICT',
+        'AI tutor session is no longer active',
+      );
+    }
+
+    return operation(tx);
+  });
 }
 
 // Lesson phases the AI tutor progresses through
@@ -611,16 +641,20 @@ class AITutorService {
       const classInfo = await prisma.class.findUnique({
         where: { id: classroom.classId },
         include: {
-          students: {
+          termEnrollments: {
             where: { status: 'ACTIVE' },
-            select: { firstName: true, lastName: true },
+            select: {
+              student: { select: { firstName: true, lastName: true } },
+            },
             take: 50,
           },
         },
       });
       if (classInfo) {
         className = classInfo.name;
-        studentNames = classInfo.students.map((s: any) => `${s.firstName} ${s.lastName}`);
+        studentNames = classInfo.termEnrollments.map(
+          enrollment => `${enrollment.student.firstName} ${enrollment.student.lastName}`,
+        );
       }
     }
 
@@ -658,16 +692,29 @@ class AITutorService {
     });
 
     // Create DB session
-    const session = await prisma.aITutorSession.create({
-      data: {
-        classroomId,
-        status: 'ACTIVE',
-        voiceId: classroom.aiTutorVoiceId,
-        lessonPhase: 'GREETING',
-        currentTopic: initialSegmentContext?.title || null,
-        topicIndex: initialSegmentContext?.segmentIndex ? initialSegmentContext.segmentIndex - 1 : 0,
-        startedAt: new Date(),
-      },
+    const session = await runClassroomTermWriteTransaction(classroomId, 'ACADEMIC_ACTIVITY', async tx => {
+      const persistedClassroom = await tx.virtualClassroom.findUnique({
+        where: { id: classroomId },
+        select: { aiTutorEnabled: true, aiTutorVoiceId: true },
+      });
+      if (!persistedClassroom?.aiTutorEnabled) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'AI Tutor is no longer enabled for this classroom',
+        );
+      }
+
+      return tx.aITutorSession.create({
+        data: {
+          classroomId,
+          status: 'ACTIVE',
+          voiceId: persistedClassroom.aiTutorVoiceId,
+          lessonPhase: 'GREETING',
+          currentTopic: initialSegmentContext?.title || null,
+          topicIndex: initialSegmentContext?.segmentIndex ? initialSegmentContext.segmentIndex - 1 : 0,
+          startedAt: new Date(),
+        },
+      });
     });
 
     const tutorMode: TutorMode = options.mode || 'CO_TEACHER';
@@ -731,24 +778,31 @@ class AITutorService {
     memState.conversationHistory.push(entry);
 
     // Save chat message to DB
-    const greetingChat = await prisma.classroomChat.create({
-      data: {
-        classroomId,
-        senderName: classroom.aiTutorName,
-        isAI: true,
-        message: greetingText,
-      },
-    });
+    const greetingChat = await runTutorSessionWriteTransaction(
+      session.id,
+      classroomId,
+      async tx => {
+        const chat = await tx.classroomChat.create({
+          data: {
+            classroomId,
+            senderName: classroom.aiTutorName,
+            isAI: true,
+            message: greetingText,
+          },
+        });
 
-    // Update session metrics
-    await prisma.aITutorSession.update({
-      where: { id: session.id },
-      data: {
-        totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
-        totalTTSCharacters: { increment: greetingText.length },
-        conversationLog: [entry] as unknown as Prisma.InputJsonValue,
+        await tx.aITutorSession.update({
+          where: { id: session.id },
+          data: {
+            totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
+            totalTTSCharacters: { increment: greetingText.length },
+            conversationLog: [entry] as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        return chat;
       },
-    });
+    );
 
     this.emitTeacherMessage(classroomId, greetingChat, {
       audioBuffer,
@@ -834,16 +888,20 @@ class AITutorService {
       const classInfo = await prisma.class.findUnique({
         where: { id: classroom.classId },
         include: {
-          students: {
+          termEnrollments: {
             where: { status: 'ACTIVE' },
-            select: { firstName: true, lastName: true },
+            select: {
+              student: { select: { firstName: true, lastName: true } },
+            },
             take: 50,
           },
         },
       });
       if (classInfo) {
         className = classInfo.name;
-        studentNames = classInfo.students.map((s: any) => `${s.firstName} ${s.lastName}`);
+        studentNames = classInfo.termEnrollments.map(
+          enrollment => `${enrollment.student.firstName} ${enrollment.student.lastName}`,
+        );
       }
     }
 
@@ -926,37 +984,44 @@ class AITutorService {
     memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
 
     // Save to DB
-    await prisma.classroomChat.create({
-      data: {
-        classroomId: classroom.id,
-        senderName: studentName,
-        isAI: false,
-        message,
-      },
-    });
-    const teacherChat = await prisma.classroomChat.create({
-      data: {
-        classroomId: classroom.id,
-        senderName: classroom.aiTutorName,
-        isAI: true,
-        message: responseText,
-      },
-    });
+    const teacherChat = await runTutorSessionWriteTransaction(
+      sessionId,
+      classroom.id,
+      async tx => {
+        await tx.classroomChat.create({
+          data: {
+            classroomId: classroom.id,
+            senderName: studentName,
+            isAI: false,
+            message,
+          },
+        });
+        const persistedTeacherChat = await tx.classroomChat.create({
+          data: {
+            classroomId: classroom.id,
+            senderName: classroom.aiTutorName,
+            isAI: true,
+            message: responseText,
+          },
+        });
 
-    // Update session
-    await prisma.aITutorSession.update({
-      where: { id: sessionId },
-      data: {
-        totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
-        totalTTSCharacters: { increment: responseText.length },
-        questionsAsked: { increment: 1 },
-        questionsAnswered: { increment: 1 },
-        conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
-        lessonPhase: memState.phase,
-        currentTopic: memState.currentTopic,
-        topicIndex: memState.topicIndex,
+        await tx.aITutorSession.update({
+          where: { id: sessionId },
+          data: {
+            totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
+            totalTTSCharacters: { increment: responseText.length },
+            questionsAsked: { increment: 1 },
+            questionsAnswered: { increment: 1 },
+            conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
+            lessonPhase: memState.phase,
+            currentTopic: memState.currentTopic,
+            topicIndex: memState.topicIndex,
+          },
+        });
+
+        return persistedTeacherChat;
       },
-    });
+    );
 
     this.emitTeacherMessage(classroom.id, teacherChat, {
       audioBuffer,
@@ -1113,26 +1178,34 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
 
     // Save to DB
-    const transitionChat = await prisma.classroomChat.create({
-      data: {
-        classroomId: classroom.id,
-        senderName: classroom.aiTutorName,
-        isAI: true,
-        message: responseText,
-      },
-    });
+    const transitionChat = await runTutorSessionWriteTransaction(
+      sessionId,
+      classroom.id,
+      async tx => {
+        const persistedChat = await tx.classroomChat.create({
+          data: {
+            classroomId: classroom.id,
+            senderName: classroom.aiTutorName,
+            isAI: true,
+            message: responseText,
+          },
+        });
 
-    await prisma.aITutorSession.update({
-      where: { id: sessionId },
-      data: {
-        lessonPhase: memState.phase,
-        currentTopic: memState.currentTopic,
-        topicIndex: memState.topicIndex,
-        totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
-        totalTTSCharacters: { increment: responseText.length },
-        conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
+        await tx.aITutorSession.update({
+          where: { id: sessionId },
+          data: {
+            lessonPhase: memState.phase,
+            currentTopic: memState.currentTopic,
+            topicIndex: memState.topicIndex,
+            totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
+            totalTTSCharacters: { increment: responseText.length },
+            conversationLog: memState.conversationHistory as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        return persistedChat;
       },
-    });
+    );
 
     this.emitTeacherMessage(classroom.id, transitionChat, {
       audioBuffer,
@@ -1182,21 +1255,29 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const audioContentType = ttsResult?.contentType || '';
 
     // Save to DB
-    const spokenChat = await prisma.classroomChat.create({
-      data: {
-        classroomId: classroom.id,
-        senderName: classroom.aiTutorName,
-        isAI: true,
-        message: text,
-      },
-    });
+    const spokenChat = await runTutorSessionWriteTransaction(
+      sessionId,
+      classroom.id,
+      async tx => {
+        const persistedChat = await tx.classroomChat.create({
+          data: {
+            classroomId: classroom.id,
+            senderName: classroom.aiTutorName,
+            isAI: true,
+            message: text,
+          },
+        });
 
-    await prisma.aITutorSession.update({
-      where: { id: sessionId },
-      data: {
-        totalTTSCharacters: { increment: text.length },
+        await tx.aITutorSession.update({
+          where: { id: sessionId },
+          data: {
+            totalTTSCharacters: { increment: text.length },
+          },
+        });
+
+        return persistedChat;
       },
-    });
+    );
 
     this.emitTeacherMessage(classroom.id, spokenChat, {
       audioBuffer,
@@ -1287,23 +1368,31 @@ Only ask about facts and concepts from the approved content or what was explicit
       memState.conversationHistory = trimConversationHistory(memState.conversationHistory);
     }
 
-    const quizChat = await prisma.classroomChat.create({
-      data: {
-        classroomId: classroom.id,
-        senderName: classroom.aiTutorName,
-        isAI: true,
-        message: quizText,
-      },
-    });
+    const quizChat = await runTutorSessionWriteTransaction(
+      sessionId,
+      classroom.id,
+      async tx => {
+        const persistedChat = await tx.classroomChat.create({
+          data: {
+            classroomId: classroom.id,
+            senderName: classroom.aiTutorName,
+            isAI: true,
+            message: quizText,
+          },
+        });
 
-    await prisma.aITutorSession.update({
-      where: { id: sessionId },
-      data: {
-        totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
-        totalTTSCharacters: { increment: quizText.length },
-        conversationLog: (memState?.conversationHistory || session.conversationLog || []) as unknown as Prisma.InputJsonValue,
+        await tx.aITutorSession.update({
+          where: { id: sessionId },
+          data: {
+            totalTokensUsed: { increment: aiResponse.tokensUsed || 0 },
+            totalTTSCharacters: { increment: quizText.length },
+            conversationLog: (memState?.conversationHistory || session.conversationLog || []) as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        return persistedChat;
       },
-    });
+    );
 
     this.emitTeacherMessage(classroom.id, quizChat, {
       audioBuffer,
@@ -1393,78 +1482,83 @@ Return a JSON object with these exact keys:
       structuredSummary = { briefSummary: plainSummary };
     }
 
-    // Update session in DB
-    await prisma.aITutorSession.update({
-      where: { id: sessionId },
-      data: {
-        status: 'ENDED',
-        endedAt: new Date(),
-        conversationLog: conversationLog as unknown as Prisma.InputJsonValue,
-        lessonPhase: 'WRAP_UP',
-      },
-    });
+    const lessonContent = [
+      `## Virtual Classroom Session — Auto-generated Summary`,
+      `**Duration:** ${durationMinutes} minutes`,
+      `**Session date:** ${new Date().toLocaleDateString()}`,
+      '',
+      `### Topics Covered`,
+      (structuredSummary.topicsCovered || []).map((t: string) => `- ${t}`).join('\n'),
+      '',
+      `### Key Learning Points`,
+      (structuredSummary.keyLearningPoints || []).map((p: string) => `- ${p}`).join('\n'),
+      '',
+      `### Student Questions`,
+      (structuredSummary.studentQuestionsAsked || []).map((q: string) => `- ${q}`).join('\n'),
+      '',
+      `### Areas of Confusion / Follow-up Needed`,
+      (structuredSummary.areasOfConfusion || []).map((a: string) => `- ${a}`).join('\n'),
+      '',
+      `### Homework / Next Class`,
+      structuredSummary.homeworkOrFollowUp || 'None specified',
+      '',
+      `### Recommended Next Topics`,
+      (structuredSummary.recommendedNextTopics || []).map((t: string) => `- ${t}`).join('\n'),
+      '',
+      `---`,
+      `*Auto-generated from AI Tutor session ${sessionId}*`,
+    ].join('\n');
 
-    // Create a recording/summary entry
-    await prisma.classRecording.create({
-      data: {
-        classroomId: classroom.id,
-        summary: plainSummary,
-        transcript: conversationLog.map(e => `[${e.timestamp}] ${e.speaker}: ${e.message}`).join('\n'),
-        keyTopics: (structuredSummary.topicsCovered || []) as string[],
-      },
-    });
+    await runTutorSessionWriteTransaction(sessionId, classroom.id, async tx => {
+      await tx.aITutorSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'ENDED',
+          endedAt: new Date(),
+          conversationLog: conversationLog as unknown as Prisma.InputJsonValue,
+          lessonPhase: 'WRAP_UP',
+        },
+      });
 
-    // Auto-create a LessonPlan record from the session so the teacher has a record
-    if (classroom.classId && classroom.subjectId && classroom.teacherId) {
-      try {
-        const lessonContent = [
-          `## Virtual Classroom Session — Auto-generated Summary`,
-          `**Duration:** ${durationMinutes} minutes`,
-          `**Session date:** ${new Date().toLocaleDateString()}`,
-          '',
-          `### Topics Covered`,
-          (structuredSummary.topicsCovered || []).map((t: string) => `- ${t}`).join('\n'),
-          '',
-          `### Key Learning Points`,
-          (structuredSummary.keyLearningPoints || []).map((p: string) => `- ${p}`).join('\n'),
-          '',
-          `### Student Questions`,
-          (structuredSummary.studentQuestionsAsked || []).map((q: string) => `- ${q}`).join('\n'),
-          '',
-          `### Areas of Confusion / Follow-up Needed`,
-          (structuredSummary.areasOfConfusion || []).map((a: string) => `- ${a}`).join('\n'),
-          '',
-          `### Homework / Next Class`,
-          structuredSummary.homeworkOrFollowUp || 'None specified',
-          '',
-          `### Recommended Next Topics`,
-          (structuredSummary.recommendedNextTopics || []).map((t: string) => `- ${t}`).join('\n'),
-          '',
-          `---`,
-          `*Auto-generated from AI Tutor session ${sessionId}*`,
-        ].join('\n');
+      await tx.classRecording.create({
+        data: {
+          classroomId: classroom.id,
+          summary: plainSummary,
+          transcript: conversationLog.map(e => `[${e.timestamp}] ${e.speaker}: ${e.message}`).join('\n'),
+          keyTopics: (structuredSummary.topicsCovered || []) as string[],
+        },
+      });
 
-        // Find active term
-        const activeTerm = await prisma.academicTerm.findFirst({
-          where: { isActive: true },
+      const persistedClassroom = await tx.virtualClassroom.findUnique({
+        where: { id: classroom.id },
+        select: { classId: true, subjectId: true, teacherId: true, title: true },
+      });
+      if (persistedClassroom?.classId && persistedClassroom.subjectId && persistedClassroom.teacherId) {
+        const classSubject = await tx.class.findFirst({
+          where: {
+            id: persistedClassroom.classId,
+            subjects: { some: { id: persistedClassroom.subjectId } },
+          },
+          select: { academicTermId: true },
         });
 
-        await prisma.lessonPlan.create({
-          data: {
-            teacherId: classroom.teacherId,
-            classId: classroom.classId,
-            subjectId: classroom.subjectId,
-            termId: activeTerm?.id || '',
-            title: `[Virtual Class] ${classroom.title} — ${new Date().toLocaleDateString()}`,
-            weekStartDate: new Date(),
-            content: lessonContent,
-            status: 'COMPLETED',
-          } as any,
-        });
-      } catch (planErr) {
-        console.warn('[AITutor] Could not auto-create lesson plan:', planErr);
+        if (classSubject) {
+          await tx.lessonPlan.create({
+            data: {
+              teacherId: persistedClassroom.teacherId,
+              classId: persistedClassroom.classId,
+              subjectId: persistedClassroom.subjectId,
+              termId: classSubject.academicTermId,
+              title: `[Virtual Class] ${persistedClassroom.title} — ${new Date().toLocaleDateString()}`,
+              weekStartDate: new Date(),
+              content: lessonContent,
+            },
+          });
+        } else {
+          console.warn('[AITutor] Could not auto-create lesson plan: subject is not assigned to the classroom class');
+        }
       }
-    }
+    });
 
     // Clean up auto-advance timer and in-memory state
     const activeState = this.activeSessions.get(sessionId);

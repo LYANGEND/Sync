@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AccountingPostingEventType, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import aiService from '../services/aiService';
@@ -11,6 +12,20 @@ import {
   getAgedReceivables,
   getBalanceSheet,
 } from '../services/accountingService';
+import {
+  getActiveTerm,
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import {
+  allocateExistingPayment,
+  createCompletedPayment,
+  PaymentSettlementError,
+} from '../services/paymentSettlementService';
+import { sendPaymentSettlementError } from '../utils/paymentSettlementHttp';
+import { onInvoiceSent, onPaymentCreated } from '../services/accountingBridge';
+import { enqueueAccountingPosting } from '../services/accountingOutboxService';
 
 // ========================================
 // AI FINANCIAL ADVISOR
@@ -20,7 +35,7 @@ import {
  * Gather a COMPREHENSIVE financial snapshot — loops through ALL finance data
  * so the AI can answer any question about the school's financial state.
  */
-async function gatherFinancialSnapshot(branchId?: string) {
+async function gatherFinancialSnapshot(branchId?: string, termId?: string) {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -32,6 +47,25 @@ async function gatherFinancialSnapshot(branchId?: string) {
   const thisYearStart = new Date(currentYear, 0, 1);
 
   const branchFilter: any = branchId ? { branchId } : {};
+  const termPaymentFilter: any = termId ? { academicTermId: termId } : {};
+  const termInvoiceFilter: any = termId ? { termId } : {};
+  const termFeeFilter: any = termId ? { academicTermId: termId } : {};
+  const refundFilter: Prisma.RefundWhereInput = {
+    ...branchFilter,
+    ...(termId ? { payment: { academicTermId: termId } } : {}),
+  };
+  const creditNoteFilter: Prisma.CreditNoteWhereInput = (termId || branchId)
+    ? {
+      invoice: {
+        ...(termId ? { termId } : {}),
+        ...(branchId ? { branchId } : {}),
+      },
+    }
+    : {};
+  const mobileMoneyFilter: Prisma.MobileMoneyCollectionWhereInput = {
+    ...branchFilter,
+    ...(termId ? { payment: { academicTermId: termId } } : {}),
+  };
 
   // ================================================================
   // 1. REVENUE / PAYMENTS — aggregated + recent individual records
@@ -49,29 +83,29 @@ async function gatherFinancialSnapshot(branchId?: string) {
     agedReceivables,
   ] = await Promise.all([
     prisma.payment.aggregate({
-      where: { status: 'COMPLETED', paymentDate: { gte: thisMonthStart }, ...branchFilter },
+      where: { status: 'COMPLETED', paymentDate: { gte: thisMonthStart }, ...branchFilter, ...termPaymentFilter },
       _sum: { amount: true }, _count: true,
     }),
     prisma.payment.aggregate({
-      where: { status: 'COMPLETED', paymentDate: { gte: lastMonthStart, lte: lastMonthEnd }, ...branchFilter },
+      where: { status: 'COMPLETED', paymentDate: { gte: lastMonthStart, lte: lastMonthEnd }, ...branchFilter, ...termPaymentFilter },
       _sum: { amount: true }, _count: true,
     }),
     prisma.payment.aggregate({
-      where: { status: 'COMPLETED', paymentDate: { gte: thisYearStart }, ...branchFilter },
+      where: { status: 'COMPLETED', paymentDate: { gte: thisYearStart }, ...branchFilter, ...termPaymentFilter },
       _sum: { amount: true }, _count: true,
     }),
     prisma.payment.groupBy({
       by: ['method'],
-      where: { status: 'COMPLETED', paymentDate: { gte: thisYearStart }, ...branchFilter },
+      where: { status: 'COMPLETED', paymentDate: { gte: thisYearStart }, ...branchFilter, ...termPaymentFilter },
       _sum: { amount: true }, _count: true,
     }),
     prisma.payment.findMany({
-      where: { status: 'COMPLETED', paymentDate: { gte: new Date(currentYear, currentMonth - 6, 1) }, ...branchFilter },
+      where: { status: 'COMPLETED', paymentDate: { gte: new Date(currentYear, currentMonth - 6, 1) }, ...branchFilter, ...termPaymentFilter },
       select: { paymentDate: true, amount: true },
     }),
     // Recent 30 individual payments
     prisma.payment.findMany({
-      where: { ...branchFilter },
+      where: { ...branchFilter, ...termPaymentFilter },
       orderBy: { paymentDate: 'desc' },
       take: 30,
       select: {
@@ -80,10 +114,14 @@ async function gatherFinancialSnapshot(branchId?: string) {
         allocations: { select: { amount: true, studentFee: { select: { feeTemplate: { select: { name: true } } } } } },
       },
     }),
-    prisma.student.count({ where: branchFilter }),
-    prisma.student.count({ where: { status: 'ACTIVE', ...branchFilter } }),
-    prisma.studentFeeStructure.aggregate({ _sum: { amountDue: true, amountPaid: true } }),
-    getAgedReceivables(branchId).catch(() => null),
+    termId
+      ? prisma.studentTermEnrollment.count({ where: { academicTermId: termId, ...(branchId ? { student: { branchId } } : {}) } })
+      : prisma.student.count({ where: branchFilter }),
+    termId
+      ? prisma.studentTermEnrollment.count({ where: { academicTermId: termId, status: 'ACTIVE', ...(branchId ? { student: { branchId } } : {}) } })
+      : prisma.student.count({ where: { status: 'ACTIVE', ...branchFilter } }),
+    prisma.studentFeeStructure.aggregate({ where: termFeeFilter, _sum: { amountDue: true, amountPaid: true } }),
+    getAgedReceivables(branchId, termId).catch(() => null),
   ]);
 
   // ================================================================
@@ -120,7 +158,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
     }),
     // Recent 30 individual expenses
     prisma.expense.findMany({
-      where: { ...branchFilter },
+      where: branchFilter,
       orderBy: { date: 'desc' },
       take: 30,
       select: {
@@ -139,13 +177,13 @@ async function gatherFinancialSnapshot(branchId?: string) {
     // Summary by status
     prisma.invoice.groupBy({
       by: ['status'],
-      where: { ...branchFilter },
+      where: { ...branchFilter, ...termInvoiceFilter },
       _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
       _count: true,
     }),
     // Recent 20 invoices
     prisma.invoice.findMany({
-      where: { ...branchFilter },
+      where: { ...branchFilter, ...termInvoiceFilter },
       orderBy: { issueDate: 'desc' },
       take: 20,
       select: {
@@ -157,7 +195,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
     }),
     // All overdue invoices
     prisma.invoice.findMany({
-      where: { status: 'OVERDUE', ...branchFilter },
+      where: { status: 'OVERDUE', ...branchFilter, ...termInvoiceFilter },
       select: {
         invoiceNumber: true, dueDate: true, balanceDue: true, totalAmount: true,
         student: { select: { firstName: true, lastName: true } },
@@ -171,6 +209,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // ================================================================
   const [feeTemplates, feeCategories, feeCollectionByTemplate] = await Promise.all([
     prisma.feeTemplate.findMany({
+      where: termFeeFilter,
       select: {
         id: true, name: true, amount: true, applicableGrade: true,
         academicTerm: { select: { name: true } },
@@ -185,6 +224,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
     // Collection rate per fee template
     prisma.studentFeeStructure.groupBy({
       by: ['feeTemplateId'],
+      where: termFeeFilter,
       _sum: { amountDue: true, amountPaid: true },
       _count: true,
     }),
@@ -193,18 +233,47 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // ================================================================
   // 5. INDIVIDUAL STUDENT FEE BALANCES — top 30 debtors with detail
   // ================================================================
-  const studentFeeBalances = await prisma.$queryRaw<any[]>`
-    SELECT sf."amountDue", sf."amountPaid", sf."dueDate",
-           s."firstName", s."lastName", s."admissionNumber", s.status,
-           c."gradeLevel" as grade, ft.name as "feeName"
-    FROM student_fee_structures sf
-    JOIN students s ON sf."studentId" = s.id
-    JOIN classes c ON s."classId" = c.id
-    JOIN fee_templates ft ON sf."feeTemplateId" = ft.id
-    WHERE sf."amountPaid" < sf."amountDue"
-    ORDER BY (sf."amountDue" - sf."amountPaid") DESC
-    LIMIT 50
-  `.catch(() => []);
+  const studentFeeBalances = await prisma.studentFeeStructure.findMany({
+    where: {
+      ...termFeeFilter,
+      ...(branchId ? { student: { branchId } } : {}),
+    },
+    orderBy: { amountDue: 'desc' },
+    take: 100,
+    select: {
+      amountDue: true,
+      amountPaid: true,
+      dueDate: true,
+      student: {
+        select: {
+          firstName: true,
+          lastName: true,
+          admissionNumber: true,
+          status: true,
+          termEnrollments: {
+            where: { academicTermId: termId },
+            select: { class: { select: { gradeLevel: true } } },
+            take: 1,
+          },
+        },
+      },
+      feeTemplate: { select: { name: true } },
+    },
+  }).then(rows => rows.flatMap(row => {
+    const placement = row.student.termEnrollments[0];
+    if (!placement) return [];
+    return [{
+    amountDue: row.amountDue,
+    amountPaid: row.amountPaid,
+    dueDate: row.dueDate,
+    firstName: row.student.firstName,
+    lastName: row.student.lastName,
+    admissionNumber: row.student.admissionNumber,
+    status: row.student.status,
+    grade: placement.class.gradeLevel,
+    feeName: row.feeTemplate.name,
+    }];
+  })).catch(() => []);
 
   // Build per-student debt summaries
   const studentDebtMap: Record<string, any> = {};
@@ -292,7 +361,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // 8. BUDGETS — with item breakdowns
   // ================================================================
   const allBudgets = await prisma.budget.findMany({
-    where: { ...(branchId ? { branchId } : {}) },
+    where: { ...(branchId ? { branchId } : {}), ...(termId ? { termId } : {}) },
     include: { items: true },
     orderBy: { year: 'desc' },
   });
@@ -356,7 +425,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // ================================================================
   const [refunds, creditNotes] = await Promise.all([
     prisma.refund.findMany({
-      where: { ...(branchId ? { branchId } : {}) },
+      where: refundFilter,
       orderBy: { requestedAt: 'desc' },
       take: 15,
       select: {
@@ -364,6 +433,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
       },
     }),
     prisma.creditNote.findMany({
+      where: creditNoteFilter,
       orderBy: { issuedAt: 'desc' },
       take: 15,
       select: {
@@ -379,10 +449,12 @@ async function gatherFinancialSnapshot(branchId?: string) {
   const [mobileMoneyStats, recentMobileMoney] = await Promise.all([
     prisma.mobileMoneyCollection.groupBy({
       by: ['status'],
+      where: mobileMoneyFilter,
       _count: true,
       _sum: { amount: true },
     }),
     prisma.mobileMoneyCollection.findMany({
+      where: mobileMoneyFilter,
       orderBy: { initiatedAt: 'desc' },
       take: 15,
       select: {
@@ -408,6 +480,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
   // 15. DEBT COLLECTION CAMPAIGNS
   // ================================================================
   const debtCampaigns = await (prisma as any).debtCollectionCampaign.findMany({
+    where: termId ? { academicTermId: termId } : undefined,
     orderBy: { createdAt: 'desc' },
     take: 10,
     select: {
@@ -466,6 +539,7 @@ async function gatherFinancialSnapshot(branchId?: string) {
   return {
     generatedAt: now.toISOString(),
     currency: 'ZMW',
+    academicTermId: termId || null,
 
     // ---- SCHOOL OVERVIEW ----
     school: {
@@ -865,9 +939,9 @@ IMPORTANT: Only ONE action block per response. Always confirm what you're about 
 
 **BUDGET MANAGEMENT:**
 - CREATE_BUDGET — Create a new budget
-  Required: name (string, min 3 chars), period (term/annual/quarterly), year (int), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), items (array of {category, allocated} — category uses same expense categories)
-  Optional: notes, termId
-  Example: {"type":"CREATE_BUDGET","name":"Term 2 2026 Budget","period":"term","year":2026,"startDate":"2026-05-01","endDate":"2026-08-31","items":[{"category":"SALARIES","allocated":50000},{"category":"UTILITIES","allocated":8000}]}
+  Required: name (string, min 3 chars), period (term/annual/quarterly), year (int), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), items (array of {category, allocated} — category uses same expense categories). A term budget also requires its explicit termId; never infer it from the current term.
+  Optional: notes, termId (only optional for non-term budgets)
+  Example: {"type":"CREATE_BUDGET","name":"Term 2 2026 Budget","period":"term","termId":"academic-term-uuid","year":2026,"startDate":"2026-05-01","endDate":"2026-08-31","items":[{"category":"SALARIES","allocated":50000},{"category":"UTILITIES","allocated":8000}]}
 
 **PETTY CASH:**
 - CREATE_PETTY_CASH_TRANSACTION — Record a petty cash disbursement or replenishment
@@ -1292,6 +1366,7 @@ export const executeAIAction = async (req: Request, res: Response) => {
         const nameParts = studentName.trim().split(/\s+/);
         const student = await prisma.student.findFirst({
           where: {
+            ...(user.role === 'SUPER_ADMIN' || !branchId ? {} : { branchId }),
             OR: [
               { firstName: { contains: nameParts[0], mode: 'insensitive' }, lastName: { contains: nameParts[nameParts.length - 1], mode: 'insensitive' } },
               { firstName: { contains: studentName, mode: 'insensitive' } },
@@ -1302,39 +1377,94 @@ export const executeAIAction = async (req: Request, res: Response) => {
         if (!student) return res.status(404).json({ error: `Student "${studentName}" not found` });
 
         // Find active term
-        const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true }, orderBy: { startDate: 'desc' } });
+        const activeTerm = await getActiveTerm();
+        if (!activeTerm) return res.status(400).json({ error: 'No active academic term is configured' });
 
         const disc = Number(discAmt) || 0;
-        const subtotal = items.reduce((sum: number, i: any) => sum + (Number(i.quantity || 1) * Number(i.unitPrice)), 0);
-        const totalAmount = subtotal - disc;
-        const invoiceNumber = await generateSequenceNumber('INV', branchId);
-
-        const invoice = await prisma.invoice.create({
-          data: {
-            invoiceNumber,
-            studentId: student.id,
-            termId: activeTerm?.id || '',
-            dueDate: new Date(dueDate),
-            subtotal,
-            discount: disc,
-            taxAmount: 0,
-            totalAmount,
-            amountPaid: 0,
-            balanceDue: totalAmount,
-            status: 'SENT',
-            notes: invNotes || null,
-            branchId: branchId || null,
-            items: {
-              create: items.map((i: any) => ({
-                description: i.description,
-                quantity: Number(i.quantity || 1),
-                unitPrice: Number(i.unitPrice),
-                amount: Number(i.quantity || 1) * Number(i.unitPrice),
-              })),
+        if (disc !== 0) {
+          return res.status(400).json({
+            error: 'Invoice discounts require a canonical fee adjustment and are not supported by AI invoice creation',
+          });
+        }
+        const invoice = await runTermWriteTransaction(activeTerm.id, 'FINANCIAL_OBLIGATION', async tx => {
+          const assignedFees = await tx.studentFeeStructure.findMany({
+            where: { studentId: student.id, academicTermId: activeTerm.id },
+            include: {
+              feeTemplate: true,
+              invoiceItem: { select: { id: true } },
             },
-          },
+          });
+          const usedFeeIds = new Set<string>();
+          const canonicalItems = items.map((item: any) => {
+            const normalizedDescription = String(item.description || '').trim().toLowerCase();
+            const candidates = assignedFees.filter(fee => (
+              !fee.invoiceItem
+              && !usedFeeIds.has(fee.id)
+              && (
+                (item.feeTemplateId && fee.feeTemplateId === item.feeTemplateId)
+                || (!item.feeTemplateId && fee.feeTemplate.name.trim().toLowerCase() === normalizedDescription)
+              )
+            ));
+            if (candidates.length !== 1) {
+              throw new PaymentSettlementError(
+                'INVOICE_OBLIGATION_LINK_REQUIRED',
+                `Invoice item "${item.description || 'Unnamed fee'}" must match exactly one un-invoiced fee obligation`,
+                400,
+              );
+            }
+            const fee = candidates[0];
+            usedFeeIds.add(fee.id);
+            return {
+              description: fee.feeTemplate.name,
+              quantity: 1,
+              unitPrice: Number(fee.amountDue),
+              amount: Number(fee.amountDue),
+              feeTemplateId: fee.feeTemplateId,
+              studentFeeId: fee.id,
+            };
+          });
+          const subtotal = canonicalItems.reduce((sum: number, item: any) => sum + item.amount, 0);
+          const totalAmount = subtotal - disc;
+          if (totalAmount <= 0 || totalAmount > subtotal) {
+            throw new PaymentSettlementError(
+              'INVOICE_NOT_SETTLEABLE',
+              'Invoice total must be positive and cannot exceed canonical fee obligations',
+              400,
+            );
+          }
+          const invoiceNumber = await generateSequenceNumber('INV', branchId, tx);
+          const created = await tx.invoice.create({
+            data: {
+              invoiceNumber,
+              studentId: student.id,
+              termId: activeTerm.id,
+              dueDate: new Date(dueDate),
+              subtotal,
+              discount: disc,
+              taxAmount: 0,
+              totalAmount,
+              amountPaid: 0,
+              balanceDue: totalAmount,
+              status: 'SENT',
+              notes: invNotes || null,
+              branchId: student.branchId || null,
+              items: {
+                create: canonicalItems,
+              },
+            },
+          });
+          await enqueueAccountingPosting(
+            tx,
+            AccountingPostingEventType.INVOICE_ISSUED,
+            created.id,
+            user.userId,
+          );
+          return created;
         });
-        return res.json({ success: true, message: `Invoice ${invoice.invoiceNumber} created for ${studentName} — ZMW ${totalAmount.toFixed(2)}`, created: 'invoice', data: invoice });
+        onInvoiceSent(invoice.id, user.userId).catch(error =>
+          console.error('Background AI invoice journal failed:', error)
+        );
+        return res.json({ success: true, message: `Invoice ${invoice.invoiceNumber} created for ${studentName} — ZMW ${Number(invoice.totalAmount).toFixed(2)}`, created: 'invoice', data: invoice });
       }
 
       // ============ RECORD PAYMENT ============
@@ -1355,53 +1485,91 @@ export const executeAIAction = async (req: Request, res: Response) => {
         });
         if (!payStudent) return res.status(404).json({ error: `Student "${payStudentName}" not found` });
 
-        const txnId = `TXN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-        const payment = await prisma.payment.create({
-          data: {
-            transactionId: txnId,
-            studentId: payStudent.id,
-            amount: Number(payAmt),
-            method: method as any,
-            notes: payNotes || `AI-recorded payment`,
-            status: 'COMPLETED',
-            recordedByUserId: user.userId,
-            branchId: branchId || null,
-          },
+        const activeTerm = await getActiveTerm();
+        if (!activeTerm) return res.status(400).json({ error: 'No active academic term is configured' });
+
+        if (!['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT'].includes(method)) {
+          return res.status(400).json({ error: 'method must be CASH, MOBILE_MONEY, or BANK_DEPOSIT' });
+        }
+
+        const creation = await createCompletedPayment({
+          studentId: payStudent.id,
+          receiptTermId: activeTerm.id,
+          amount: Number(payAmt),
+          method,
+          source: 'AI',
+          notes: payNotes || 'AI-recorded payment',
+          recordedByUserId: user.userId,
+          actorBranchId: user.role === 'SUPER_ADMIN' ? null : user.branchId,
+          idempotencyKey: params.idempotencyKey || req.header?.('Idempotency-Key')?.trim(),
         });
-        return res.json({ success: true, message: `Payment ${txnId} recorded — ZMW ${Number(payAmt).toFixed(2)} from ${payStudentName} (${method})`, created: 'payment', data: payment });
+        if (!creation.reused) {
+          onPaymentCreated(creation.payment.id, user.userId).catch(error =>
+            console.error('Background AI payment journal failed:', error)
+          );
+        }
+        return res.json({
+          success: true,
+          message: `Payment ${creation.payment.transactionId} recorded — ZMW ${Number(payAmt).toFixed(2)} from ${payStudentName} (${method})`,
+          created: 'payment',
+          data: creation.payment,
+          settlement: {
+            allocatedAmount: creation.settlement.allocatedAmount,
+            unallocatedAmount: creation.settlement.unallocatedAmount,
+          },
+          reused: creation.reused,
+        });
       }
 
       // ============ CREATE BUDGET ============
       case 'CREATE_BUDGET': {
-        const { name: budgetName, period, year, startDate: bStart, endDate: bEnd, items: budgetItems, notes: budgetNotes } = params;
+        const {
+          name: budgetName,
+          period,
+          termId: budgetTermId,
+          year,
+          startDate: bStart,
+          endDate: bEnd,
+          items: budgetItems,
+          notes: budgetNotes,
+        } = params;
         if (!budgetName || !period || !year || !bStart || !bEnd || !budgetItems?.length) {
           return res.status(400).json({ error: 'name, period, year, startDate, endDate, and items are required' });
         }
+        if (period === 'term' && !budgetTermId) {
+          return res.status(400).json({ error: 'termId is required for a term budget and cannot be inferred' });
+        }
         const totalBudget = budgetItems.reduce((sum: number, i: any) => sum + Number(i.allocated || 0), 0);
-        const budget = await prisma.budget.create({
-          data: {
-            name: budgetName.trim(),
-            period,
-            year: Number(year),
-            startDate: new Date(bStart),
-            endDate: new Date(bEnd),
-            totalBudget,
-            totalSpent: 0,
-            status: 'DRAFT',
-            notes: budgetNotes || null,
-            createdBy: user.userId,
-            branchId: branchId || null,
-            items: {
-              create: budgetItems.map((i: any) => ({
-                category: i.category as any,
-                description: i.description || null,
-                allocated: Number(i.allocated),
-                spent: 0,
-                remaining: Number(i.allocated),
-              })),
+        const createBudget = (client: Prisma.TransactionClient | typeof prisma) => (
+          client.budget.create({
+            data: {
+              name: budgetName.trim(),
+              period,
+              termId: budgetTermId || null,
+              year: Number(year),
+              startDate: new Date(bStart),
+              endDate: new Date(bEnd),
+              totalBudget,
+              totalSpent: 0,
+              status: 'DRAFT',
+              notes: budgetNotes || null,
+              createdBy: user.userId,
+              branchId: branchId || null,
+              items: {
+                create: budgetItems.map((i: any) => ({
+                  category: i.category as any,
+                  description: i.description || null,
+                  allocated: Number(i.allocated),
+                  spent: 0,
+                  remaining: Number(i.allocated),
+                })),
+              },
             },
-          },
-        });
+          })
+        );
+        const budget = budgetTermId
+          ? await runTermWriteTransaction(budgetTermId, 'SETUP', createBudget)
+          : await createBudget(prisma);
         return res.json({ success: true, message: `Budget "${budget.name}" created — ZMW ${totalBudget.toFixed(2)} total (${budgetItems.length} categories)`, created: 'budget', data: budget });
       }
 
@@ -1460,15 +1628,17 @@ export const executeAIAction = async (req: Request, res: Response) => {
           if (cat) categoryId = cat.id;
         }
 
-        const feeTemplate = await prisma.feeTemplate.create({
-          data: {
-            name: feeName.trim(),
-            amount: Number(feeAmt),
-            applicableGrade: Number(applicableGrade),
-            academicTermId: term.id,
-            categoryId,
-          },
-        });
+        const feeTemplate = await runTermWriteTransaction(term.id, 'SETUP', tx => (
+          tx.feeTemplate.create({
+            data: {
+              name: feeName.trim(),
+              amount: Number(feeAmt),
+              applicableGrade: Number(applicableGrade),
+              academicTermId: term.id,
+              categoryId,
+            },
+          })
+        ));
         return res.json({ success: true, message: `Fee template "${feeTemplate.name}" created — ZMW ${Number(feeAmt).toFixed(2)} for grade ${applicableGrade}`, created: 'fee_template', data: feeTemplate });
       }
 
@@ -1505,6 +1675,8 @@ export const executeAIAction = async (req: Request, res: Response) => {
         return res.status(400).json({ error: `Unknown action type: ${type}` });
     }
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('AI Action execution error:', error);
     res.status(500).json({ error: error.message || 'Failed to execute action' });
   }
@@ -1540,7 +1712,7 @@ export const getCashFlowForecast = async (req: Request, res: Response) => {
         where: { dueDate: { gte: now, lte: ninetyDaysLater } },
         select: { amountDue: true, amountPaid: true, dueDate: true },
       }),
-      prisma.academicTerm.findFirst({ where: { isActive: true } }),
+      getActiveTerm(),
     ]);
 
     // Aggregate by month
@@ -1713,7 +1885,7 @@ export const autoAllocatePayments = async (req: Request, res: Response) => {
     const payments = await prisma.payment.findMany({
       where: { status: 'COMPLETED', ...branchFilter },
       select: {
-        id: true, studentId: true, amount: true, transactionId: true,
+        id: true, studentId: true, academicTermId: true, amount: true, transactionId: true,
         allocations: { select: { amount: true, studentFeeId: true } },
         student: { select: { firstName: true, lastName: true } },
       },
@@ -1725,47 +1897,16 @@ export const autoAllocatePayments = async (req: Request, res: Response) => {
     const results: any[] = [];
 
     for (const payment of payments) {
-      const alreadyAllocated = payment.allocations.reduce((s, a) => s + Number(a.amount), 0);
-      let unallocated = Number(payment.amount) - alreadyAllocated;
-      if (unallocated < 0.01) continue;
+      const allocation = await allocateExistingPayment(payment.academicTermId, payment.id);
 
-      // Get outstanding fees for this student, oldest due date first
-      const allFees = await prisma.studentFeeStructure.findMany({
-        where: { studentId: payment.studentId },
-        orderBy: { dueDate: 'asc' },
-      });
-      const outstandingFees = allFees.filter(f => Number(f.amountDue) > Number(f.amountPaid));
-      if (!outstandingFees.length) continue;
-
-      const newAllocations: { paymentId: string; studentFeeId: string; amount: number }[] = [];
-      for (const fee of outstandingFees) {
-        if (unallocated < 0.01) break;
-        // Skip if already allocated for this payment+fee pair
-        if (payment.allocations.some(a => a.studentFeeId === fee.id)) continue;
-        const outstanding = Number(fee.amountDue) - Number(fee.amountPaid);
-        const toAllocate = Math.min(unallocated, outstanding);
-        newAllocations.push({ paymentId: payment.id, studentFeeId: fee.id, amount: toAllocate });
-        unallocated -= toAllocate;
-      }
-
-      if (newAllocations.length > 0) {
-        const ops: any[] = [
-          ...newAllocations.map(a => prisma.paymentAllocation.create({ data: a })),
-          ...newAllocations.map(a =>
-            prisma.studentFeeStructure.update({
-              where: { id: a.studentFeeId },
-              data: { amountPaid: { increment: a.amount } },
-            })
-          ),
-        ];
-        await prisma.$transaction(ops);
+      if (allocation.allocations.length) {
         paymentsProcessed++;
-        const amt = newAllocations.reduce((s, a) => s + a.amount, 0);
+        const amt = allocation.allocatedAmount;
         totalAllocated += amt;
         results.push({
           student: `${payment.student.firstName} ${payment.student.lastName}`,
           transactionId: payment.transactionId || payment.id.slice(0, 8),
-          allocations: newAllocations.length,
+          allocations: allocation.allocations.length,
           amount: amt,
         });
       }
@@ -1781,6 +1922,8 @@ export const autoAllocatePayments = async (req: Request, res: Response) => {
         : 'All payments are already fully allocated — ledger is clean',
     });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof PaymentSettlementError) return sendPaymentSettlementError(res, error);
     console.error('Payment allocation error:', error);
     res.status(500).json({ error: error.message || 'Failed to allocate payments' });
   }
@@ -1800,26 +1943,42 @@ export const saveReport = async (req: Request, res: Response) => {
     const branchId = user.role !== 'SUPER_ADMIN' ? user.branchId : undefined;
 
     // Gather a fresh snapshot of the financial data to embed in the report
-    const snapshot = await gatherFinancialSnapshot(branchId);
+    const snapshot = await gatherFinancialSnapshot(branchId, termId || undefined);
 
-    const report = await prisma.financialReport.create({
-      data: {
-        title: title.trim(),
-        reportType: reportType || 'CUSTOM',
-        termId: termId || null,
-        summary: summary || null,
-        data: snapshot as any,
-        generatedBy: user.userId,
-        branchId: branchId || null,
-      },
-      include: {
-        term: { select: { name: true } },
-        user: { select: { fullName: true } },
-      },
-    });
+    const createReport = (client: Prisma.TransactionClient | typeof prisma) => (
+      client.financialReport.create({
+        data: {
+          title: title.trim(),
+          reportType: reportType || 'CUSTOM',
+          termId: termId || null,
+          summary: summary || null,
+          data: snapshot as any,
+          generatedBy: user.userId,
+          branchId: branchId || null,
+        },
+        include: {
+          term: { select: { name: true } },
+          user: { select: { fullName: true } },
+        },
+      })
+    );
+
+    const report = termId
+      ? await runTermWriteTransaction(termId, 'FINALIZATION', async tx => {
+        const persistedTerm = await tx.academicTerm.findUnique({
+          where: { id: termId },
+          select: { id: true },
+        });
+        if (!persistedTerm) {
+          throw new TermLifecycleError('TERM_NOT_FOUND', 'Academic term not found', 404);
+        }
+        return createReport(tx);
+      })
+      : await createReport(prisma);
 
     res.json({ success: true, report });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Save report error:', error);
     res.status(500).json({ error: error.message || 'Failed to save report' });
   }

@@ -26,6 +26,14 @@
   --text-secondary: #6b7280;
   --text-tertiary: #9ca3af;
   --border-color: #e5e7eb;
+
+  /* Standard hover backgrounds (use hover:bg-surface-hover / -strong / -accent / -danger) */
+  --bg-hover: #f3f4f6;
+  --bg-hover-strong: #e5e7eb;
+  --bg-hover-accent: #eff6ff;
+  --bg-hover-danger: #fef2f2;
+  /* Derived from --primary-color so a school's brand colour (Settings > Theme) keeps a matching hover. */
+  --primary-hover: color-mix(in srgb, var(--primary-color) 85%, black);
 }
 
 .dark {
@@ -41,6 +49,11 @@
   --text-secondary: #9ca3af;
   --text-tertiary: #6b7280;
   --border-color: #374151;
+
+  --bg-hover: #334155;
+  --bg-hover-strong: #475569;
+  --bg-hover-accent: rgb(59 130 246 / 0.18);
+  --bg-hover-danger: rgb(239 68 68 / 0.18);
 }
 
 /* ===============================
@@ -230,7 +243,7 @@
 
   /* Secondary button */
   .btn-secondary {
-    @apply px-4 py-2.5 bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 active:bg-gray-300 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 touch-target;
+    @apply px-4 py-2.5 bg-gray-100 dark:bg-slate-700 hover:bg-surface-hover-strong active:bg-gray-300 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 touch-target;
   }
 
   .btn-secondary:active {

@@ -14,9 +14,15 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import aiUsageTracker from '../services/aiUsageTracker';
 import { generateGradeForecast } from '../services/aiGradeForecastService';
 import { predictFeeDefaulters } from '../services/aiDefaulterPredictionService';
-import { generateTimetable, saveTimetablePeriods } from '../services/aiTimetableService';
+import {
+  generateTimetable,
+  saveTimetablePeriods,
+  TimetableSaveError,
+} from '../services/aiTimetableService';
 import { analyseExamSchedule } from '../services/aiExamSchedulerService';
 import { generateParentLetter } from '../services/aiParentReportService';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 // ─────────────────────────────────────────
 // Grade Forecasting
@@ -114,6 +120,10 @@ export const generateAITimetable = async (req: AuthRequest, res: Response) => {
 
     res.json({ ...result, saveResult });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof TimetableSaveError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('[TimetableGenerator] Error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate timetable' });
   }
@@ -132,6 +142,10 @@ export const saveAITimetable = async (req: AuthRequest, res: Response) => {
     const result = await saveTimetablePeriods({ periods, termId, termName: termName || '', generatedAt: new Date().toISOString(), classesScheduled: 0, totalPeriods: periods.length, conflicts: [], notes: '' }, clearExisting);
     res.json(result);
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    if (error instanceof TimetableSaveError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     console.error('[TimetableSave] Error:', error);
     res.status(500).json({ error: error.message || 'Failed to save timetable' });
   }

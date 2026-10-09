@@ -16,6 +16,7 @@ import aiIntelligenceService, {
 } from '../../services/aiIntelligenceService';
 import intelligenceService, { RiskAssessment, AttendanceAlert } from '../../services/intelligenceService';
 import api from '../../utils/api';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
 import toast from 'react-hot-toast';
 
 type Tab = 'at-risk' | 'alerts' | 'grade-forecast' | 'fee-defaulters' | 'timetable' | 'exam-schedule';
@@ -54,10 +55,14 @@ function GradeForecastTab() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GradeForecastResponse | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const { activeTerm } = useActiveTerm();
 
   useEffect(() => {
-    api.get('/classes').then(r => setClasses(r.data?.classes || r.data || [])).catch(() => {});
-  }, []);
+    if (!activeTerm) return;
+    api.get('/classes', { params: { academicTermId: activeTerm.id } })
+      .then(classResponse => setClasses(classResponse.data?.classes || classResponse.data || []))
+      .catch(() => {});
+  }, [activeTerm?.id]);
 
   useEffect(() => {
     if (!classId) return;
@@ -115,7 +120,7 @@ function GradeForecastTab() {
           <button
             onClick={run}
             disabled={loading || !classId}
-            className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
             {loading ? 'Analysing…' : 'Generate Forecast'}
@@ -170,7 +175,7 @@ function GradeForecastTab() {
                     <>
                       <tr
                         key={s.studentId}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
+                        className="hover:bg-surface-hover cursor-pointer"
                         onClick={() => setExpanded(expanded === s.studentId ? null : s.studentId)}
                       >
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{s.studentName}</td>
@@ -236,20 +241,11 @@ function GradeForecastTab() {
 // ─────────────────────────────────────────
 
 function FeeDefaulterTab() {
-  const [terms, setTerms] = useState<any[]>([]);
-  const [termId, setTermId] = useState('');
+  const { activeTerm } = useActiveTerm();
+  const termId = activeTerm?.id ?? '';
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DefaulterPredictionResponse | null>(null);
   const [riskFilter, setRiskFilter] = useState('ALL');
-
-  useEffect(() => {
-    api.get('/terms').then(r => {
-      const list = r.data?.terms || r.data || [];
-      setTerms(list);
-      const active = list.find((t: any) => t.isActive);
-      if (active) setTermId(active.id);
-    }).catch(() => {});
-  }, []);
 
   const run = async () => {
     setLoading(true);
@@ -279,16 +275,6 @@ function FeeDefaulterTab() {
           AI scores each student's likelihood of defaulting based on payment history, prior terms, and outstanding balances.
         </p>
         <div className="flex flex-wrap gap-3">
-          <select
-            value={termId}
-            onChange={e => setTermId(e.target.value)}
-            className="flex-1 min-w-[200px] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
-          >
-            <option value="">Active Term</option>
-            {terms.map((t: any) => (
-              <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' (Active)' : ''}</option>
-            ))}
-          </select>
           <button
             onClick={run}
             disabled={loading}
@@ -355,7 +341,7 @@ function FeeDefaulterTab() {
                   <button
                     key={f}
                     onClick={() => setRiskFilter(f)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${riskFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${riskFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-surface-hover-strong'}`}
                   >
                     {f}
                   </button>
@@ -373,7 +359,7 @@ function FeeDefaulterTab() {
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {filtered.map((s: StudentDefaultRisk) => (
-                    <tr key={s.studentId} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                    <tr key={s.studentId} className="hover:bg-surface-hover">
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900 dark:text-white">{s.studentName}</div>
                         {s.contactDetails.phone && (
@@ -416,24 +402,15 @@ function FeeDefaulterTab() {
 // ─────────────────────────────────────────
 
 function TimetableTab() {
-  const [terms, setTerms] = useState<any[]>([]);
-  const [termId, setTermId] = useState('');
+  const { activeTerm } = useActiveTerm();
+  const termId = activeTerm?.id ?? '';
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<TimetableGenerationResult | null>(null);
   const [viewClass, setViewClass] = useState('');
 
-  useEffect(() => {
-    api.get('/terms').then(r => {
-      const list = r.data?.terms || r.data || [];
-      setTerms(list);
-      const active = list.find((t: any) => t.isActive);
-      if (active) setTermId(active.id);
-    }).catch(() => {});
-  }, []);
-
   const generate = async () => {
-    if (!termId) return toast.error('Select a term');
+    if (!termId) return toast.error('No active term is set');
     setLoading(true);
     try {
       const data = await aiIntelligenceService.generateTimetable(termId);
@@ -487,15 +464,6 @@ function TimetableTab() {
           AI generates a conflict-free weekly timetable respecting teacher assignments, subject hours, and school-day constraints.
         </p>
         <div className="flex flex-wrap gap-3">
-          <select
-            value={termId}
-            onChange={e => setTermId(e.target.value)}
-            className="flex-1 min-w-[200px] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
-          >
-            {terms.map((t: any) => (
-              <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' (Active)' : ''}</option>
-            ))}
-          </select>
           <button
             onClick={generate}
             disabled={loading || !termId}
@@ -570,7 +538,7 @@ function TimetableTab() {
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {allPeriodNumbers.map(pn => (
-                    <tr key={pn} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                    <tr key={pn} className="hover:bg-surface-hover">
                       <td className="px-3 py-2 font-medium text-gray-700 dark:text-gray-300">P{pn}</td>
                       {DAYS.map(day => {
                         const period = periodsByDayAndNumber[day]?.[pn];
@@ -605,22 +573,13 @@ function TimetableTab() {
 // ─────────────────────────────────────────
 
 function ExamScheduleTab() {
-  const [terms, setTerms] = useState<any[]>([]);
-  const [termId, setTermId] = useState('');
+  const { activeTerm } = useActiveTerm();
+  const termId = activeTerm?.id ?? '';
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ExamScheduleAnalysis | null>(null);
 
-  useEffect(() => {
-    api.get('/terms').then(r => {
-      const list = r.data?.terms || r.data || [];
-      setTerms(list);
-      const active = list.find((t: any) => t.isActive);
-      if (active) setTermId(active.id);
-    }).catch(() => {});
-  }, []);
-
   const run = async () => {
-    if (!termId) return toast.error('Select a term');
+    if (!termId) return toast.error('No active term is set');
     setLoading(true);
     try {
       const data = await aiIntelligenceService.analyseExamSchedule(termId);
@@ -650,15 +609,6 @@ function ExamScheduleTab() {
           AI detects double-bookings, overloaded weeks, and too-close assessments — then suggests an optimised calendar.
         </p>
         <div className="flex flex-wrap gap-3">
-          <select
-            value={termId}
-            onChange={e => setTermId(e.target.value)}
-            className="flex-1 min-w-[200px] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
-          >
-            {terms.map((t: any) => (
-              <option key={t.id} value={t.id}>{t.name}{t.isActive ? ' (Active)' : ''}</option>
-            ))}
-          </select>
           <button
             onClick={run}
             disabled={loading || !termId}
@@ -849,7 +799,7 @@ function AtRiskStudentsTab() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
               {filteredStudents.map(student => (
-                <tr key={student.studentId} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                <tr key={student.studentId} className="hover:bg-surface-hover">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{student.studentName}</td>
                   <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{student.className}</td>
                   <td className="px-4 py-3">{getRiskBadge(student.riskLevel)}</td>
@@ -862,7 +812,7 @@ function AtRiskStudentsTab() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => { setSelectedStudent(student); fetchRecommendations(student.studentId); }} className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"><Eye className="w-4 h-4" /></button>
+                    <button onClick={() => { setSelectedStudent(student); fetchRecommendations(student.studentId); }} className="p-2 text-blue-600 hover:bg-surface-hover-accent rounded-lg"><Eye className="w-4 h-4" /></button>
                   </td>
                 </tr>
               ))}
@@ -909,7 +859,7 @@ function AtRiskStudentsTab() {
                 : recommendations.length > 0 ? <ul className="space-y-2">{recommendations.map((rec, i) => <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"><span className="w-5 h-5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{i + 1}</span>{rec}</li>)}</ul>
                 : <p className="text-sm text-gray-400">No recommendations available.</p>}
             </div>
-            <button onClick={() => setSelectedStudent(null)} className="w-full py-2.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200 font-medium">Close</button>
+            <button onClick={() => setSelectedStudent(null)} className="w-full py-2.5 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-surface-hover-strong font-medium">Close</button>
           </div>
         </div>
       )}
@@ -924,12 +874,22 @@ function AtRiskStudentsTab() {
 function AttendanceAlertsTab() {
   const [alerts, setAlerts] = useState<AttendanceAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const academicTermId = activeTerm?.id ?? '';
 
-  useEffect(() => { fetchAlerts(); }, []);
+  useEffect(() => {
+    if (termLoading) return;
+    if (!academicTermId) {
+      setLoading(false);
+      return;
+    }
+    void fetchAlerts(academicTermId);
+  }, [termLoading, academicTermId]);
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = async (termId = academicTermId) => {
+    if (!termId) return;
     setLoading(true);
-    try { const data = await intelligenceService.getAttendanceAlerts({ resolved: false }).catch(() => []); setAlerts(data); }
+    try { const data = await intelligenceService.getAttendanceAlerts({ academicTermId: termId, resolved: false }).catch(() => []); setAlerts(data); }
     catch {} finally { setLoading(false); }
   };
 
@@ -944,7 +904,8 @@ function AttendanceAlertsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500 dark:text-gray-400">Unresolved attendance patterns flagged by AI — chronic absences, sudden drops, and concerning trends.</p>
-        <button onClick={async () => { try { await api.post('/intelligence/attendance/analyze'); toast.success('Analysis running...'); fetchAlerts(); } catch { toast.error('Failed'); } }}
+        <button onClick={async () => { try { await api.post('/intelligence/attendance/analyze', {}, { params: { termId: academicTermId } }); toast.success('Analysis running...'); fetchAlerts(); } catch { toast.error('Failed'); } }}
+          disabled={!academicTermId}
           className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm"><RefreshCw className="w-4 h-4" /> Run Analysis</button>
       </div>
 
@@ -1006,7 +967,7 @@ export default function AIIntelligenceHub() {
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
               activeTab === tab.id
                 ? `bg-${tab.color}-600 text-white shadow-md`
-                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-surface-hover'
             }`}
           >
             <tab.icon className="w-4 h-4" />

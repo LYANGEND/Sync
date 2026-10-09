@@ -18,7 +18,7 @@ interface ChatInputProps {
 const sendBg = {
   purple: 'bg-purple-600 hover:bg-purple-700',
   emerald: 'bg-emerald-600 hover:bg-emerald-700',
-  blue: 'bg-blue-600 hover:bg-blue-700',
+  blue: 'bg-primary hover:bg-primary-hover',
 } as const;
 
 export default function ChatInput({

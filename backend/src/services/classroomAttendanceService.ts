@@ -1,6 +1,9 @@
 import { AttendanceStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { isDateWithinRangeByDay } from '../utils/academicValidation';
 import { createNotification } from './notificationService';
+import { TermLifecycleError, runTermWriteTransaction } from './termLifecycleService';
+import { getClassEnrollmentsForTerm } from './studentPlacementService';
 
 const LATE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -64,15 +67,6 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
           joinedAt: true,
         },
       },
-      recordings: {
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: {
-          id: true,
-          summary: true,
-          transcript: true,
-        },
-      },
     },
   });
 
@@ -109,20 +103,23 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
   const dayStart = startOfDay(attendanceDate);
   const dayEnd = endOfDay(attendanceDate);
 
-  const existingAttendanceCount = await prisma.attendance.count({
-    where: {
-      classId: classroom.classId,
-      date: {
-        gte: dayStart,
-        lte: dayEnd,
+  const classInfo = await prisma.class.findUnique({
+    where: { id: classroom.classId },
+    select: {
+      academicTermId: true,
+      academicTerm: {
+        select: {
+          startDate: true,
+          endDate: true,
+        },
       },
     },
   });
 
-  if (existingAttendanceCount > 0) {
+  if (!classInfo) {
     return {
       synced: false,
-      skippedReason: 'Attendance already exists for this class and day',
+      skippedReason: 'Linked class no longer exists',
       attendanceDate: dayStart.toISOString(),
       totalStudents: 0,
       presentCount: 0,
@@ -132,23 +129,26 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
     };
   }
 
-  const students = await prisma.student.findMany({
-    where: {
-      classId: classroom.classId,
-      status: 'ACTIVE',
-    },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      parentId: true,
-      userId: true,
-    },
-    orderBy: [
-      { lastName: 'asc' },
-      { firstName: 'asc' },
-    ],
-  });
+  if (!isDateWithinRangeByDay(attendanceDate, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
+    return {
+      synced: false,
+      skippedReason: 'Classroom date falls outside the linked class term',
+      attendanceDate: dayStart.toISOString(),
+      totalStudents: 0,
+      presentCount: 0,
+      lateCount: 0,
+      absentCount: 0,
+      recordedCount: 0,
+    };
+  }
+
+  const students = (await getClassEnrollmentsForTerm(
+    classroom.classId,
+    classInfo.academicTermId,
+    { statuses: ['ACTIVE'] },
+  ))
+    .map(enrollment => enrollment.student)
+    .filter(student => student.status === 'ACTIVE');
 
   if (students.length === 0) {
     return {
@@ -195,6 +195,7 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
   const attendanceRows: {
     studentId: string;
     classId: string;
+    academicTermId: string;
     date: Date;
     status: AttendanceStatus;
     recordedByUserId: string;
@@ -242,15 +243,12 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
     attendanceRows.push({
       studentId: student.id,
       classId: classroom.classId,
+      academicTermId: classInfo.academicTermId,
       date: dayStart,
       status,
       recordedByUserId,
     });
   }
-
-  await prisma.attendance.createMany({
-    data: attendanceRows,
-  });
 
   const summaryText = formatAttendanceSummary({
     presentCount,
@@ -268,38 +266,96 @@ export async function syncClassroomAttendance(classroomId: string): Promise<Atte
     }),
   ].join('\n');
 
-  const latestRecording = classroom.recordings[0];
-  if (latestRecording) {
-    await prisma.classRecording.update({
-      where: { id: latestRecording.id },
-      data: {
-        summary: latestRecording.summary
-          ? `${latestRecording.summary}\n\n${summaryText}`
-          : summaryText,
-        transcript: latestRecording.transcript
-          ? `${latestRecording.transcript}\n\n${transcriptLines}`
-          : transcriptLines,
-      },
-    });
-  } else {
-    await prisma.classRecording.create({
-      data: {
-        classroomId,
-        summary: summaryText,
-        transcript: transcriptLines,
-        keyTopics: ['attendance-sync'],
-      },
-    });
-  }
+  const attendanceCreated = await runTermWriteTransaction(
+    classInfo.academicTermId,
+    'ACADEMIC_ACTIVITY',
+    async tx => {
+      const persistedClassroom = await tx.virtualClassroom.findUnique({
+        where: { id: classroomId },
+        select: { classId: true },
+      });
+      const persistedClass = persistedClassroom?.classId
+        ? await tx.class.findUnique({
+          where: { id: persistedClassroom.classId },
+          select: { academicTermId: true },
+        })
+        : null;
+      if (!persistedClassroom
+        || persistedClassroom.classId !== classroom.classId
+        || persistedClass?.academicTermId !== classInfo.academicTermId) {
+        throw new TermLifecycleError(
+          'TERM_LIFECYCLE_CONFLICT',
+          'Virtual classroom term ownership changed while attendance was being synchronized',
+        );
+      }
 
-  await prisma.classroomChat.create({
-    data: {
-      classroomId,
-      senderName: 'System',
-      isAI: true,
-      message: `${summaryText} Attendance was recorded automatically from virtual classroom participation.`,
+      const existingAttendanceCount = await tx.attendance.count({
+        where: {
+          classId: classroom.classId!,
+          academicTermId: classInfo.academicTermId,
+          date: {
+            gte: dayStart,
+            lte: dayEnd,
+          },
+        },
+      });
+      if (existingAttendanceCount > 0) return false;
+
+      await tx.attendance.createMany({ data: attendanceRows });
+
+      const latestRecording = await tx.classRecording.findFirst({
+        where: { classroomId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, summary: true, transcript: true },
+      });
+      if (latestRecording) {
+        await tx.classRecording.update({
+          where: { id: latestRecording.id },
+          data: {
+            summary: latestRecording.summary
+              ? `${latestRecording.summary}\n\n${summaryText}`
+              : summaryText,
+            transcript: latestRecording.transcript
+              ? `${latestRecording.transcript}\n\n${transcriptLines}`
+              : transcriptLines,
+          },
+        });
+      } else {
+        await tx.classRecording.create({
+          data: {
+            classroomId,
+            summary: summaryText,
+            transcript: transcriptLines,
+            keyTopics: ['attendance-sync'],
+          },
+        });
+      }
+
+      await tx.classroomChat.create({
+        data: {
+          classroomId,
+          senderName: 'System',
+          isAI: true,
+          message: `${summaryText} Attendance was recorded automatically from virtual classroom participation.`,
+        },
+      });
+
+      return true;
     },
-  });
+  );
+
+  if (!attendanceCreated) {
+    return {
+      synced: false,
+      skippedReason: 'Attendance already exists for this class and day',
+      attendanceDate: dayStart.toISOString(),
+      totalStudents: students.length,
+      presentCount: 0,
+      lateCount: 0,
+      absentCount: 0,
+      recordedCount: 0,
+    };
+  }
 
   const dateStr = dayStart.toLocaleDateString('en-GB', {
     day: '2-digit',

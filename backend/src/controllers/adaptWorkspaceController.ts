@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AdaptWorkspaceService } from '../services/adaptWorkspaceService';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 /**
  * ADAPT WORKSPACE CONTROLLER
@@ -93,6 +95,7 @@ export const createFromAction = async (req: Request, res: Response) => {
 
     res.status(201).json({ data: lesson });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AdaptWorkspace] createFromAction error:', error);
     res.status(400).json({ error: error.message || 'Failed to create lesson' });
   }
@@ -115,6 +118,7 @@ export const updateLesson = async (req: Request, res: Response) => {
 
     res.json({ data: lesson });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AdaptWorkspace] updateLesson error:', error);
     res.status(400).json({ error: error.message || 'Failed to update lesson' });
   }
@@ -136,11 +140,13 @@ export const generateActivities = async (req: Request, res: Response) => {
 
     const lesson = await AdaptWorkspaceService.generateActivities({
       lessonId: req.params.id,
+      teacherId: userId,
       additionalContext: req.body.additionalContext,
     });
 
     res.json({ data: lesson });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AdaptWorkspace] generateActivities error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate activities' });
   }
@@ -166,6 +172,7 @@ export const changeLessonStatus = async (req: Request, res: Response) => {
 
     res.json({ data: lesson });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('[AdaptWorkspace] changeLessonStatus error:', error);
     res.status(400).json({ error: error.message || 'Failed to change status' });
   }

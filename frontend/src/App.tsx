@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { BranchProvider } from './context/BranchContext';
@@ -119,23 +119,21 @@ function App() {
                   } />
 
                   <Route path="/academics" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY', 'PARENT']}>
                       <Academics />
                     </RoleGuard>
                   } />
                   <Route path="/academics/grading-scales" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN']}>
                       <GradingScales />
                     </RoleGuard>
                   } />
                   <Route path="/academics/report-cards" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY']}>
                       <ReportCards />
                     </RoleGuard>
                   } />
 
-
-                // ... (In Routes)
                   <Route path="/academics/attendance" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'SECRETARY']}>
                       <AttendanceRegister />

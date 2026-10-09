@@ -7,6 +7,8 @@
 import express from 'express';
 import termFinancialService from '../services/termFinancialService';
 import { authenticateToken as authenticate } from '../middleware/authMiddleware';
+import { TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 
 const router = express.Router();
 
@@ -62,6 +64,7 @@ router.get('/terms/:termId/summary', authenticate, async (req, res) => {
       data: summary
     });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Error fetching term summary:', error);
     res.status(500).json({
       success: false,
@@ -192,6 +195,7 @@ router.post('/terms/:termId/recalculate', authenticate, async (req, res) => {
       data: updatedSummary
     });
   } catch (error: any) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Error recalculating term summary:', error);
     res.status(500).json({
       success: false,

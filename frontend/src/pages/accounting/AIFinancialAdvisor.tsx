@@ -725,7 +725,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                   {bodyRows.map((row, ri) => {
                     const cells = parseCells(row);
                     return (
-                      <tr key={ri} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <tr key={ri} className="hover:bg-surface-hover">
                         {cells.map((cell, ci) => (
                           <td key={ci} className="px-3 py-1.5 text-slate-600 dark:text-gray-300 text-xs">
                             {renderInline(cell, `td-${ri}-${ci}`)}
@@ -1086,7 +1086,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                     <div className="text-center py-8">
                       <TrendingUp size={36} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
                       <p className="text-sm text-slate-500 dark:text-gray-400 mb-3">Generate an AI-powered 30/60/90-day cash flow projection based on historical data</p>
-                      <button onClick={loadCashFlowForecast} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+                      <button onClick={loadCashFlowForecast} className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors">
                         Generate Forecast
                       </button>
                     </div>
@@ -1394,7 +1394,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                   ) : (
                     <div className="space-y-1.5 max-h-80 overflow-y-auto">
                       {rawSnapshot.recentFinancialActivity.map((log: any, i: number) => (
-                        <div key={i} className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                        <div key={i} className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/50 hover:bg-surface-hover transition-colors">
                           <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0 mt-0.5">
                             <Shield size={11} className="text-slate-500" />
                           </div>
@@ -1450,7 +1450,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                       <button
                         onClick={exportCSV}
                         disabled={!insights}
-                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 hover:bg-surface-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <div className="w-10 h-10 bg-slate-500 rounded-lg flex items-center justify-center">
                           <FileDown size={20} className="text-white" />
@@ -1662,7 +1662,7 @@ const AIFinancialAdvisor: React.FC<Props> = ({ embedded }) => {
                           className={`group px-3 py-2.5 cursor-pointer border-l-2 transition-colors ${
                             activeConversationId === conv.id
                               ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-500'
-                              : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
+                              : 'border-transparent hover:bg-surface-hover'
                           }`}
                         >
                           {renamingId === conv.id ? (
@@ -2017,7 +2017,7 @@ const ActionButton: React.FC<{ action: { type: string; params: Record<string, an
             {[
               { label: '📄 PDF', fn: () => (window as any).__syncExport?.doPDF(), color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50' },
               { label: '📊 Excel', fn: () => (window as any).__syncExport?.doExcel(), color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50' },
-              { label: '📋 CSV', fn: () => (window as any).__syncExport?.doCSV(), color: 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-600' },
+              { label: '📋 CSV', fn: () => (window as any).__syncExport?.doCSV(), color: 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 hover:bg-surface-hover-strong' },
             ].map(({ label, fn, color }) => (
               <button key={label} onClick={fn} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${color}`}>{label}</button>
             ))}

@@ -7,6 +7,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import aiAssistantService, { Conversation, Message, FavoritePrompt, Artifact, SystemSubject, SubjectTopic } from '../../services/aiAssistantService';
+import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
@@ -92,6 +93,7 @@ const AIAssistant = () => {
   const [teachingClasses, setTeachingClasses] = useState<TeachingClass[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
+  const [academicTermId, setAcademicTermId] = useState<string>('');
   // All system subjects (for the subject picker and AI curriculum awareness)
   const [allSubjects, setAllSubjects] = useState<SystemSubject[]>([]);
   const [subjectsByGrade, setSubjectsByGrade] = useState<Record<number, SystemSubject[]>>({});
@@ -113,11 +115,15 @@ const AIAssistant = () => {
 
   const loadInitialData = async () => {
     try {
+      const termsResponse = await api.get<Array<{ id: string; isActive?: boolean; status?: string }>>('/academic-terms');
+      const activeTerm = termsResponse.data.find(term => term.status === 'ACTIVE' || term.isActive);
+      if (!activeTerm) throw new Error('No active academic term is configured');
+      setAcademicTermId(activeTerm.id);
       const [statusData, convsData, favsData, ctxData, subjectsData] = await Promise.all([
         aiAssistantService.getStatus(),
         aiAssistantService.getConversations(),
         aiAssistantService.getFavorites().catch(() => []),
-        aiAssistantService.getTeachingContext().catch(() => ({ classes: [], subjects: [] })),
+        aiAssistantService.getTeachingContext(activeTerm.id).catch(() => ({ classes: [], subjects: [] })),
         aiAssistantService.getAllSubjects().catch(() => ({ subjects: [], byGrade: {} })),
       ]);
       setAiAvailable(statusData.available);
@@ -181,6 +187,10 @@ const AIAssistant = () => {
 
   const sendMessage = async () => {
     if ((!input.trim() && !imageBase64) || sending) return;
+    if (!academicTermId) {
+      toast.error('No active academic term is configured');
+      return;
+    }
 
     const currentImage = imageBase64;
     const userMessage = input.trim() || 'Analyze this teaching image and suggest how I can use it in class.';
@@ -191,7 +201,7 @@ const AIAssistant = () => {
     // Build context from selected class/subject
     const selectedClass = teachingClasses.find(c => c.id === selectedClassId);
     const selectedSubject = allSubjects.find(s => s.id === selectedSubjectId);
-    const context: any = {};
+    const context: any = { academicTermId };
     if (selectedClassId) {
       context.classId = selectedClassId;
       context.className = selectedClass?.name;
@@ -355,9 +365,11 @@ const AIAssistant = () => {
   // Student insights
   const loadStudentInsights = async () => {
     if (!selectedClassId) { toast.error('Select a class first'); return; }
+    if (!academicTermId) { toast.error('No active academic term is configured'); return; }
     setLoadingInsights(true);
     try {
       const data = await aiAssistantService.getStudentInsights({
+        academicTermId,
         classId: selectedClassId,
         subjectId: selectedSubjectId || undefined,
       });
@@ -400,7 +412,7 @@ const AIAssistant = () => {
               className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors group ${
                 activeConversation === conv.id
                   ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-surface-hover'
               }`}
             >
               <MessageSquare className="w-4 h-4 flex-shrink-0" />
@@ -436,7 +448,7 @@ const AIAssistant = () => {
                 <button
                   key={fav.id}
                   onClick={() => useFavorite(fav.prompt)}
-                  className="w-full text-left text-xs px-2 py-1.5 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 truncate flex items-center gap-1.5"
+                  className="w-full text-left text-xs px-2 py-1.5 rounded text-gray-600 dark:text-gray-400 hover:bg-surface-hover truncate flex items-center gap-1.5"
                 >
                   <Star className="w-3 h-3 text-yellow-500 flex-shrink-0" />
                   {fav.title}
@@ -454,7 +466,7 @@ const AIAssistant = () => {
           <div className="flex items-center gap-3 px-4 py-3">
             <button
               onClick={() => setShowSidebar(!showSidebar)}
-              className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"
+              className="md:hidden p-1.5 rounded-lg hover:bg-surface-hover"
             >
               <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
             </button>
@@ -703,7 +715,7 @@ const AIAssistant = () => {
               <button
                 key={cmd.command}
                 onClick={() => insertCommand(cmd.command)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-hover transition-colors text-left"
               >
                 <cmd.icon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                 <div>
@@ -848,7 +860,7 @@ const AIAssistant = () => {
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                         {studentInsights.students.map((s: StudentInsight) => (
-                          <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-slate-750">
+                          <tr key={s.id} className="hover:bg-surface-hover">
                             <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">{s.name}</td>
                             <td className="px-3 py-2 text-center">
                               {s.averageScore !== null ? (
@@ -903,7 +915,7 @@ const AIAssistant = () => {
         <div className="sm:hidden flex items-center gap-1 px-4 pb-2">
           {(['chat', 'artifacts', 'insights'] as const).map(panel => (
             <button key={panel} onClick={() => { setActivePanel(panel); if (panel === 'artifacts') loadArtifacts(); if (panel === 'insights' && selectedClassId) loadStudentInsights(); }}
-              className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${activePanel === panel ? 'bg-purple-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
+              className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${activePanel === panel ? 'bg-purple-600 text-white' : 'text-gray-500 hover:bg-surface-hover'}`}
             >{panel.charAt(0).toUpperCase() + panel.slice(1)}</button>
           ))}
         </div>
@@ -976,13 +988,13 @@ const ArtifactCard = ({ artifact, onDelete }: { artifact: Artifact; onDelete: (i
           {artifact.published && <span className="px-1.5 py-0.5 bg-green-100 text-green-600 rounded text-[10px]">Published</span>}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button onClick={() => setExpanded(!expanded)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700">
+          <button onClick={() => setExpanded(!expanded)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-surface-hover">
             <Eye className="w-4 h-4" />
           </button>
-          <button onClick={() => { navigator.clipboard.writeText(artifact.content); toast.success('Copied!'); }} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700">
+          <button onClick={() => { navigator.clipboard.writeText(artifact.content); toast.success('Copied!'); }} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-surface-hover">
             <Download className="w-4 h-4" />
           </button>
-          <button onClick={() => onDelete(artifact.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700">
+          <button onClick={() => onDelete(artifact.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-surface-hover">
             <Trash2 className="w-4 h-4" />
           </button>
         </div>

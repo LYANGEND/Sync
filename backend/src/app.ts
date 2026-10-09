@@ -10,6 +10,7 @@ import subjectRoutes from './routes/subjectRoutes';
 import classRoutes from './routes/classRoutes';
 import userRoutes from './routes/userRoutes';
 import academicTermRoutes from './routes/academicTermRoutes';
+import termRolloverRoutes from './routes/termRolloverRoutes';
 import feeRoutes from './routes/feeRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import teachingHubRoutes from './routes/teachingHubRoutes';
@@ -78,7 +79,7 @@ const allowedOrigins = process.env.CORS_ORIGINS
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? allowedOrigins : '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Content-Disposition', 'X-Archive-Checksum', 'X-Archive-Record-Count', 'X-Archive-Model-Count'],
   credentials: true,
@@ -106,6 +107,7 @@ app.use('/api/v1/subjects', subjectRoutes);
 app.use('/api/v1/classes', classRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/academic-terms', academicTermRoutes);
+app.use('/api/v1/term-rollovers', termRolloverRoutes);
 app.use('/api/v1/fees', feeRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/teaching-hub', teachingHubRoutes);

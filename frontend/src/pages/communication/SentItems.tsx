@@ -274,7 +274,7 @@ const SentItems = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                   {logs.map((log) => (
-                    <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <tr key={log.id} className="hover:bg-surface-hover transition-colors">
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${channelColors[log.channel]}`}>
                           {channelIcons[log.channel]}
@@ -319,7 +319,7 @@ const SentItems = () => {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setSelectedLog(log)}
-                          className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
                           title="View details"
                         >
                           <Eye size={16} />
@@ -341,14 +341,14 @@ const SentItems = () => {
                   <button
                     onClick={() => setPage(p => Math.max(1, p - 1))}
                     disabled={page === 1}
-                    className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <ChevronLeft size={16} />
                   </button>
                   <button
                     onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                     disabled={page === totalPages}
-                    className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="p-2 rounded-lg border border-gray-200 dark:border-slate-600 hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <ChevronRight size={16} />
                   </button>
@@ -427,7 +427,7 @@ const SentItems = () => {
             <div className="p-4 border-t border-gray-100 dark:border-slate-700 flex justify-end">
               <button
                 onClick={() => setSelectedLog(null)}
-                className="px-4 py-2 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors text-sm font-medium"
+                className="px-4 py-2 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-surface-hover-strong transition-colors text-sm font-medium"
               >
                 Close
               </button>

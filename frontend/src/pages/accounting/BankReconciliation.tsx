@@ -138,7 +138,7 @@ const scoreMatch = (row: StatementRow, payment: ReconciliationPayment) => {
   return { score, reason: reasons.join(', ') || 'weak match' };
 };
 
-const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
+const BankReconciliation = ({ embedded = false, academicTermId }: { embedded?: boolean; academicTermId: string }) => {
   const { confirm, prompt } = useAppDialog();
   const [summary, setSummary] = useState<ReconciliationSummary>(emptySummary);
   const [payments, setPayments] = useState<ReconciliationPayment[]>([]);
@@ -153,12 +153,12 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
 
   useEffect(() => {
     void loadData();
-  }, [statusFilter, methodFilter]);
+  }, [academicTermId, statusFilter, methodFilter]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await paymentControlApi.getReconciliationDashboard({ status: statusFilter, method: methodFilter });
+      const res = await paymentControlApi.getReconciliationDashboard({ academicTermId, status: statusFilter, method: methodFilter });
       setSummary(res.data.summary || emptySummary);
       setPayments(res.data.payments || []);
     } catch (error: any) {
@@ -377,7 +377,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          <label className="px-4 py-2 rounded-lg border text-sm cursor-pointer hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700 inline-flex items-center gap-2">
+          <label className="px-4 py-2 rounded-lg border text-sm cursor-pointer hover:bg-surface-hover dark:border-gray-600 dark:text-gray-200 inline-flex items-center gap-2">
             <Upload size={16} />
             Import statement
             <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleStatementUpload} />
@@ -391,7 +391,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
           </button>
           <button
             onClick={() => void loadData()}
-            className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+            className="px-4 py-2 rounded-lg border text-sm hover:bg-surface-hover dark:border-gray-600 dark:text-gray-200"
           >
             <span className="inline-flex items-center gap-2"><RefreshCw size={16} />Refresh</span>
           </button>
@@ -409,14 +409,14 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
               <button
                 onClick={handleApplyMatches}
                 disabled={applyingMatches || matchedCount === 0}
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60 inline-flex items-center gap-2"
+                className="px-4 py-2 rounded-lg bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-60 inline-flex items-center gap-2"
               >
                 <Sparkles size={16} />
                 {applyingMatches ? 'Applying…' : `Apply ${matchedCount} match(es)`}
               </button>
               <button
                 onClick={() => { setStatementRows([]); setStatementFileName(''); }}
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                className="px-4 py-2 rounded-lg border text-sm hover:bg-surface-hover dark:border-gray-600 dark:text-gray-200"
               >
                 Clear import
               </button>
@@ -451,7 +451,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {statementMatches.map(match => (
-                  <tr key={match.row.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <tr key={match.row.id} className="hover:bg-surface-hover">
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{new Date(match.row.date).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-white">{fmt(match.row.amount)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">{match.row.reference || match.row.description || '—'}</td>
@@ -521,7 +521,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
               ) : filteredPayments.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500 dark:text-gray-400">No payments match the current filters.</td></tr>
               ) : filteredPayments.map(payment => (
-                <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                <tr key={payment.id} className="hover:bg-surface-hover">
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">{new Date(payment.paymentDate).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900 dark:text-white">{payment.student.firstName} {payment.student.lastName}</p>
@@ -552,7 +552,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
                       <button
                         onClick={() => void handleUnreconcile(payment)}
                         disabled={actionLoading === payment.id}
-                        className="px-3 py-1.5 rounded-lg text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 disabled:opacity-60"
+                        className="px-3 py-1.5 rounded-lg text-sm bg-gray-100 text-gray-700 hover:bg-surface-hover-strong dark:bg-gray-700 dark:text-gray-200 disabled:opacity-60"
                       >
                         {actionLoading === payment.id ? 'Working…' : 'Re-open'}
                       </button>
@@ -560,7 +560,7 @@ const BankReconciliation = ({ embedded = false }: { embedded?: boolean }) => {
                       <button
                         onClick={() => void handleReconcile(payment)}
                         disabled={actionLoading === payment.id}
-                        className="px-3 py-1.5 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                        className="px-3 py-1.5 rounded-lg text-sm bg-primary text-white hover:bg-primary-hover disabled:opacity-60"
                       >
                         {actionLoading === payment.id ? 'Reconciling…' : 'Reconcile'}
                       </button>

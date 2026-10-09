@@ -5,6 +5,9 @@ import { Plus, Search, Filter, Edit2, Trash2, Eye, Upload, X, CheckSquare, Squar
 import ExportDropdown from '../../components/ExportDropdown';
 import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
+import StudentMatchPanel, { StudentMatch } from './StudentMatchPanel';
 
 interface Student {
   id: string;
@@ -13,17 +16,17 @@ interface Student {
   admissionNumber: string;
   dateOfBirth: string;
   gender: string;
-  classId: string;
+  classId: string | null;
   class: {
     name: string;
-  };
+  } | null;
   branch?: {
     id: string;
     name: string;
   };
-  guardianName: string;
-  guardianPhone: string;
-  guardianEmail?: string;
+  guardianName: string | null;
+  guardianPhone: string | null;
+  guardianEmail?: string | null;
   address?: string;
   status: string;
 }
@@ -31,6 +34,7 @@ interface Student {
 interface Class {
   id: string;
   name: string;
+  academicTermId: string;
 }
 
 const Students = () => {
@@ -44,6 +48,8 @@ const Students = () => {
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [classes, setClasses] = useState<Class[]>([]);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const activeTermId = activeTerm?.id ?? '';
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -84,14 +90,69 @@ const Students = () => {
     branchId: '',
     status: 'ACTIVE'
   });
+  const [duplicateMatches, setDuplicateMatches] = useState<StudentMatch[]>([]);
+  const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
+  const likelyDuplicateKey = duplicateMatches
+    .filter(match => match.strength === 'LIKELY_SAME')
+    .map(match => match.student.id)
+    .join(',');
+  const duplicateBlocksSubmit = !editingStudent && Boolean(likelyDuplicateKey) && !duplicateConfirmed;
+
+  // A new set of likely duplicates needs a fresh confirmation.
+  useEffect(() => {
+    setDuplicateConfirmed(false);
+  }, [likelyDuplicateKey]);
 
   useEffect(() => {
-    fetchStudents();
-    fetchClasses();
+    if (!showModal || editingStudent) return;
+    const { firstName, lastName, dateOfBirth, guardianName, guardianPhone, guardianEmail } = formData;
+    const hasChildName = firstName.trim().length >= 2 && lastName.trim().length >= 2;
+    const hasGuardianSignal = guardianPhone.replace(/\D/g, '').length >= 9
+      || guardianEmail.includes('@')
+      || guardianName.trim().length >= 3;
+    if (!hasChildName && !hasGuardianSignal) {
+      setDuplicateMatches([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await api.post('/students/duplicate-check', {
+          firstName, lastName, dateOfBirth, guardianName, guardianPhone, guardianEmail,
+        });
+        if (!cancelled) setDuplicateMatches(response.data.matches ?? []);
+      } catch (error) {
+        console.error('Failed to check for existing students', error);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    showModal,
+    editingStudent,
+    formData.firstName,
+    formData.lastName,
+    formData.dateOfBirth,
+    formData.guardianName,
+    formData.guardianPhone,
+    formData.guardianEmail,
+  ]);
+
+  useEffect(() => {
     if (user?.role === 'SUPER_ADMIN') {
       fetchBranches();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!activeTermId) return;
+    fetchStudents(activeTermId);
+    fetchClasses(activeTermId);
+  }, [activeTermId]);
 
   const fetchBranches = async () => {
     try {
@@ -102,9 +163,11 @@ const Students = () => {
     }
   };
 
-  const fetchStudents = async () => {
+  const fetchStudents = async (academicTermId = activeTermId) => {
+    if (!academicTermId) return;
     try {
-      const response = await api.get('/students');
+      setLoading(true);
+      const response = await api.get('/students', { params: { academicTermId } });
       setStudents(response.data);
     } catch (error) {
       console.error('Failed to fetch students', error);
@@ -113,9 +176,10 @@ const Students = () => {
     }
   };
 
-  const fetchClasses = async () => {
+  const fetchClasses = async (academicTermId = activeTermId) => {
+    if (!academicTermId) return;
     try {
-      const response = await api.get('/classes');
+      const response = await api.get('/classes', { params: { academicTermId } });
       setClasses(response.data);
     } catch (error) {
       console.error('Failed to fetch classes', error);
@@ -126,14 +190,25 @@ const Students = () => {
     e.preventDefault();
     try {
       if (editingStudent) {
-        await api.put(`/students/${editingStudent.id}`, formData);
+        await api.put(`/students/${editingStudent.id}`, {
+          ...formData,
+          academicTermId: activeTermId,
+        });
       } else {
-        await api.post('/students', formData);
+        await api.post('/students', {
+          ...formData,
+          academicTermId: activeTermId,
+          confirmDuplicate: duplicateConfirmed,
+        });
       }
-      fetchStudents();
+      fetchStudents(activeTermId);
       setShowModal(false);
       resetForm();
-    } catch (error) {
+    } catch (error: any) {
+      if (error.response?.status === 409 && error.response.data?.code === 'POSSIBLE_DUPLICATE_STUDENT') {
+        setDuplicateMatches(error.response.data.matches ?? []);
+        return;
+      }
       console.error('Failed to save student', error);
       alert('Failed to save student');
     }
@@ -162,11 +237,11 @@ const Students = () => {
       admissionNumber: student.admissionNumber,
       dateOfBirth: new Date(student.dateOfBirth).toISOString().split('T')[0],
       gender: student.gender,
-      guardianName: student.guardianName,
-      guardianPhone: student.guardianPhone,
+      guardianName: student.guardianName || '',
+      guardianPhone: student.guardianPhone || '',
       guardianEmail: student.guardianEmail || '',
       address: student.address || '',
-      classId: student.classId,
+      classId: student.classId || '',
       branchId: student.branch?.id || '',
       status: student.status
     });
@@ -194,6 +269,8 @@ const Students = () => {
       status: 'ACTIVE'
     });
     setEditingStudent(null);
+    setDuplicateMatches([]);
+    setDuplicateConfirmed(false);
   };
 
   const toggleSelection = (id: string) => {
@@ -220,7 +297,7 @@ const Students = () => {
     try {
       await api.post('/students/bulk-delete', { ids: selectedIds });
       setSelectedIds([]);
-      fetchStudents();
+      fetchStudents(activeTermId);
     } catch (error) {
       console.error('Failed to delete students', error);
       alert('Failed to delete selected students');
@@ -282,11 +359,37 @@ const Students = () => {
         };
       });
 
-      await api.post('/students/bulk', formattedData);
+      const submitImport = (allowDuplicates: boolean) => api.post(
+        '/students/bulk',
+        formattedData,
+        allowDuplicates ? { params: { allowDuplicates: 'true' } } : undefined,
+      );
+
+      try {
+        await submitImport(false);
+      } catch (error: any) {
+        const data = error.response?.data;
+        if (error.response?.status !== 409 || data?.code !== 'POSSIBLE_DUPLICATE_STUDENTS') throw error;
+
+        const duplicates: { row: number; firstName: string; lastName: string; matches: StudentMatch[] }[] = data.duplicates ?? [];
+        const preview = duplicates.slice(0, 5).map(item => {
+          const match = item.matches[0]?.student;
+          const matchLabel = match ? `${match.firstName} ${match.lastName}${match.admissionNumber ? ` (${match.admissionNumber})` : ''}` : 'an existing record';
+          return `Row ${item.row}: ${item.firstName} ${item.lastName} matches ${matchLabel}`;
+        }).join('; ');
+        const remaining = duplicates.length > 5 ? `; and ${duplicates.length - 5} more` : '';
+        const proceed = await confirm({
+          title: 'Possible duplicate students',
+          message: `${data.error} ${preview}${remaining}. Import all rows anyway?`,
+          confirmText: 'Import anyway',
+        });
+        if (!proceed) return;
+        await submitImport(true);
+      }
       setShowImportModal(false);
       setImportFile(null);
       setImportPreview([]);
-      fetchStudents();
+      fetchStudents(activeTermId);
       alert('Students imported successfully');
     } catch (error: any) {
       console.error('Import failed', error);
@@ -308,13 +411,19 @@ const Students = () => {
     document.body.removeChild(link);
   };
 
-  // Apply all filters
+  // Every word typed must appear somewhere in the student's searchable fields.
+  const searchTokens = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filteredStudents = students.filter(student => {
-    const matchesSearch =
-      student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.admissionNumber.includes(searchTerm) ||
-      student.guardianName.toLowerCase().includes(searchTerm.toLowerCase());
+    const haystack = [
+      student.firstName,
+      student.lastName,
+      student.admissionNumber,
+      student.guardianName,
+      student.guardianPhone,
+      student.guardianEmail,
+      student.class?.name,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const matchesSearch = searchTokens.every(token => haystack.includes(token));
 
     const matchesClass = !classFilter || student.classId === classFilter;
     const matchesStatus = !statusFilter || student.status === statusFilter;
@@ -336,6 +445,11 @@ const Students = () => {
     setCurrentPage(1);
   }, [searchTerm, classFilter, statusFilter, genderFilter]);
 
+  if (termLoading) return null;
+  if (!activeTerm) {
+    return <div className="p-4 md:p-6"><NoActiveTermNotice /></div>;
+  }
+
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -348,14 +462,14 @@ const Students = () => {
             <>
               <button
                 onClick={() => setShowImportModal(true)}
-                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-surface-hover transition-colors"
               >
                 <Upload size={20} />
                 <span>Import</span>
               </button>
               <button
                 onClick={openAddModal}
-                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                className="flex-1 md:flex-none flex items-center justify-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors"
               >
                 <Plus size={20} />
                 <span>Add Student</span>
@@ -442,7 +556,7 @@ const Students = () => {
             <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by name or admission number..."
+              placeholder="Search by name, admission number, guardian or class..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
@@ -462,7 +576,7 @@ const Students = () => {
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center justify-center space-x-2 px-3 py-2 border rounded-lg transition-colors ${classFilter || statusFilter || genderFilter
                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-surface-hover'
                 }`}
             >
               <Filter size={18} />
@@ -509,7 +623,7 @@ const Students = () => {
                 <h2 className="text-xl font-bold dark:text-white">Filter Students</h2>
                 <button
                   onClick={() => setShowFilters(false)}
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="p-1 hover:bg-surface-hover rounded-lg transition-colors"
                 >
                   <X size={20} className="text-gray-500 dark:text-gray-400" />
                 </button>
@@ -562,13 +676,13 @@ const Students = () => {
                     setStatusFilter('');
                     setGenderFilter('');
                   }}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg transition-colors"
                 >
                   Clear All
                 </button>
                 <button
                   onClick={() => setShowFilters(false)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
                 >
                   Apply Filters
                 </button>
@@ -611,7 +725,7 @@ const Students = () => {
                 </tr>
               ) : (
                 paginatedStudents.map((student) => (
-                  <tr key={student.id} className={`hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors ${selectedIds.includes(student.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
+                  <tr key={student.id} className={`hover:bg-surface-hover transition-colors ${selectedIds.includes(student.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
                     <td className="px-6 py-4">
                       <button onClick={() => toggleSelection(student.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                         {selectedIds.includes(student.id) ? (
@@ -755,8 +869,8 @@ const Students = () => {
         {/* Pagination */}
         <div className="p-4 border-t border-gray-100 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 dark:text-gray-400">
           <span>
-            Showing {startIndex + 1}-{Math.min(endIndex, filteredStudents.length)} of {filteredStudents.length} students
-            {(classFilter || statusFilter || searchTerm) && (
+            Showing {filteredStudents.length === 0 ? 0 : startIndex + 1}-{Math.min(endIndex, filteredStudents.length)} of {filteredStudents.length} students
+            {(classFilter || statusFilter || genderFilter || searchTerm) && (
               <span className="text-gray-400"> (filtered from {students.length} total)</span>
             )}
           </span>
@@ -764,7 +878,7 @@ const Students = () => {
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 border border-gray-200 dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 border border-gray-200 dark:border-slate-700 rounded hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Previous
             </button>
@@ -786,7 +900,7 @@ const Students = () => {
                     onClick={() => setCurrentPage(pageNum)}
                     className={`px-3 py-1 border rounded transition-colors ${currentPage === pageNum
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                      : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-surface-hover'
                       }`}
                   >
                     {pageNum}
@@ -797,7 +911,7 @@ const Students = () => {
             <button
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 border border-gray-200 dark:border-slate-700 rounded hover:bg-gray-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 border border-gray-200 dark:border-slate-700 rounded hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Next
             </button>
@@ -894,14 +1008,14 @@ const Students = () => {
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100 dark:border-slate-700">
                 <button
                   onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
                   disabled={!importFile || isImporting}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50 flex items-center space-x-2"
                 >
                   {isImporting ? (
                     <><span>Importing...</span></>
@@ -1067,17 +1181,33 @@ const Students = () => {
                 )}
               </div>
 
+              {!editingStudent && (
+                <StudentMatchPanel
+                  matches={duplicateMatches}
+                  confirmed={duplicateConfirmed}
+                  onConfirmedChange={setDuplicateConfirmed}
+                  onViewStudent={(studentId) => {
+                    setShowModal(false);
+                    navigate(`/students/${studentId}`);
+                  }}
+                  onUseGuardian={(guardian) => setFormData(prev => ({ ...prev, ...guardian }))}
+                  showBranch={user?.role === 'SUPER_ADMIN'}
+                />
+              )}
+
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={duplicateBlocksSubmit}
+                  title={duplicateBlocksSubmit ? 'Confirm this is a different child to continue' : undefined}
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {editingStudent ? 'Update Student' : 'Create Student'}
                 </button>

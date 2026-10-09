@@ -1,5 +1,8 @@
 import aiService from './aiService';
 import { prisma } from '../utils/prisma';
+import { isDateWithinRangeByDay } from '../utils/academicValidation';
+import { runTermWriteTransaction } from './termLifecycleService';
+import { getClassEnrollmentsForTerm } from './studentPlacementService';
 
 // ==========================================
 // VOICE ATTENDANCE SERVICE
@@ -23,6 +26,7 @@ export async function processVoiceAttendance(
   classId: string,
   audioBuffer: Buffer,
   date: Date,
+  recordedByUserId: string,
   mimeType: string = 'audio/webm'
 ): Promise<VoiceAttendanceResult> {
   // 1. Transcribe audio
@@ -38,16 +42,7 @@ export async function processVoiceAttendance(
   const classInfo = await prisma.class.findUnique({
     where: { id: classId },
     include: {
-      students: {
-        where: { status: 'ACTIVE' },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          admissionNumber: true,
-        },
-        orderBy: { lastName: 'asc' },
-      },
+      academicTerm: true,
     },
   });
 
@@ -55,7 +50,13 @@ export async function processVoiceAttendance(
     throw new Error('Class not found');
   }
 
-  const students = classInfo.students;
+  if (!isDateWithinRangeByDay(date, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
+    throw new Error('Attendance date must fall within the class academic term');
+  }
+
+  const students = (await getClassEnrollmentsForTerm(classId, classInfo.academicTermId, {
+    statuses: ['ACTIVE'],
+  })).map(enrollment => enrollment.student);
   const studentNames = students.map(s => `${s.firstName} ${s.lastName}`).join(', ');
 
   // 3. Parse attendance from transcript using AI
@@ -145,86 +146,97 @@ Consider common Zambian names and pronunciation variations.`,
     confidence: parsed.confidence || 0.8,
   };
 
-  // 5. Process present students
-  for (const name of parsed.present || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'PRESENT',
-          markedBy: 'voice-ai',
-        },
-        update: { 
-          status: 'PRESENT',
-          markedBy: 'voice-ai',
-        },
-      });
-      result.present.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+  await runTermWriteTransaction(classInfo.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+    // 5. Process present students
+    for (const name of parsed.present || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'PRESENT',
+            recordedByUserId,
+          },
+          update: {
+            classId,
+            academicTermId: classInfo.academicTermId,
+            status: 'PRESENT',
+            recordedByUserId,
+          },
+        });
+        result.present.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
 
-  // 6. Process absent students
-  for (const name of parsed.absent || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'ABSENT',
-          markedBy: 'voice-ai',
-        },
-        update: { 
-          status: 'ABSENT',
-          markedBy: 'voice-ai',
-        },
-      });
-      result.absent.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+    // 6. Process absent students
+    for (const name of parsed.absent || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'ABSENT',
+            recordedByUserId,
+          },
+          update: {
+            classId,
+            academicTermId: classInfo.academicTermId,
+            status: 'ABSENT',
+            recordedByUserId,
+          },
+        });
+        result.absent.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
 
-  // 7. Process late students
-  for (const name of parsed.late || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'LATE',
-          markedBy: 'voice-ai',
-        },
-        update: { 
-          status: 'LATE',
-          markedBy: 'voice-ai',
-        },
-      });
-      result.late.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+    // 7. Process late students
+    for (const name of parsed.late || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'LATE',
+            recordedByUserId,
+          },
+          update: {
+            classId,
+            academicTermId: classInfo.academicTermId,
+            status: 'LATE',
+            recordedByUserId,
+          },
+        });
+        result.late.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
+  });
 
   return result;
 }
@@ -235,21 +247,14 @@ Consider common Zambian names and pronunciation variations.`,
 export async function processTextAttendance(
   classId: string,
   textInput: string,
-  date: Date
+  date: Date,
+  recordedByUserId: string
 ): Promise<VoiceAttendanceResult> {
   // Get class roster
   const classInfo = await prisma.class.findUnique({
     where: { id: classId },
     include: {
-      students: {
-        where: { status: 'ACTIVE' },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-        orderBy: { lastName: 'asc' },
-      },
+      academicTerm: true,
     },
   });
 
@@ -257,7 +262,13 @@ export async function processTextAttendance(
     throw new Error('Class not found');
   }
 
-  const students = classInfo.students;
+  if (!isDateWithinRangeByDay(date, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
+    throw new Error('Attendance date must fall within the class academic term');
+  }
+
+  const students = (await getClassEnrollmentsForTerm(classId, classInfo.academicTermId, {
+    statuses: ['ACTIVE'],
+  })).map(enrollment => enrollment.student);
 
   // Parse using AI
   const prompt = `Parse attendance from this text command.
@@ -305,75 +316,80 @@ Return JSON:
     confidence: parsed.confidence || 0.8,
   };
 
-  // Process each category
-  for (const name of parsed.present || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'PRESENT',
-          markedBy: 'text-ai',
-        },
-        update: { status: 'PRESENT', markedBy: 'text-ai' },
-      });
-      result.present.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+  await runTermWriteTransaction(classInfo.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+    // Process each category
+    for (const name of parsed.present || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'PRESENT',
+            recordedByUserId,
+          },
+          update: { classId, academicTermId: classInfo.academicTermId, status: 'PRESENT', recordedByUserId },
+        });
+        result.present.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
 
-  for (const name of parsed.absent || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'ABSENT',
-          markedBy: 'text-ai',
-        },
-        update: { status: 'ABSENT', markedBy: 'text-ai' },
-      });
-      result.absent.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+    for (const name of parsed.absent || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'ABSENT',
+            recordedByUserId,
+          },
+          update: { classId, academicTermId: classInfo.academicTermId, status: 'ABSENT', recordedByUserId },
+        });
+        result.absent.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
 
-  for (const name of parsed.late || []) {
-    const student = matchStudent(name);
-    if (student) {
-      await prisma.attendance.upsert({
-        where: {
-          studentId_date: { studentId: student.id, date },
-        },
-        create: {
-          studentId: student.id,
-          classId,
-          date,
-          status: 'LATE',
-          markedBy: 'text-ai',
-        },
-        update: { status: 'LATE', markedBy: 'text-ai' },
-      });
-      result.late.push(`${student.firstName} ${student.lastName}`);
-      result.totalProcessed++;
-    } else {
-      result.unmatched.push(name);
+    for (const name of parsed.late || []) {
+      const student = matchStudent(name);
+      if (student) {
+        await tx.attendance.upsert({
+          where: {
+            studentId_date: { studentId: student.id, date },
+          },
+          create: {
+            studentId: student.id,
+            classId,
+            academicTermId: classInfo.academicTermId,
+            date,
+            status: 'LATE',
+            recordedByUserId,
+          },
+          update: { classId, academicTermId: classInfo.academicTermId, status: 'LATE', recordedByUserId },
+        });
+        result.late.push(`${student.firstName} ${student.lastName}`);
+        result.totalProcessed++;
+      } else {
+        result.unmatched.push(name);
+      }
     }
-  }
+  });
 
   return result;
 }

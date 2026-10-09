@@ -2,6 +2,22 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { syncStudentClassFees } from '../services/classFeeAssignmentService';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
+import {
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import {
+  getClassEnrollmentsForTerm,
+  StudentPlacementError,
+  upsertStudentPlacement,
+} from '../services/studentPlacementService';
+
+const academicTermQuerySchema = z.object({
+  academicTermId: z.string().uuid(),
+});
 
 const classSchema = z.object({
   name: z.string().min(2),
@@ -13,19 +29,31 @@ const classSchema = z.object({
 
 export const getClasses = async (req: Request, res: Response) => {
   try {
-    const userRole = (req as any).user?.role;
-    const userId = (req as any).user?.userId;
+    const user = (req as AuthRequest).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    const { academicTermId } = academicTermQuerySchema.parse(req.query);
 
-    const userBranchId = (req as any).user?.branchId;
+    const whereClause: any = { academicTermId };
 
-    let whereClause: any = {};
-
-    if (userRole !== 'SUPER_ADMIN' && userBranchId) {
-      whereClause.branchId = userBranchId;
+    if (user.role !== 'SUPER_ADMIN' && user.branchId) {
+      whereClause.branchId = user.branchId;
+    } else if (user.role === 'SUPER_ADMIN' && typeof req.query.branchId === 'string') {
+      whereClause.branchId = req.query.branchId;
     }
 
-    if (userRole === 'TEACHER') {
-      whereClause = { ...whereClause, teacherId: userId };
+    if (user.role === 'TEACHER') {
+      whereClause.OR = [
+        { teacherId: user.userId },
+        { teacherAssignments: { some: { teacherId: user.userId } } },
+      ];
+    } else if (user.role === 'STUDENT') {
+      whereClause.termEnrollments = {
+        some: { academicTermId, student: { userId: user.userId, status: 'ACTIVE' } },
+      };
+    } else if (user.role === 'PARENT') {
+      whereClause.termEnrollments = {
+        some: { academicTermId, student: { parentId: user.userId, status: 'ACTIVE' } },
+      };
     }
 
     const classes = await prisma.class.findMany({
@@ -36,7 +64,7 @@ export const getClasses = async (req: Request, res: Response) => {
         },
         subjects: true,
         _count: {
-          select: { students: true },
+          select: { termEnrollments: true },
         },
       },
       orderBy: [
@@ -44,8 +72,14 @@ export const getClasses = async (req: Request, res: Response) => {
         { name: 'asc' },
       ],
     });
-    res.json(classes);
+    res.json(classes.map(classRecord => ({
+      ...classRecord,
+      _count: { students: classRecord._count.termEnrollments },
+    })));
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
     res.status(500).json({ error: 'Failed to fetch classes' });
   }
 };
@@ -53,44 +87,42 @@ export const getClasses = async (req: Request, res: Response) => {
 export const getClassById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const user = (req as any).user;
-    const userRole = user?.role;
-    const userBranchId = user?.branchId;
+    const { academicTermId } = academicTermQuerySchema.parse(req.query);
+    await ensureAcademicClassAccess(req as AuthRequest, id, { academicTermId });
 
-    const classData = await prisma.class.findUnique({
-      where: { id },
-      include: {
-        teacher: {
-          select: { fullName: true },
+    const [classData, enrollments] = await Promise.all([
+      prisma.class.findUnique({
+        where: { id },
+        include: {
+          teacher: {
+            select: { fullName: true },
+          },
+          subjects: true,
         },
-        subjects: true,
-        students: {
-          where: { status: 'ACTIVE' },
-          orderBy: { lastName: 'asc' },
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            admissionNumber: true,
-          }
-        },
-        _count: {
-          select: { students: true },
-        },
-      },
-    });
+      }),
+      getClassEnrollmentsForTerm(id, academicTermId),
+    ]);
 
     if (!classData) {
       return res.status(404).json({ error: 'Class not found' });
     }
 
-    // Check branch access
-    if (userRole !== 'SUPER_ADMIN' && userBranchId && classData.branchId && classData.branchId !== userBranchId) {
-      return res.status(403).json({ error: 'Unauthorized access to this class' });
-    }
-
-    res.json(classData);
+    const students = enrollments.map(enrollment => ({
+      ...enrollment.student,
+      classId: enrollment.classId,
+      placementStatus: enrollment.status,
+    }));
+    res.json({ ...classData, students, _count: { students: students.length } });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Error fetching class:', error);
     res.status(500).json({ error: 'Failed to fetch class' });
   }
@@ -100,27 +132,30 @@ export const createClass = async (req: Request, res: Response) => {
   try {
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
 
-    const newClass = await prisma.class.create({
-      data: {
-        name,
-        gradeLevel,
-        teacherId,
-        academicTermId,
-        subjects: subjectIds ? {
-          connect: subjectIds.map(id => ({ id })),
-        } : undefined,
-        branchId: (req as any).user?.branchId, // Assign to creator's branch
-      },
-      include: {
-        subjects: true,
-      },
-    });
+    const newClass = await runTermWriteTransaction(academicTermId, 'SETUP', tx => (
+      tx.class.create({
+        data: {
+          name,
+          gradeLevel,
+          teacherId,
+          academicTermId,
+          subjects: subjectIds ? {
+            connect: subjectIds.map(id => ({ id })),
+          } : undefined,
+          branchId: (req as any).user?.branchId,
+        },
+        include: {
+          subjects: true,
+        },
+      })
+    ));
 
     res.status(201).json(newClass);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to create class' });
   }
 };
@@ -130,27 +165,38 @@ export const updateClass = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, gradeLevel, teacherId, academicTermId, subjectIds } = classSchema.parse(req.body);
 
-    const updatedClass = await prisma.class.update({
+    const existing = await prisma.class.findUnique({
       where: { id },
-      data: {
-        name,
-        gradeLevel,
-        teacherId,
-        academicTermId,
-        subjects: subjectIds ? {
-          set: subjectIds.map(id => ({ id })),
-        } : undefined,
-      },
-      include: {
-        subjects: true,
-      },
+      select: { academicTermId: true },
     });
+    if (!existing) return res.status(404).json({ error: 'Class not found' });
+    if (academicTermId !== existing.academicTermId) {
+      return res.status(400).json({ error: 'A class offering cannot be moved to another academic term' });
+    }
+
+    const updatedClass = await runTermWriteTransaction(existing.academicTermId, 'SETUP', tx => (
+      tx.class.update({
+        where: { id },
+        data: {
+          name,
+          gradeLevel,
+          teacherId,
+          subjects: subjectIds ? {
+            set: subjectIds.map(id => ({ id })),
+          } : undefined,
+        },
+        include: {
+          subjects: true,
+        },
+      })
+    ));
 
     res.json(updatedClass);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to update class' });
   }
 };
@@ -158,11 +204,17 @@ export const updateClass = async (req: Request, res: Response) => {
 export const deleteClass = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await prisma.class.delete({
+    const classRecord = await prisma.class.findUnique({
       where: { id },
+      select: { academicTermId: true },
     });
+    if (!classRecord) return res.status(404).json({ error: 'Class not found' });
+    await runTermWriteTransaction(classRecord.academicTermId, 'SETUP', tx => (
+      tx.class.delete({ where: { id } })
+    ));
     res.status(204).send();
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to delete class' });
   }
 };
@@ -170,12 +222,28 @@ export const deleteClass = async (req: Request, res: Response) => {
 export const getClassStudents = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const students = await prisma.student.findMany({
-      where: { classId: id },
-      orderBy: { lastName: 'asc' },
-    });
+    const { academicTermId } = academicTermQuerySchema.parse(req.query);
+    await ensureAcademicClassAccess(req as AuthRequest, id, { academicTermId });
+
+    const enrollments = await getClassEnrollmentsForTerm(id, academicTermId);
+    const students = enrollments.map(enrollment => ({
+      ...enrollment.student,
+      classId: enrollment.classId,
+      placementStatus: enrollment.status,
+      placementStartsAt: enrollment.startsAt,
+      placementEndsAt: enrollment.endsAt,
+    }));
     res.json(students);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
     console.error('Error fetching class students:', error);
     res.status(500).json({ error: 'Failed to fetch class students' });
   }
@@ -184,30 +252,66 @@ export const getClassStudents = async (req: Request, res: Response) => {
 export const addStudentsToClass = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { studentIds } = z.object({ studentIds: z.array(z.string().uuid()) }).parse(req.body);
-    const userId = (req as any).user?.userId;
+    const { studentIds, academicTermId } = z.object({
+      studentIds: z.array(z.string().uuid()).min(1),
+      academicTermId: z.string().uuid(),
+    }).superRefine((payload, ctx) => {
+      if (new Set(payload.studentIds).size !== payload.studentIds.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['studentIds'],
+          message: 'Student IDs must be unique',
+        });
+      }
+    }).parse(req.body);
 
-    const classExists = await prisma.class.findUnique({ where: { id } });
-    if (!classExists) {
-      return res.status(404).json({ error: 'Class not found' });
-    }
-
-    await prisma.student.updateMany({
-      where: {
-        id: { in: studentIds },
-      },
-      data: {
-        classId: id,
-      },
+    const targetClass = await ensureAcademicClassAccess(req as AuthRequest, id, { academicTermId });
+    const students = await prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      select: { id: true, branchId: true },
     });
 
-    await Promise.all(studentIds.map(studentId => syncStudentClassFees(studentId)));
+    if (students.length !== studentIds.length) {
+      return res.status(404).json({ error: 'One or more students were not found' });
+    }
+
+    const crossBranchStudent = students.find((student) => (
+      targetClass.branchId && student.branchId && student.branchId !== targetClass.branchId
+    ));
+    if (crossBranchStudent) {
+      return res.status(400).json({ error: 'Students can only be assigned to a class in the same branch' });
+    }
+
+    const placementResults = await runTermWriteTransaction(
+      targetClass.academicTermId,
+      targetClass.academicTerm.status === 'DRAFT' ? 'SETUP' : 'ACADEMIC_ACTIVITY',
+      tx => Promise.all(studentIds.map(studentId => upsertStudentPlacement(tx, {
+        studentId,
+        academicTermId,
+        classId: id,
+        changedByUserId: (req as AuthRequest).user?.userId,
+        movementReason: 'Administrative class assignment',
+      }))),
+    );
+
+    await Promise.all(
+      placementResults
+        .filter(result => result.compatibilityPointerUpdated)
+        .map(result => syncStudentClassFees(result.enrollment.studentId)),
+    );
 
     res.json({ message: 'Students added to class successfully' });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     res.status(500).json({ error: 'Failed to add students to class' });
   }
 };
@@ -216,22 +320,12 @@ const bulkClassSchema = z.object({
   name: z.string().min(2),
   gradeLevel: z.number().int().min(-2).max(12),
   teacherId: z.string().uuid().optional(),
-  academicTermId: z.string().uuid().optional(),
+  academicTermId: z.string().uuid(),
 });
 
 export const bulkCreateClasses = async (req: Request, res: Response) => {
   try {
     const classesData = z.array(bulkClassSchema).parse(req.body);
-
-    // Get current academic term
-    const currentTerm = await prisma.academicTerm.findFirst({
-      where: { isActive: true },
-      orderBy: { startDate: 'desc' }
-    });
-
-    if (!currentTerm) {
-      return res.status(400).json({ error: 'No active academic term found' });
-    }
 
     // Get default teacher
     const defaultTeacher = await prisma.user.findFirst({
@@ -246,14 +340,21 @@ export const bulkCreateClasses = async (req: Request, res: Response) => {
       name: c.name,
       gradeLevel: c.gradeLevel,
       teacherId: c.teacherId || defaultTeacher.id,
-      academicTermId: c.academicTermId || currentTerm.id,
+      academicTermId: c.academicTermId,
       branchId: (req as any).user?.branchId, // Assign to creator's branch
     }));
 
-    const result = await prisma.class.createMany({
-      data: dataToCreate,
-      skipDuplicates: true,
-    });
+    const termIds = new Set(dataToCreate.map(classRecord => classRecord.academicTermId));
+    if (termIds.size !== 1) {
+      return res.status(400).json({ error: 'Classes can only be imported for one academic term at a time' });
+    }
+
+    const result = await runTermWriteTransaction([...termIds][0], 'SETUP', tx => (
+      tx.class.createMany({
+        data: dataToCreate,
+        skipDuplicates: true,
+      })
+    ));
 
     res.status(201).json({
       message: `Successfully imported ${result.count} classes`,
@@ -263,6 +364,7 @@ export const bulkCreateClasses = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Bulk create classes error:', error);
     res.status(500).json({ error: 'Failed to import classes' });
   }

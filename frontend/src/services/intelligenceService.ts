@@ -95,10 +95,10 @@ const intelligenceService = {
   analyzeAttendance: (termId?: string) =>
     api.post('/intelligence/attendance/analyze', {}, { params: termId ? { termId } : undefined }).then(r => r.data),
 
-  getClassInsights: (classId: string, startDate: string, endDate: string) =>
-    api.get<ClassInsights>('/intelligence/attendance/insights', { params: { classId, startDate, endDate } }).then(r => r.data),
+  getClassInsights: (classId: string, termId: string, startDate: string, endDate: string) =>
+    api.get<ClassInsights>('/intelligence/attendance/insights', { params: { classId, termId, startDate, endDate } }).then(r => r.data),
 
-  getAttendanceAlerts: (params?: { resolved?: boolean; classId?: string; studentId?: string }) =>
+  getAttendanceAlerts: (params: { academicTermId: string; resolved?: boolean; classId?: string; studentId?: string }) =>
     api.get<AttendanceAlert[]>('/intelligence/attendance/alerts', { params }).then(r => r.data),
 
   resolveAlert: (alertId: string, notes: string) =>
@@ -111,17 +111,17 @@ const intelligenceService = {
   getFeeAnalytics: (params?: { termId?: string }) =>
     api.get<FeeAnalytics>('/intelligence/fees/analytics', { params }).then(r => r.data),
 
-  predictPayments: (classId?: string) =>
-    api.get<PaymentPrediction[]>('/intelligence/fees/predictions', { params: { classId } }).then(r => r.data),
+  predictPayments: (termId: string, classId?: string) =>
+    api.get<PaymentPrediction[]>('/intelligence/fees/predictions', { params: { termId, classId } }).then(r => r.data),
 
   createPaymentPlan: (data: { studentId: string; feeId: string; installments: number }) =>
     api.post<PaymentPlan>('/intelligence/fees/payment-plan', data).then(r => r.data),
 
-  sendSmartReminders: () =>
-    api.post('/intelligence/fees/smart-reminders').then(r => r.data),
+  sendSmartReminders: (termId: string) =>
+    api.post('/intelligence/fees/smart-reminders', { termId }).then(r => r.data),
 
-  getFinancialAidCandidates: () =>
-    api.get('/intelligence/fees/financial-aid').then(r => r.data),
+  getFinancialAidCandidates: (termId: string) =>
+    api.get('/intelligence/fees/financial-aid', { params: { termId } }).then(r => r.data),
 
   // Auto Grading
   gradeSubmission: (submissionId: string) =>

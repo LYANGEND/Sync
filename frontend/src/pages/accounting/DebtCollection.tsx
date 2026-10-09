@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 
 interface DebtorProfile {
   studentId: string;
@@ -104,6 +106,8 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
   const [analytics, setAnalytics] = useState<any>(null);
   const [settings, setSettings] = useState<CollectionSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const academicTermId = activeTerm?.id ?? '';
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -139,31 +143,34 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
   // ---- Data Fetching ----
   const fetchDebtors = useCallback(async () => {
     try {
-      const res = await api.get('/debt-collection/debtors');
+      if (!academicTermId) return;
+      const res = await api.get('/debt-collection/debtors', { params: { academicTermId } });
       setDebtors(res.data.debtors || []);
       setDebtorSummary(res.data.summary || null);
     } catch (err: any) {
       console.error('Failed to load debtors:', err);
     }
-  }, []);
+  }, [academicTermId]);
 
   const fetchCampaigns = useCallback(async () => {
     try {
-      const res = await api.get('/debt-collection/campaigns');
-      setCampaigns(res.data.campaigns || []);
+      if (!academicTermId) return;
+      const res = await api.get('/debt-collection/campaigns', { params: { academicTermId } });
+      setCampaigns(Array.isArray(res.data) ? res.data : res.data.campaigns || []);
     } catch (err: any) {
       console.error('Failed to load campaigns:', err);
     }
-  }, []);
+  }, [academicTermId]);
 
   const fetchAnalytics = useCallback(async () => {
     try {
-      const res = await api.get('/debt-collection/analytics');
-      setAnalytics(res.data.analytics || null);
+      if (!academicTermId) return;
+      const res = await api.get('/debt-collection/analytics', { params: { academicTermId } });
+      setAnalytics(res.data.analytics || res.data || null);
     } catch (err: any) {
       console.error('Failed to load analytics:', err);
     }
-  }, []);
+  }, [academicTermId]);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -175,13 +182,14 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
   }, []);
 
   useEffect(() => {
+    if (!academicTermId) return;
     const loadAll = async () => {
       setLoading(true);
       await Promise.all([fetchDebtors(), fetchCampaigns(), fetchAnalytics(), fetchSettings()]);
       setLoading(false);
     };
     loadAll();
-  }, [fetchDebtors, fetchCampaigns, fetchAnalytics, fetchSettings]);
+  }, [academicTermId, fetchDebtors, fetchCampaigns, fetchAnalytics, fetchSettings]);
 
   // ---- Actions ----
   const handleCreateCampaign = async () => {
@@ -191,9 +199,9 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
     }
     setActionLoading('create-campaign');
     try {
-      const res = await api.post('/debt-collection/campaigns', newCampaign);
+      const res = await api.post('/debt-collection/campaigns', { ...newCampaign, academicTermId });
       toast.success('Campaign created!');
-      setCampaigns(prev => [res.data.campaign, ...prev]);
+      setCampaigns(prev => [res.data.campaign || res.data, ...prev]);
       setShowCreateCampaign(false);
       setNewCampaign({ name: '', description: '', minAmountOwed: 0, minDaysOverdue: 0, targetSegments: [], targetGradeLevels: [] });
     } catch (err: any) {
@@ -224,11 +232,12 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
     setActionLoading('quick-send');
     try {
       const res = await api.post('/debt-collection/send', {
+        academicTermId,
         channels: quickSendChannels,
         segments: quickSendSegments.length > 0 ? quickSendSegments : undefined,
         studentIds: targets,
       });
-      toast.success(`Sent ${res.data.result?.totalSent || 0} reminders!`);
+      toast.success(`Sent ${res.data.sent || res.data.result?.totalSent || 0} reminders!`);
       setShowQuickSend(false);
       setSelectedDebtors([]);
       await fetchDebtors();
@@ -247,10 +256,11 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
     setPreviewLoading(true);
     try {
       const res = await api.post('/debt-collection/preview-message', {
+        academicTermId,
         studentId: previewStudent,
         channel: previewChannel,
       });
-      setPreviewMessage(res.data.message || 'No preview available');
+      setPreviewMessage(res.data.preview?.message || res.data.preview || res.data.message || 'No preview available');
     } catch (err: any) {
       toast.error('Failed to generate preview');
     } finally {
@@ -261,8 +271,8 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
   const handleReconcile = async () => {
     setActionLoading('reconcile');
     try {
-      const res = await api.post('/debt-collection/reconcile');
-      toast.success(`Reconciled: ${res.data.result?.updatedCount || 0} payments matched`);
+      const res = await api.post('/debt-collection/reconcile', { academicTermId });
+      toast.success(`Reconciled: ${res.data.reconciled || res.data.result?.updatedCount || 0} payments matched`);
       await fetchCampaigns();
       await fetchAnalytics();
     } catch (err: any) {
@@ -317,6 +327,10 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
   };
 
   // ---- Loading State ----
+  if (!termLoading && !activeTerm) {
+    return <NoActiveTermNotice />;
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -545,7 +559,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
                 <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">{selectedDebtors.length} selected</span>
                 <button
                   onClick={() => setShowQuickSend(true)}
-                  className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-1 px-3 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors"
                 >
                   <Send size={14} />
                   Send
@@ -597,7 +611,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
                     filteredDebtors.map(debtor => {
                       const segCfg = SEGMENT_CONFIG[debtor.segment];
                       return (
-                        <tr key={debtor.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                        <tr key={debtor.studentId} className="hover:bg-surface-hover transition-colors">
                           <td className="px-4 py-3">
                             <input
                               type="checkbox"
@@ -668,7 +682,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
             <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Collection Campaigns</h3>
             <button
               onClick={() => setShowCreateCampaign(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors"
             >
               <Plus size={16} />
               New Campaign
@@ -682,7 +696,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
               <p className="text-slate-500 dark:text-gray-400 mb-4">Create your first collection campaign to start reaching out to debtors.</p>
               <button
                 onClick={() => setShowCreateCampaign(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
               >
                 <Plus size={16} />
                 Create Campaign
@@ -916,7 +930,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
             <button
               onClick={handleUpdateSettings}
               disabled={actionLoading === 'settings'}
-              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
             >
               {actionLoading === 'settings' ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />}
               Save Settings
@@ -1006,7 +1020,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
               <button
                 onClick={handleCreateCampaign}
                 disabled={actionLoading === 'create-campaign'}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors disabled:opacity-50"
               >
                 {actionLoading === 'create-campaign' ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
                 Create Campaign
@@ -1092,7 +1106,7 @@ const DebtCollection: React.FC<DebtCollection> = ({ embedded }) => {
               <button
                 onClick={handleQuickSend}
                 disabled={actionLoading === 'quick-send' || quickSendChannels.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors disabled:opacity-50"
               >
                 {actionLoading === 'quick-send' ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
                 Send Reminders

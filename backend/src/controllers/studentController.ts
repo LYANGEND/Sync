@@ -6,6 +6,67 @@ import { sendEmail } from '../services/emailService';
 import { syncStudentClassFees } from '../services/classFeeAssignmentService';
 import { AcademicScopeError, ensureStudentRecordAccess } from '../utils/academicScope';
 import { AuthRequest } from '../middleware/authMiddleware';
+import {
+  assertTermWriteAllowed,
+  getActiveTerm,
+  runTermLifecycleTransaction,
+  runTermWriteTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import {
+  getStudentPlacementForTerm,
+  StudentPlacementError,
+  upsertStudentPlacement,
+} from '../services/studentPlacementService';
+import {
+  candidateToRecord,
+  hasLikelySameStudent,
+  loadStudentMatchPool,
+  StudentMatch,
+} from '../services/studentDuplicateService';
+import { logAuditEvent } from '../middleware/auditMiddleware';
+
+const optionalText = z.string().nullable().optional().transform(val => (val ? val : undefined));
+
+const duplicateCheckSchema = z.object({
+  firstName: z.string().default(''),
+  lastName: z.string().default(''),
+  dateOfBirth: optionalText,
+  guardianName: optionalText,
+  guardianPhone: optionalText,
+  guardianEmail: optionalText,
+  excludeStudentId: z.string().uuid().optional(),
+});
+
+// Non-admins only see matches inside their own branch, mirroring GET /students scoping.
+const duplicateScopeBranchId = (user: { role?: string; branchId?: string | null }) => (
+  user.role === 'SUPER_ADMIN' ? undefined : user.branchId ?? undefined
+);
+
+const sendDuplicateConflict = (res: Response, matches: StudentMatch[]) => res.status(409).json({
+  code: 'POSSIBLE_DUPLICATE_STUDENT',
+  error: 'This student may already exist. Review the matches and confirm before creating.',
+  matches,
+});
+
+export const checkStudentDuplicates = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (user.role !== 'SUPER_ADMIN' && !user.branchId) {
+      return res.status(403).json({ error: 'User does not belong to a branch.' });
+    }
+    const { excludeStudentId, ...candidate } = duplicateCheckSchema.parse(req.body);
+    const pool = await loadStudentMatchPool({ branchId: duplicateScopeBranchId(user), excludeStudentId });
+    res.json({ matches: pool.match(candidate) });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    console.error('Student duplicate check error:', error);
+    res.status(500).json({ error: 'Failed to check for existing students' });
+  }
+};
 
 const baseStudentSchema = z.object({
   firstName: z.string().min(2),
@@ -29,9 +90,47 @@ const createStudentSchema = baseStudentSchema.refine(data => data.classId || dat
 });
 
 const updateStudentSchema = baseStudentSchema.partial().extend({
+  academicTermId: z.string().uuid().optional(),
   status: z.enum(['ACTIVE', 'TRANSFERRED', 'GRADUATED', 'DROPPED_OUT']).optional(),
   reason: z.string().optional(), // For audit trail
 });
+
+const archiveStudentsWithoutActivePlacement = async (ids: string[]) => (
+  runTermLifecycleTransaction(async tx => {
+    const students = await tx.student.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        termEnrollments: {
+          where: { status: 'ACTIVE' },
+          select: { id: true },
+        },
+      },
+    });
+
+    const blockedStudentIds = students
+      .filter(student => student.termEnrollments.length > 0)
+      .map(student => student.id);
+
+    if (blockedStudentIds.length > 0) {
+      return {
+        kind: 'ACTIVE_PLACEMENT' as const,
+        studentIds: blockedStudentIds,
+      };
+    }
+
+    const result = await tx.student.updateMany({
+      where: { id: { in: students.map(student => student.id) } },
+      data: { status: 'ARCHIVED' },
+    });
+
+    return {
+      kind: 'ARCHIVED' as const,
+      count: result.count,
+      foundIds: students.map(student => student.id),
+    };
+  })
+);
 
 export const getStudents = async (req: Request, res: Response) => {
   try {
@@ -39,20 +138,35 @@ export const getStudents = async (req: Request, res: Response) => {
     const userRole = user?.role;
     const userId = user?.userId;
     const userBranchId = user?.branchId; // Assumes branchId is in the token or attached by middleware
+    const academicTermId = z.string().uuid().parse(req.query.academicTermId);
+    const includeUnplaced = req.query.includeUnplaced === 'true';
+
+    if (includeUnplaced && !['SUPER_ADMIN', 'SECRETARY'].includes(userRole)) {
+      return res.status(403).json({ error: 'Only student placement administrators can include unplaced identities' });
+    }
 
     // Base filter: always exclude archived students
     let whereClause: any = {
-      status: { not: 'ARCHIVED' }
+      status: { not: 'ARCHIVED' },
+      ...(!includeUnplaced && { termEnrollments: { some: { academicTermId } } }),
     };
 
     // Branch Scoping: If not SUPER_ADMIN, restrict to user's branch
     if (userRole !== 'SUPER_ADMIN' && userBranchId) {
       whereClause.branchId = userBranchId;
+    } else if (userRole === 'SUPER_ADMIN' && typeof req.query.branchId === 'string') {
+      whereClause.branchId = req.query.branchId;
     }
 
     if (userRole === 'TEACHER') {
       const myClasses = await prisma.class.findMany({
-        where: { teacherId: userId },
+        where: {
+          academicTermId,
+          OR: [
+            { teacherId: userId },
+            { teacherAssignments: { some: { teacherId: userId } } },
+          ],
+        },
         select: { id: true }
       });
 
@@ -61,22 +175,58 @@ export const getStudents = async (req: Request, res: Response) => {
       // Teachers see students in their classes AND belong to their branch (already filtered above)
       whereClause = {
         ...whereClause,
-        classId: { in: classIds }
+        termEnrollments: {
+          some: { academicTermId, classId: { in: classIds } },
+        },
       };
+    } else if (userRole === 'PARENT') {
+      whereClause.parentId = userId;
+    } else if (userRole === 'STUDENT') {
+      whereClause.userId = userId;
+    } else if (typeof req.query.parentId === 'string') {
+      whereClause.parentId = req.query.parentId;
+    }
+
+    if (typeof req.query.search === 'string' && req.query.search.trim()) {
+      // Each word must match a field, so "John Banda" finds first + last name together.
+      whereClause.AND = req.query.search.trim().split(/\s+/).map(token => ({
+        OR: [
+          { firstName: { contains: token, mode: 'insensitive' } },
+          { lastName: { contains: token, mode: 'insensitive' } },
+          { admissionNumber: { contains: token, mode: 'insensitive' } },
+          { guardianName: { contains: token, mode: 'insensitive' } },
+          { guardianPhone: { contains: token } },
+        ],
+      }));
     }
 
     const students = await prisma.student.findMany({
       where: whereClause,
       include: {
-        class: true,
         branch: true,
+        termEnrollments: {
+          where: { academicTermId },
+          include: { class: true },
+          take: 1,
+        },
       },
       orderBy: {
         lastName: 'asc',
       },
     });
-    res.json(students);
+    res.json(students.map(({ termEnrollments, ...student }) => {
+      const placement = termEnrollments[0];
+      return {
+        ...student,
+        classId: placement?.classId ?? null,
+        class: placement?.class ?? null,
+        placementStatus: placement?.status ?? null,
+      };
+    }));
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
     console.error('Error fetching students:', error);
     res.status(500).json({ error: 'Failed to fetch students' });
   }
@@ -91,6 +241,21 @@ export const createStudent = async (req: Request, res: Response) => {
     }
 
     const data = parseResult.data;
+
+    if (data.classId) {
+      const requestedClass = await prisma.class.findUnique({
+        where: { id: data.classId },
+        select: { academicTermId: true, academicTerm: { select: { status: true } } },
+      });
+      if (!requestedClass) return res.status(404).json({ error: 'Class not found' });
+      if (requestedClass.academicTerm.status !== 'ACTIVE') {
+        return res.status(409).json({
+          code: 'INITIAL_PLACEMENT_REQUIRES_ACTIVE_TERM',
+          error: 'Create the student in the active term, then stage future placement from class management',
+        });
+      }
+      await assertTermWriteAllowed(requestedClass.academicTermId, 'ACADEMIC_ACTIVITY');
+    }
 
     // Branch Logic
     let branchId = data.branchId;
@@ -109,6 +274,14 @@ export const createStudent = async (req: Request, res: Response) => {
       if (!branchId && user.branchId) {
         branchId = user.branchId;
       }
+    }
+
+    // Checked before any parent account is created so a rejected duplicate leaves no side effects.
+    const duplicateConfirmed = req.body?.confirmDuplicate === true;
+    const duplicatePool = await loadStudentMatchPool({ branchId: duplicateScopeBranchId(user) });
+    const duplicateMatches = duplicatePool.match(data);
+    if (hasLikelySameStudent(duplicateMatches) && !duplicateConfirmed) {
+      return sendDuplicateConflict(res, duplicateMatches);
     }
 
     let parentId: string | null = null;
@@ -220,9 +393,7 @@ export const createStudent = async (req: Request, res: Response) => {
 
     if (data.className && !finalClassId) {
       // Get current academic term
-      const currentTerm = await prisma.academicTerm.findFirst({
-        orderBy: { startDate: 'desc' }
-      });
+      const currentTerm = await getActiveTerm();
 
       if (!currentTerm) {
         return res.status(400).json({ error: 'No academic term found. Please create an academic term first.' });
@@ -273,14 +444,23 @@ export const createStudent = async (req: Request, res: Response) => {
         }
 
         // Create the class
-        const newClass = await prisma.class.create({
-          data: {
-            name: normalizedName,
-            gradeLevel,
-            teacherId: defaultTeacher.id,
-            academicTermId: currentTerm.id,
-            branchId: branchId // Assign new class to the same branch
-          }
+        const newClass = await runTermWriteTransaction(currentTerm.id, 'SETUP', async tx => {
+          const concurrentClass = await tx.class.findFirst({
+            where: {
+              name: { equals: normalizedName, mode: 'insensitive' },
+              academicTermId: currentTerm.id,
+              branchId,
+            },
+          });
+          return concurrentClass ?? tx.class.create({
+            data: {
+              name: normalizedName,
+              gradeLevel,
+              teacherId: defaultTeacher.id,
+              academicTermId: currentTerm.id,
+              branchId,
+            }
+          });
         });
 
         finalClassId = newClass.id;
@@ -295,24 +475,68 @@ export const createStudent = async (req: Request, res: Response) => {
     // Remove className and guardianEmail from data before creating
     const { className, guardianEmail, classId: _, ...studentData } = data;
 
-    const student = await prisma.student.create({
-      data: {
-        ...studentData,
+    const targetClass = await prisma.class.findUnique({
+      where: { id: finalClassId },
+      select: { academicTermId: true, academicTerm: { select: { status: true } } },
+    });
+    if (!targetClass) return res.status(404).json({ error: 'Class not found' });
+    if (targetClass.academicTerm.status !== 'ACTIVE') {
+      return res.status(409).json({
+        code: 'INITIAL_PLACEMENT_REQUIRES_ACTIVE_TERM',
+        error: 'Initial student placement is only allowed in the active term',
+      });
+    }
+
+    const student = await runTermWriteTransaction(targetClass.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const createdStudent = await tx.student.create({
+        data: {
+          ...studentData,
+          classId: finalClassId,
+          admissionNumber,
+          status: 'ACTIVE',
+          parentId,
+          branchId,
+        },
+      });
+      await upsertStudentPlacement(tx, {
+        studentId: createdStudent.id,
+        academicTermId: targetClass.academicTermId,
         classId: finalClassId,
-        admissionNumber,
         status: 'ACTIVE',
-        parentId,
-        branchId: branchId,
-      },
+        changedByUserId: user.userId,
+        movementReason: 'Initial student placement',
+      });
+      return createdStudent;
     });
 
     await syncStudentClassFees(student.id);
+
+    if (hasLikelySameStudent(duplicateMatches)) {
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'DUPLICATE_OVERRIDE',
+        entityType: 'Student',
+        entityId: student.id,
+        newValue: {
+          reason: 'Created despite likely duplicate match',
+          matchedStudentIds: duplicateMatches
+            .filter(match => match.strength === 'LIKELY_SAME')
+            .map(match => match.student.id),
+        },
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('User-Agent') ?? null,
+      });
+    }
 
     res.status(201).json(student);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Create student error:', error);
     res.status(500).json({ error: 'Failed to create student' });
   }
@@ -321,11 +545,29 @@ export const createStudent = async (req: Request, res: Response) => {
 export const bulkCreateStudents = async (req: Request, res: Response) => {
   try {
     const studentsData = z.array(createStudentSchema).parse(req.body);
+    const bulkUser = (req as AuthRequest).user ?? {};
+
+    // Each row is checked against existing students and against earlier rows in the same file.
+    if (req.query.allowDuplicates !== 'true') {
+      const pool = await loadStudentMatchPool({ branchId: duplicateScopeBranchId(bulkUser) });
+      const duplicateRows = studentsData.flatMap((row, index) => {
+        const rowMatches = pool.match(row).filter(match => match.strength === 'LIKELY_SAME');
+        pool.add(candidateToRecord(row, `Import row ${index + 1}`));
+        return rowMatches.length > 0
+          ? [{ row: index + 1, firstName: row.firstName, lastName: row.lastName, matches: rowMatches }]
+          : [];
+      });
+      if (duplicateRows.length > 0) {
+        return res.status(409).json({
+          code: 'POSSIBLE_DUPLICATE_STUDENTS',
+          error: `${duplicateRows.length} row(s) may already exist. Review them before importing.`,
+          duplicates: duplicateRows,
+        });
+      }
+    }
 
     // Get current academic term (most recent or active)
-    const currentTerm = await prisma.academicTerm.findFirst({
-      orderBy: { startDate: 'desc' }
-    });
+    const currentTerm = await getActiveTerm();
 
     if (!currentTerm) {
       return res.status(400).json({ error: 'No academic term found. Please create an academic term first.' });
@@ -380,13 +622,21 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
               }
             }
 
-            const newClass = await prisma.class.create({
-              data: {
-                name: normalizedName,
-                gradeLevel,
-                teacherId: defaultTeacher.id,
-                academicTermId: currentTerm.id,
-              }
+            const newClass = await runTermWriteTransaction(currentTerm.id, 'SETUP', async tx => {
+              const concurrentClass = await tx.class.findFirst({
+                where: {
+                  name: { equals: normalizedName, mode: 'insensitive' },
+                  academicTermId: currentTerm.id,
+                },
+              });
+              return concurrentClass ?? tx.class.create({
+                data: {
+                  name: normalizedName,
+                  gradeLevel,
+                  teacherId: defaultTeacher.id,
+                  academicTermId: currentTerm.id,
+                }
+              });
             });
 
             classId = newClass.id;
@@ -444,16 +694,37 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
       };
     });
 
-    const result = await prisma.student.createMany({
-      data: dataToCreate,
-      skipDuplicates: true,
+    const targetClassIds = [...new Set(dataToCreate.map(student => student.classId))];
+    const validTargetClassCount = await prisma.class.count({
+      where: { id: { in: targetClassIds }, academicTermId: currentTerm.id },
     });
+    if (validTargetClassCount !== targetClassIds.length) {
+      return res.status(400).json({ error: 'Every student class must belong to the active academic term' });
+    }
 
-    const createdStudents = await prisma.student.findMany({
-      where: {
-        admissionNumber: { in: dataToCreate.map(student => student.admissionNumber) },
-      },
-      select: { id: true },
+    const { result, createdStudents } = await runTermWriteTransaction(currentTerm.id, 'ACADEMIC_ACTIVITY', async tx => {
+      const result = await tx.student.createMany({
+        data: dataToCreate,
+        skipDuplicates: true,
+      });
+      const createdStudents = await tx.student.findMany({
+        where: {
+          admissionNumber: { in: dataToCreate.map(student => student.admissionNumber) },
+        },
+        select: { id: true, admissionNumber: true },
+      });
+      const classIdByAdmissionNumber = new Map(
+        dataToCreate.map(student => [student.admissionNumber, student.classId]),
+      );
+      await Promise.all(createdStudents.map(student => upsertStudentPlacement(tx, {
+        studentId: student.id,
+        academicTermId: currentTerm.id,
+        classId: classIdByAdmissionNumber.get(student.admissionNumber)!,
+        status: 'ACTIVE',
+        changedByUserId: (req as AuthRequest).user?.userId,
+        movementReason: 'Bulk student import',
+      })));
+      return { result, createdStudents };
     });
 
     await Promise.all(createdStudents.map(student => syncStudentClassFees(student.id)));
@@ -467,6 +738,10 @@ export const bulkCreateStudents = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Bulk create error:', error);
     res.status(500).json({ error: 'Failed to import students', details: error instanceof Error ? error.message : 'Unknown error' });
   }
@@ -476,18 +751,21 @@ export const bulkDeleteStudents = async (req: Request, res: Response) => {
   try {
     const { ids } = z.object({ ids: z.array(z.string()) }).parse(req.body);
 
-    // Soft delete: Mark students as ARCHIVED instead of deleting
-    const result = await prisma.student.updateMany({
-      where: {
-        id: { in: ids }
-      },
-      data: {
-        status: 'ARCHIVED'
-      }
-    });
+    const result = await archiveStudentsWithoutActivePlacement(ids);
+    if (result.kind === 'ACTIVE_PLACEMENT') {
+      return res.status(409).json({
+        code: 'ACTIVE_PLACEMENT_ARCHIVE_FORBIDDEN',
+        error: 'Students with an active placement must be transferred or withdrawn before archival',
+        studentIds: result.studentIds,
+      });
+    }
 
     res.json({ message: `Successfully archived ${result.count} students`, count: result.count });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Bulk delete error:', error);
     res.status(500).json({ error: 'Failed to archive students' });
   }
@@ -496,23 +774,31 @@ export const bulkDeleteStudents = async (req: Request, res: Response) => {
 export const getStudentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const academicTermId = z.string().uuid().parse(req.query.academicTermId);
     const authReq = req as AuthRequest;
 
-    await ensureStudentRecordAccess(authReq, id);
+    await ensureStudentRecordAccess(authReq, id, { academicTermId });
 
     const student = await prisma.student.findUnique({
       where: { id },
       include: {
-        class: true,
+        termEnrollments: {
+          where: { academicTermId },
+          include: { class: true },
+          take: 1,
+        },
         scholarship: true,
         payments: {
+          where: { academicTermId, status: 'COMPLETED' },
           orderBy: { paymentDate: 'desc' }
         },
         attendance: {
+          where: { academicTermId },
           take: 5,
           orderBy: { date: 'desc' }
         },
         feeStructures: {
+          where: { academicTermId },
           include: {
             feeTemplate: true
           }
@@ -524,9 +810,18 @@ export const getStudentById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Student not found' });
     }
 
+    const { termEnrollments, ...studentIdentity } = student;
+    const placement = termEnrollments[0];
+    const termScopedStudent = {
+      ...studentIdentity,
+      classId: placement?.classId ?? null,
+      class: placement?.class ?? null,
+      placementStatus: placement?.status ?? null,
+    };
+
     if (authReq.user?.role === 'TEACHER') {
       return res.json({
-        ...student,
+        ...termScopedStudent,
         scholarshipId: null,
         scholarship: null,
         payments: [],
@@ -534,10 +829,16 @@ export const getStudentById = async (req: Request, res: Response) => {
       });
     }
 
-    res.json(student);
+    res.json(termScopedStudent);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
     }
     res.status(500).json({ error: 'Failed to fetch student' });
   }
@@ -552,35 +853,135 @@ export const updateStudent = async (req: Request, res: Response) => {
       return res.status(400).json({ error: parseResult.error.errors });
     }
 
-    const { reason, ...data } = parseResult.data;
+    const { reason, academicTermId, classId, ...data } = parseResult.data;
     const userId = (req as any).user?.userId;
-
-    // If class is changing, we need to log it
-    if (data.classId) {
-      const currentStudent = await prisma.student.findUnique({
-        where: { id },
-        select: { classId: true }
-      });
-
-      if (currentStudent && currentStudent.classId !== data.classId) {
-        await prisma.classMovementLog.create({
-          data: {
-            studentId: id,
-            fromClassId: currentStudent.classId,
-            toClassId: data.classId,
-            reason: reason || 'Class update',
-            changedByUserId: userId
-          }
-        });
-      }
+    const placementMutationRequested = Boolean(classId || data.status);
+    if (placementMutationRequested && !academicTermId) {
+      return res.status(400).json({ error: 'Academic term ID is required for placement changes' });
     }
 
-    const student = await prisma.student.update({
-      where: { id },
-      data,
-    });
+    const currentStudent = placementMutationRequested || data.branchId
+      ? await prisma.student.findUnique({
+        where: { id },
+        select: {
+          branchId: true,
+          status: true,
+        },
+      })
+      : null;
+    if ((placementMutationRequested || data.branchId) && !currentStudent) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
 
-    if (data.classId) {
+    if (data.branchId && data.branchId !== currentStudent?.branchId) {
+      return res.status(409).json({
+        code: 'BRANCH_TRANSFER_REQUIRED',
+        error: 'Student branch changes must use the branch transfer workflow',
+      });
+    }
+
+    const statusIsChanging = Boolean(
+      data.status && currentStudent && data.status !== currentStudent.status,
+    );
+    if (statusIsChanging && (
+      currentStudent!.status !== 'ACTIVE'
+      || !['TRANSFERRED', 'DROPPED_OUT'].includes(data.status!)
+    )) {
+      return res.status(409).json({
+        code: 'ROLLOVER_DECISION_REQUIRED',
+        error: 'Graduation and student reactivation must be staged through the term rollover workflow',
+      });
+    }
+    if (classId && currentStudent && currentStudent.status !== 'ACTIVE') {
+      return res.status(409).json({
+        code: 'ROLLOVER_DECISION_REQUIRED',
+        error: 'Inactive students cannot be moved through the legacy class update endpoint',
+      });
+    }
+
+    if (classId && statusIsChanging) {
+      return res.status(400).json({ error: 'Class movement and withdrawal must be completed separately' });
+    }
+
+    let student;
+
+    // Class and active-placement status changes are term-owned and must stay atomic.
+    if (placementMutationRequested) {
+      const currentEnrollment = await getStudentPlacementForTerm(id, academicTermId!);
+      if (!currentEnrollment) {
+        return res.status(409).json({
+          code: 'TERM_PLACEMENT_REQUIRED',
+          error: 'Student has no placement in the selected academic term',
+        });
+      }
+      if (currentEnrollment.status !== 'ACTIVE') {
+        return res.status(409).json({
+          code: 'ACTIVE_PLACEMENT_REQUIRED',
+          error: 'Only an active term placement can be changed through this endpoint',
+        });
+      }
+
+      const targetClass = classId
+        ? await prisma.class.findUnique({
+          where: { id: classId },
+          select: { academicTermId: true },
+        })
+        : null;
+
+      if (classId && !targetClass) return res.status(404).json({ error: 'Class not found' });
+      if (targetClass && targetClass.academicTermId !== academicTermId) {
+        return res.status(400).json({ error: 'Target class does not belong to the selected academic term' });
+      }
+
+      student = await runTermWriteTransaction(academicTermId!, 'ACADEMIC_ACTIVITY', async tx => {
+        const lockedEnrollment = await tx.studentTermEnrollment.findUnique({
+          where: {
+            studentId_academicTermId: {
+              studentId: id,
+              academicTermId: academicTermId!,
+            },
+          },
+          include: { academicTerm: { select: { endDate: true } } },
+        });
+        if (!lockedEnrollment
+          || lockedEnrollment.id !== currentEnrollment.id
+          || lockedEnrollment.classId !== currentEnrollment.classId
+          || lockedEnrollment.status !== 'ACTIVE') {
+          throw new AcademicScopeError(409, 'Student placement changed while the update was being processed');
+        }
+
+        if (classId && classId !== lockedEnrollment.classId) {
+          await upsertStudentPlacement(tx, {
+            studentId: id,
+            academicTermId: academicTermId!,
+            classId,
+            status: 'ACTIVE',
+            changedByUserId: userId,
+            movementReason: reason || 'Class update',
+          });
+        }
+        if (statusIsChanging) {
+          const requestedEnd = new Date();
+          const endsAt = new Date(Math.min(
+            Math.max(requestedEnd.getTime(), lockedEnrollment.startsAt.getTime()),
+            lockedEnrollment.academicTerm.endDate.getTime(),
+          ));
+          await tx.studentTermEnrollment.update({
+            where: { id: lockedEnrollment.id },
+            data: {
+              status: data.status === 'TRANSFERRED' ? 'TRANSFERRED' : 'WITHDRAWN',
+              endsAt,
+              notes: reason || undefined,
+            },
+          });
+        }
+        return tx.student.update({ where: { id }, data });
+      });
+    } else {
+      student = await prisma.student.update({ where: { id }, data });
+    }
+
+    if (classId) {
       await syncStudentClassFees(student.id);
     }
 
@@ -589,6 +990,14 @@ export const updateStudent = async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
+    console.error('Update student error:', error);
     res.status(500).json({ error: 'Failed to update student' });
   }
 };
@@ -597,22 +1006,18 @@ export const deleteStudent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Verify student exists
-    const student = await prisma.student.findUnique({
-      where: { id },
-      select: { id: true }
-    });
-
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-
-    // Soft delete: Mark student as ARCHIVED instead of deleting
-    await prisma.student.update({
-      where: { id },
-      data: { status: 'ARCHIVED' }
-    });
+    const result = await archiveStudentsWithoutActivePlacement([id]);
+    if (result.kind === 'ACTIVE_PLACEMENT') {
+      return res.status(409).json({
+        code: 'ACTIVE_PLACEMENT_ARCHIVE_FORBIDDEN',
+        error: 'A student with an active placement must be transferred or withdrawn before archival',
+      });
+    }
+    if (!result.foundIds.includes(id)) return res.status(404).json({ error: 'Student not found' });
 
     res.status(204).send();
   } catch (error) {
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Delete student error:', error);
     res.status(500).json({ error: 'Failed to archive student' });
   }
@@ -621,31 +1026,47 @@ export const deleteStudent = async (req: Request, res: Response) => {
 export const getMyChildren = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
+    const academicTermId = typeof req.query.academicTermId === 'string' ? req.query.academicTermId : undefined;
 
-    // Get Active Term
-    const activeTerm = await prisma.academicTerm.findFirst({
-      where: { isActive: true }
+    if (!academicTermId) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
+
+    const selectedTerm = await prisma.academicTerm.findUnique({
+      where: { id: academicTermId }
     });
+
+    if (!selectedTerm) {
+      return res.status(404).json({ error: 'Academic term not found' });
+    }
 
     const students = await prisma.student.findMany({
       where: {
         parentId: userId
       },
       include: {
-        class: true,
+        termEnrollments: {
+          where: { academicTermId },
+          include: { class: true },
+          take: 1,
+        },
         attendance: {
+          where: { academicTermId },
           take: 5,
           orderBy: { date: 'desc' }
         },
         payments: {
+          where: { academicTermId, status: 'COMPLETED' },
           orderBy: { paymentDate: 'desc' }
         },
         feeStructures: {
+          where: { academicTermId },
           include: {
             feeTemplate: true
           }
         },
         assessmentResults: {
+          where: { assessment: { termId: academicTermId } },
           take: 5,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -657,17 +1078,21 @@ export const getMyChildren = async (req: Request, res: Response) => {
           }
         },
         termResults: {
+          where: { termId: academicTermId },
           include: {
             subject: true,
-            term: true
+            term: true,
+            class: true
           },
           orderBy: {
             term: { startDate: 'asc' }
           }
         },
         termReports: {
+          where: { termId: academicTermId },
           include: {
-            term: true
+            term: true,
+            class: true
           },
           orderBy: {
             term: { startDate: 'desc' }
@@ -680,6 +1105,10 @@ export const getMyChildren = async (req: Request, res: Response) => {
     const todayName = days[new Date().getDay()];
 
     const studentsWithExtras = await Promise.all(students.map(async (student) => {
+      const selectedPlacement = student.termEnrollments[0];
+      const selectedClass = selectedPlacement?.class ?? null;
+      const selectedClassId = selectedClass?.id;
+
       // 1. Balance Calculation
       const totalFees = student.feeStructures.reduce((sum, fee) => sum + Number(fee.amountDue), 0);
       const totalPaid = student.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
@@ -689,12 +1118,12 @@ export const getMyChildren = async (req: Request, res: Response) => {
       let pendingAssessments: any[] = [];
       let todaysClasses: any[] = [];
 
-      if (activeTerm) {
+      if (selectedClassId) {
         // Find assessments for the class
         const assessments = await prisma.assessment.findMany({
           where: {
-            classId: student.classId,
-            termId: activeTerm.id,
+            classId: selectedClassId,
+            termId: selectedTerm.id,
             date: {
               gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Include recent ones
             }
@@ -722,11 +1151,11 @@ export const getMyChildren = async (req: Request, res: Response) => {
         if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(todayName)) {
           todaysClasses = await prisma.timetablePeriod.findMany({
             where: {
-              academicTermId: activeTerm.id,
+              academicTermId: selectedTerm.id,
               dayOfWeek: todayName as any,
               classes: {
                 some: {
-                  classId: student.classId
+                  classId: selectedClassId
                 }
               }
             },
@@ -741,8 +1170,13 @@ export const getMyChildren = async (req: Request, res: Response) => {
 
       return {
         ...student,
+        termEnrollments: undefined,
+        classId: selectedPlacement?.classId ?? null,
+        class: selectedClass,
+        placementStatus: selectedPlacement?.status ?? null,
         payments: recentPayments,
         balance,
+        academicTerm: selectedTerm,
         pendingAssessments,
         todaysClasses
       };
@@ -762,10 +1196,15 @@ export const getStudentProfile = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    const academicTermId = z.string().uuid().parse(req.query.academicTermId);
     const student = await prisma.student.findUnique({
       where: { userId },
       include: {
-        class: true
+        termEnrollments: {
+          where: { academicTermId },
+          include: { class: true },
+          take: 1,
+        },
       }
     });
 
@@ -773,8 +1212,18 @@ export const getStudentProfile = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Student profile not found' });
     }
 
-    res.json(student);
+    const { termEnrollments, ...identity } = student;
+    const placement = termEnrollments[0];
+    res.json({
+      ...identity,
+      classId: placement?.classId ?? null,
+      class: placement?.class ?? null,
+      placementStatus: placement?.status ?? null,
+    });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Academic term ID is required' });
+    }
     console.error('Get student profile error:', error);
     res.status(500).json({ error: 'Failed to fetch student profile' });
   }

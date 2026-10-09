@@ -1,5 +1,9 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
+import { isDateWithinRangeByDay } from '../utils/academicValidation';
+import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 import * as lessonPlannerService from '../services/aiLessonPlannerService';
 import { prisma } from '../utils/prisma';
 
@@ -130,7 +134,7 @@ export const saveLessonPlan = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const user = await prisma.user.findUnique({ where: { userId } });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const { 
@@ -139,7 +143,6 @@ export const saveLessonPlan = async (req: AuthRequest, res: Response) => {
       classId, 
       subjectId, 
       weekStartDate,
-      generatedPlan // The full AI-generated plan object
     } = req.body;
 
     if (!title || !content || !classId || !subjectId || !weekStartDate) {
@@ -153,28 +156,39 @@ export const saveLessonPlan = async (req: AuthRequest, res: Response) => {
       ? content 
       : JSON.stringify(content, null, 2);
 
-    const lessonPlan = await prisma.lessonPlan.create({
-      data: {
-        title,
-        content: formattedContent,
-        classId,
-        subjectId,
-        weekStartDate: new Date(weekStartDate),
-        createdBy: userId,
-        metadata: generatedPlan ? {
-          aiGenerated: true,
-          generatedAt: new Date().toISOString(),
-          ...generatedPlan,
-        } : undefined,
-      },
-      include: {
-        class: { select: { name: true } },
-        subject: { select: { name: true } },
-      },
-    });
+    const classInfo = await ensureAcademicClassAccess(req, classId, { subjectId });
+    if (!isDateWithinRangeByDay(
+      weekStartDate,
+      classInfo.academicTerm.startDate,
+      classInfo.academicTerm.endDate,
+    )) {
+      return res.status(400).json({ error: 'Lesson plan week must begin within the class academic term' });
+    }
+
+    const lessonPlan = await runTermWriteTransaction(classInfo.academicTermId, 'SETUP', tx => (
+      tx.lessonPlan.create({
+        data: {
+          title,
+          content: formattedContent,
+          classId,
+          subjectId,
+          termId: classInfo.academicTermId,
+          teacherId: userId,
+          weekStartDate: new Date(weekStartDate),
+        },
+        include: {
+          class: { select: { name: true } },
+          subject: { select: { name: true } },
+        },
+      })
+    ));
 
     res.status(201).json(lessonPlan);
   } catch (error: any) {
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Save lesson plan error:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to save lesson plan' 

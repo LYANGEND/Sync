@@ -1,476 +1,544 @@
-import React, { useEffect, useState } from 'react';
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    PieChart, Pie, Cell,
-} from 'recharts';
-import {
-    AlertTriangle, Calendar, CreditCard, RefreshCw, ShieldAlert,
-    TrendingUp, Wallet, PieChart as PieChartIcon,
-} from 'lucide-react';
+import { ReactNode, useEffect, useState } from 'react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AlertTriangle, Bell, RefreshCw } from 'lucide-react';
 import api from '../../utils/api';
-import { financialApi, invoiceApi, Refund } from '../../services/accountingService';
+import ExportDropdown from '../../components/ExportDropdown';
+import { financialApi, Refund } from '../../services/accountingService';
+import { fmt, fmtWhole, formatMethod, formatPaymentDate, plural, ProgressBar } from './financeFormat';
 
-const COLORS = ['#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'];
+type AgeingBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
 
-interface FinancialReportData {
-    monthlyRevenue: number[];
+// Shape of GET /payments/reports. Every figure comes from the same per-student balances as Payments and Reminders.
+interface TermReport {
+    summary: {
+        billed: number;
+        collected: number;
+        paymentsCount: number;
+        owed: number;
+        debtorCount: number;
+        overdueAmount: number;
+        overdueCount: number;
+        credit: number;
+        creditCount: number;
+        studentsBilled: number;
+        settledRate: number;
+    };
+    weekly: { week: number; weekStart: string; amount: number; payments: number; cumulative: number }[];
     paymentMethods: { method: string; count: number; amount: number }[];
-    classCollection: { className: string; totalDue: number; totalCollected: number; percentage: number }[];
+    classCollection: { className: string; students: number; billed: number; settled: number; owed: number; debtors: number; rate: number }[];
+    ageing: { bucket: AgeingBucket; amount: number; students: number }[];
+    debtors: {
+        studentId: string;
+        name: string;
+        admissionNumber: string;
+        className: string;
+        billed: number;
+        paid: number;
+        balance: number;
+        earliestDueDate: string | null;
+        daysOverdue: number;
+        bucket: AgeingBucket;
+        guardianName?: string | null;
+        guardianPhone?: string | null;
+        guardianEmail?: string | null;
+    }[];
+    generatedAt: string;
 }
 
-interface IncomeStatementSnapshot {
-    totalIncome: number;
-    totalExpenses: number;
-    netIncome: number;
-}
-
-interface CashFlowSnapshot {
-    totalInflows: number;
-    totalOutflows: number;
-    netCashFlow: number;
-}
-
-interface ReceivableItem {
-    studentId: string;
-    studentName: string;
-    admissionNumber: string;
-    className: string;
-    totalDue: number;
-    totalPaid: number;
-    balance: number;
-    ageDays: number;
-    bucket: string;
-    guardianPhone?: string;
-    guardianEmail?: string;
-}
-
-interface InvoiceSummary {
-    totalInvoiced?: number;
-    totalCollected?: number;
-    totalOutstanding?: number;
-    totalOverdue?: number;
-}
-
-interface DashboardData {
-    paymentReport: FinancialReportData;
-    income: IncomeStatementSnapshot;
-    cashFlow: CashFlowSnapshot;
-    receivables: ReceivableItem[];
-    invoiceSummary: InvoiceSummary;
+interface LedgerSnapshot {
+    income: number;
+    expenses: number;
+    cashIn: number;
+    cashOut: number;
     refunds: Refund[];
 }
 
-const emptyData: DashboardData = {
-    paymentReport: {
-        monthlyRevenue: new Array(12).fill(0),
-        paymentMethods: [],
-        classCollection: [],
-    },
-    income: {
-        totalIncome: 0,
-        totalExpenses: 0,
-        netIncome: 0,
-    },
-    cashFlow: {
-        totalInflows: 0,
-        totalOutflows: 0,
-        netCashFlow: 0,
-    },
-    receivables: [],
-    invoiceSummary: {},
-    refunds: [],
+interface AcademicTerm {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+}
+
+interface FinanceReportsProps {
+    academicTerm: AcademicTerm;
+    onOpenReminders?: () => void;
+}
+
+const AGEING: Record<AgeingBucket, { label: string; tone: string }> = {
+    current: { label: 'Not yet due', tone: 'bg-slate-300 dark:bg-slate-500' },
+    '1-30': { label: '1-30 days late', tone: 'bg-amber-400' },
+    '31-60': { label: '31-60 days late', tone: 'bg-orange-500' },
+    '61-90': { label: '61-90 days late', tone: 'bg-red-500' },
+    '90+': { label: 'Over 90 days late', tone: 'bg-red-700' },
 };
 
-const FinanceReports = () => {
-    const [data, setData] = useState<DashboardData>(emptyData);
+const rateTone = (rate: number) => (rate >= 80 ? 'bg-green-500' : rate >= 50 ? 'bg-amber-500' : 'bg-red-500');
+const shortDate = (value: string) => new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const amount = (value: number) => Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const Section = ({ title, story, action, children }: { title: string; story: string; action?: ReactNode; children: ReactNode }) => (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <h3 className="text-base font-semibold text-slate-800 dark:text-white">{title}</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">{story}</p>
+            </div>
+            {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
+        </div>
+        {children}
+    </section>
+);
+
+const Figure = ({ label, value, detail, tone = 'text-slate-900 dark:text-white', children }: { label: string; value: string; detail: string; tone?: string; children?: ReactNode }) => (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <p className="text-sm text-slate-500 dark:text-gray-400">{label}</p>
+        <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+        {children}
+        <p className="mt-2 text-xs text-slate-500 dark:text-gray-400">{detail}</p>
+    </div>
+);
+
+const EmptyNote = ({ children }: { children: ReactNode }) => (
+    <p className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-gray-400">{children}</p>
+);
+
+const FinanceReports = ({ academicTerm, onOpenReminders }: FinanceReportsProps) => {
+    const [report, setReport] = useState<TermReport | null>(null);
+    const [ledger, setLedger] = useState<LedgerSnapshot | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
 
     useEffect(() => {
         fetchReport();
-    }, []);
+    }, [academicTerm.id]);
 
     const fetchReport = async () => {
         setLoading(true);
-        try {
-            const [paymentReport, income, cashFlow, receivables, invoiceSummary, refunds] = await Promise.allSettled([
-                api.get('/payments/reports'),
-                financialApi.getIncomeStatement(),
-                financialApi.getCashFlow(),
-                financialApi.getAgedReceivables(),
-                invoiceApi.getSummary(),
-                financialApi.getRefunds(),
-            ]);
+        const termParams = {
+            academicTermId: academicTerm.id,
+            startDate: academicTerm.startDate,
+            endDate: academicTerm.endDate,
+        };
+        const [termReport, income, cashFlow, refunds] = await Promise.allSettled([
+            api.get('/payments/reports', { params: { academicTermId: academicTerm.id } }),
+            financialApi.getIncomeStatement(termParams),
+            financialApi.getCashFlow(termParams),
+            financialApi.getRefunds(termParams),
+        ]);
 
-            setData({
-                paymentReport: paymentReport.status === 'fulfilled'
-                    ? {
-                        monthlyRevenue: paymentReport.value.data?.monthlyRevenue || new Array(12).fill(0),
-                        paymentMethods: paymentReport.value.data?.paymentMethods || [],
-                        classCollection: paymentReport.value.data?.classCollection || [],
-                    }
-                    : emptyData.paymentReport,
-                income: income.status === 'fulfilled'
-                    ? {
-                        totalIncome: income.value.data?.totalIncome || 0,
-                        totalExpenses: income.value.data?.totalExpenses || 0,
-                        netIncome: income.value.data?.netIncome || 0,
-                    }
-                    : emptyData.income,
-                cashFlow: cashFlow.status === 'fulfilled'
-                    ? {
-                        totalInflows: cashFlow.value.data?.inflows?.totalInflow ?? cashFlow.value.data?.totalInflows ?? 0,
-                        totalOutflows: cashFlow.value.data?.outflows?.totalOutflow ?? cashFlow.value.data?.totalOutflows ?? 0,
-                        netCashFlow: cashFlow.value.data?.netCashFlow ?? 0,
-                    }
-                    : emptyData.cashFlow,
-                receivables: receivables.status === 'fulfilled'
-                    ? (receivables.value.data?.receivables || receivables.value.data || [])
-                    : [],
-                invoiceSummary: invoiceSummary.status === 'fulfilled'
-                    ? (invoiceSummary.value.data || {})
-                    : {},
+        setLoadFailed(termReport.status !== 'fulfilled');
+        setReport(termReport.status === 'fulfilled' ? termReport.value.data : null);
+        setLedger(income.status === 'fulfilled' || cashFlow.status === 'fulfilled'
+            ? {
+                income: income.status === 'fulfilled' ? Number(income.value.data?.totalIncome || 0) : 0,
+                expenses: income.status === 'fulfilled' ? Number(income.value.data?.totalExpenses || 0) : 0,
+                cashIn: cashFlow.status === 'fulfilled' ? Number(cashFlow.value.data?.inflows?.totalInflow ?? cashFlow.value.data?.totalInflows ?? 0) : 0,
+                cashOut: cashFlow.status === 'fulfilled' ? Number(cashFlow.value.data?.outflows?.totalOutflow ?? cashFlow.value.data?.totalOutflows ?? 0) : 0,
                 refunds: refunds.status === 'fulfilled'
                     ? (Array.isArray(refunds.value.data) ? refunds.value.data : (refunds.value.data?.refunds || []))
                     : [],
-            });
-        } catch (error) {
-            console.error('Failed to fetch financial reports', error);
-            setData(emptyData);
-        } finally {
-            setLoading(false);
-        }
+            }
+            : null);
+        setLoading(false);
     };
 
-    const fmt = (amount: number) => `K${(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const pct = (value: number) => `${Number.isFinite(value) ? value.toFixed(1) : '0.0'}%`;
+    const termRange = `${formatPaymentDate(academicTerm.startDate)} to ${formatPaymentDate(academicTerm.endDate)}`;
 
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const revenueData = data.paymentReport.monthlyRevenue.map((amount, index) => ({
-        name: months[index],
-        revenue: amount,
+    const header = (
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+                <h2 className="text-xl font-semibold text-slate-800 dark:text-white">Term report</h2>
+                <p className="text-sm text-slate-500 dark:text-gray-400">
+                    {academicTerm.name} · {termRange}
+                    {report && ` · as of ${formatPaymentDate(report.generatedAt)}`}
+                </p>
+            </div>
+            <button
+                onClick={fetchReport}
+                disabled={loading}
+                className="inline-flex min-h-[44px] items-center gap-2 self-start rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-surface-hover disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200 md:self-auto"
+            >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+            </button>
+        </div>
+    );
+
+    if (loading && !report) {
+        return (
+            <div className="space-y-6" aria-busy="true">
+                {header}
+                <div className="h-28 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {[0, 1, 2, 3].map(i => <div key={i} className="h-32 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />)}
+                </div>
+                <div className="h-80 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+            </div>
+        );
+    }
+
+    if (!report) {
+        return (
+            <div className="space-y-6">
+                {header}
+                <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <p>{loadFailed ? 'The term report could not be loaded. Check your connection and refresh.' : 'No report data for this term.'}</p>
+                </div>
+            </div>
+        );
+    }
+
+    const { summary, weekly, paymentMethods, classCollection, ageing, debtors } = report;
+    const asOf = formatPaymentDate(report.generatedAt);
+
+    // The story at the top: what came in, what is still owed, and who paid ahead.
+    const storyLines = summary.billed === 0
+        ? [`No fees have been billed for ${academicTerm.name} yet. Assign fee structures to students to start tracking collections.`]
+        : [
+            `By ${asOf}, ${fmtWhole(summary.collected)} has come in from ${plural(summary.paymentsCount, 'payment')} against ${fmtWhole(summary.billed)} billed to ${plural(summary.studentsBilled, 'student')}.`,
+            summary.debtorCount === 0
+                ? 'Every billed student is fully paid.'
+                : `${plural(summary.debtorCount, 'student')} still ${summary.debtorCount === 1 ? 'owes' : 'owe'} ${fmtWhole(summary.owed)}${summary.overdueCount > 0
+                    ? `; ${summary.overdueCount} of them ${summary.overdueCount === 1 ? 'is' : 'are'} past the due date.`
+                    : ', none of it past due yet.'}`,
+            summary.creditCount > 0
+                ? `${plural(summary.creditCount, 'student')} paid ahead, holding ${fmtWhole(summary.credit)} in credit. That is why collections are higher than billed minus owed.`
+                : '',
+        ].filter(Boolean);
+
+    const bestWeek = weekly.reduce<TermReport['weekly'][number] | null>((best, week) => (week.amount > (best?.amount || 0) ? week : best), null);
+    const chartData = weekly.map(week => ({ ...week, label: `Wk ${week.week}` }));
+    const methodsTotal = paymentMethods.reduce((sum, method) => sum + method.amount, 0);
+
+    const weakestClass = classCollection.find(cls => cls.billed > 0);
+    const settledClasses = classCollection.filter(cls => cls.billed > 0 && cls.owed === 0).length;
+    const classStory = !weakestClass
+        ? 'No class has fees billed this term.'
+        : weakestClass.owed === 0
+            ? (classCollection.length === 1 ? 'The only billed class is fully settled.' : `All ${classCollection.length} classes are fully settled.`)
+            : `${weakestClass.className} is furthest behind at ${weakestClass.rate}% settled, with ${fmtWhole(weakestClass.owed)} outstanding. ${settledClasses} of ${classCollection.length} ${classCollection.length === 1 ? 'class is' : 'classes are'} fully settled.`;
+
+    const oldestDebtor = debtors[0];
+    const debtStory = debtors.length === 0
+        ? 'Nothing is owed for this term.'
+        : `${fmtWhole(summary.overdueAmount)} of the ${fmtWhole(summary.owed)} owed is past its due date.${oldestDebtor && oldestDebtor.daysOverdue > 0
+            ? ` The oldest balance is ${plural(oldestDebtor.daysOverdue, 'day')} late. Start with the students at the top of the list.`
+            : ''}`;
+
+    const noContact = debtors.filter(d => !d.guardianPhone && !d.guardianEmail).length;
+
+    const exportRows = debtors.map(d => ({
+        name: d.name,
+        admissionNumber: d.admissionNumber,
+        className: d.className,
+        dueDate: d.earliestDueDate ? formatPaymentDate(d.earliestDueDate) : '',
+        daysOverdue: d.daysOverdue,
+        guardian: d.guardianName || '',
+        phone: d.guardianPhone || '',
+        email: d.guardianEmail || '',
+        billed: d.billed,
+        paid: d.paid,
+        balance: d.balance,
     }));
 
-    const methodData = data.paymentReport.paymentMethods.map((m) => ({
-        name: m.method.replace(/_/g, ' '),
-        value: m.amount,
-        count: m.count,
-    }));
-
-    const totalRevenue = data.paymentReport.monthlyRevenue.reduce((sum, amount) => sum + amount, 0);
-    const totalInvoiced = data.invoiceSummary.totalInvoiced || 0;
-    const totalCollected = data.invoiceSummary.totalCollected || totalRevenue;
-    const outstanding = data.invoiceSummary.totalOutstanding || data.receivables.reduce((sum, item) => sum + item.balance, 0);
-    const overdue = data.invoiceSummary.totalOverdue || data.receivables.filter(item => item.ageDays > 30).reduce((sum, item) => sum + item.balance, 0);
-    const collectionRate = totalInvoiced > 0 ? (totalCollected / totalInvoiced) * 100 : 0;
-    const refundExposure = data.refunds.reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
-    const pendingRefunds = data.refunds.filter(refund => refund.status === 'PENDING');
-
-    const bucketOrder = ['0-30', '30-60', '60-90', '90+'];
-    const receivableBuckets = bucketOrder.map(bucket => {
-        const matches = data.receivables.filter(item => item.bucket === bucket);
-        return {
-            bucket,
-            balance: matches.reduce((sum, item) => sum + item.balance, 0),
-            students: matches.length,
-        };
-    });
-
-    const topDebtors = [...data.receivables]
-        .sort((a, b) => b.balance - a.balance)
-        .slice(0, 6);
-
-    const riskClasses = [...data.paymentReport.classCollection]
-        .sort((a, b) => a.percentage - b.percentage)
-        .slice(0, 5);
-
-    const refundByStatus = ['PENDING', 'APPROVED', 'PROCESSED'].map(status => ({
-        status,
-        count: data.refunds.filter(refund => refund.status === status).length,
-        amount: data.refunds
-            .filter(refund => refund.status === status)
-            .reduce((sum, refund) => sum + Number(refund.amount || 0), 0),
-    }));
-
-    if (loading) return <div className="p-8 text-center text-gray-600 dark:text-gray-400">Loading analytics...</div>;
+    const pendingRefunds = ledger?.refunds.filter(r => r.status === 'PENDING') || [];
+    const processedRefunds = ledger?.refunds.filter(r => r.status === 'PROCESSED') || [];
+    const sumRefunds = (list: Refund[]) => list.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const netSurplus = ledger ? ledger.income - ledger.expenses : 0;
+    const netCash = ledger ? ledger.cashIn - ledger.cashOut : 0;
 
     return (
         <div className="space-y-6 animate-fade-in">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                    <h2 className="text-xl font-semibold text-slate-800 dark:text-white">Finance Management Pack</h2>
-                    <p className="text-sm text-slate-500 dark:text-gray-400">Collections, arrears, cash health, and reporting exceptions in one view.</p>
-                </div>
-                <button
-                    onClick={fetchReport}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200 dark:hover:bg-slate-700"
-                >
-                    <RefreshCw className="h-4 w-4" />
-                    Refresh pack
-                </button>
-            </div>
+            {header}
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {[
-                    {
-                        label: 'Collected Revenue (YTD)',
-                        value: fmt(totalRevenue),
-                        detail: `${data.paymentReport.paymentMethods.reduce((sum, item) => sum + item.count, 0)} payment(s) posted`,
-                        icon: TrendingUp,
-                        tone: 'text-blue-600 dark:text-blue-400',
-                        bg: 'bg-blue-50 dark:bg-blue-900/20',
-                    },
-                    {
-                        label: 'Total Invoiced',
-                        value: fmt(totalInvoiced),
-                        detail: `Collection rate ${pct(collectionRate)}`,
-                        icon: CreditCard,
-                        tone: 'text-emerald-600 dark:text-emerald-400',
-                        bg: 'bg-emerald-50 dark:bg-emerald-900/20',
-                    },
-                    {
-                        label: 'Outstanding Fees',
-                        value: fmt(outstanding),
-                        detail: `${topDebtors.length} key debtor(s) highlighted`,
-                        icon: ShieldAlert,
-                        tone: 'text-amber-600 dark:text-amber-400',
-                        bg: 'bg-amber-50 dark:bg-amber-900/20',
-                    },
-                    {
-                        label: 'Overdue Exposure',
-                        value: fmt(overdue),
-                        detail: `${receivableBuckets.find(bucket => bucket.bucket === '90+')?.students || 0} account(s) in 90+ days`,
-                        icon: AlertTriangle,
-                        tone: 'text-red-600 dark:text-red-400',
-                        bg: 'bg-red-50 dark:bg-red-900/20',
-                    },
-                    {
-                        label: 'Net Surplus / Deficit',
-                        value: fmt(data.income.netIncome),
-                        detail: `Income ${fmt(data.income.totalIncome)} vs expenses ${fmt(data.income.totalExpenses)}`,
-                        icon: Wallet,
-                        tone: data.income.netIncome >= 0 ? 'text-violet-600 dark:text-violet-400' : 'text-orange-600 dark:text-orange-400',
-                        bg: data.income.netIncome >= 0 ? 'bg-violet-50 dark:bg-violet-900/20' : 'bg-orange-50 dark:bg-orange-900/20',
-                    },
-                    {
-                        label: 'Refund Pipeline',
-                        value: fmt(refundExposure),
-                        detail: `${pendingRefunds.length} refund(s) pending approval`,
-                        icon: Calendar,
-                        tone: 'text-slate-700 dark:text-slate-200',
-                        bg: 'bg-slate-100 dark:bg-slate-800',
-                    },
-                ].map(card => (
-                    <div key={card.label} className={`rounded-xl border border-slate-200 p-5 shadow-sm dark:border-slate-700 ${card.bg}`}>
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <p className="text-sm text-slate-500 dark:text-gray-400">{card.label}</p>
-                                <p className={`mt-2 text-2xl font-bold ${card.tone}`}>{card.value}</p>
-                                <p className="mt-2 text-xs text-slate-500 dark:text-gray-400">{card.detail}</p>
+            {/* The story of the term in plain words */}
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-gray-400">Where the term stands</p>
+                <div className="mt-2 space-y-1 text-base leading-relaxed text-slate-700 dark:text-gray-200">
+                    {storyLines.map(line => <p key={line}>{line}</p>)}
+                </div>
+            </section>
+
+            {summary.billed > 0 && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <Figure
+                        label="Billed this term"
+                        value={fmtWhole(summary.billed)}
+                        detail={`Fees assigned to ${plural(summary.studentsBilled, 'student')}`}
+                    />
+                    <Figure
+                        label="Collected"
+                        value={fmtWhole(summary.collected)}
+                        detail={summary.credit > 0
+                            ? `${plural(summary.paymentsCount, 'payment')} · includes ${fmtWhole(summary.credit)} paid ahead`
+                            : plural(summary.paymentsCount, 'payment')}
+                    />
+                    <Figure
+                        label="Still owed"
+                        value={fmtWhole(summary.owed)}
+                        tone={summary.owed > 0 ? 'text-slate-900 dark:text-white' : 'text-green-600 dark:text-green-400'}
+                        detail={`${summary.settledRate}% of billing settled · ${plural(summary.debtorCount, 'student')} owing`}
+                    >
+                        <ProgressBar value={summary.settledRate} label="Share of billing settled" tone={rateTone(summary.settledRate)} />
+                    </Figure>
+                    <Figure
+                        label="Past due"
+                        value={fmtWhole(summary.overdueAmount)}
+                        tone={summary.overdueAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}
+                        detail={summary.overdueCount > 0
+                            ? `${plural(summary.overdueCount, 'student')} past their due date`
+                            : 'No balance is past its due date'}
+                    />
+                </div>
+            )}
+
+            {/* How money came in */}
+            <Section
+                title="How money came in"
+                story={bestWeek
+                    ? `The busiest week was week ${bestWeek.week} (from ${shortDate(bestWeek.weekStart)}), with ${fmtWhole(bestWeek.amount)} from ${plural(bestWeek.payments, 'payment')}.`
+                    : 'No payments have been recorded for this term yet.'}
+            >
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                    <div className="lg:col-span-2">
+                        <p className="mb-2 text-sm font-medium text-slate-600 dark:text-gray-300">Collected per week of term (ZMW)</p>
+                        {bestWeek ? (
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-200 dark:text-slate-700" />
+                                        <XAxis dataKey="label" fontSize={12} tickLine={false} axisLine={false} />
+                                        <YAxis
+                                            width={44}
+                                            fontSize={12}
+                                            tickLine={false}
+                                            axisLine={false}
+                                            tickFormatter={(value: number) => (value >= 1000 ? `${Math.round(value / 1000)}k` : `${value}`)}
+                                        />
+                                        <Tooltip
+                                            cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
+                                            formatter={(value, _name, item) => [`${fmt(Number(value ?? 0))} · ${plural(item?.payload?.payments || 0, 'payment')}`, 'Collected']}
+                                            labelFormatter={(_label, payload) => {
+                                                const week = payload?.[0]?.payload;
+                                                return week ? `Week ${week.week}, from ${shortDate(week.weekStart)} · running total ${fmtWhole(week.cumulative)}` : '';
+                                            }}
+                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                        />
+                                        <Bar dataKey="amount" fill="var(--primary-color)" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
                             </div>
-                            <card.icon className={`h-5 w-5 ${card.tone}`} />
-                        </div>
+                        ) : (
+                            <EmptyNote>Payments recorded against this term will appear here week by week.</EmptyNote>
+                        )}
                     </div>
-                ))}
-            </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800 xl:col-span-2">
-                    <div className="mb-6 flex items-center justify-between">
-                        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800 dark:text-white">
-                            <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                            Monthly Revenue ({new Date().getFullYear()})
-                        </h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">YTD {fmt(totalRevenue)}</span>
-                    </div>
-                    <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={revenueData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
-                                <YAxis
-                                    fontSize={12}
-                                    tickLine={false}
-                                    axisLine={false}
-                                    tickFormatter={(value) => `K${(value / 1000).toFixed(0)}k`}
-                                />
-                                <Tooltip
-                                    formatter={(value: number) => [`ZMW ${value.toLocaleString()}`, 'Revenue']}
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                    <div>
+                        <p className="mb-2 text-sm font-medium text-slate-600 dark:text-gray-300">By payment method</p>
+                        {paymentMethods.length === 0 ? (
+                            <EmptyNote>No payments yet.</EmptyNote>
+                        ) : (
+                            <ul className="space-y-4">
+                                {paymentMethods.map(method => {
+                                    const share = methodsTotal > 0 ? Math.round((method.amount / methodsTotal) * 100) : 0;
+                                    return (
+                                        <li key={method.method}>
+                                            <div className="flex items-baseline justify-between gap-3 text-sm">
+                                                <span className="font-medium text-slate-700 dark:text-gray-200">{formatMethod(method.method)}</span>
+                                                <span className="font-semibold tabular-nums text-slate-900 dark:text-white">{fmtWhole(method.amount)}</span>
+                                            </div>
+                                            <ProgressBar value={share} label={`${formatMethod(method.method)} share of collections`} tone="bg-primary" className="mt-2" />
+                                            <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">{share}% of collections · {plural(method.count, 'payment')}</p>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
                     </div>
                 </div>
+            </Section>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
-                        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800 dark:text-white">
-                            <PieChartIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                            Payment Mix
-                        </h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">{methodData.length} channel(s)</span>
+            {/* Which classes are behind */}
+            <Section title="Which classes are behind" story={classStory}>
+                {classCollection.length === 0 ? (
+                    <EmptyNote>Once fees are assigned, each class's progress shows here, weakest first.</EmptyNote>
+                ) : (
+                    <div className="-mx-5 overflow-x-auto sm:mx-0">
+                        <table className="w-full min-w-[640px] text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-gray-400">
+                                    <th className="px-5 py-2 sm:pl-0">Class</th>
+                                    <th className="px-3 py-2 text-right">Students</th>
+                                    <th className="px-3 py-2 text-right">Billed (ZMW)</th>
+                                    <th className="px-3 py-2 w-48">Settled</th>
+                                    <th className="px-3 py-2 text-right">Still owed (ZMW)</th>
+                                    <th className="px-5 py-2 text-right sm:pr-0">Owing</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {classCollection.map(cls => (
+                                    <tr key={cls.className}>
+                                        <td className="px-5 py-3 font-medium text-slate-800 dark:text-white sm:pl-0">{cls.className}</td>
+                                        <td className="px-3 py-3 text-right tabular-nums text-slate-600 dark:text-gray-300">{cls.students}</td>
+                                        <td className="px-3 py-3 text-right tabular-nums text-slate-600 dark:text-gray-300">{amount(cls.billed)}</td>
+                                        <td className="px-3 py-3">
+                                            <div className="flex items-center gap-3">
+                                                <ProgressBar value={cls.rate} label={`${cls.className} settled`} tone={rateTone(cls.rate)} className="flex-1" />
+                                                <span className="w-10 text-right tabular-nums text-slate-600 dark:text-gray-300">{cls.rate}%</span>
+                                            </div>
+                                        </td>
+                                        <td className={`px-3 py-3 text-right font-semibold tabular-nums ${cls.owed > 0 ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-gray-500'}`}>{amount(cls.owed)}</td>
+                                        <td className="px-5 py-3 text-right tabular-nums text-slate-600 dark:text-gray-300 sm:pr-0">{cls.debtors} of {cls.students}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
-                    <div className="h-52">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie data={methodData} cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={5} dataKey="value">
-                                    {methodData.map((entry, index) => (
-                                        <Cell key={`cell-${entry.name}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip formatter={(value: number) => [`ZMW ${value.toLocaleString()}`, 'Amount']} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                        {methodData.length === 0 ? (
-                            <p className="text-sm text-slate-500 dark:text-gray-400">No payment channel data yet.</p>
-                        ) : methodData.map((method, index) => {
-                            const share = totalRevenue > 0 ? (method.value / totalRevenue) * 100 : 0;
-                            return (
-                                <div key={method.name} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-700/50">
-                                    <div className="flex items-center gap-2">
-                                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                                        <span className="font-medium text-slate-700 dark:text-gray-200">{method.name}</span>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="font-semibold text-slate-800 dark:text-white">{fmt(method.value)}</p>
-                                        <p className="text-xs text-slate-500 dark:text-gray-400">{method.count} txn • {pct(share)}</p>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
+                )}
+            </Section>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-5 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Collections Health</h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">Cash and accrual snapshot</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                            <p className="text-sm text-slate-500 dark:text-gray-400">Collected</p>
-                            <p className="mt-1 text-xl font-bold text-emerald-600">{fmt(totalCollected)}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                            <p className="text-sm text-slate-500 dark:text-gray-400">Collection Rate</p>
-                            <p className="mt-1 text-xl font-bold text-blue-600">{pct(collectionRate)}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                            <p className="text-sm text-slate-500 dark:text-gray-400">Cash Inflow</p>
-                            <p className="mt-1 text-xl font-bold text-emerald-600">{fmt(data.cashFlow.totalInflows)}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                            <p className="text-sm text-slate-500 dark:text-gray-400">Cash Outflow</p>
-                            <p className="mt-1 text-xl font-bold text-red-600">{fmt(data.cashFlow.totalOutflows)}</p>
-                        </div>
-                    </div>
-                    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-700/30">
-                        <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-slate-600 dark:text-gray-300">Net cash position</span>
-                            <span className={`text-lg font-bold ${data.cashFlow.netCashFlow >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>{fmt(data.cashFlow.netCashFlow)}</span>
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500 dark:text-gray-400">
-                            Use this with the income statement to track timing gaps between earned revenue and received cash.
-                        </p>
-                    </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-5 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Refund Control Watch</h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">Approval pipeline</span>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        {refundByStatus.map(item => (
-                            <div key={item.status} className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                                <p className="text-sm text-slate-500 dark:text-gray-400">{item.status}</p>
-                                <p className="mt-1 text-xl font-bold text-slate-800 dark:text-white">{item.count}</p>
-                                <p className="text-xs text-slate-500 dark:text-gray-400">{fmt(item.amount)}</p>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
-                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Control note</p>
-                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
-                            Pending refunds should be reviewed daily to prevent unapproved credits from aging in the ledger.
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Aged Receivables</h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">By aging bucket</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        {receivableBuckets.map(bucket => (
-                            <div key={bucket.bucket} className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/50">
-                                <p className="text-sm text-slate-500 dark:text-gray-400">{bucket.bucket} days</p>
-                                <p className="mt-1 text-xl font-bold text-slate-800 dark:text-white">{fmt(bucket.balance)}</p>
-                                <p className="text-xs text-slate-500 dark:text-gray-400">{bucket.students} student(s)</p>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="mt-5 rounded-lg border border-slate-200 dark:border-slate-700">
-                        <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-                            <p className="text-sm font-medium text-slate-700 dark:text-gray-200">Highest-risk debtor accounts</p>
-                        </div>
-                        <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                            {topDebtors.length === 0 ? (
-                                <p className="px-4 py-6 text-sm text-slate-500 dark:text-gray-400">No outstanding debtor balances.</p>
-                            ) : topDebtors.map(debtor => (
-                                <div key={debtor.studentId} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-                                    <div>
-                                        <p className="font-medium text-slate-800 dark:text-white">{debtor.studentName}</p>
-                                        <p className="text-xs text-slate-500 dark:text-gray-400">{debtor.className} • {debtor.bucket} days • {debtor.guardianPhone || debtor.guardianEmail || 'No contact'}</p>
-                                    </div>
-                                    <span className="font-semibold text-red-600">{fmt(debtor.balance)}</span>
-                                </div>
+            {/* How overdue is the debt */}
+            <Section
+                title="How overdue is the debt"
+                story={debtStory}
+                action={debtors.length > 0 && (
+                    <>
+                        <ExportDropdown
+                            data={exportRows}
+                            filename={`debtors-${academicTerm.name.replace(/\s+/g, '-').toLowerCase()}`}
+                            columns={[
+                                { key: 'name', header: 'Student' },
+                                { key: 'admissionNumber', header: 'Admission No.' },
+                                { key: 'className', header: 'Class' },
+                                { key: 'dueDate', header: 'Due date' },
+                                { key: 'daysOverdue', header: 'Days late' },
+                                { key: 'guardian', header: 'Guardian' },
+                                { key: 'phone', header: 'Phone' },
+                                { key: 'email', header: 'Email' },
+                                { key: 'billed', header: 'Billed (ZMW)' },
+                                { key: 'paid', header: 'Paid (ZMW)' },
+                                { key: 'balance', header: 'Owed (ZMW)' },
+                            ]}
+                        />
+                        {onOpenReminders && (
+                            <button
+                                onClick={onOpenReminders}
+                                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-hover"
+                            >
+                                <Bell className="h-4 w-4" />
+                                Send reminders
+                            </button>
+                        )}
+                    </>
+                )}
+            >
+                {debtors.length === 0 ? (
+                    <EmptyNote>{summary.billed > 0 ? 'Every billed student is fully paid.' : 'Nothing has been billed yet.'}</EmptyNote>
+                ) : (
+                    <>
+                        <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700" role="img" aria-label="Owed amount split by how late it is">
+                            {ageing.filter(b => b.amount > 0).map(b => (
+                                <div key={b.bucket} className={AGEING[b.bucket].tone} style={{ width: `${(b.amount / summary.owed) * 100}%` }} title={`${AGEING[b.bucket].label}: ${fmtWhole(b.amount)}`} />
                             ))}
                         </div>
-                    </div>
-                </div>
+                        <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                            {ageing.map(b => (
+                                <div key={b.bucket} className={`rounded-lg bg-slate-50 p-3 dark:bg-slate-700/40 ${b.amount === 0 ? 'opacity-60' : ''}`}>
+                                    <dt className="flex items-center gap-2 text-xs text-slate-500 dark:text-gray-400">
+                                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${AGEING[b.bucket].tone}`} />
+                                        {AGEING[b.bucket].label}
+                                    </dt>
+                                    <dd className="mt-1 text-base font-semibold tabular-nums text-slate-900 dark:text-white">{fmtWhole(b.amount)}</dd>
+                                    <dd className="text-xs text-slate-500 dark:text-gray-400">{plural(b.students, 'student')}</dd>
+                                </div>
+                            ))}
+                        </dl>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <div className="mb-6 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Collection Rate per Class</h3>
-                        <span className="text-sm text-slate-500 dark:text-gray-400">Weakest classes first</span>
+                        {noContact > 0 && (
+                            <p className="mt-4 flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                {plural(noContact, 'student')} owing {noContact === 1 ? 'has' : 'have'} no guardian phone or email, so reminders cannot reach them.
+                            </p>
+                        )}
+
+                        <div className="-mx-5 mt-4 overflow-x-auto sm:mx-0">
+                            <table className="w-full min-w-[720px] text-sm">
+                                <thead>
+                                    <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-gray-400">
+                                        <th className="px-5 py-2 sm:pl-0">Student</th>
+                                        <th className="px-3 py-2">Due</th>
+                                        <th className="px-3 py-2">Guardian</th>
+                                        <th className="px-3 py-2 text-right">Paid (ZMW)</th>
+                                        <th className="px-5 py-2 text-right sm:pr-0">Owed (ZMW)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                    {debtors.map(d => (
+                                        <tr key={d.studentId}>
+                                            <td className="px-5 py-3 sm:pl-0">
+                                                <p className="font-medium text-slate-800 dark:text-white">{d.name}</p>
+                                                <p className="text-xs text-slate-500 dark:text-gray-400">{d.admissionNumber} · {d.className}</p>
+                                            </td>
+                                            <td className="px-3 py-3">
+                                                <p className="text-slate-700 dark:text-gray-200">{d.earliestDueDate ? formatPaymentDate(d.earliestDueDate) : 'No due date'}</p>
+                                                <p className={`text-xs ${d.daysOverdue > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-gray-400'}`}>
+                                                    {d.daysOverdue > 0 ? `${plural(d.daysOverdue, 'day')} late` : 'Not yet due'}
+                                                </p>
+                                            </td>
+                                            <td className="px-3 py-3">
+                                                {d.guardianPhone || d.guardianEmail ? (
+                                                    <>
+                                                        <p className="text-slate-700 dark:text-gray-200">{d.guardianName || 'Guardian'}</p>
+                                                        <p className="text-xs text-slate-500 dark:text-gray-400">{d.guardianPhone || d.guardianEmail}</p>
+                                                    </>
+                                                ) : (
+                                                    <p className="text-xs text-amber-700 dark:text-amber-300">No contact on file</p>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-right tabular-nums text-slate-600 dark:text-gray-300">{amount(d.paid)}</td>
+                                            <td className="px-5 py-3 text-right font-semibold tabular-nums text-slate-900 dark:text-white sm:pr-0">{amount(d.balance)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+            </Section>
+
+            {/* Books for the term */}
+            <Section
+                title="Books for the term"
+                story="From the general ledger for the term dates. Surplus counts income when it is earned; cash shows money that actually moved in and out of the accounts."
+            >
+                {!ledger ? (
+                    <EmptyNote>Ledger figures are not available right now. Refresh to try again.</EmptyNote>
+                ) : (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/40">
+                            <p className="text-sm text-slate-500 dark:text-gray-400">{netSurplus >= 0 ? 'Surplus' : 'Deficit'}</p>
+                            <p className={`mt-1 text-xl font-semibold tabular-nums ${netSurplus >= 0 ? 'text-slate-900 dark:text-white' : 'text-red-600 dark:text-red-400'}`}>{fmtWhole(Math.abs(netSurplus))}</p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">Income {fmtWhole(ledger.income)} · expenses {fmtWhole(ledger.expenses)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/40">
+                            <p className="text-sm text-slate-500 dark:text-gray-400">Net cash {netCash >= 0 ? 'in' : 'out'}</p>
+                            <p className={`mt-1 text-xl font-semibold tabular-nums ${netCash >= 0 ? 'text-slate-900 dark:text-white' : 'text-red-600 dark:text-red-400'}`}>{fmtWhole(Math.abs(netCash))}</p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">In {fmtWhole(ledger.cashIn)} · out {fmtWhole(ledger.cashOut)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-700/40">
+                            <p className="text-sm text-slate-500 dark:text-gray-400">Refunds</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-slate-900 dark:text-white">{fmtWhole(sumRefunds(processedRefunds))} paid out</p>
+                            <p className={`mt-1 text-xs ${pendingRefunds.length > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-gray-400'}`}>
+                                {pendingRefunds.length > 0
+                                    ? `${plural(pendingRefunds.length, 'refund')} (${fmtWhole(sumRefunds(pendingRefunds))}) waiting for approval`
+                                    : 'No refunds waiting for approval'}
+                            </p>
+                        </div>
                     </div>
-                    <div className="space-y-4">
-                        {riskClasses.length === 0 ? (
-                            <p className="text-sm text-slate-500 dark:text-gray-400">No class collection performance yet.</p>
-                        ) : riskClasses.map((cls) => (
-                            <div key={cls.className} className="space-y-2">
-                                <div className="flex justify-between text-sm">
-                                    <span className="font-medium text-slate-700 dark:text-gray-200">{cls.className}</span>
-                                    <span className="text-slate-500 dark:text-gray-400">
-                                        {cls.percentage}% ({cls.totalCollected.toLocaleString()} / {cls.totalDue.toLocaleString()})
-                                    </span>
-                                </div>
-                                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full rounded-full transition-all duration-500 ${cls.percentage >= 80 ? 'bg-emerald-500' : cls.percentage >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
-                                        style={{ width: `${Math.min(cls.percentage, 100)}%` }}
-                                    />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-900/20">
-                        <p className="text-sm font-medium text-red-700 dark:text-red-300">Follow-up priority</p>
-                        <p className="mt-1 text-xs text-red-600 dark:text-red-200">
-                            Focus debt collection and bursar review on classes below 50% collection to reduce overdue spillover into future terms.
-                        </p>
-                    </div>
-                </div>
-            </div>
+                )}
+            </Section>
         </div>
     );
 };

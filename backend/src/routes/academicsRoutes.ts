@@ -11,12 +11,12 @@ const router = Router();
 router.use(authenticateToken);
 
 // Assign a teacher to a subject in a class
-router.post('/assign', authorizeRole(['SUPER_ADMIN', 'ADMIN']), assignSubjectTeacher);
+router.post('/assign', authorizeRole(['SUPER_ADMIN']), assignSubjectTeacher);
 
 // Get assignments for a specific class
-router.get('/class/:classId', authorizeRole(['SUPER_ADMIN', 'ADMIN', 'TEACHER', 'BURSAR']), getClassSubjectTeachers);
+router.get('/class/:classId', authorizeRole(['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY']), getClassSubjectTeachers);
 
 // Get assignments for a specific teacher
-router.get('/teacher/:teacherId', authorizeRole(['SUPER_ADMIN', 'ADMIN', 'TEACHER']), getTeacherSubjectAssignments);
+router.get('/teacher/:teacherId', authorizeRole(['SUPER_ADMIN', 'TEACHER']), getTeacherSubjectAssignments);
 
 export default router;

@@ -177,7 +177,7 @@ const Branches = () => {
                 {canCreate && (
                     <button
                         onClick={openAddModal}
-                        className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                        className="flex items-center space-x-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition-colors"
                     >
                         <Plus size={20} />
                         <span>Add Branch</span>
@@ -221,18 +221,18 @@ const Branches = () => {
                                     <div className="flex space-x-1" onClick={(e) => e.stopPropagation()}>
                                         <button
                                             onClick={() => navigate(`/branches/${branch.id}`)}
-                                            className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                                            className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-surface-hover-accent rounded transition-colors"
                                             title="View Details"
                                         >
                                             <Eye size={16} />
                                         </button>
                                         {canManage && (
-                                            <button onClick={() => openEditModal(branch)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors">
+                                            <button onClick={() => openEditModal(branch)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-surface-hover-accent rounded transition-colors">
                                                 <Edit2 size={16} />
                                             </button>
                                         )}
                                         {canCreate && !branch.isMain && (
-                                            <button onClick={() => handleDelete(branch.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors">
+                                            <button onClick={() => handleDelete(branch.id)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-surface-hover-danger rounded transition-colors">
                                                 <Trash2 size={16} />
                                             </button>
                                         )}
@@ -409,13 +409,13 @@ const Branches = () => {
                                 <button
                                     type="button"
                                     onClick={closeModal}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                    className="px-4 py-2 text-gray-600 hover:bg-surface-hover rounded-lg transition-colors"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                    className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
                                 >
                                     {editingBranch ? 'Save Changes' : 'Create Branch'}
                                 </button>

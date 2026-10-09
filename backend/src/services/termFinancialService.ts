@@ -8,9 +8,8 @@
  * - Outstanding balance calculations per term
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
+import { runTermWriteTransaction } from './termLifecycleService';
 
 export interface TermFinancialSummary {
   termId: string;
@@ -22,6 +21,10 @@ export interface TermFinancialSummary {
   totalFeesCollected: number;
   totalOutstanding: number;
   collectionRate: number;
+  totalCashReceived: number;
+  totalRefunded: number;
+  netCashReceived: number;
+  unallocatedCredit: number;
   cashCollected: number;
   mobileMoneyCollected: number;
   bankCollected: number;
@@ -101,6 +104,10 @@ export async function getTermFinancialSummary(
     totalFeesCollected: Number(summary.totalFeesCollected),
     totalOutstanding: Number(summary.totalOutstanding),
     collectionRate: Number(summary.collectionRate),
+    totalCashReceived: Number(summary.totalCashReceived),
+    totalRefunded: Number(summary.totalRefunded),
+    netCashReceived: Number(summary.netCashReceived),
+    unallocatedCredit: Number(summary.unallocatedCredit),
     cashCollected: Number(summary.cashCollected),
     mobileMoneyCollected: Number(summary.mobileMoneyCollected),
     bankCollected: Number(summary.bankCollected),
@@ -110,6 +117,83 @@ export async function getTermFinancialSummary(
     studentsNotPaid: summary.studentsNotPaid,
     lastCalculatedAt: summary.lastCalculatedAt
   };
+}
+
+export type AgeingBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
+
+/** Days past the earliest fee due date; zero or less means not yet due. */
+export function getAgeingBucket(ageDays: number): AgeingBucket {
+  if (ageDays <= 0) return 'current';
+  if (ageDays <= 30) return '1-30';
+  if (ageDays <= 60) return '31-60';
+  if (ageDays <= 90) return '61-90';
+  return '90+';
+}
+
+/**
+ * Per-student balance for a term: fees billed minus completed payments received.
+ * Single source for "still owed", debtor counts and fee reminders. Payments are
+ * counted whether or not they have been allocated to individual fee lines.
+ */
+export async function getTermStudentBalances(termId: string, branchId?: string, studentIds?: string[]) {
+  const studentScope = {
+    ...(branchId ? { branchId } : {}),
+    ...(studentIds && studentIds.length > 0 ? { id: { in: studentIds } } : {}),
+  };
+  const [feeStructures, paymentsByStudent] = await Promise.all([
+    prisma.studentFeeStructure.findMany({
+      where: { academicTermId: termId, student: studentScope },
+      select: { studentId: true, amountDue: true, dueDate: true },
+    }),
+    prisma.payment.groupBy({
+      by: ['studentId'],
+      where: { status: 'COMPLETED', academicTermId: termId, student: studentScope },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const totals = new Map<string, { billed: number; paid: number; feeCount: number; earliestDueDate: Date | null }>();
+  for (const fee of feeStructures) {
+    const entry = totals.get(fee.studentId) || { billed: 0, paid: 0, feeCount: 0, earliestDueDate: null };
+    entry.billed += Number(fee.amountDue);
+    entry.feeCount += 1;
+    if (fee.dueDate && (!entry.earliestDueDate || fee.dueDate < entry.earliestDueDate)) entry.earliestDueDate = fee.dueDate;
+    totals.set(fee.studentId, entry);
+  }
+  for (const payment of paymentsByStudent) {
+    const entry = totals.get(payment.studentId) || { billed: 0, paid: 0, feeCount: 0, earliestDueDate: null };
+    entry.paid += Number(payment._sum.amount || 0);
+    totals.set(payment.studentId, entry);
+  }
+
+  const students = await prisma.student.findMany({
+    where: { id: { in: Array.from(totals.keys()) } },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      admissionNumber: true,
+      status: true,
+      guardianName: true,
+      guardianEmail: true,
+      guardianPhone: true,
+      class: { select: { name: true } },
+      termEnrollments: { where: { academicTermId: termId }, select: { class: { select: { name: true } } }, take: 1 },
+    },
+  });
+
+  return students.map(student => {
+    const entry = totals.get(student.id)!;
+    return {
+      ...student,
+      className: student.termEnrollments[0]?.class.name || student.class?.name || 'No class',
+      billed: entry.billed,
+      paid: entry.paid,
+      balance: entry.billed - entry.paid,
+      feeCount: entry.feeCount,
+      earliestDueDate: entry.earliestDueDate,
+    };
+  });
 }
 
 /**
@@ -131,7 +215,11 @@ export async function getTermOutstandingBalances(
     include: {
       student: {
         include: {
-          class: true
+          termEnrollments: {
+            where: { academicTermId: termId },
+            include: { class: true },
+            take: 1
+          }
         }
       },
       feeTemplate: true
@@ -142,12 +230,14 @@ export async function getTermOutstandingBalances(
   const studentMap = new Map<string, any>();
 
   for (const fee of feeStructures) {
+    const placement = fee.student.termEnrollments[0];
+    if (!placement) continue;
     if (!studentMap.has(fee.studentId)) {
       studentMap.set(fee.studentId, {
         studentId: fee.student.id,
         studentName: `${fee.student.firstName} ${fee.student.lastName}`,
         admissionNumber: fee.student.admissionNumber,
-        className: fee.student.class.name,
+        className: placement.class.name,
         totalDue: 0,
         totalPaid: 0,
         feeBreakdown: []
@@ -305,80 +395,128 @@ export async function recalculateTermSummary(
   termId: string,
   branchId?: string
 ): Promise<void> {
-  const feeStructures = await prisma.studentFeeStructure.findMany({
-    where: {
-      academicTermId: termId,
-      ...(branchId && {
-        student: {
-          branchId: branchId
-        }
-      })
-    }
-  });
-
-  const payments = await prisma.payment.findMany({
-    where: {
-      academicTermId: termId,
-      status: 'COMPLETED',
-      ...(branchId && { branchId })
-    }
-  });
-
-  const totalExpected = feeStructures.reduce((sum, f) => sum + Number(f.amountDue), 0);
-  const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const totalOutstanding = totalExpected - totalCollected;
-  const collectionRate = totalExpected > 0 ? (totalCollected / totalExpected) * 100 : 0;
-
-  const cashTotal = payments
-    .filter(p => p.method === 'CASH')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const mobileMoneyTotal = payments
-    .filter(p => p.method === 'MOBILE_MONEY')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const bankTotal = payments
-    .filter(p => p.method === 'BANK_DEPOSIT')
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const studentStats = calculateStudentStats(feeStructures);
-
-  const summaryData = {
-    totalFeesExpected: totalExpected,
-    totalFeesCollected: totalCollected,
-    totalOutstanding: totalOutstanding,
-    collectionRate: collectionRate,
-    cashCollected: cashTotal,
-    mobileMoneyCollected: mobileMoneyTotal,
-    bankCollected: bankTotal,
-    totalStudents: studentStats.total,
-    studentsFullyPaid: studentStats.fullyPaid,
-    studentsPartiallyPaid: studentStats.partiallyPaid,
-    studentsNotPaid: studentStats.notPaid,
-    lastCalculatedAt: new Date()
-  };
-
-  const existingSummary = await prisma.termFinancialSummary.findFirst({
-    where: {
-      academicTermId: termId,
-      branchId: branchId || null
-    }
-  });
-
-  if (existingSummary) {
-    await prisma.termFinancialSummary.update({
-      where: { id: existingSummary.id },
-      data: summaryData
-    });
-  } else {
-    await prisma.termFinancialSummary.create({
-      data: {
+  await runTermWriteTransaction(termId, 'FINANCIAL_RECEIPT', async tx => {
+    const feeStructures = await tx.studentFeeStructure.findMany({
+      where: {
         academicTermId: termId,
-        ...(branchId && { branchId }),
-        ...summaryData
+        ...(branchId && {
+          student: {
+            branchId: branchId
+          }
+        })
       }
     });
-  }
+
+    const payments = await tx.payment.findMany({
+      where: {
+        academicTermId: termId,
+        status: 'COMPLETED',
+        ...(branchId && { branchId })
+      },
+      include: {
+        refunds: {
+          where: { status: 'PROCESSED' },
+          select: { amount: true },
+        },
+        allocations: {
+          select: {
+            amount: true,
+            refundAllocations: {
+              where: { refund: { status: 'PROCESSED' } },
+              select: { amount: true },
+            },
+          },
+        },
+      },
+    });
+
+    const totalExpected = feeStructures.reduce((sum, f) => sum + Number(f.amountDue), 0);
+    const totalCollected = feeStructures.reduce((sum, f) => sum + Number(f.amountPaid), 0);
+    const totalOutstanding = feeStructures.reduce(
+      (sum, fee) => sum + Math.max(0, Number(fee.amountDue) - Number(fee.amountPaid)),
+      0,
+    );
+    const collectionRate = totalExpected > 0 ? (totalCollected / totalExpected) * 100 : 0;
+
+    const paymentCash = payments.map(payment => {
+      const refunded = payment.refunds.reduce((sum, refund) => sum + Number(refund.amount), 0);
+      const allocated = payment.allocations.reduce((sum, allocation) => {
+        const reversed = allocation.refundAllocations.reduce(
+          (reversalSum, reversal) => reversalSum + Number(reversal.amount),
+          0,
+        );
+        return sum + Number(allocation.amount) - reversed;
+      }, 0);
+      const gross = Number(payment.amount);
+      const net = Math.max(0, gross - refunded);
+      return {
+        method: payment.method,
+        gross,
+        refunded,
+        net,
+        unallocated: Math.max(0, net - allocated),
+      };
+    });
+    const totalCashReceived = paymentCash.reduce((sum, payment) => sum + payment.gross, 0);
+    const totalRefunded = paymentCash.reduce((sum, payment) => sum + payment.refunded, 0);
+    const netCashReceived = paymentCash.reduce((sum, payment) => sum + payment.net, 0);
+    const unallocatedCredit = paymentCash.reduce((sum, payment) => sum + payment.unallocated, 0);
+
+    const cashTotal = paymentCash
+      .filter(p => p.method === 'CASH')
+      .reduce((sum, p) => sum + p.net, 0);
+
+    const mobileMoneyTotal = paymentCash
+      .filter(p => p.method === 'MOBILE_MONEY')
+      .reduce((sum, p) => sum + p.net, 0);
+
+    const bankTotal = paymentCash
+      .filter(p => p.method === 'BANK_DEPOSIT')
+      .reduce((sum, p) => sum + p.net, 0);
+
+    const studentStats = calculateStudentStats(feeStructures);
+
+    const summaryData = {
+      totalFeesExpected: totalExpected,
+      totalFeesCollected: totalCollected,
+      totalOutstanding: totalOutstanding,
+      collectionRate: collectionRate,
+      totalCashReceived,
+      totalRefunded,
+      netCashReceived,
+      unallocatedCredit,
+      cashCollected: cashTotal,
+      mobileMoneyCollected: mobileMoneyTotal,
+      bankCollected: bankTotal,
+      totalStudents: studentStats.total,
+      studentsFullyPaid: studentStats.fullyPaid,
+      studentsPartiallyPaid: studentStats.partiallyPaid,
+      studentsNotPaid: studentStats.notPaid,
+      lastCalculatedAt: new Date()
+    };
+
+    const existingSummary = await tx.termFinancialSummary.findFirst({
+      where: {
+        academicTermId: termId,
+        branchId: branchId || null
+      }
+    });
+
+    if (existingSummary) {
+      await tx.termFinancialSummary.update({
+        where: { id: existingSummary.id },
+        data: summaryData
+      });
+    } else {
+      await tx.termFinancialSummary.create({
+        data: {
+          academicTermId: termId,
+          ...(branchId && { branchId }),
+          ...summaryData
+        }
+      });
+    }
+  });
 }
 
 function calculateStudentStats(feeStructures: any[]) {
@@ -445,6 +583,10 @@ export async function getAllTermSummaries(
         totalFeesCollected: Number(summary.totalFeesCollected),
         totalOutstanding: Number(summary.totalOutstanding),
         collectionRate: Number(summary.collectionRate),
+        totalCashReceived: Number(summary.totalCashReceived),
+        totalRefunded: Number(summary.totalRefunded),
+        netCashReceived: Number(summary.netCashReceived),
+        unallocatedCredit: Number(summary.unallocatedCredit),
         cashCollected: Number(summary.cashCollected),
         mobileMoneyCollected: Number(summary.mobileMoneyCollected),
         bankCollected: Number(summary.bankCollected),

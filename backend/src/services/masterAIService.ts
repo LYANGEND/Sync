@@ -3,6 +3,13 @@ import aiService from './aiService';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import curriculumService from './curriculumService';
+import { hasValidTimeRange } from '../utils/academicValidation';
+import {
+  createTerm as createLifecycleTerm,
+  getActiveTerm,
+  runTermWriteTransaction,
+} from './termLifecycleService';
+import { upsertStudentPlacement } from './studentPlacementService';
 
 // ==========================================
 // MASTER AI OPS SERVICE
@@ -401,37 +408,103 @@ const tools: ToolDefinition[] = [
     parameters: [
       { name: 'students', type: 'array', description: 'Array of student objects: firstName, lastName, admissionNumber, gender (MALE/FEMALE), dateOfBirth (YYYY-MM-DD), classId, guardianName, guardianPhone, address (optional)', required: true },
     ],
-    execute: async (params) => {
+    execute: async (params, userId) => {
       const students = params.students as any[];
       const created = [];
       const updated = [];
       const errors: string[] = [];
       for (const s of students) {
         try {
-          const student = await prisma.student.upsert({
-            where: { admissionNumber: s.admissionNumber },
-            update: {
-              firstName: s.firstName,
-              lastName: s.lastName,
-              gender: s.gender || undefined,
-              dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : undefined,
-              classId: s.classId || undefined,
-              guardianName: s.guardianName || undefined,
-              guardianPhone: s.guardianPhone || undefined,
-              address: s.address || undefined,
-            },
-            create: {
-              firstName: s.firstName,
-              lastName: s.lastName,
-              admissionNumber: s.admissionNumber,
-              gender: s.gender || 'MALE',
-              dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : new Date('2010-01-01'),
-              classId: s.classId,
-              guardianName: s.guardianName || null,
-              guardianPhone: s.guardianPhone || null,
-              address: s.address || null,
+          if (!s.classId) throw new Error('classId is required');
+          const targetClass = await prisma.class.findUnique({
+            where: { id: s.classId },
+            select: {
+              academicTermId: true,
+              branchId: true,
+              academicTerm: { select: { status: true } },
             },
           });
+          if (!targetClass) throw new Error('Selected class was not found');
+          if (targetClass.academicTerm.status !== 'ACTIVE') {
+            throw new Error('Initial and direct student placement is only allowed in the active term');
+          }
+
+          const student = await runTermWriteTransaction(
+            targetClass.academicTermId,
+            'ACADEMIC_ACTIVITY',
+            async tx => {
+              const currentTarget = await tx.class.findFirst({
+                where: { id: s.classId, academicTermId: targetClass.academicTermId },
+                select: { id: true },
+              });
+              if (!currentTarget) throw new Error('Selected class changed while the request was processed');
+
+              const existing = await tx.student.findUnique({
+                where: { admissionNumber: s.admissionNumber },
+                select: { id: true },
+              });
+              if (existing) {
+                const existingPlacement = await tx.studentTermEnrollment.findUnique({
+                  where: {
+                    studentId_academicTermId: {
+                      studentId: existing.id,
+                      academicTermId: targetClass.academicTermId,
+                    },
+                  },
+                  select: { id: true, classId: true },
+                });
+                if (!existingPlacement) {
+                  throw new Error('Cross-term student placement requires a rollover decision');
+                }
+
+                const updatedStudent = await tx.student.update({
+                  where: { id: existing.id },
+                  data: {
+                    firstName: s.firstName,
+                    lastName: s.lastName,
+                    gender: s.gender || undefined,
+                    dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : undefined,
+                    guardianName: s.guardianName || undefined,
+                    guardianPhone: s.guardianPhone || undefined,
+                    address: s.address || undefined,
+                  },
+                });
+                await upsertStudentPlacement(tx, {
+                  studentId: existing.id,
+                  academicTermId: targetClass.academicTermId,
+                  classId: s.classId,
+                  status: 'ACTIVE',
+                  changedByUserId: userId,
+                  movementReason: 'Master AI student update',
+                });
+                return updatedStudent;
+              }
+
+              const createdStudent = await tx.student.create({
+                data: {
+                  firstName: s.firstName,
+                  lastName: s.lastName,
+                  admissionNumber: s.admissionNumber,
+                  gender: s.gender || 'MALE',
+                  dateOfBirth: s.dateOfBirth ? new Date(s.dateOfBirth) : new Date('2010-01-01'),
+                  classId: s.classId,
+                  branchId: targetClass.branchId,
+                  guardianName: s.guardianName || null,
+                  guardianPhone: s.guardianPhone || null,
+                  address: s.address || null,
+                },
+              });
+              await upsertStudentPlacement(tx, {
+                studentId: createdStudent.id,
+                academicTermId: targetClass.academicTermId,
+                classId: s.classId,
+                status: 'ACTIVE',
+                changedByUserId: userId,
+                movementReason: 'Initial student placement from Master AI',
+              });
+              return createdStudent;
+            },
+          );
           // Check if it was an update by seeing if createdAt < updatedAt
           if (student.createdAt.getTime() < student.updatedAt.getTime() - 1000) {
             updated.push(student);
@@ -448,8 +521,9 @@ const tools: ToolDefinition[] = [
 
   {
     name: 'search_students',
-    description: 'Search for students by name, admission number, or class.',
+    description: 'Search for students by name, admission number, or class in one academic term.',
     parameters: [
+      { name: 'academicTermId', type: 'string', description: 'Academic term ID (use list_academic_terms first)', required: true },
       { name: 'query', type: 'string', description: 'Search query (name or admission number)' },
       { name: 'classId', type: 'string', description: 'Filter by class ID' },
       { name: 'status', type: 'string', description: 'Filter by status', enum: ['ACTIVE', 'TRANSFERRED', 'GRADUATED', 'DROPPED_OUT', 'ARCHIVED'] },
@@ -463,14 +537,31 @@ const tools: ToolDefinition[] = [
           { admissionNumber: { contains: params.query, mode: 'insensitive' } },
         ];
       }
-      if (params.classId) where.classId = params.classId;
+      where.termEnrollments = {
+        some: {
+          academicTermId: params.academicTermId,
+          ...(params.classId ? { classId: params.classId } : {}),
+        },
+      };
       if (params.status) where.status = params.status;
-      return prisma.student.findMany({
+      const students = await prisma.student.findMany({
         where,
-        include: { class: { select: { name: true } } },
+        include: {
+          termEnrollments: {
+            where: { academicTermId: params.academicTermId },
+            include: { class: { select: { id: true, name: true, gradeLevel: true } } },
+            take: 1,
+          },
+        },
         take: 20,
         orderBy: { firstName: 'asc' },
       });
+      return students.map(({ termEnrollments, ...student }) => ({
+        ...student,
+        academicTermId: params.academicTermId,
+        classId: termEnrollments[0]?.classId ?? null,
+        class: termEnrollments[0]?.class ?? null,
+      }));
     },
   },
 
@@ -504,13 +595,8 @@ const tools: ToolDefinition[] = [
         }
       }
       if (!defaultTermId) {
-        const term = await prisma.academicTerm.findFirst({ where: { isActive: true } });
-        if (!term) {
-          const anyTerm = await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
-          defaultTermId = anyTerm?.id;
-        } else {
-          defaultTermId = term.id;
-        }
+        const term = await getActiveTerm();
+        defaultTermId = term?.id;
       }
       
       // Validate that we have required IDs before attempting to create classes
@@ -534,21 +620,31 @@ const tools: ToolDefinition[] = [
       const errors: string[] = [];
       for (const c of classes) {
         try {
-          // Check if a class with this name already exists
-          const existingClass = await prisma.class.findFirst({ where: { name: c.name } });
-          if (existingClass) {
-            existing.push(existingClass);
-            continue;
-          }
-          const cls = await prisma.class.create({
-            data: {
-              name: c.name,
-              gradeLevel: c.gradeLevel || 1,
-              teacherId: c.teacherId || defaultTeacherId,
-              academicTermId: c.academicTermId || defaultTermId,
-            },
+          const academicTermId = c.academicTermId || defaultTermId;
+          const teacherId = c.teacherId || defaultTeacherId;
+          const outcome = await runTermWriteTransaction(academicTermId, 'SETUP', async tx => {
+            const [existingClass, teacher] = await Promise.all([
+              tx.class.findFirst({ where: { name: c.name, academicTermId } }),
+              tx.user.findFirst({
+                where: { id: teacherId, role: 'TEACHER', isActive: true },
+                select: { id: true },
+              }),
+            ]);
+            if (existingClass) return { kind: 'EXISTING' as const, value: existingClass };
+            if (!teacher) throw new Error('Selected teacher was not found or is inactive');
+
+            const cls = await tx.class.create({
+              data: {
+                name: c.name,
+                gradeLevel: c.gradeLevel || 1,
+                teacherId,
+                academicTermId,
+              },
+            });
+            return { kind: 'CREATED' as const, value: cls };
           });
-          created.push(cls);
+          if (outcome.kind === 'EXISTING') existing.push(outcome.value);
+          else created.push(outcome.value);
         } catch (err: any) {
           errors.push(`Class "${c.name}": ${err.message?.split('\n').pop()}`);
         }
@@ -559,13 +655,20 @@ const tools: ToolDefinition[] = [
 
   {
     name: 'list_classes',
-    description: 'List all classes with student counts.',
-    parameters: [],
-    execute: async () => {
-      return prisma.class.findMany({
-        include: { _count: { select: { students: true } } },
+    description: 'List classes and active enrollment counts for one academic term.',
+    parameters: [
+      { name: 'academicTermId', type: 'string', description: 'Academic term ID (use list_academic_terms first)', required: true },
+    ],
+    execute: async (params) => {
+      const classes = await prisma.class.findMany({
+        where: { academicTermId: params.academicTermId },
+        include: { _count: { select: { termEnrollments: { where: { status: 'ACTIVE' } } } } },
         orderBy: { gradeLevel: 'asc' },
       });
+      return classes.map(classRecord => ({
+        ...classRecord,
+        _count: { students: classRecord._count.termEnrollments },
+      }));
     },
   },
 
@@ -674,22 +777,31 @@ const tools: ToolDefinition[] = [
             }
           }
 
-          // Get already-linked subject IDs for this class
-          const existing = await prisma.class.findUnique({ where: { id: cls.id }, select: { subjects: { select: { id: true } } } });
-          const existingIds = new Set((existing?.subjects || []).map((s: any) => s.id));
-
-          const toConnect = subjectIds.filter(id => !existingIds.has(id));
-          const alreadyIds = subjectIds.filter(id => existingIds.has(id));
-
-          if (toConnect.length > 0) {
-            await prisma.class.update({
+          const assignmentResult = await runTermWriteTransaction(cls.academicTermId, 'SETUP', async tx => {
+            const current = await tx.class.findUnique({
               where: { id: cls.id },
-              data: { subjects: { connect: toConnect.map(id => ({ id })) } },
+              select: { subjects: { select: { id: true } } },
             });
-            connected.push(`${cls.name}: ${toConnect.length} subject(s) connected`);
+            if (!current) throw new Error('Class no longer exists');
+            const existingIds = new Set(current.subjects.map(subject => subject.id));
+            const uniqueSubjectIds = [...new Set(subjectIds)];
+            const toConnect = uniqueSubjectIds.filter(id => !existingIds.has(id));
+            const alreadyIds = uniqueSubjectIds.filter(id => existingIds.has(id));
+
+            if (toConnect.length > 0) {
+              await tx.class.update({
+                where: { id: cls.id },
+                data: { subjects: { connect: toConnect.map(id => ({ id })) } },
+              });
+            }
+            return { connected: toConnect.length, alreadyLinked: alreadyIds.length };
+          });
+
+          if (assignmentResult.connected > 0) {
+            connected.push(`${cls.name}: ${assignmentResult.connected} subject(s) connected`);
           }
-          if (alreadyIds.length > 0) {
-            alreadyLinked.push(`${cls.name}: ${alreadyIds.length} already assigned`);
+          if (assignmentResult.alreadyLinked > 0) {
+            alreadyLinked.push(`${cls.name}: ${assignmentResult.alreadyLinked} already assigned`);
           }
         } catch (err: any) {
           errors.push(`Assignment error: ${err.message?.split('\n').pop()}`);
@@ -708,7 +820,7 @@ const tools: ToolDefinition[] = [
     execute: async (params) => {
       const dryRun = params.dryRun !== 'false';
       const allClasses = await prisma.class.findMany({
-        select: { id: true, name: true, gradeLevel: true, subjects: { select: { id: true, name: true, code: true } } },
+        select: { id: true, name: true, gradeLevel: true, academicTermId: true, subjects: { select: { id: true, name: true, code: true } } },
         orderBy: { gradeLevel: 'asc' },
       });
 
@@ -722,10 +834,12 @@ const tools: ToolDefinition[] = [
         invalidAssignments.push(`${cls.name} (Gr${cls.gradeLevel}): ${invalidSubjects.map(s => s.code).join(', ')}`);
 
         if (!dryRun) {
-          await prisma.class.update({
-            where: { id: cls.id },
-            data: { subjects: { disconnect: invalidSubjects.map(s => ({ id: s.id })) } },
-          });
+          await runTermWriteTransaction(cls.academicTermId, 'SETUP', tx => (
+            tx.class.update({
+              where: { id: cls.id },
+              data: { subjects: { disconnect: invalidSubjects.map(s => ({ id: s.id })) } },
+            })
+          ));
           removed.push(`${cls.name}: removed ${invalidSubjects.length} subject(s)`);
         }
       }
@@ -1153,6 +1267,9 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       const subjects = await prisma.subject.findMany({ select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
 
       const invalidEntries: { subjectName: string; subjectCode: string; gradeLevel: number; topicCount: number; subtopicCount: number }[] = [];
+      let deletedTopicCount = 0;
+      let deletedSubtopicCount = 0;
+      let protectedTopicCount = 0;
 
       for (const subject of subjects) {
         const range = getSubjectGradeRange(subject.code);
@@ -1191,9 +1308,22 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
 
           if (!dryRun) {
             const topicIds = topics.map(t => t.id);
-            await prisma.subTopic.deleteMany({ where: { topicId: { in: topicIds } } });
-            await prisma.topicProgress.deleteMany({ where: { topicId: { in: topicIds } } }).catch(() => {});
-            await prisma.topic.deleteMany({ where: { id: { in: topicIds } } });
+            const protectedTopics = await prisma.topicProgress.findMany({
+              where: { topicId: { in: topicIds } },
+              select: { topicId: true },
+              distinct: ['topicId'],
+            });
+            if (protectedTopics.length > 0) {
+              protectedTopicCount += protectedTopics.length;
+              continue;
+            }
+            const deletion = await prisma.$transaction(async tx => {
+              const subtopics = await tx.subTopic.deleteMany({ where: { topicId: { in: topicIds } } });
+              const deletedTopics = await tx.topic.deleteMany({ where: { id: { in: topicIds } } });
+              return { subtopics: subtopics.count, topics: deletedTopics.count };
+            });
+            deletedTopicCount += deletion.topics;
+            deletedSubtopicCount += deletion.subtopics;
           }
         }
       }
@@ -1208,11 +1338,14 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       return {
         summary: dryRun
           ? `Found ${totalTopics} topics and ${totalSubtopics} subtopics that don't belong at their grade levels. Run with dryRun=false to delete them.`
-          : `Deleted ${totalTopics} invalid topics and ${totalSubtopics} subtopics across ${invalidEntries.length} subject-grade combos.`,
+          : `Deleted ${deletedTopicCount} invalid topics and ${deletedSubtopicCount} subtopics. ${protectedTopicCount} topics with historical progress were preserved.`,
         dryRun,
         invalidEntries: invalidEntries.map(e => `${e.subjectName} (${e.subjectCode}) at Grade ${e.gradeLevel}: ${e.topicCount} topics, ${e.subtopicCount} subtopics`),
         totalTopics,
         totalSubtopics,
+        deletedTopicCount,
+        deletedSubtopicCount,
+        protectedTopicCount,
       };
     },
   },
@@ -1302,14 +1435,25 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       const topics = await prisma.topic.findMany({ where: { subjectId, gradeLevel: gl }, select: { id: true } });
       if (topics.length === 0) return { deleted: 0, summary: 'No topics found to delete' };
 
-      // Delete subtopics first (cascade should handle this, but be safe)
-      const subResult = await prisma.subTopic.deleteMany({ where: { topicId: { in: topics.map(t => t.id) } } });
-      // Delete progress
-      await prisma.topicProgress.deleteMany({ where: { topicId: { in: topics.map(t => t.id) } } }).catch(() => {});
-      // Delete topics
-      const result = await prisma.topic.deleteMany({ where: { subjectId, gradeLevel: gl } });
+      const topicIds = topics.map(topic => topic.id);
+      const protectedTopicCount = await prisma.topicProgress.count({
+        where: { topicId: { in: topicIds } },
+      });
+      if (protectedTopicCount > 0) {
+        return {
+          error: 'Topics with historical class progress cannot be deleted',
+          protectedProgressRecords: protectedTopicCount,
+          deleted: 0,
+        };
+      }
 
-      return { deleted: result.count, subtopicsDeleted: subResult.count, summary: `Deleted ${result.count} topics and ${subResult.count} subtopics` };
+      const { subtopicsDeleted, topicsDeleted } = await prisma.$transaction(async tx => {
+        const subtopics = await tx.subTopic.deleteMany({ where: { topicId: { in: topicIds } } });
+        const deletedTopics = await tx.topic.deleteMany({ where: { id: { in: topicIds } } });
+        return { subtopicsDeleted: subtopics.count, topicsDeleted: deletedTopics.count };
+      });
+
+      return { deleted: topicsDeleted, subtopicsDeleted, summary: `Deleted ${topicsDeleted} topics and ${subtopicsDeleted} subtopics` };
     },
   },
 
@@ -1330,21 +1474,27 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
 
       const gl = Number(params.gradeLevel);
 
+      // Resolve term before class so an old class with the same grade cannot be selected.
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found. Activate a term first.' };
+
       // Resolve class
       let classId = params.classId;
       let classInfo: any = null;
       if (classId) {
-        classInfo = await prisma.class.findUnique({ where: { id: classId }, select: { id: true, name: true } });
+        classInfo = await prisma.class.findFirst({
+          where: { id: classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+          select: { id: true, name: true, academicTermId: true },
+        });
       }
       if (!classInfo) {
-        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+        classInfo = await prisma.class.findFirst({
+          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+          select: { id: true, name: true, academicTermId: true },
+        });
       }
-      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
+      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
       classId = classInfo.id;
-
-      // Resolve term
-      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
-      if (!term) return { error: 'No academic term found. Create one first.' };
 
       // Get topics with subtopics
       const topics = await prisma.topic.findMany({
@@ -1395,18 +1545,42 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
 
           const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.5, maxTokens: 1500 });
 
-          await prisma.lessonPlan.create({
-            data: {
-              title: `${subject.name}: ${topic.title}`,
-              content: aiResponse.content,
-              teacherId: userId,
-              classId,
-              subjectId: subject.id,
-              termId: term.id,
-              weekStartDate: new Date(),
-            },
+          const wasCreated = await runTermWriteTransaction(term.id, 'SETUP', async tx => {
+            const [currentClass, duplicate] = await Promise.all([
+              tx.class.findFirst({
+                where: {
+                  id: classId,
+                  academicTermId: term.id,
+                  subjects: { some: { id: subject.id } },
+                },
+                select: { id: true },
+              }),
+              tx.lessonPlan.findFirst({
+                where: {
+                  termId: term.id,
+                  subjectId: subject.id,
+                  classId,
+                  title: { contains: topic.title },
+                },
+                select: { id: true },
+              }),
+            ]);
+            if (!currentClass) throw new Error('Class or subject assignment changed while generating the lesson plan');
+            if (duplicate) return false;
+            await tx.lessonPlan.create({
+              data: {
+                title: `${subject.name}: ${topic.title}`,
+                content: aiResponse.content,
+                teacherId: userId,
+                classId,
+                subjectId: subject.id,
+                termId: term.id,
+                weekStartDate: new Date(),
+              },
+            });
+            return true;
           });
-          created.push(topic.title);
+          created.push(wasCreated ? topic.title : `${topic.title} (already exists)`);
         } catch (err: any) {
           errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
         }
@@ -1440,16 +1614,22 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
       const gl = Number(params.gradeLevel);
       const assessmentType = params.assessmentType || 'TEST';
 
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found. Activate a term first.' };
+
       let classInfo: any = params.classId
-        ? await prisma.class.findUnique({ where: { id: params.classId }, select: { id: true, name: true } })
+        ? await prisma.class.findFirst({
+            where: { id: params.classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+            select: { id: true, name: true, academicTermId: true },
+          })
         : null;
       if (!classInfo) {
-        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+        classInfo = await prisma.class.findFirst({
+          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+          select: { id: true, name: true, academicTermId: true },
+        });
       }
-      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
-
-      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
-      if (!term) return { error: 'No academic term found. Create one first.' };
+      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
 
       const topics = await prisma.topic.findMany({
         where: { subjectId: subject.id, gradeLevel: gl },
@@ -1506,55 +1686,76 @@ Requirements:
             questions = [];
           }
 
-          const assessment = await prisma.assessment.create({
-            data: {
-              title: `${assessmentType === 'QUIZ' ? 'Quiz' : assessmentType === 'EXAM' ? 'Exam' : 'Test'}: ${topic.title}`,
-              type: assessmentType as any,
-              classId: classInfo.id,
-              subjectId: subject.id,
-              termId: term.id,
-              totalMarks,
-              weight: assessmentType === 'QUIZ' ? 10 : assessmentType === 'EXAM' ? 40 : 25,
-              date: new Date(),
-              description: `AI-generated ${assessmentType.toLowerCase()} covering: ${topic.title}`,
-            },
+          const questionCreates = questions.map((q, index) => {
+            const type = q.type === 'SHORT_ANSWER'
+              ? 'SHORT_ANSWER'
+              : q.type === 'TRUE_FALSE'
+                ? 'TRUE_FALSE'
+                : q.type === 'ESSAY'
+                  ? 'ESSAY'
+                  : 'MULTIPLE_CHOICE';
+            const options = Array.isArray(q.options)
+              ? q.options.map((option: any) => {
+                  const text = typeof option === 'string' ? option : option.text || String(option);
+                  return {
+                    text,
+                    isCorrect: Boolean(q.correctAnswer)
+                      && (text.startsWith(q.correctAnswer) || text === q.correctAnswer),
+                  };
+                })
+              : [];
+            return {
+              text: q.question || q.questionText || `Question ${index + 1}`,
+              type: type as any,
+              points: q.marks || q.points || Math.round(totalMarks / questionCount),
+              correctAnswer: q.correctAnswer || null,
+              options: options.length > 0 ? { create: options } : undefined,
+            };
           });
 
-          // Save questions if parsed successfully
-          if (questions.length > 0) {
-            for (let i = 0; i < questions.length; i++) {
-              const q = questions[i];
-              const qType = q.type === 'SHORT_ANSWER' ? 'SHORT_ANSWER' : q.type === 'TRUE_FALSE' ? 'TRUE_FALSE' : q.type === 'ESSAY' ? 'ESSAY' : 'MULTIPLE_CHOICE';
-              const points = q.marks || q.points || Math.round(totalMarks / questionCount);
-
-              const question = await prisma.question.create({
-                data: {
-                  assessmentId: assessment.id,
-                  text: q.question || q.questionText || `Question ${i + 1}`,
-                  type: qType as any,
-                  points,
-                  correctAnswer: q.correctAnswer || null,
+          const wasCreated = await runTermWriteTransaction(term.id, 'ACADEMIC_ACTIVITY', async tx => {
+            const [currentClass, duplicate] = await Promise.all([
+              tx.class.findFirst({
+                where: {
+                  id: classInfo.id,
+                  academicTermId: term.id,
+                  subjects: { some: { id: subject.id } },
                 },
-              });
+                select: { id: true },
+              }),
+              tx.assessment.findFirst({
+                where: {
+                  termId: term.id,
+                  subjectId: subject.id,
+                  classId: classInfo.id,
+                  title: { contains: topic.title },
+                },
+                select: { id: true },
+              }),
+            ]);
+            if (!currentClass) throw new Error('Class or subject assignment changed while generating the assessment');
+            if (duplicate) return false;
 
-              // Create options for multiple choice / true-false
-              if (Array.isArray(q.options) && q.options.length > 0) {
-                for (const opt of q.options) {
-                  const optText = typeof opt === 'string' ? opt : opt.text || String(opt);
-                  const isCorrect = q.correctAnswer ? optText.startsWith(q.correctAnswer) || optText === q.correctAnswer : false;
-                  await prisma.questionOption.create({
-                    data: {
-                      questionId: question.id,
-                      text: optText,
-                      isCorrect,
-                    },
-                  });
-                }
-              }
-            }
-          }
+            await tx.assessment.create({
+              data: {
+                title: `${assessmentType === 'QUIZ' ? 'Quiz' : assessmentType === 'EXAM' ? 'Exam' : 'Test'}: ${topic.title}`,
+                type: assessmentType as any,
+                classId: classInfo.id,
+                subjectId: subject.id,
+                termId: term.id,
+                totalMarks,
+                weight: assessmentType === 'QUIZ' ? 10 : assessmentType === 'EXAM' ? 40 : 25,
+                date: new Date(),
+                description: `AI-generated ${assessmentType.toLowerCase()} covering: ${topic.title}`,
+                questions: questionCreates.length > 0 ? { create: questionCreates } : undefined,
+              },
+            });
+            return true;
+          });
 
-          created.push(`${topic.title} (${questions.length} questions)`);
+          created.push(wasCreated
+            ? `${topic.title} (${questions.length} questions)`
+            : `${topic.title} (already exists)`);
         } catch (err: any) {
           errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
         }
@@ -1587,16 +1788,22 @@ Requirements:
 
       const gl = Number(params.gradeLevel);
 
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found. Activate a term first.' };
+
       let classInfo: any = params.classId
-        ? await prisma.class.findUnique({ where: { id: params.classId }, select: { id: true, name: true } })
+        ? await prisma.class.findFirst({
+            where: { id: params.classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+            select: { id: true, name: true, academicTermId: true },
+          })
         : null;
       if (!classInfo) {
-        classInfo = await prisma.class.findFirst({ where: { gradeLevel: gl }, select: { id: true, name: true } });
+        classInfo = await prisma.class.findFirst({
+          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
+          select: { id: true, name: true, academicTermId: true },
+        });
       }
-      if (!classInfo) return { error: `No class found for grade ${gl}. Create classes first.` };
-
-      const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
-      if (!term) return { error: 'No academic term found. Create one first.' };
+      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
 
       const topics = await prisma.topic.findMany({
         where: { subjectId: subject.id, gradeLevel: gl },
@@ -1651,22 +1858,48 @@ Return the homework as structured text.`;
           const dueDate = new Date();
           dueDate.setDate(dueDate.getDate() + 7); // Due in 1 week
 
-          await prisma.assessment.create({
-            data: {
-              title: `Homework: ${topic.title}`,
-              type: 'HOMEWORK',
-              classId: classInfo.id,
-              subjectId: subject.id,
-              termId: term.id,
-              totalMarks: 20,
-              weight: 5,
-              date: new Date(),
-              dueDate,
-              description: aiResponse.content,
-            },
+          const wasCreated = await runTermWriteTransaction(term.id, 'ACADEMIC_ACTIVITY', async tx => {
+            const [currentClass, duplicate] = await Promise.all([
+              tx.class.findFirst({
+                where: {
+                  id: classInfo.id,
+                  academicTermId: term.id,
+                  subjects: { some: { id: subject.id } },
+                },
+                select: { id: true },
+              }),
+              tx.assessment.findFirst({
+                where: {
+                  termId: term.id,
+                  subjectId: subject.id,
+                  classId: classInfo.id,
+                  type: 'HOMEWORK',
+                  title: { contains: topic.title },
+                },
+                select: { id: true },
+              }),
+            ]);
+            if (!currentClass) throw new Error('Class or subject assignment changed while generating homework');
+            if (duplicate) return false;
+
+            await tx.assessment.create({
+              data: {
+                title: `Homework: ${topic.title}`,
+                type: 'HOMEWORK',
+                classId: classInfo.id,
+                subjectId: subject.id,
+                termId: term.id,
+                totalMarks: 20,
+                weight: 5,
+                date: new Date(),
+                dueDate,
+                description: aiResponse.content,
+              },
+            });
+            return true;
           });
 
-          created.push(topic.title);
+          created.push(wasCreated ? topic.title : `${topic.title} (already exists)`);
         } catch (err: any) {
           errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
         }
@@ -1767,31 +2000,36 @@ Return the homework as structured text.`;
       // Find default term if not provided
       let defaultTermId = templates?.[0]?.academicTermId;
       if (!defaultTermId) {
-        const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
+        const term = await getActiveTerm();
         defaultTermId = term?.id;
+      }
+      if (!defaultTermId) {
+        return { error: 'No active academic term found. Activate a term first.' };
       }
       const created = [];
       const existing = [];
       const errors: string[] = [];
       for (const t of templates) {
         try {
-          // Check if a template with this name already exists for this term
-          const existingTmpl = await prisma.feeTemplate.findFirst({
-            where: { name: t.name, academicTermId: t.academicTermId || defaultTermId },
+          const academicTermId = t.academicTermId || defaultTermId;
+          const outcome = await runTermWriteTransaction(academicTermId, 'SETUP', async tx => {
+            const existingTmpl = await tx.feeTemplate.findFirst({
+              where: { name: t.name, academicTermId },
+            });
+            if (existingTmpl) return { kind: 'EXISTING' as const, value: existingTmpl };
+
+            const tmpl = await tx.feeTemplate.create({
+              data: {
+                name: t.name,
+                amount: t.amount,
+                academicTermId,
+                applicableGrade: t.applicableGrade || 1,
+              },
+            });
+            return { kind: 'CREATED' as const, value: tmpl };
           });
-          if (existingTmpl) {
-            existing.push(existingTmpl);
-            continue;
-          }
-          const tmpl = await prisma.feeTemplate.create({
-            data: {
-              name: t.name,
-              amount: t.amount,
-              academicTermId: t.academicTermId || defaultTermId,
-              applicableGrade: t.applicableGrade || 1,
-            },
-          });
-          created.push(tmpl);
+          if (outcome.kind === 'EXISTING') existing.push(outcome.value);
+          else created.push(outcome.value);
         } catch (err: any) {
           errors.push(`Fee "${t.name}": ${err.message?.split('\n').pop()}`);
         }
@@ -1812,9 +2050,9 @@ Return the homework as structured text.`;
   // ===================== ACADEMIC TERMS =====================
   {
     name: 'create_academic_terms',
-    description: 'Create academic terms/semesters for the school year.',
+    description: 'Create academic terms/semesters for the school year. Terms are created as drafts; the active term is set only in Settings.',
     parameters: [
-      { name: 'terms', type: 'array', description: 'Array of: name, startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), isActive (boolean, optional)', required: true },
+      { name: 'terms', type: 'array', description: 'Array of: name, startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)', required: true },
     ],
     execute: async (params) => {
       const terms = params.terms as any[];
@@ -1829,13 +2067,10 @@ Return the homework as structured text.`;
             existing.push(existingTerm);
             continue;
           }
-          const term = await prisma.academicTerm.create({
-            data: {
-              name: t.name,
-              startDate: new Date(t.startDate),
-              endDate: new Date(t.endDate),
-              isActive: t.isActive || false,
-            },
+          const term = await createLifecycleTerm({
+            name: t.name,
+            startDate: new Date(t.startDate),
+            endDate: new Date(t.endDate),
           });
           created.push(term);
         } catch (err: any) {
@@ -1868,17 +2103,30 @@ Return the homework as structured text.`;
       const errors: string[] = [];
       for (const a of assessments) {
         try {
-          const assessment = await prisma.assessment.create({
-            data: {
-              title: a.title,
-              type: a.type || 'TEST',
-              classId: a.classId,
-              subjectId: a.subjectId,
-              termId: a.termId,
-              date: new Date(a.date),
-              totalMarks: a.totalMarks || 100,
-              weight: a.weight || 25,
-            },
+          const assessment = await runTermWriteTransaction(a.termId, 'ACADEMIC_ACTIVITY', async tx => {
+            const classInfo = await tx.class.findFirst({
+              where: {
+                id: a.classId,
+                academicTermId: a.termId,
+                subjects: { some: { id: a.subjectId } },
+              },
+              select: { id: true },
+            });
+            if (!classInfo) {
+              throw new Error('Class does not belong to the term or subject is not assigned to the class');
+            }
+            return tx.assessment.create({
+              data: {
+                title: a.title,
+                type: a.type || 'TEST',
+                classId: a.classId,
+                subjectId: a.subjectId,
+                termId: a.termId,
+                date: new Date(a.date),
+                totalMarks: a.totalMarks || 100,
+                weight: a.weight || 25,
+              },
+            });
           });
           created.push(assessment);
         } catch (err: any) {
@@ -1901,29 +2149,72 @@ Return the homework as structured text.`;
       // Find default term
       let defaultTermId = periods?.[0]?.academicTermId;
       if (!defaultTermId) {
-        const term = await prisma.academicTerm.findFirst({ where: { isActive: true } }) || await prisma.academicTerm.findFirst({ orderBy: { startDate: 'desc' } });
+        const term = await getActiveTerm();
         defaultTermId = term?.id;
       }
       const created = [];
       const errors: string[] = [];
       for (const p of periods) {
         try {
-          const period = await prisma.timetablePeriod.create({
-            data: {
-              dayOfWeek: p.dayOfWeek,
-              startTime: p.startTime,
-              endTime: p.endTime,
-              subjectId: p.subjectId,
-              teacherId: p.teacherId,
-              academicTermId: p.academicTermId || defaultTermId,
-            },
-          });
-          // Link to class
-          if (p.classId) {
-            await prisma.timetablePeriodClass.create({
-              data: { timetablePeriodId: period.id, classId: p.classId },
-            });
+          const academicTermId = p.academicTermId || defaultTermId;
+          if (!academicTermId) throw new Error('No academic term was provided and no term is active');
+          if (!p.classId) throw new Error('classId is required');
+          if (!hasValidTimeRange(p.startTime, p.endTime)) {
+            throw new Error('End time must be after start time');
           }
+
+          const period = await runTermWriteTransaction(academicTermId, 'SETUP', async tx => {
+            const [classInfo, allocation, teacherConflict, classConflict] = await Promise.all([
+              tx.class.findFirst({
+                where: {
+                  id: p.classId,
+                  academicTermId,
+                  subjects: { some: { id: p.subjectId } },
+                },
+                select: { id: true },
+              }),
+              tx.teacherSubject.findFirst({
+                where: { classId: p.classId, subjectId: p.subjectId, teacherId: p.teacherId },
+                select: { id: true },
+              }),
+              tx.timetablePeriod.findFirst({
+                where: {
+                  teacherId: p.teacherId,
+                  dayOfWeek: p.dayOfWeek,
+                  academicTermId,
+                  startTime: { lt: p.endTime },
+                  endTime: { gt: p.startTime },
+                },
+                select: { id: true },
+              }),
+              tx.timetablePeriod.findFirst({
+                where: {
+                  dayOfWeek: p.dayOfWeek,
+                  academicTermId,
+                  startTime: { lt: p.endTime },
+                  endTime: { gt: p.startTime },
+                  classes: { some: { classId: p.classId } },
+                },
+                select: { id: true },
+              }),
+            ]);
+            if (!classInfo) throw new Error('Class does not belong to the term or subject is not assigned');
+            if (!allocation) throw new Error('Teacher is not assigned to this subject and class');
+            if (teacherConflict) throw new Error('Teacher is already booked for this time slot');
+            if (classConflict) throw new Error('Class already has a period in this time slot');
+
+            return tx.timetablePeriod.create({
+              data: {
+                dayOfWeek: p.dayOfWeek,
+                startTime: p.startTime,
+                endTime: p.endTime,
+                subjectId: p.subjectId,
+                teacherId: p.teacherId,
+                academicTermId,
+                classes: { create: { classId: p.classId } },
+              },
+            });
+          });
           created.push(period);
         } catch (err: any) {
           errors.push(`Period ${p.dayOfWeek} ${p.startTime}-${p.endTime}: ${err.message?.split('\n').pop()}`);
@@ -2179,7 +2470,19 @@ Return the homework as structured text.`;
       const payments = await prisma.payment.findMany({
         where,
         include: {
-          student: { select: { firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } } },
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              admissionNumber: true,
+              termEnrollments: {
+                select: {
+                  academicTermId: true,
+                  class: { select: { name: true } },
+                },
+              },
+            },
+          },
           allocations: { include: { studentFee: { include: { feeTemplate: { select: { name: true } } } } } },
         },
         orderBy: { paymentDate: 'desc' },
@@ -2190,7 +2493,10 @@ Return the homework as structured text.`;
         payments: payments.map(p => ({
           transactionId: p.transactionId,
           student: `${p.student.firstName} ${p.student.lastName} (${p.student.admissionNumber})`,
-          class: p.student.class?.name || 'N/A',
+          class: p.student.termEnrollments.find(
+            enrollment => enrollment.academicTermId === p.academicTermId,
+          )?.class.name || 'Not placed in payment term',
+          academicTermId: p.academicTermId,
           amount: Number(p.amount),
           method: p.method,
           status: p.status,
@@ -2320,7 +2626,18 @@ Return the homework as structured text.`;
             { admissionNumber: { equals: params.studentQuery } },
           ],
         },
-        select: { id: true, firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          admissionNumber: true,
+          termEnrollments: {
+            select: {
+              academicTermId: true,
+              class: { select: { name: true } },
+            },
+          },
+        },
         take: 5,
       });
 
@@ -2330,6 +2647,9 @@ Return the homework as structured text.`;
 
       // If multiple matches, get history for the best match
       const student = students[0];
+      const placementByTerm = new Map(
+        student.termEnrollments.map(enrollment => [enrollment.academicTermId, enrollment.class]),
+      );
       const paymentWhere: any = { studentId: student.id };
       if (params.status) paymentWhere.status = params.status;
 
@@ -2359,7 +2679,10 @@ Return the homework as structured text.`;
         student: {
           name: `${student.firstName} ${student.lastName}`,
           admissionNumber: student.admissionNumber,
-          class: student.class?.name || 'N/A',
+          placements: student.termEnrollments.map(enrollment => ({
+            academicTermId: enrollment.academicTermId,
+            class: enrollment.class.name,
+          })),
         },
         financialSummary: {
           totalFeesDue: totalDue,
@@ -2368,6 +2691,8 @@ Return the homework as structured text.`;
           transactionCount: payments.length,
         },
         feeBalances: feeStructures.map(f => ({
+          academicTermId: f.academicTermId,
+          class: placementByTerm.get(f.academicTermId)?.name || 'Not placed in fee term',
           feeItem: f.feeTemplate.name,
           amountDue: Number(f.amountDue),
           amountPaid: Number(f.amountPaid),
@@ -2375,6 +2700,8 @@ Return the homework as structured text.`;
         })),
         transactions: payments.map(p => ({
           transactionId: p.transactionId,
+          academicTermId: p.academicTermId,
+          class: placementByTerm.get(p.academicTermId)?.name || 'Not placed in payment term',
           amount: Number(p.amount),
           method: p.method,
           status: p.status,
@@ -2396,8 +2723,9 @@ Return the homework as structured text.`;
 
   {
     name: 'get_student_fee_balances',
-    description: 'Get fee balance status for students — who has paid, who has outstanding balances, which fee items are unpaid. Can filter by class/grade, or show only students with overdue balances. Great for identifying defaulters or checking collection rates.',
+    description: 'Get fee balance status for students in one academic term — who has paid, who has outstanding balances, and which fee items are unpaid.',
     parameters: [
+      { name: 'academicTermId', type: 'string', description: 'Academic term ID (use list_academic_terms first)', required: true },
       { name: 'classId', type: 'string', description: 'Filter by class ID (use list_classes first to get IDs)' },
       { name: 'className', type: 'string', description: 'Filter by class name (e.g. "Grade 1", "10A")' },
       { name: 'onlyWithBalance', type: 'string', description: 'Set to "true" to show only students with outstanding balances', enum: ['true', 'false'] },
@@ -2405,16 +2733,23 @@ Return the homework as structured text.`;
     ],
     execute: async (params) => {
       const studentWhere: any = { status: 'ACTIVE' };
-      if (params.classId) studentWhere.classId = params.classId;
+      const placementWhere: any = { academicTermId: params.academicTermId };
+      if (params.classId) placementWhere.classId = params.classId;
       if (params.className) {
-        studentWhere.class = { name: { contains: params.className, mode: 'insensitive' } };
+        placementWhere.class = { name: { contains: params.className, mode: 'insensitive' } };
       }
+      studentWhere.termEnrollments = { some: placementWhere };
 
       const students = await prisma.student.findMany({
         where: studentWhere,
         include: {
-          class: { select: { name: true } },
+          termEnrollments: {
+            where: { academicTermId: params.academicTermId },
+            include: { class: { select: { name: true } } },
+            take: 1,
+          },
           feeStructures: {
+            where: { academicTermId: params.academicTermId },
             include: { feeTemplate: { select: { name: true } } },
           },
         },
@@ -2423,6 +2758,7 @@ Return the homework as structured text.`;
       });
 
       const results = students.map(s => {
+        const placement = s.termEnrollments[0];
         const fees = s.feeStructures.map(f => ({
           feeItem: f.feeTemplate.name,
           amountDue: Number(f.amountDue),
@@ -2434,7 +2770,8 @@ Return the homework as structured text.`;
         return {
           name: `${s.firstName} ${s.lastName}`,
           admissionNumber: s.admissionNumber,
-          class: s.class?.name || 'N/A',
+          academicTermId: params.academicTermId,
+          class: placement?.class.name || 'Not placed in term',
           totalDue,
           totalPaid,
           outstandingBalance: totalDue - totalPaid,
@@ -2471,8 +2808,9 @@ Return the homework as structured text.`;
 
   {
     name: 'get_invoice_summary',
-    description: 'Get a summary of all invoices — counts and totals by status (DRAFT/SENT/PARTIALLY_PAID/PAID/OVERDUE/CANCELLED), overdue invoices, and recent invoice activity. Useful for accounts receivable reporting.',
+    description: 'Get an invoice summary for one academic term — counts and totals by status, overdue invoices, and recent activity.',
     parameters: [
+      { name: 'academicTermId', type: 'string', description: 'Academic term ID (use list_academic_terms first)', required: true },
       { name: 'status', type: 'string', description: 'Filter by invoice status', enum: ['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED', 'CREDITED'] },
       { name: 'startDate', type: 'string', description: 'Filter from issue date (YYYY-MM-DD)' },
       { name: 'endDate', type: 'string', description: 'Filter to issue date (YYYY-MM-DD)' },
@@ -2480,7 +2818,8 @@ Return the homework as structured text.`;
       { name: 'limit', type: 'number', description: 'Max invoices to return (default 20)' },
     ],
     execute: async (params) => {
-      const where: any = {};
+      const termScope = { termId: params.academicTermId };
+      const where: any = { ...termScope };
       if (params.status) where.status = params.status;
       if (params.startDate || params.endDate) {
         where.issueDate = {};
@@ -2500,20 +2839,32 @@ Return the homework as structured text.`;
       // Status breakdown (overall)
       const statusBreakdown = await prisma.invoice.groupBy({
         by: ['status'],
+        where: termScope,
         _count: { id: true },
         _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
       });
 
       // Overdue invoices
       const overdueCount = await prisma.invoice.count({
-        where: { status: { in: ['SENT', 'PARTIALLY_PAID'] }, dueDate: { lt: new Date() } },
+        where: { ...termScope, status: { in: ['SENT', 'PARTIALLY_PAID'] }, dueDate: { lt: new Date() } },
       });
 
       // Filtered invoices list
       const invoices = await prisma.invoice.findMany({
         where,
         include: {
-          student: { select: { firstName: true, lastName: true, admissionNumber: true, class: { select: { name: true } } } },
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              admissionNumber: true,
+              termEnrollments: {
+                where: { academicTermId: params.academicTermId },
+                select: { class: { select: { name: true } } },
+                take: 1,
+              },
+            },
+          },
           items: { select: { description: true, amount: true } },
         },
         orderBy: { issueDate: 'desc' },
@@ -2534,7 +2885,8 @@ Return the homework as structured text.`;
         invoices: invoices.map(inv => ({
           invoiceNumber: inv.invoiceNumber,
           student: `${inv.student.firstName} ${inv.student.lastName} (${inv.student.admissionNumber})`,
-          class: inv.student.class?.name || 'N/A',
+          academicTermId: inv.termId,
+          class: inv.student.termEnrollments[0]?.class.name || 'Not placed in invoice term',
           issueDate: inv.issueDate.toISOString().split('T')[0],
           dueDate: inv.dueDate.toISOString().split('T')[0],
           totalAmount: Number(inv.totalAmount),

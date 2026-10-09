@@ -10,10 +10,13 @@ import * as metrics from '../services/metricsService';
 
 export const getAnalyticsDashboard = async (req: AuthRequest, res: Response) => {
   try {
-    const { period = '30' } = req.query; // days
+    const { period = '30', academicTermId } = req.query; // days
+    const term = await getRequiredAcademicTerm(academicTermId);
+    if (!term) return res.status(400).json({ error: 'A valid academicTermId is required' });
     const days = parseInt(period as string) || 30;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
+    const effectiveStartDate = startDate > term.startDate ? startDate : term.startDate;
 
     // Parallel data fetching for performance
     const [
@@ -23,11 +26,11 @@ export const getAnalyticsDashboard = async (req: AuthRequest, res: Response) => 
       academicData,
       riskData,
     ] = await Promise.all([
-      getEnrollmentTrends(days),
-      getRevenueTrends(startDate),
-      getAttendanceTrends(startDate),
-      getAcademicPerformance(),
-      getRiskSummary(),
+      getEnrollmentTrends(term.id),
+      getRevenueTrends(effectiveStartDate, term.id),
+      getAttendanceTrends(effectiveStartDate, term.id),
+      getAcademicPerformance(term.id),
+      getRiskSummary(term.id),
     ]);
 
     res.json({
@@ -46,18 +49,23 @@ export const getAnalyticsDashboard = async (req: AuthRequest, res: Response) => 
 
 export const getRevenueAnalytics = async (req: AuthRequest, res: Response) => {
   try {
-    const { startDate, endDate, groupBy = 'day' } = req.query;
+    const { startDate, endDate, groupBy = 'day', academicTermId } = req.query;
+    const term = await getRequiredAcademicTerm(academicTermId);
+    if (!term) return res.status(400).json({ error: 'A valid academicTermId is required' });
 
-    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const end = endDate ? new Date(endDate as string) : new Date();
+    const requestedStart = startDate ? new Date(startDate as string) : term.startDate;
+    const requestedEnd = endDate ? new Date(endDate as string) : term.endDate;
+    if (Number.isNaN(requestedStart.getTime()) || Number.isNaN(requestedEnd.getTime())) {
+      return res.status(400).json({ error: 'Invalid analytics date range' });
+    }
+    const start = requestedStart > term.startDate ? requestedStart : term.startDate;
+    const end = requestedEnd < term.endDate ? requestedEnd : term.endDate;
 
     const payments = await prisma.payment.findMany({
       where: {
+        academicTermId: term.id,
         paymentDate: { gte: start, lte: end },
         status: 'COMPLETED',
-      },
-      include: {
-        student: { include: { class: true } },
       },
       orderBy: { paymentDate: 'asc' },
     });
@@ -98,7 +106,9 @@ export const getRevenueAnalytics = async (req: AuthRequest, res: Response) => {
     const methodDistribution = Array.from(methodMap.entries()).map(([method, amount]) => ({
       method,
       amount: Math.round(amount * 100) / 100,
-      percentage: Math.round((amount / payments.reduce((s, p) => s + Number(p.amount), 0)) * 100),
+      percentage: payments.length > 0
+        ? Math.round((amount / payments.reduce((s, p) => s + Number(p.amount), 0)) * 100)
+        : 0,
     }));
 
     // Total summary
@@ -121,16 +131,12 @@ export const getRevenueAnalytics = async (req: AuthRequest, res: Response) => {
 
 export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Response) => {
   try {
-    const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
-    if (!activeTerm) return res.json({ message: 'No active term' });
+    const term = await getRequiredAcademicTerm(req.query.academicTermId);
+    if (!term) return res.status(400).json({ error: 'A valid academicTermId is required' });
 
     const records = await prisma.attendance.findMany({
-      where: {
-        date: { gte: activeTerm.startDate, lte: new Date() },
-      },
-      include: {
-        student: { include: { class: true } },
-      },
+      where: { academicTermId: term.id },
+      include: { class: true },
     });
 
     // Overall attendance rate
@@ -141,7 +147,7 @@ export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Res
     // By class
     const classStats = new Map<string, { name: string; total: number; present: number }>();
     records.forEach(r => {
-      const className = r.student?.class?.name || 'Unknown';
+      const className = r.class?.name || 'Unknown';
       const classId = r.classId;
       if (!classStats.has(classId)) classStats.set(classId, { name: className, total: 0, present: 0 });
       const stats = classStats.get(classId)!;
@@ -157,8 +163,9 @@ export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Res
     })).sort((a, b) => a.attendanceRate - b.attendanceRate);
 
     // Daily trend for last 30 days
-    const thirtyDaysAgo = new Date();
+    const thirtyDaysAgo = new Date(term.endDate < new Date() ? term.endDate : new Date());
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    if (thirtyDaysAgo < term.startDate) thirtyDaysAgo.setTime(term.startDate.getTime());
 
     const recentRecords = records.filter(r => r.date >= thirtyDaysAgo);
     const dailyMap = new Map<string, { total: number; present: number }>();
@@ -181,7 +188,7 @@ export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Res
     let alertsCount = 0;
     try {
       alertsCount = await (prisma as any).attendanceAlert.count({
-        where: { isResolved: false },
+        where: { academicTermId: term.id, isResolved: false },
       });
     } catch { /* table may not exist yet */ }
 
@@ -200,9 +207,9 @@ export const getAttendanceAnalyticsDashboard = async (req: AuthRequest, res: Res
 
 export const getSchoolHealthDashboard = async (req: AuthRequest, res: Response) => {
   try {
-    const health = await metrics.getSchoolHealthSnapshot();
-
-    const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
+    const term = await getRequiredAcademicTerm(req.query.academicTermId);
+    if (!term) return res.status(400).json({ error: 'A valid academicTermId is required' });
+    const health = await metrics.getSchoolHealthSnapshot(term.id);
 
     // Generate text insights from canonical numbers
     const insights = generateHealthInsights({
@@ -223,7 +230,7 @@ export const getSchoolHealthDashboard = async (req: AuthRequest, res: Response) 
         feeCollectionRate: health.fees.collectionRatePercent,
         weeklyAttendanceRate: health.attendance.ratePercent,
         atRiskStudents: health.risk.critical + health.risk.high,
-        currentTerm: activeTerm?.name || 'N/A',
+        currentTerm: term.name,
       },
       insights,
     });
@@ -237,32 +244,42 @@ export const getSchoolHealthDashboard = async (req: AuthRequest, res: Response) 
 // Helper Functions
 // ==========================================
 
-async function getEnrollmentTrends(days: number) {
-  const statusCounts = await prisma.student.groupBy({
-    by: ['status'],
-    _count: true,
-  });
-
-  const byGrade = await prisma.class.findMany({
-    include: { _count: { select: { students: true } } },
+async function getEnrollmentTrends(academicTermId: string) {
+  const classes = await prisma.class.findMany({
+    where: { academicTermId },
+    select: {
+      id: true,
+      name: true,
+      gradeLevel: true,
+      termEnrollments: { select: { studentId: true, status: true } },
+    },
     orderBy: { gradeLevel: 'asc' },
+  });
+  const studentsByClass = new Map(classes.map(classRecord => [
+    classRecord.id,
+    new Set(classRecord.termEnrollments.map(enrollment => enrollment.studentId)),
+  ]));
+  const statusCountMap = new Map<string, number>();
+  classes.flatMap(classRecord => classRecord.termEnrollments).forEach(enrollment => {
+    statusCountMap.set(enrollment.status, (statusCountMap.get(enrollment.status) || 0) + 1);
   });
 
   return {
-    byStatus: statusCounts.map(s => ({ status: s.status, count: s._count })),
-    byGrade: byGrade.map(c => ({
+    byStatus: [...statusCountMap].map(([status, count]) => ({ status, count })),
+    byGrade: classes.map(c => ({
       className: c.name,
       gradeLevel: c.gradeLevel,
-      students: c._count.students,
+      students: studentsByClass.get(c.id)?.size || 0,
     })),
-    total: statusCounts.reduce((sum, s) => sum + s._count, 0),
+    total: [...statusCountMap.values()].reduce((sum, count) => sum + count, 0),
   };
 }
 
-async function getRevenueTrends(startDate: Date) {
+async function getRevenueTrends(startDate: Date, academicTermId: string) {
   const payments = await prisma.payment.findMany({
     where: {
       paymentDate: { gte: startDate },
+      academicTermId,
       status: 'COMPLETED',
     },
     orderBy: { paymentDate: 'asc' },
@@ -288,9 +305,9 @@ async function getRevenueTrends(startDate: Date) {
   };
 }
 
-async function getAttendanceTrends(startDate: Date) {
+async function getAttendanceTrends(startDate: Date, academicTermId: string) {
   const records = await prisma.attendance.findMany({
-    where: { date: { gte: startDate } },
+    where: { academicTermId, date: { gte: startDate } },
   });
 
   const total = records.length;
@@ -307,12 +324,9 @@ async function getAttendanceTrends(startDate: Date) {
   };
 }
 
-async function getAcademicPerformance() {
-  const activeTerm = await prisma.academicTerm.findFirst({ where: { isActive: true } });
-  if (!activeTerm) return { averageScore: 0, passRate: 0, subjectPerformance: [] };
-
+async function getAcademicPerformance(academicTermId: string) {
   const results = await prisma.termResult.findMany({
-    where: { termId: activeTerm.id },
+    where: { termId: academicTermId },
     include: { subject: true },
   });
 
@@ -343,10 +357,11 @@ async function getAcademicPerformance() {
   };
 }
 
-async function getRiskSummary() {
+async function getRiskSummary(academicTermId: string) {
   try {
     const riskCounts = await (prisma as any).studentRiskAssessment.groupBy({
       by: ['riskLevel'],
+      where: { termId: academicTermId },
       _count: true,
     });
 
@@ -357,6 +372,11 @@ async function getRiskSummary() {
   } catch {
     return { byLevel: [], total: 0 };
   }
+}
+
+async function getRequiredAcademicTerm(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return prisma.academicTerm.findUnique({ where: { id: value } });
 }
 
 function generateHealthInsights(data: {

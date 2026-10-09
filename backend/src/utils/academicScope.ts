@@ -1,4 +1,10 @@
 import { AuthRequest } from '../middleware/authMiddleware';
+import {
+  assertStudentsEnrolledInClass,
+  getStudentPlacementForTerm,
+  type PlacementClient,
+  StudentPlacementError,
+} from '../services/studentPlacementService';
 import { prisma } from './prisma';
 
 export class AcademicScopeError extends Error {
@@ -15,6 +21,7 @@ export const ensureAcademicClassAccess = async (
   classId: string,
   options?: {
     subjectId?: string;
+    academicTermId?: string;
   }
 ) => {
   const user = req.user;
@@ -26,11 +33,16 @@ export const ensureAcademicClassAccess = async (
     where: { id: classId },
     include: {
       subjects: { select: { id: true, name: true, code: true } },
+      academicTerm: { select: { id: true, name: true, status: true, startDate: true, endDate: true } },
     },
   });
 
   if (!classInfo) {
     throw new AcademicScopeError(404, 'Class not found');
+  }
+
+  if (options?.academicTermId && classInfo.academicTermId !== options.academicTermId) {
+    throw new AcademicScopeError(400, 'Selected class does not belong to the requested academic term');
   }
 
   if (user.role !== 'SUPER_ADMIN' && user.branchId && classInfo.branchId && classInfo.branchId !== user.branchId) {
@@ -46,11 +58,14 @@ export const ensureAcademicClassAccess = async (
 
   if (user.role === 'STUDENT') {
     const student = await prisma.student.findFirst({
-      where: { userId: user.userId, classId },
+      where: { userId: user.userId },
       select: { id: true },
     });
 
-    if (!student) {
+    const placement = student
+      ? await getStudentPlacementForTerm(student.id, classInfo.academicTermId)
+      : null;
+    if (!placement || placement.classId !== classId) {
       throw new AcademicScopeError(403, 'You do not have access to this class');
     }
 
@@ -58,9 +73,13 @@ export const ensureAcademicClassAccess = async (
   }
 
   if (user.role === 'PARENT') {
-    const childInClass = await prisma.student.findFirst({
-      where: { parentId: user.userId, classId },
-      select: { id: true },
+    const childInClass = await prisma.studentTermEnrollment.findFirst({
+      where: {
+        classId,
+        academicTermId: classInfo.academicTermId,
+        student: { parentId: user.userId },
+      },
+      select: { studentId: true },
     });
 
     if (!childInClass) {
@@ -89,7 +108,11 @@ export const ensureAcademicClassAccess = async (
   return classInfo;
 };
 
-export const ensureStudentRecordAccess = async (req: AuthRequest, studentId: string) => {
+export const ensureStudentRecordAccess = async (
+  req: AuthRequest,
+  studentId: string,
+  options?: { academicTermId?: string },
+) => {
   const user = req.user;
   if (!user) {
     throw new AcademicScopeError(401, 'Unauthorized');
@@ -99,7 +122,6 @@ export const ensureStudentRecordAccess = async (req: AuthRequest, studentId: str
     where: { id: studentId },
     select: {
       id: true,
-      classId: true,
       parentId: true,
       userId: true,
       branchId: true,
@@ -133,34 +155,46 @@ export const ensureStudentRecordAccess = async (req: AuthRequest, studentId: str
   }
 
   if (user.role === 'TEACHER') {
-    await ensureAcademicClassAccess(req, student.classId);
+    if (!options?.academicTermId) {
+      throw new AcademicScopeError(400, 'Academic term ID is required for teacher student access');
+    }
+    const placement = await getStudentPlacementForTerm(student.id, options.academicTermId);
+    if (!placement) {
+      throw new AcademicScopeError(403, 'Student has no placement in the requested academic term');
+    }
+    await ensureAcademicClassAccess(req, placement.classId, {
+      academicTermId: options.academicTermId,
+    });
   }
 
   return student;
 };
 
-export const ensureStudentsBelongToClass = async (classId: string, studentIds: string[]) => {
-  const uniqueStudentIds = [...new Set(studentIds)];
-  if (uniqueStudentIds.length === 0) {
-    return;
-  }
-
-  const count = await prisma.student.count({
-    where: {
-      id: { in: uniqueStudentIds },
-      classId,
-    },
-  });
-
-  if (count !== uniqueStudentIds.length) {
-    throw new AcademicScopeError(400, 'One or more students do not belong to the selected class');
+export const ensureStudentsBelongToClass = async (
+  classId: string,
+  academicTermId: string,
+  studentIds: string[],
+  options: { client?: PlacementClient } = {},
+) => {
+  try {
+    await assertStudentsEnrolledInClass(classId, academicTermId, studentIds, {
+      client: options.client,
+    });
+  } catch (error) {
+    if (error instanceof StudentPlacementError) {
+      throw new AcademicScopeError(error.status, error.message);
+    }
+    throw error;
   }
 };
 
 export const ensureTopicMatchesClassGrade = async (topicId: string, classId: string) => {
   const [topic, classInfo] = await Promise.all([
-    prisma.topic.findUnique({ where: { id: topicId }, select: { id: true, gradeLevel: true } }),
-    prisma.class.findUnique({ where: { id: classId }, select: { id: true, gradeLevel: true } }),
+    prisma.topic.findUnique({ where: { id: topicId }, select: { id: true, gradeLevel: true, subjectId: true } }),
+    prisma.class.findUnique({
+      where: { id: classId },
+      select: { id: true, gradeLevel: true, subjects: { select: { id: true } } },
+    }),
   ]);
 
   if (!topic) {
@@ -173,6 +207,10 @@ export const ensureTopicMatchesClassGrade = async (topicId: string, classId: str
 
   if (topic.gradeLevel !== classInfo.gradeLevel) {
     throw new AcademicScopeError(400, 'This topic does not belong to the selected class grade level');
+  }
+
+  if (!classInfo.subjects.some((subject) => subject.id === topic.subjectId)) {
+    throw new AcademicScopeError(400, 'This topic subject is not assigned to the selected class');
   }
 
   return { topic, classInfo };

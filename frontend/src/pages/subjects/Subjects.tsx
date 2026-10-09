@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  BookOpen, Plus, Trash2, Edit2, Save, X, Search, Upload,
+  BookOpen, Plus, Trash2, Edit2, Save, X, Upload,
   ChevronRight, ChevronDown, Layers, ListTree, GraduationCap,
   ArrowLeft, Target, Clock, Loader2, AlertCircle, FileText,
   Printer, BarChart3, ClipboardList, PenLine, Sparkles,
@@ -10,6 +10,7 @@ import syllabusService, {
   SubjectSyllabusOverview, Topic, SubTopic, parseLearningObjectives,
 } from '../../services/syllabusService';
 import BulkImportModal from '../../components/BulkImportModal';
+import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import LessonPlanner from '../academics/LessonPlanner';
 import Assessments from '../academics/Assessments';
 import HomeworkManagement from '../academics/HomeworkManagement';
@@ -63,6 +64,8 @@ const Subjects = () => {
   const [overview, setOverview] = useState<SubjectSyllabusOverview[]>([]);
   const [loadingOverview, setLoadingOverview] = useState(true);
   const [search, setSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [draftSearch, setDraftSearch] = useState('');
 
   /* ---- Subject CRUD ---- */
   const [showSubjectModal, setShowSubjectModal] = useState(false);
@@ -411,6 +414,17 @@ const Subjects = () => {
     s.code.toLowerCase().includes(search.toLowerCase())
   );
 
+  const openFilters = () => {
+    setDraftSearch(search);
+    setShowFilters(true);
+  };
+
+  const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSearch(draftSearch.trim());
+    setShowFilters(false);
+  };
+
   /* ==========================================
      RENDER — SUBJECT DRILL-DOWN
      ========================================== */
@@ -423,7 +437,7 @@ const Subjects = () => {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
           <div className="flex items-center gap-3">
-            <button onClick={goBack} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition">
+            <button onClick={goBack} className="p-2 rounded-lg hover:bg-surface-hover transition">
               <ArrowLeft size={20} className="text-gray-500 dark:text-gray-400" />
             </button>
             <span className="text-2xl">{subjectIcon(selectedSubject.name)}</span>
@@ -501,14 +515,14 @@ const Subjects = () => {
                 {generatingAI ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                 {generatingAI ? 'Generating...' : 'AI Generate Syllabus'}
               </button>
-              <button onClick={expandAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition">Expand All</button>
-              <button onClick={collapseAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition">Collapse All</button>
+              <button onClick={expandAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition">Expand All</button>
+              <button onClick={collapseAll} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition">Collapse All</button>
             </div>
           )}
           {activeView === 'outline' && (
             <button
               onClick={() => window.print()}
-              className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition"
+              className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-surface-hover transition"
             >
               <Printer size={14} /> Print Outline
             </button>
@@ -530,7 +544,7 @@ const Subjects = () => {
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
                       active
                         ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
+                        : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-surface-hover-strong'
                     }`}
                   >
                     {gradeLabel(gl)}
@@ -657,8 +671,8 @@ const Subjects = () => {
                                       <textarea value={editSubObjectives} onChange={e => setEditSubObjectives(e.target.value)} placeholder="Learning objectives (one per line)" rows={3}
                                         className="mt-2 w-full px-2 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                                       <div className="flex justify-end gap-2 mt-2">
-                                        <button onClick={() => setEditingSubId(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
-                                        <button onClick={() => handleEditSubTopic(st.id)} disabled={saving} className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                        <button onClick={() => setEditingSubId(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
+                                        <button onClick={() => handleEditSubTopic(st.id)} disabled={saving} className="text-xs px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50">
                                           {saving ? 'Saving...' : 'Save'}
                                         </button>
                                       </div>
@@ -667,7 +681,7 @@ const Subjects = () => {
                                 }
 
                                 return (
-                                  <div key={st.id} className="px-6 py-3 hover:bg-white dark:hover:bg-slate-750 transition group/sub">
+                                  <div key={st.id} className="px-6 py-3 hover:bg-surface-hover transition group/sub">
                                     <div className="flex items-start gap-3">
                                       <div className="mt-0.5 flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold flex-shrink-0">
                                         {stIdx + 1}
@@ -720,9 +734,9 @@ const Subjects = () => {
                               <textarea value={newSubObjectives} onChange={e => setNewSubObjectives(e.target.value)} placeholder="Learning objectives (one per line)" rows={3}
                                 className="mt-2 w-full px-2 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                               <div className="flex justify-end gap-2 mt-2">
-                                <button onClick={() => setAddingSubTopicFor(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
+                                <button onClick={() => setAddingSubTopicFor(null)} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
                                 <button onClick={() => handleAddSubTopic(topic.id)} disabled={saving || !newSubTitle.trim()}
-                                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                  className="text-xs px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50">
                                   {saving ? 'Adding...' : 'Add SubTopic'}
                                 </button>
                               </div>
@@ -755,8 +769,8 @@ const Subjects = () => {
                 <textarea value={newTopicDesc} onChange={e => setNewTopicDesc(e.target.value)} placeholder="Description (optional)" rows={2}
                   className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 <div className="flex justify-end gap-2 mt-3">
-                  <button onClick={() => setAddingTopic(false)} className="text-sm px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
-                  <button onClick={handleAddTopic} disabled={saving || !newTopicTitle.trim()} className="text-sm px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  <button onClick={() => setAddingTopic(false)} className="text-sm px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-surface-hover rounded-lg">Cancel</button>
+                  <button onClick={handleAddTopic} disabled={saving || !newTopicTitle.trim()} className="text-sm px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50">
                     {saving ? 'Adding...' : 'Add Topic'}
                   </button>
                 </div>
@@ -899,12 +913,13 @@ const Subjects = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400">Manage subjects, topics, subtopics & outlines</p>
         </div>
         <div className="flex gap-2">
+          <AcademicFilterButton onClick={openFilters} activeCount={search ? 1 : 0} />
           <button onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition text-sm font-medium">
+            className="flex items-center gap-2 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg hover:bg-surface-hover-strong transition text-sm font-medium">
             <Upload size={16} /> Import
           </button>
           <button onClick={openAddSubject}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-hover transition text-sm font-medium">
             <Plus size={16} /> Add Subject
           </button>
         </div>
@@ -912,17 +927,37 @@ const Subjects = () => {
 
       {/* Search + global stats */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="Search subjects..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
+        {search ? (
+          <span className="max-w-sm truncate rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">Search: {search}</span>
+        ) : <span />}
         <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
           <span className="flex items-center gap-1"><BookOpen size={14} className="text-blue-500" /> {overview.length} Subjects</span>
           <span className="flex items-center gap-1"><Layers size={14} className="text-indigo-500" /> {overview.reduce((s, o) => s + o.totalTopics, 0)} Topics</span>
           <span className="flex items-center gap-1"><ListTree size={14} className="text-emerald-500" /> {overview.reduce((s, o) => s + o.totalSubTopics, 0)} SubTopics</span>
         </div>
       </div>
+
+      <AcademicFilterDialog
+        open={showFilters}
+        title="Filter subjects"
+        description="Search the subject catalogue by subject name or code."
+        onClose={() => setShowFilters(false)}
+        onApply={applyFilters}
+        onReset={() => setDraftSearch('')}
+      >
+        <div>
+          <label htmlFor="subject-search-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Search subjects</label>
+          <input
+            id="subject-search-filter"
+            data-filter-autofocus="true"
+            type="search"
+            value={draftSearch}
+            onChange={(event) => setDraftSearch(event.target.value)}
+            placeholder="Subject name or code"
+            className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
+          />
+        </div>
+      </AcademicFilterDialog>
 
       {/* Subject cards grid */}
       {loadingOverview ? (
@@ -946,10 +981,10 @@ const Subjects = () => {
             >
               {/* Action buttons (top-right) */}
               <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => openEditSubject(subject, e)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition" title="Edit subject">
+                <button onClick={(e) => openEditSubject(subject, e)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-surface-hover-accent rounded-lg transition" title="Edit subject">
                   <Edit2 size={14} />
                 </button>
-                <button onClick={(e) => handleDeleteSubject(subject.id, subject.name, e)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition" title="Delete subject">
+                <button onClick={(e) => handleDeleteSubject(subject.id, subject.name, e)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-surface-hover-danger rounded-lg transition" title="Delete subject">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -1016,8 +1051,8 @@ const Subjects = () => {
               </div>
               <div className="flex justify-end space-x-3 mt-6">
                 <button type="button" onClick={() => setShowSubjectModal(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-surface-hover rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover">
                   {editingSubject ? 'Update' : 'Create'}
                 </button>
               </div>

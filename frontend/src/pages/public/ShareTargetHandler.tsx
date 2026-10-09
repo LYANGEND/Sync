@@ -117,7 +117,7 @@ const ShareTargetHandler: React.FC = () => {
                     </div>
                     <button
                         onClick={handleDismiss}
-                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                        className="p-2 hover:bg-surface-hover rounded-lg transition-colors"
                     >
                         <X size={20} className="text-slate-400" />
                     </button>
@@ -175,14 +175,14 @@ const ShareTargetHandler: React.FC = () => {
                 <div className="flex gap-3">
                     <button
                         onClick={handleDismiss}
-                        className="flex-1 py-3 px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-medium rounded-xl transition-colors"
+                        className="flex-1 py-3 px-4 bg-slate-100 dark:bg-slate-700 hover:bg-surface-hover-strong text-slate-700 dark:text-slate-300 font-medium rounded-xl transition-colors"
                     >
                         Cancel
                     </button>
                     <button
                         onClick={handleProcess}
                         disabled={isProcessing}
-                        className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+                        className="flex-1 py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
                         {isProcessing ? (
                             <>

@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Building, Users, GraduationCap, BookOpen,
-    CreditCard, TrendingUp, Settings, Activity, MapPin,
+    CreditCard, TrendingUp, Activity, MapPin,
     Phone, Mail, Edit2, RefreshCw, ArrowRightLeft
 } from 'lucide-react';
 import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 
 interface BranchData {
     id: string;
@@ -70,22 +72,22 @@ const BranchDetail = () => {
     const [staffMembers, setStaff] = useState<any[]>([]);
     const [classes, setClasses] = useState<any[]>([]);
     const [transfers, setTransfers] = useState<any[]>([]);
+    const { activeTerm, loading: termLoading } = useActiveTerm();
+    const activeTermId = activeTerm?.id ?? '';
 
     const canManage = ['SUPER_ADMIN', 'BRANCH_MANAGER'].includes(user?.role || '');
 
     useEffect(() => {
-        if (id) {
-            fetchBranchData();
-        }
-    }, [id]);
+        if (id && activeTermId) fetchBranchData();
+    }, [id, activeTermId]);
 
     const fetchBranchData = async () => {
         try {
             setLoading(true);
             const [branchRes, analyticsRes, financialsRes] = await Promise.all([
                 api.get(`/branches/${id}`),
-                api.get(`/branches/${id}/analytics`),
-                api.get(`/branches/${id}/financial-summary`)
+                api.get(`/branches/${id}/analytics`, { params: { academicTermId: activeTermId } }),
+                api.get(`/branches/${id}/financial-summary`, { params: { academicTermId: activeTermId } })
             ]);
             setBranch(branchRes.data);
             setAnalytics(analyticsRes.data);
@@ -99,7 +101,9 @@ const BranchDetail = () => {
 
     const fetchStudents = async () => {
         try {
-            const response = await api.get(`/students?branchId=${id}`);
+            const response = await api.get('/students', {
+                params: { branchId: id, academicTermId: activeTermId },
+            });
             setStudents(response.data.students || response.data);
         } catch (error) {
             console.error('Failed to fetch students', error);
@@ -117,7 +121,9 @@ const BranchDetail = () => {
 
     const fetchClasses = async () => {
         try {
-            const response = await api.get(`/classes?branchId=${id}`);
+            const response = await api.get('/classes', {
+                params: { branchId: id, academicTermId: activeTermId },
+            });
             setClasses(response.data);
         } catch (error) {
             console.error('Failed to fetch classes', error);
@@ -134,11 +140,12 @@ const BranchDetail = () => {
     };
 
     useEffect(() => {
-        if (activeTab === 'students' && students.length === 0) fetchStudents();
+        if (!activeTermId) return;
+        if (activeTab === 'students') fetchStudents();
         if (activeTab === 'staff' && staffMembers.length === 0) fetchStaff();
-        if (activeTab === 'classes' && classes.length === 0) fetchClasses();
+        if (activeTab === 'classes') fetchClasses();
         if (activeTab === 'transfers' && transfers.length === 0) fetchTransfers();
-    }, [activeTab]);
+    }, [activeTab, activeTermId]);
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -152,6 +159,10 @@ const BranchDetail = () => {
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('en-ZM', { style: 'currency', currency: 'ZMW' }).format(amount);
     };
+
+    if (!termLoading && !activeTerm) {
+        return <div className="p-4 md:p-6"><NoActiveTermNotice /></div>;
+    }
 
     if (loading) {
         return (
@@ -188,7 +199,7 @@ const BranchDetail = () => {
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => navigate('/branches')}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                        className="p-2 hover:bg-surface-hover rounded-lg transition-colors"
                     >
                         <ArrowLeft size={20} />
                     </button>
@@ -210,15 +221,17 @@ const BranchDetail = () => {
                         </div>
                     </div>
                 </div>
+                <div className="flex items-end gap-3">
                 {canManage && (
                     <button
                         onClick={() => navigate(`/branches/${id}/edit`)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
                     >
                         <Edit2 size={16} />
                         <span>Edit Branch</span>
                     </button>
                 )}
+                </div>
             </div>
 
             {/* Contact Info */}
@@ -253,7 +266,7 @@ const BranchDetail = () => {
                         onClick={() => setActiveTab(tab.key)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${activeTab === tab.key
                                 ? 'bg-blue-600 text-white'
-                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-surface-hover'
                             }`}
                     >
                         {tab.icon}
@@ -367,7 +380,7 @@ const BranchDetail = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                                 {students.slice(0, 10).map((student) => (
-                                    <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                    <tr key={student.id} className="hover:bg-surface-hover">
                                         <td className="px-4 py-3 text-gray-900 dark:text-white">{student.firstName} {student.lastName}</td>
                                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono">{student.admissionNumber}</td>
                                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{student.class?.name || '-'}</td>
@@ -400,7 +413,7 @@ const BranchDetail = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                                 {staffMembers.map((staff) => (
-                                    <tr key={staff.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                    <tr key={staff.id} className="hover:bg-surface-hover">
                                         <td className="px-4 py-3 text-gray-900 dark:text-white">{staff.fullName}</td>
                                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{staff.email}</td>
                                         <td className="px-4 py-3">
@@ -467,7 +480,7 @@ const BranchDetail = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                                 {transfers.map((transfer) => (
-                                    <tr key={transfer.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                    <tr key={transfer.id} className="hover:bg-surface-hover">
                                         <td className="px-4 py-3">
                                             <span className={`px-2 py-1 rounded-full text-xs ${transfer.entityType === 'STUDENT' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
                                                 {transfer.entityType}

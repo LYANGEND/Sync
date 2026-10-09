@@ -732,7 +732,7 @@ const MasterAI = () => {
           </div>
           <button
             onClick={startNewChat}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-surface-hover transition-colors text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm"
           >
             <Plus size={18} />
             New Chat
@@ -808,7 +808,7 @@ const MasterAI = () => {
           <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
+              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-surface-hover transition-colors flex-shrink-0"
               title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             >
               {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
@@ -1172,7 +1172,7 @@ const ConversationItem = ({
       className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
         isActive
           ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300'
-          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700/50'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-surface-hover'
       }`}
     >
       <MessageSquare size={14} className="flex-shrink-0 opacity-50" />
@@ -1196,7 +1196,7 @@ const ConversationItem = ({
           <div className={`flex items-center gap-0.5 ${isActive || showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+              className="p-1 rounded hover:bg-surface-hover transition-colors"
             >
               <MoreHorizontal size={14} />
             </button>
@@ -1209,13 +1209,13 @@ const ConversationItem = ({
         <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-700 rounded-lg shadow-lg border border-gray-200 dark:border-slate-600 py-1 min-w-[120px]">
           <button
             onClick={(e) => { e.stopPropagation(); setIsRenaming(true); setRenameValue(conversation.title); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-600"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-surface-hover"
           >
             <Pencil size={12} /> Rename
           </button>
           <button
             onClick={(e) => { setShowMenu(false); onDelete(e); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-surface-hover-danger"
           >
             <Trash2 size={12} /> Delete
           </button>

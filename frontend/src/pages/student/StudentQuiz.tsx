@@ -181,7 +181,7 @@ const StudentQuiz = () => {
                   {q.type === 'MULTIPLE_CHOICE' && (
                     <div className="space-y-2">
                       {q.options?.map(opt => (
-                        <label key={opt.id} className="flex items-center gap-3 p-3 border border-gray-200 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer transition-colors">
+                        <label key={opt.id} className="flex items-center gap-3 p-3 border border-gray-200 dark:border-slate-600 rounded-lg hover:bg-surface-hover cursor-pointer transition-colors">
                           <input
                             type="radio"
                             name={q.id}
@@ -233,7 +233,7 @@ const StudentQuiz = () => {
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50"
+            className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors font-medium disabled:opacity-50"
           >
             {submitting ? 'Submitting...' : 'Submit Quiz'}
           </button>

@@ -1,7 +1,9 @@
 import { prisma } from '../utils/prisma';
+import { getClassEnrollmentsForTerm } from './studentPlacementService';
 import { smsService } from './smsService';
 import { whatsappService } from './whatsappService';
 import { sendEmail } from './emailService';
+import { runTermWriteTransaction } from './termLifecycleService';
 
 interface AttendancePattern {
   type: string; // CONSECUTIVE_ABSENCE, DAY_PATTERN, POST_EVENT, CHRONIC
@@ -36,31 +38,38 @@ class AttendanceIntelligenceService {
   /**
    * Run daily attendance analysis - call this via a cron job or manual trigger
    */
-  async runDailyAnalysis(termId?: string): Promise<{
+  async runDailyAnalysis(termId: string): Promise<{
     alertsGenerated: number;
     patternsDetected: number;
     studentsAnalyzed: number;
   }> {
-    let term: any;
-    if (termId) {
-      term = await prisma.academicTerm.findUnique({ where: { id: termId } });
-    } else {
-      term = await prisma.academicTerm.findFirst({ where: { isActive: true } });
-    }
+    const term = await prisma.academicTerm.findUnique({ where: { id: termId } });
 
     if (!term) return { alertsGenerated: 0, patternsDetected: 0, studentsAnalyzed: 0 };
 
-    const students = await prisma.student.findMany({
-      where: { status: 'ACTIVE' },
+    const enrollments = await prisma.studentTermEnrollment.findMany({
+      where: {
+        academicTermId: term.id,
+        status: 'ACTIVE',
+        student: { status: 'ACTIVE' },
+      },
       include: {
         class: true,
-        parent: { select: { fullName: true, email: true } },
-        attendance: {
-          where: { date: { gte: term.startDate, lte: new Date() } },
-          orderBy: { date: 'desc' },
+        student: {
+          include: {
+            parent: { select: { fullName: true, email: true } },
+            attendance: {
+              where: { academicTermId: term.id, date: { gte: term.startDate, lte: new Date() } },
+              orderBy: { date: 'desc' },
+            },
+          },
         },
       },
     });
+    const students = enrollments.map(enrollment => ({
+      ...enrollment.student,
+      class: enrollment.class,
+    }));
 
     let alertsGenerated = 0;
     let patternsDetected = 0;
@@ -71,7 +80,7 @@ class AttendanceIntelligenceService {
       // Generate alerts for concerning patterns
       for (const pattern of analysis.patterns) {
         if (pattern.severity === 'HIGH' || pattern.severity === 'MEDIUM') {
-          await this.createAlert(student.id, pattern);
+          await this.createAlert(student.id, term.id, pattern);
           alertsGenerated++;
           patternsDetected++;
         }
@@ -79,13 +88,13 @@ class AttendanceIntelligenceService {
 
       // Check for consecutive absences (3+ days)
       if (analysis.consecutiveAbsences >= 3) {
-        await this.createConsecutiveAbsenceAlert(student, analysis.consecutiveAbsences);
+        await this.createConsecutiveAbsenceAlert(student, term.id, analysis.consecutiveAbsences);
         alertsGenerated++;
       }
 
       // Check for chronic absenteeism (attendance rate < 80%)
       if (analysis.attendanceRate < 80 && student.attendance.length >= 10) {
-        await this.createChronicAbsenteeismAlert(student, analysis.attendanceRate);
+        await this.createChronicAbsenteeismAlert(student, term.id, analysis.attendanceRate);
         alertsGenerated++;
       }
     }
@@ -111,15 +120,24 @@ class AttendanceIntelligenceService {
     trends: { week: string; attendanceRate: number }[];
     alerts: any[];
   }> {
-    const students = await prisma.student.findMany({
-      where: { classId, status: 'ACTIVE' },
+    const classInfo = await prisma.class.findUnique({
+      where: { id: classId },
+      select: { academicTermId: true },
     });
+    if (!classInfo) {
+      throw new Error('Class not found');
+    }
+
+    const students = (await getClassEnrollmentsForTerm(classId, classInfo.academicTermId, {
+      statuses: ['ACTIVE'],
+    })).map(enrollment => enrollment.student);
 
     const studentIds = students.map(s => s.id);
 
     const records = await prisma.attendance.findMany({
       where: {
         classId,
+        academicTermId: classInfo.academicTermId,
         date: { gte: startDate, lte: endDate },
       },
       orderBy: { date: 'asc' },
@@ -185,6 +203,7 @@ class AttendanceIntelligenceService {
     const alerts = await (prisma as any).attendanceAlert.findMany({
       where: {
         studentId: { in: studentIds },
+        academicTermId: classInfo.academicTermId,
         isResolved: false,
       },
       orderBy: { createdAt: 'desc' },
@@ -207,22 +226,21 @@ class AttendanceIntelligenceService {
   /**
    * Get unresolved alerts
    */
-  async getAlerts(filters?: {
+  async getAlerts(filters: {
     studentId?: string;
     classId?: string;
+    academicTermId: string;
     isResolved?: boolean;
   }): Promise<any[]> {
     const where: any = {};
 
-    if (filters?.isResolved !== undefined) where.isResolved = filters.isResolved;
-    if (filters?.studentId) where.studentId = filters.studentId;
+    if (filters.isResolved !== undefined) where.isResolved = filters.isResolved;
+    if (filters.studentId) where.studentId = filters.studentId;
+    where.academicTermId = filters.academicTermId;
 
-    if (filters?.classId) {
-      const students = await prisma.student.findMany({
-        where: { classId: filters.classId, status: 'ACTIVE' },
-        select: { id: true },
-      });
-      where.studentId = { in: students.map(s => s.id) };
+    if (filters.classId) {
+      const enrollments = await getClassEnrollmentsForTerm(filters.classId, filters.academicTermId);
+      where.studentId = { in: enrollments.map(enrollment => enrollment.studentId) };
     }
 
     const alerts = await (prisma as any).attendanceAlert.findMany({
@@ -235,9 +253,20 @@ class AttendanceIntelligenceService {
     const studentIds = alerts.map((a: any) => a.studentId as string).filter((v: string, i: number, arr: string[]) => arr.indexOf(v) === i);
     const students = await prisma.student.findMany({
       where: { id: { in: studentIds } },
-      include: { class: true, parent: { select: { fullName: true } } },
+      include: {
+        parent: { select: { fullName: true } },
+        termEnrollments: {
+          where: { academicTermId: filters.academicTermId },
+          include: { class: true },
+          take: 1,
+        },
+      },
     });
-    const studentMap = new Map(students.map(s => [s.id, s]));
+    const studentMap = new Map(students.map(student => [student.id, {
+      ...student,
+      class: student.termEnrollments?.[0]?.class ?? null,
+      termEnrollments: undefined,
+    }]));
 
     return alerts.map((a: any) => ({
       ...a,
@@ -249,14 +278,29 @@ class AttendanceIntelligenceService {
    * Resolve an alert
    */
   async resolveAlert(alertId: string, userId: string, notes?: string): Promise<void> {
-    await (prisma as any).attendanceAlert.update({
+    const alert = await prisma.attendanceAlert.findUnique({
       where: { id: alertId },
-      data: {
-        isResolved: true,
-        resolvedBy: userId,
-        resolvedAt: new Date(),
-        resolvedNotes: notes || null,
-      },
+      select: { academicTermId: true },
+    });
+    if (!alert) throw new Error('Alert not found');
+
+    await runTermWriteTransaction(alert.academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const current = await tx.attendanceAlert.findUnique({
+        where: { id: alertId },
+        select: { academicTermId: true },
+      });
+      if (!current || current.academicTermId !== alert.academicTermId) {
+        throw new Error('Attendance alert changed while it was being resolved');
+      }
+      await tx.attendanceAlert.update({
+        where: { id: alertId },
+        data: {
+          isResolved: true,
+          resolvedBy: userId,
+          resolvedAt: new Date(),
+          resolvedNotes: notes || null,
+        },
+      });
     });
   }
 
@@ -264,7 +308,7 @@ class AttendanceIntelligenceService {
    * Send parent notification for attendance alert
    */
   async notifyParent(alertId: string): Promise<{ emailSent: boolean; smsSent: boolean; whatsappSent: boolean }> {
-    const alert = await (prisma as any).attendanceAlert.findUnique({ where: { id: alertId } });
+    const alert = await prisma.attendanceAlert.findUnique({ where: { id: alertId } });
     if (!alert) throw new Error('Alert not found');
 
     const student = await prisma.student.findUnique({
@@ -278,12 +322,38 @@ class AttendanceIntelligenceService {
     const schoolName = settings?.schoolName || 'School';
     const studentName = `${student.firstName} ${student.lastName}`;
 
+    const parentEmail = student.parent?.email || student.guardianEmail;
+    const parentPhone = student.guardianPhone;
+    if (!parentEmail && !parentPhone) {
+      return { emailSent: false, smsSent: false, whatsappSent: false };
+    }
+
+    const reserved = await runTermWriteTransaction(
+      alert.academicTermId,
+      'ACADEMIC_ACTIVITY',
+      async tx => {
+        const current = await tx.attendanceAlert.findUnique({
+          where: { id: alertId },
+          select: { academicTermId: true, parentNotified: true },
+        });
+        if (!current || current.academicTermId !== alert.academicTermId) {
+          throw new Error('Attendance alert changed while notification was being prepared');
+        }
+        if (current.parentNotified) return false;
+        await tx.attendanceAlert.update({
+          where: { id: alertId },
+          data: { parentNotified: true, notifiedAt: new Date() },
+        });
+        return true;
+      },
+    );
+    if (!reserved) throw new Error('Parent notification has already been processed');
+
     let emailSent = false;
     let smsSent = false;
     let whatsappSent = false;
 
     // Email
-    const parentEmail = student.parent?.email || student.guardianEmail;
     if (parentEmail) {
       emailSent = await sendEmail(
         parentEmail,
@@ -294,7 +364,6 @@ class AttendanceIntelligenceService {
     }
 
     // SMS
-    const parentPhone = student.guardianPhone;
     if (parentPhone) {
       const smsResult = await smsService.sendAttendanceAlert(parentPhone, studentName, 3, schoolName);
       smsSent = smsResult.success;
@@ -306,11 +375,14 @@ class AttendanceIntelligenceService {
       whatsappSent = waResult.success;
     }
 
-    // Update alert
-    await (prisma as any).attendanceAlert.update({
-      where: { id: alertId },
-      data: { parentNotified: true, notifiedAt: new Date() },
-    });
+    if (!emailSent && !smsSent && !whatsappSent) {
+      await runTermWriteTransaction(alert.academicTermId, 'ACADEMIC_ACTIVITY', tx => (
+        tx.attendanceAlert.update({
+          where: { id: alertId },
+          data: { parentNotified: false, notifiedAt: null },
+        })
+      ));
+    }
 
     return { emailSent, smsSent, whatsappSent };
   }
@@ -384,70 +456,79 @@ class AttendanceIntelligenceService {
     };
   }
 
-  private async createAlert(studentId: string, pattern: AttendancePattern) {
-    // Check if similar alert already exists (not resolved) in last 7 days
-    const existingAlert = await (prisma as any).attendanceAlert.findFirst({
-      where: {
-        studentId,
-        type: pattern.type,
-        isResolved: false,
-        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-      },
-    });
+  private async createAlert(studentId: string, academicTermId: string, pattern: AttendancePattern) {
+    await runTermWriteTransaction(academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      // Check if similar alert already exists (not resolved) in last 7 days.
+      const existingAlert = await tx.attendanceAlert.findFirst({
+        where: {
+          studentId,
+          academicTermId,
+          type: pattern.type,
+          isResolved: false,
+          createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+        },
+      });
 
-    if (existingAlert) return; // Don't duplicate
-
-    await (prisma as any).attendanceAlert.create({
-      data: {
-        studentId,
-        type: pattern.type,
-        message: pattern.description,
-        details: { dates: pattern.dates, severity: pattern.severity },
-      },
-    });
-  }
-
-  private async createConsecutiveAbsenceAlert(student: any, days: number) {
-    const existing = await (prisma as any).attendanceAlert.findFirst({
-      where: {
-        studentId: student.id,
-        type: 'CONSECUTIVE_ABSENCE',
-        isResolved: false,
-        createdAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-      },
-    });
-
-    if (existing) return;
-
-    await (prisma as any).attendanceAlert.create({
-      data: {
-        studentId: student.id,
-        type: 'CONSECUTIVE_ABSENCE',
-        message: `${student.firstName} ${student.lastName} has been absent for ${days} consecutive days`,
-        details: { consecutiveDays: days, className: student.class?.name },
-      },
+      if (existingAlert) return;
+      await tx.attendanceAlert.create({
+        data: {
+          studentId,
+          academicTermId,
+          type: pattern.type,
+          message: pattern.description,
+          details: { dates: pattern.dates, severity: pattern.severity },
+        },
+      });
     });
   }
 
-  private async createChronicAbsenteeismAlert(student: any, rate: number) {
-    const existing = await (prisma as any).attendanceAlert.findFirst({
-      where: {
-        studentId: student.id,
-        type: 'CHRONIC_ABSENTEEISM',
-        isResolved: false,
-        createdAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
-      },
+  private async createConsecutiveAbsenceAlert(student: any, academicTermId: string, days: number) {
+    await runTermWriteTransaction(academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const existing = await tx.attendanceAlert.findFirst({
+        where: {
+          studentId: student.id,
+          academicTermId,
+          type: 'CONSECUTIVE_ABSENCE',
+          isResolved: false,
+          createdAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+        },
+      });
+
+      if (existing) return;
+      await tx.attendanceAlert.create({
+        data: {
+          studentId: student.id,
+          academicTermId,
+          type: 'CONSECUTIVE_ABSENCE',
+          message: `${student.firstName} ${student.lastName} has been absent for ${days} consecutive days`,
+          details: { consecutiveDays: days, className: student.class?.name },
+        },
+      });
     });
+  }
 
-    if (existing) return;
+  private async createChronicAbsenteeismAlert(student: any, academicTermId: string, rate: number) {
+    await runTermWriteTransaction(academicTermId, 'ACADEMIC_ACTIVITY', async tx => {
+      const existing = await tx.attendanceAlert.findFirst({
+        where: {
+          studentId: student.id,
+          academicTermId,
+          type: 'CHRONIC_ABSENTEEISM',
+          isResolved: false,
+          createdAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+        },
+      });
 
-    await (prisma as any).attendanceAlert.create({
-      data: {
-        studentId: student.id,
-        type: 'CHRONIC_ABSENTEEISM',
-        message: `${student.firstName} ${student.lastName} has a ${rate.toFixed(1)}% attendance rate (below 80% threshold)`,
-        details: { attendanceRate: rate, className: student.class?.name },
-      },
+      if (existing) return;
+      await tx.attendanceAlert.create({
+        data: {
+          studentId: student.id,
+          academicTermId,
+          type: 'CHRONIC_ABSENTEEISM',
+          message: `${student.firstName} ${student.lastName} has a ${rate.toFixed(1)}% attendance rate (below 80% threshold)`,
+          details: { attendanceRate: rate, className: student.class?.name },
+        },
+      });
     });
   }
 

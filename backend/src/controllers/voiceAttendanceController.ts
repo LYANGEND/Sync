@@ -32,6 +32,7 @@ export const takeAttendanceByVoice = async (req: AuthRequest, res: Response) => 
       classId,
       req.file.buffer,
       attendanceDate,
+      userId,
       req.file.mimetype
     );
 
@@ -70,7 +71,8 @@ export const takeAttendanceByText = async (req: AuthRequest, res: Response) => {
     const result = await voiceAttendanceService.processTextAttendance(
       classId,
       textInput,
-      attendanceDate
+      attendanceDate,
+      userId
     );
 
     res.json({

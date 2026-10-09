@@ -5,6 +5,8 @@ import { Navigate, Link } from 'react-router-dom';
 import api from '../../utils/api';
 import { PullToRefresh, DashboardSkeleton, SwipeableCards } from '../../components/mobile';
 import analyticsService, { type AnalyticsDashboard } from '../../services/analyticsService';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
+import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 
 import TeacherDashboard from './TeacherDashboard';
 import DashboardAnalytics, { type AnalyticsPeriod } from './DashboardAnalytics';
@@ -80,17 +82,20 @@ const Dashboard = () => {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>(90);
   const [analyticsDataPeriod, setAnalyticsDataPeriod] = useState<AnalyticsPeriod>(90);
   const [refreshing, setRefreshing] = useState(false);
+  const { activeTerm, loading: termLoading } = useActiveTerm();
+  const activeTermId = activeTerm?.id ?? '';
 
   const fetchStats = useCallback(async () => {
+    if (!activeTermId) return;
     try {
-      const response = await api.get<DashboardData>('/dashboard/stats');
+      const response = await api.get<DashboardData>('/dashboard/stats', { params: { academicTermId: activeTermId } });
       setData(response.data);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeTermId]);
 
   const fetchAnalytics = useCallback(async () => {
     if (!canViewAnalytics) {
@@ -102,7 +107,8 @@ const Dashboard = () => {
     setAnalyticsLoading(true);
     setAnalyticsUnavailable(false);
     try {
-      setAnalytics(await analyticsService.getDashboard(analyticsPeriod));
+      if (!activeTermId) return;
+      setAnalytics(await analyticsService.getDashboard(activeTermId, analyticsPeriod));
       setAnalyticsDataPeriod(analyticsPeriod);
     } catch (error) {
       console.error('Error fetching dashboard analytics:', error);
@@ -110,7 +116,7 @@ const Dashboard = () => {
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [analyticsPeriod, canViewAnalytics]);
+  }, [analyticsPeriod, canViewAnalytics, activeTermId]);
 
   useEffect(() => {
     if (user?.role === 'PARENT' || user?.role === 'PLATFORM_ADMIN') return;
@@ -139,6 +145,18 @@ const Dashboard = () => {
 
   if (user?.role === 'PLATFORM_ADMIN') {
     return <Navigate to="/ops/tenants" replace />;
+  }
+
+  if (termLoading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (!activeTerm) {
+    return (
+      <div className="p-4 md:p-6">
+        <NoActiveTermNotice />
+      </div>
+    );
   }
 
   if (loading) {

@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { getAgeingBucket, getTermStudentBalances } from './termFinancialService';
+type AccountingClient = Prisma.TransactionClient | typeof prisma;
 // ========================================
 // RECEIPT SEQUENCE
 // ========================================
@@ -8,18 +10,7 @@ import { prisma } from '../utils/prisma';
  * Generate a sequential receipt number: REC-2026-00001
  */
 export const generateReceiptNumber = async (branchId?: string): Promise<string> => {
-  const year = new Date().getFullYear();
-  const prefix = 'REC';
-
-  const sequence = await prisma.receiptSequence.upsert({
-    where: {
-      prefix_year_branchId: { prefix, year, branchId: branchId || '' },
-    },
-    create: { prefix, year, branchId: branchId || null, lastNumber: 1 },
-    update: { lastNumber: { increment: 1 } },
-  });
-
-  return `${prefix}-${year}-${String(sequence.lastNumber).padStart(5, '0')}`;
+  return generateSequenceNumber('REC', branchId);
 };
 
 /**
@@ -27,15 +18,16 @@ export const generateReceiptNumber = async (branchId?: string): Promise<string> 
  */
 export const generateSequenceNumber = async (
   prefix: string,
-  branchId?: string
+  _branchId?: string,
+  client: AccountingClient = prisma,
 ): Promise<string> => {
   const year = new Date().getFullYear();
 
-  const sequence = await prisma.receiptSequence.upsert({
+  const sequence = await client.receiptSequence.upsert({
     where: {
-      prefix_year_branchId: { prefix, year, branchId: branchId || '' },
+      prefix_year: { prefix, year },
     },
-    create: { prefix, year, branchId: branchId || null, lastNumber: 1 },
+    create: { prefix, year, branchId: null, lastNumber: 1 },
     update: { lastNumber: { increment: 1 } },
   });
 
@@ -59,12 +51,21 @@ interface JournalLine {
 export const createJournalEntry = async (data: {
   date: Date;
   description: string;
+  postingKey?: string;
   referenceType?: string;
   referenceId?: string;
   lines: JournalLine[];
   branchId?: string;
   autoPost?: boolean;
 }) => {
+  if (data.postingKey) {
+    const existing = await prisma.journalEntry.findUnique({
+      where: { postingKey: data.postingKey },
+      include: { lines: { include: { account: true } } },
+    });
+    if (existing) return existing;
+  }
+
   // Validate debits = credits
   const totalDebit = data.lines.reduce((sum, l) => sum + (l.debit || 0), 0);
   const totalCredit = data.lines.reduce((sum, l) => sum + (l.credit || 0), 0);
@@ -90,29 +91,44 @@ export const createJournalEntry = async (data: {
     }
   }
 
-  return prisma.journalEntry.create({
-    data: {
-      entryNumber,
-      date: data.date,
-      description: data.description,
-      referenceType: data.referenceType,
-      referenceId: data.referenceId,
-      isPosted: data.autoPost || false,
-      postedAt: data.autoPost ? new Date() : null,
-      branchId: data.branchId,
-      lines: {
-        create: data.lines.map(line => ({
-          accountId: accountMap.get(line.accountCode)!,
-          debit: line.debit || 0,
-          credit: line.credit || 0,
-          description: line.description,
-        })),
+  try {
+    return await prisma.journalEntry.create({
+      data: {
+        entryNumber,
+        postingKey: data.postingKey,
+        date: data.date,
+        description: data.description,
+        referenceType: data.referenceType,
+        referenceId: data.referenceId,
+        isPosted: data.autoPost || false,
+        postedAt: data.autoPost ? new Date() : null,
+        branchId: data.branchId,
+        lines: {
+          create: data.lines.map(line => ({
+            accountId: accountMap.get(line.accountCode)!,
+            debit: line.debit || 0,
+            credit: line.credit || 0,
+            description: line.description,
+          })),
+        },
       },
-    },
-    include: {
-      lines: { include: { account: true } },
-    },
-  });
+      include: {
+        lines: { include: { account: true } },
+      },
+    });
+  } catch (error) {
+    if (
+      data.postingKey
+      && error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === 'P2002'
+    ) {
+      return prisma.journalEntry.findUniqueOrThrow({
+        where: { postingKey: data.postingKey },
+        include: { lines: { include: { account: true } } },
+      });
+    }
+    throw error;
+  }
 };
 
 // ========================================
@@ -428,76 +444,32 @@ export const getCashFlowSummary = async (startDate: Date, endDate: Date, branchI
 /**
  * Generate Aged Receivables Report
  */
-export const getAgedReceivables = async (branchId?: string) => {
+export const getAgedReceivables = async (branchId?: string, academicTermId?: string) => {
+  if (!academicTermId) {
+    throw new Error('academicTermId is required for aged receivables');
+  }
   const now = new Date();
-  const days30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const days60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-  const days90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const balances = await getTermStudentBalances(academicTermId, branchId);
 
-  const branchFilter = branchId ? { branchId } : {};
-
-  const students = await prisma.student.findMany({
-    where: {
-      status: 'ACTIVE',
-      ...branchFilter,
-    },
-    include: {
-      class: true,
-      feeStructures: {
-        include: { feeTemplate: true },
-      },
-      payments: {
-        where: { status: 'COMPLETED' },
-      },
-    },
-  });
-
-  const receivables = students.map(student => {
-    const totalDue = student.feeStructures.reduce(
-      (sum, fs) => sum + Number(fs.amountDue),
-      0
-    );
-    const totalPaid = student.payments.reduce(
-      (sum, p) => sum + Number(p.amount),
-      0
-    );
-    const balance = totalDue - totalPaid;
-
-    if (balance <= 0) return null;
-
-    // Categorize by age based on earliest unpaid fee due date
-    const earliestDue = student.feeStructures
-      .filter(fs => Number(fs.amountDue) > Number(fs.amountPaid))
-      .sort((a, b) => {
-        const dateA = a.dueDate || a.createdAt;
-        const dateB = b.dueDate || b.createdAt;
-        return dateA.getTime() - dateB.getTime();
-      })[0];
-
-    const dueDate = earliestDue?.dueDate || earliestDue?.createdAt || now;
-    const ageDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-
-    let bucket: string;
-    if (ageDays <= 0) bucket = 'current';
-    else if (ageDays <= 30) bucket = '1-30';
-    else if (ageDays <= 60) bucket = '31-60';
-    else if (ageDays <= 90) bucket = '61-90';
-    else bucket = '90+';
-
-    return {
-      studentId: student.id,
-      studentName: `${student.firstName} ${student.lastName}`,
-      admissionNumber: student.admissionNumber,
-      className: student.class?.name || 'N/A',
-      totalDue,
-      totalPaid,
-      balance,
-      ageDays,
-      bucket,
-      guardianPhone: student.guardianPhone,
-      guardianEmail: student.guardianEmail,
-    };
-  }).filter(Boolean);
+  const receivables = balances
+    .filter(student => student.balance > 0)
+    .map(student => {
+      const dueDate = student.earliestDueDate || now;
+      const ageDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        studentId: student.id,
+        studentName: `${student.firstName} ${student.lastName}`,
+        admissionNumber: student.admissionNumber,
+        className: student.className,
+        totalDue: student.billed,
+        totalPaid: student.paid,
+        balance: student.balance,
+        ageDays,
+        bucket: getAgeingBucket(ageDays),
+        guardianPhone: student.guardianPhone,
+        guardianEmail: student.guardianEmail,
+      };
+    });
 
   // Summary by bucket
   const summary = {

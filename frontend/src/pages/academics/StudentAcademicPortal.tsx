@@ -23,6 +23,12 @@ interface TrendData {
   subjects: string[];
 }
 
+interface AcademicTerm {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 const StudentAcademicPortal: React.FC = () => {
   const { user } = useAuth();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -37,24 +43,34 @@ const StudentAcademicPortal: React.FC = () => {
   // For teachers/admins: search students
   const [studentSearch, setStudentSearch] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
+  const [selectedTermId, setSelectedTermId] = useState('');
 
   useEffect(() => {
-    if (user?.role === 'PARENT') {
-      fetchChildren();
-    }
+    api.get<AcademicTerm[]>('/academic-terms').then(res => {
+      const terms = Array.isArray(res.data) ? res.data : [];
+      setAcademicTerms(terms);
+      setSelectedTermId(terms.find(term => term.isActive)?.id || terms[0]?.id || '');
+    }).catch(error => console.error('Failed to fetch academic terms:', error));
     // Teachers/admins pick a student from search
   }, [user]);
 
   useEffect(() => {
-    if (selectedChild) {
+    if (user?.role === 'PARENT' && selectedTermId) fetchChildren();
+  }, [user, selectedTermId]);
+
+  useEffect(() => {
+    if (selectedChild && selectedTermId) {
       fetchDashboard(selectedChild);
       fetchTrends(selectedChild);
     }
-  }, [selectedChild]);
+  }, [selectedChild, selectedTermId]);
 
   const fetchChildren = async () => {
     try {
-      const res = await api.get('/students', { params: { parentId: user?.id } });
+      const res = await api.get('/students', {
+        params: { parentId: user?.id, academicTermId: selectedTermId },
+      });
       const studentList = res.data?.students || res.data || [];
       setChildren(studentList);
       if (studentList.length > 0) {
@@ -69,7 +85,9 @@ const StudentAcademicPortal: React.FC = () => {
   const searchStudents = async (query: string) => {
     if (query.length < 2) { setSearchResults([]); return; }
     try {
-      const res = await api.get('/students', { params: { search: query } });
+      const res = await api.get('/students', {
+        params: { search: query, academicTermId: selectedTermId },
+      });
       setSearchResults(res.data?.students || res.data || []);
     } catch (error) {
       console.error('Failed to search students:', error);
@@ -79,7 +97,7 @@ const StudentAcademicPortal: React.FC = () => {
   const fetchDashboard = async (studentId: string) => {
     try {
       setLoading(true);
-      const res = await api.get(`/student-portal/student/${studentId}/dashboard`);
+      const res = await api.get(`/student-portal/student/${studentId}/dashboard`, { params: { termId: selectedTermId } });
       setDashboardData(res.data);
     } catch (error) {
       console.error('Failed to fetch dashboard:', error);
@@ -90,7 +108,9 @@ const StudentAcademicPortal: React.FC = () => {
 
   const fetchTrends = async (studentId: string) => {
     try {
-      const res = await api.get(`/student-portal/student/${studentId}/trends`);
+      const res = await api.get(`/student-portal/student/${studentId}/trends`, {
+        params: { termId: selectedTermId },
+      });
       setTrendData(res.data);
     } catch (error) {
       console.error('Failed to fetch trends:', error);
@@ -123,7 +143,7 @@ const StudentAcademicPortal: React.FC = () => {
               <div className="absolute right-0 mt-1 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
                 {searchResults.slice(0, 10).map((s: any) => (
                   <button key={s.id} onClick={() => { setSelectedChild(s.id); setStudentSearch(`${s.firstName} ${s.lastName}`); setSearchResults([]); }}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-700 text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
+                    className="w-full text-left px-4 py-2 hover:bg-surface-hover text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
                   >
                     <span className="font-medium">{s.firstName} {s.lastName}</span>
                     <span className="text-gray-400 ml-2">{s.admissionNumber} • {s.class?.name || ''}</span>
@@ -196,6 +216,16 @@ const StudentAcademicPortal: React.FC = () => {
           )}
         </div>
 
+        <select
+          value={selectedTermId}
+          onChange={event => setSelectedTermId(event.target.value)}
+          className="min-h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-900 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+          aria-label="Reporting term"
+        >
+          {academicTerms.length === 0 && <option value="">No academic terms</option>}
+          {academicTerms.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+        </select>
+
         {/* Parent child selector */}
         {user?.role === 'PARENT' && children.length > 1 && (
           <select value={selectedChild} onChange={e => setSelectedChild(e.target.value)}
@@ -221,7 +251,7 @@ const StudentAcademicPortal: React.FC = () => {
               <div className="absolute right-0 mt-1 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
                 {searchResults.slice(0, 10).map((s: any) => (
                   <button key={s.id} onClick={() => { setSelectedChild(s.id); setStudentSearch(`${s.firstName} ${s.lastName}`); setSearchResults([]); }}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-700 text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
+                    className="w-full text-left px-4 py-2 hover:bg-surface-hover text-sm border-b border-gray-100 dark:border-slate-700 last:border-0"
                   >
                     <span className="font-medium">{s.firstName} {s.lastName}</span>
                     <span className="text-gray-400 ml-2">{s.admissionNumber} • {s.class?.name || ''}</span>
@@ -245,7 +275,7 @@ const StudentAcademicPortal: React.FC = () => {
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-surface-hover'
             }`}
           >
             <tab.icon className="w-4 h-4" />
@@ -457,7 +487,7 @@ const StudentAcademicPortal: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {trendData.subjects.map((subj, si) => (
+                      {trendData.subjects.map((subj) => (
                         <tr key={subj} className="border-b border-gray-100 dark:border-slate-700/50">
                           <td className="py-2 pr-4 font-medium text-gray-800 dark:text-white">{subj}</td>
                           {trendData.trends.map((term: any, ti: number) => {

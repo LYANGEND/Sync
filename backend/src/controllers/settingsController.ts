@@ -1,6 +1,12 @@
 import { Request, Response } from 'express';
+import { AcademicTermStatus, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
+import {
+  activateTermInTransaction,
+  runTermLifecycleTransaction,
+  TermLifecycleError,
+} from '../services/termLifecycleService';
 
 const updateSettingsSchema = z.object({
   schoolName: z.string().min(2),
@@ -97,8 +103,6 @@ export const updateSettings = async (req: Request, res: Response) => {
   try {
     const data = updateSettingsSchema.parse(req.body);
 
-    const existing = await prisma.schoolSettings.findFirst();
-
     // Prevent masked placeholders (e.g. "••••1234") or empty strings
     // from overwriting real secrets when saving settings forms.
     const isMaskedPlaceholder = (value: unknown): value is string =>
@@ -122,22 +126,47 @@ export const updateSettings = async (req: Request, res: Response) => {
       }
     }
 
-    let settings;
-    if (existing) {
-      settings = await prisma.schoolSettings.update({
-        where: { id: existing.id },
-        data: updateData,
-      });
-    } else {
-      settings = await prisma.schoolSettings.create({
-        data: updateData,
-      });
-    }
+    const settings = await runTermLifecycleTransaction(async (tx) => {
+      if ('currentTermId' in updateData) {
+        const currentTermId = updateData.currentTermId as string | null | undefined;
+
+        if (currentTermId) {
+          await activateTermInTransaction(tx, currentTermId);
+        } else {
+          const activeTerm = await tx.academicTerm.findFirst({
+            where: { status: AcademicTermStatus.ACTIVE },
+            select: { id: true },
+          });
+          if (activeTerm) {
+            throw new TermLifecycleError(
+              'INVALID_TERM_TRANSITION',
+              'The active term cannot be cleared from settings. Start the closing workflow instead',
+            );
+          }
+        }
+      }
+
+      const existing = await tx.schoolSettings.findFirst();
+      if (existing) {
+        return tx.schoolSettings.update({
+          where: { id: existing.id },
+          data: updateData,
+        });
+      }
+
+      return tx.schoolSettings.create({ data: updateData });
+    });
 
     res.json(settings);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
+    }
+    if (error instanceof TermLifecycleError) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return res.status(400).json({ message: 'Selected academic term does not exist' });
     }
     console.error('Update settings error:', error);
     res.status(500).json({ message: 'Internal server error' });

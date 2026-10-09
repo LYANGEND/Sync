@@ -77,14 +77,18 @@ async function linkFeeStructuresToTerms() {
 }
 
 async function linkPaymentsToTerms() {
-  // Get all payments without a term assignment
-  const payments = await prisma.payment.findMany({
-    where: { 
-      academicTermId: null,
-      status: 'COMPLETED' // Only process completed payments
-    },
-    include: { student: true }
-  });
+  // Raw SQL is intentional: the current Prisma schema requires academicTermId,
+  // while this one-time migration must still be able to read legacy null rows.
+  const payments = await prisma.$queryRaw<Array<{
+    id: string;
+    transactionId: string;
+    paymentDate: Date;
+  }>>`
+    SELECT "id", "transactionId", "paymentDate"
+    FROM "payments"
+    WHERE "academicTermId" IS NULL
+      AND "status" = 'COMPLETED'
+  `;
 
   console.log(`   Found ${payments.length} payments to process`);
 

@@ -71,30 +71,30 @@ const ClassBroadsheet: React.FC<ClassBroadsheetProps> = ({ reports, className = 
     };
 
     return (
-        <div className={`bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-full print:h-auto printable-content ${className}`}>
+        <div className={`min-w-0 max-w-full bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 flex flex-col h-full print:h-auto print:bg-white printable-content ${className}`}>
             {/* Header & Stats */}
-            <div className="p-6 border-b border-gray-200">
-                <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <div className="p-4 md:p-6 border-b border-gray-200 dark:border-slate-700">
+                <div className="flex flex-col xl:flex-row justify-between items-start gap-4 mb-6">
+                    <div className="min-w-0">
+                        <h2 className="text-xl md:text-2xl font-bold text-gray-800 dark:text-slate-100 flex items-start gap-2">
                             <FileSpreadsheet className="text-blue-600" />
-                            Class Master Marksheet
+                            Class Results Sheet
                         </h2>
-                        <p className="text-gray-500 mt-1">
+                        <p className="text-gray-600 dark:text-slate-300 mt-1 break-words">
                             {reports[0]?.class?.name} • {reports[0]?.term?.name} • {reports.length} Students
                         </p>
                     </div>
-                    <div className="flex gap-2 print:hidden">
+                    <div className="flex flex-wrap gap-2 print:hidden">
                         <button
                             onClick={() => window.print()}
-                            className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                            className="min-h-11 cursor-pointer flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-primary"
                         >
                             <Printer size={18} />
                             Print
                         </button>
                         <button
                             onClick={handleExportExcel}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                            className="min-h-11 cursor-pointer flex items-center gap-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-primary"
                         >
                             <Download size={18} />
                             Export Excel
@@ -102,7 +102,7 @@ const ClassBroadsheet: React.FC<ClassBroadsheetProps> = ({ reports, className = 
                         {onClose && (
                             <button
                                 onClick={onClose}
-                                className="px-4 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                                className="min-h-11 cursor-pointer px-4 py-2 text-gray-600 dark:text-slate-200 hover:bg-surface-hover rounded-lg focus-visible:ring-2 focus-visible:ring-primary"
                             >
                                 Close
                             </button>
@@ -137,7 +137,7 @@ const ClassBroadsheet: React.FC<ClassBroadsheetProps> = ({ reports, className = 
             </div>
 
             {/* The Table */}
-            <div className="flex-1 overflow-auto p-0 md:p-6 print:p-0 print:overflow-visible print:h-auto">
+            <div role="region" aria-label="Class results table" tabIndex={0} className="min-w-0 max-w-full flex-1 overflow-auto p-0 md:p-6 focus-visible:ring-2 focus-visible:ring-primary print:p-0 print:overflow-visible print:h-auto">
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full text-sm text-left border-collapse">
                         <thead className="bg-gray-100 text-gray-700 font-bold border-b border-gray-200">
@@ -156,9 +156,9 @@ const ClassBroadsheet: React.FC<ClassBroadsheetProps> = ({ reports, className = 
                         </thead>
                         <tbody className="divide-y divide-gray-200 text-gray-800">
                             {rows.map((row, idx) => (
-                                <tr key={row.id} className="hover:bg-blue-50 transition-colors">
+                                <tr key={row.id} className="hover:bg-surface-hover transition-colors">
                                     <td className="px-4 py-2 border-r border-gray-100 text-center font-bold text-gray-500">{row.rank || idx + 1}</td>
-                                    <td className="px-4 py-2 border-r border-gray-100 font-medium whitespace-nowrap sticky left-0 bg-white group-hover:bg-blue-50 z-10">
+                                    <td className="px-4 py-2 border-r border-gray-100 font-medium whitespace-nowrap sticky left-0 bg-white group-hover:bg-surface-hover z-10">
                                         {row.student?.firstName} {row.student?.lastName}
                                         {/* <div className="text-[10px] text-gray-400 font-mono">{row.student?.admissionNumber}</div> */}
                                     </td>

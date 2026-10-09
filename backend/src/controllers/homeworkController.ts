@@ -3,6 +3,9 @@ import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentRecordAccess } from '../utils/academicScope';
+import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
+import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { getStudentPlacementForTerm, StudentPlacementError } from '../services/studentPlacementService';
 
 // Get homework submissions for an assessment
 export const getSubmissions = async (req: Request, res: Response) => {
@@ -11,14 +14,17 @@ export const getSubmissions = async (req: Request, res: Response) => {
 
     const assessment = await prisma.assessment.findUnique({
       where: { id: assessmentId },
-      select: { classId: true, subjectId: true },
+      select: { classId: true, subjectId: true, termId: true },
     });
 
     if (!assessment) {
       return res.status(404).json({ error: 'Assessment not found' });
     }
 
-    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, { subjectId: assessment.subjectId });
+    await ensureAcademicClassAccess(req as AuthRequest, assessment.classId, {
+      subjectId: assessment.subjectId,
+      academicTermId: assessment.termId,
+    });
 
     const submissions = await prisma.homeworkSubmission.findMany({
       where: { assessmentId },
@@ -59,40 +65,47 @@ export const submitHomework = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Assessment not found' });
     }
 
-    if (student.classId !== assessment.classId) {
+    const placement = await getStudentPlacementForTerm(student.id, assessment.termId);
+    if (!placement || placement.classId !== assessment.classId || placement.status !== 'ACTIVE') {
       return res.status(403).json({ error: 'You can only submit homework for your own class' });
     }
 
     const now = new Date();
     const isLate = assessment.dueDate ? now > assessment.dueDate : false;
 
-    const submission = await prisma.homeworkSubmission.upsert({
-      where: {
-        assessmentId_studentId: { assessmentId, studentId: student.id }
-      },
-      update: {
-        content,
-        fileUrl,
-        status: isLate ? 'LATE_SUBMITTED' : 'SUBMITTED',
-        submittedAt: now,
-        isLate,
-      },
-      create: {
-        assessmentId,
-        studentId: student.id,
-        content,
-        fileUrl,
-        status: isLate ? 'LATE_SUBMITTED' : 'SUBMITTED',
-        submittedAt: now,
-        isLate,
-      },
-    });
+    const submission = await runTermWriteTransaction(assessment.termId, 'ACADEMIC_ACTIVITY', tx => (
+      tx.homeworkSubmission.upsert({
+        where: {
+          assessmentId_studentId: { assessmentId, studentId: student.id }
+        },
+        update: {
+          content,
+          fileUrl,
+          status: isLate ? 'LATE_SUBMITTED' : 'SUBMITTED',
+          submittedAt: now,
+          isLate,
+        },
+        create: {
+          assessmentId,
+          studentId: student.id,
+          content,
+          fileUrl,
+          status: isLate ? 'LATE_SUBMITTED' : 'SUBMITTED',
+          submittedAt: now,
+          isLate,
+        },
+      })
+    ));
 
     res.status(201).json(submission);
   } catch (error) {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof StudentPlacementError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Submit homework error:', error);
     res.status(500).json({ error: 'Failed to submit homework' });
   }
@@ -110,7 +123,7 @@ export const gradeSubmission = async (req: Request, res: Response) => {
 
     const existing = await prisma.homeworkSubmission.findUnique({
       where: { id },
-      include: { assessment: { select: { classId: true, subjectId: true, totalMarks: true } } },
+      include: { assessment: { select: { classId: true, subjectId: true, termId: true, totalMarks: true } } },
     });
 
     if (!existing) {
@@ -123,16 +136,18 @@ export const gradeSubmission = async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Score cannot exceed ${Number(existing.assessment.totalMarks)} marks` });
     }
 
-    const submission = await prisma.homeworkSubmission.update({
-      where: { id },
-      data: {
-        score,
-        feedback,
-        status: 'GRADED',
-        gradedAt: new Date(),
-        gradedBy: userId,
-      },
-    });
+    const submission = await runTermWriteTransaction(existing.assessment.termId, 'FINALIZATION', tx => (
+      tx.homeworkSubmission.update({
+        where: { id },
+        data: {
+          score,
+          feedback,
+          status: 'GRADED',
+          gradedAt: new Date(),
+          gradedBy: userId,
+        },
+      })
+    ));
 
     res.json(submission);
   } catch (error) {
@@ -142,6 +157,7 @@ export const gradeSubmission = async (req: Request, res: Response) => {
     if (error instanceof AcademicScopeError) {
       return res.status(error.status).json({ error: error.message });
     }
+    if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Grade submission error:', error);
     res.status(500).json({ error: 'Failed to grade submission' });
   }

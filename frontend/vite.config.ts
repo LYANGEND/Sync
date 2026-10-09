@@ -16,7 +16,9 @@ export default defineConfig({
       },
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4MB
+        // The existing application bundle exceeds 4 MiB. Preserve dependency
+        // ordering instead of introducing circular manual vendor chunks.
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
       },
       includeAssets: [
         'favicon-16x16.png',
@@ -138,6 +140,8 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Windows bind mounts into Docker do not emit file events; poll so edits reach the dev server.
+    watch: { usePolling: true, interval: 300 },
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET || 'http://localhost:4000',

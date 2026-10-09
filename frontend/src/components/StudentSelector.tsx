@@ -171,7 +171,7 @@ const StudentSelector: React.FC<StudentSelectorProps> = ({
                     <button
                         type="button"
                         onClick={clearSelection}
-                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-surface-hover-danger rounded-full transition-colors"
                     >
                         <X size={18} />
                     </button>
@@ -251,7 +251,7 @@ const StudentSelector: React.FC<StudentSelectorProps> = ({
                             <button
                                 type="button"
                                 onClick={handleAdmissionLookup}
-                                className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                className="px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors font-medium"
                             >
                                 Find
                             </button>
@@ -297,7 +297,7 @@ const StudentSelector: React.FC<StudentSelectorProps> = ({
                                     type="button"
                                     onClick={() => selectStudent(student)}
                                     onMouseEnter={() => setHighlightedIndex(index)}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
+                                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-surface-hover'
                                         }`}
                                 >
                                     <div className="w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-medium text-sm">
