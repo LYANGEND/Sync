@@ -26,7 +26,30 @@ export const PWAUpdatePrompt = () => {
         },
     });
 
+    // sw.js calls skipWaiting/clientsClaim, so a new release takes control without
+    // ever entering the "waiting" state. The open page still runs the old bundle,
+    // which can be incompatible with the new API, so ask for a reload (or reload
+    // right away when the tab is in the background).
+    const [controllerChanged, setControllerChanged] = useState(false);
+    useEffect(() => {
+        if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+        const onControllerChange = () => {
+            if (document.visibilityState === 'hidden') {
+                window.location.reload();
+                return;
+            }
+            setControllerChanged(true);
+            setNeedRefresh(true);
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+        return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    }, [setNeedRefresh]);
+
     const handleUpdate = () => {
+        if (controllerChanged) {
+            window.location.reload();
+            return;
+        }
         updateServiceWorker(true);
     };
 
