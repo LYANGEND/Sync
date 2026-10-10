@@ -1,0 +1,60 @@
+name: Server Logs (redacted)
+
+# Manual, read-only diagnostics. The repo is public, so every line printed here
+# is public: only container status and redacted error lines are emitted.
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: Time window
+        type: choice
+        options: [1h, 6h, 24h, 72h]
+        default: 24h
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch redacted logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            SINCE="${{ inputs.since }}"
+            redact() {
+              sed -E \
+                -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g' \
+                -e 's/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/[jwt]/g' \
+                -e 's/(Bearer|bearer) [^ "]+/\1 [token]/g' \
+                -e 's#postgres(ql)?://[^ "]+#[dburl]#g' \
+                -e 's/(password|secret|token|apikey|api_key)([" :=]+)[^ ",}]+/\1\2[redacted]/Ig' \
+                -e 's/\?[^ "]*/?[query]/g' \
+                -e 's/\+?[0-9][0-9 -]{8,}[0-9]/[number]/g'
+            }
+
+            echo "=== Containers ==="
+            docker ps -a --filter name=sync_ --format '{{.Names}}  {{.Status}}  {{.Image}}'
+            for c in sync_backend sync_frontend; do
+              echo "$c restarts: $(docker inspect -f '{{.RestartCount}}' $c 2>/dev/null)"
+            done
+
+            echo "=== Migration status ==="
+            docker exec sync_backend npx prisma migrate status 2>&1 | redact | tail -n 15
+
+            echo "=== Backend error lines (last $SINCE, max 200) ==="
+            docker logs --since "$SINCE" sync_backend 2>&1 \
+              | grep -iE 'error|exception|fail|unhandled|prisma|P[0-9]{4}| 5[0-9]{2} |status(code)?[=: ]+5[0-9]{2}' \
+              | redact | tail -n 200
+
+            echo "=== Backend tail (last 40 lines, redacted) ==="
+            docker logs --tail 40 sync_backend 2>&1 | redact
+
+            echo "=== Frontend/nginx error lines (last $SINCE, max 60) ==="
+            docker logs --since "$SINCE" sync_frontend 2>&1 \
+              | grep -E 'error|crit|emerg|" 5[0-9]{2} ' \
+              | redact | tail -n 60
