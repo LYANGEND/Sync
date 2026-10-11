@@ -8,7 +8,7 @@ import analyticsService, { type AnalyticsDashboard } from '../../services/analyt
 import { useActiveTerm } from '../../hooks/useActiveTerm';
 import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
 
-import TeacherDashboard from './TeacherDashboard';
+import TeacherDashboard, { type TeacherStats } from './TeacherDashboard';
 import DashboardAnalytics, { type AnalyticsPeriod } from './DashboardAnalytics';
 
 // Admin Stats Interface
@@ -36,37 +36,6 @@ interface AdminStats {
     unresolvedAlerts: number;
     attendanceRate: number;
   };
-}
-
-// Teacher Stats Interface
-interface TeacherStats {
-  role: 'TEACHER';
-  stats: {
-    totalStudents: number;
-    totalClasses: number;
-    todayScheduleCount: number;
-  };
-  myClasses: {
-    id: string;
-    name: string;
-    gradeLevel: number;
-    _count: { students: number };
-  }[];
-  todaySchedule: {
-    id: string;
-    startTime: string;
-    endTime: string;
-    class: { name: string };
-    subject: { name: string; code: string };
-  }[];
-  recentAssessments: {
-    id: string;
-    title: string;
-    date: string;
-    class: { name: string };
-    subject: { name: string };
-    _count: { results: number };
-  }[];
 }
 
 type DashboardData = AdminStats | TeacherStats;

@@ -7,6 +7,7 @@ import {
     X, Loader2, RefreshCw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import api from '../../utils/api';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import AttendanceAnalytics from '../../components/academics/AttendanceAnalytics';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
@@ -71,6 +72,7 @@ const ICON_BUTTON = 'grid h-11 w-11 shrink-0 cursor-pointer place-items-center r
 
 const AttendanceRegister = () => {
     const { confirm, notify } = useAppDialog();
+    const [searchParams] = useSearchParams();
     const [classes, setClasses] = useState<any[]>([]);
     const [academicTerms, setAcademicTerms] = useState<AcademicTerm[]>([]);
     const [instructionalDates, setInstructionalDates] = useState<Record<string, string[]>>({});
@@ -197,12 +199,16 @@ const AttendanceRegister = () => {
             setAcademicTerms(nextTerms);
             setInstructionalDates(nextInstructionalDates);
             if (defaultTerm) {
+                const termDates = nextInstructionalDates[defaultTerm.id] || [];
+                const requestedDate = searchParams.get('date');
                 setSelectedTermId(defaultTerm.id);
-                setDate(pickRegisterDate(nextInstructionalDates[defaultTerm.id] || []));
+                setDate(requestedDate && termDates.includes(requestedDate) ? requestedDate : pickRegisterDate(termDates));
             }
             if (defaultClasses.length > 0) {
-                setSelectedClassId(defaultClasses[0].id);
-                setSelectedClassName(defaultClasses[0].name);
+                const requestedClass = defaultClasses.find((classOption: any) => classOption.id === searchParams.get('classId'));
+                const initialClass = requestedClass || defaultClasses[0];
+                setSelectedClassId(initialClass.id);
+                setSelectedClassName(initialClass.name);
             }
         } catch (error) {
             console.error('Error fetching classes:', error);

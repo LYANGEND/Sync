@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, AlertCircle, CheckCircle, Search, Calendar, Activity, BookOpen, Sparkles, Play, Check, Edit3, Target, Loader2, X, Eye, ClipboardCheck, BrainCircuit, ChevronRight } from 'lucide-react';
+import { AlertTriangle, AlertCircle, CheckCircle, Search, Calendar, Activity, BookOpen, Sparkles, Play, Check, Edit3, Target, Loader2, X, Eye, ClipboardCheck, BrainCircuit, ChevronRight, MessageSquare, NotebookPen } from 'lucide-react';
 import { PullToRefresh } from '../../components/mobile';
 import api from '../../utils/api';
 import { Link } from 'react-router-dom';
 
-// Base props from the existing Dashboard stats
-interface TeacherStats {
+// Shape of GET /dashboard/stats for teachers
+export interface TeacherStats {
+  role: 'TEACHER';
   stats: {
     totalStudents: number;
     totalClasses: number;
@@ -15,24 +16,119 @@ interface TeacherStats {
     id: string;
     name: string;
     gradeLevel: number;
+    isClassTeacher: boolean;
+    mySubjects: { id: string; name: string }[];
     _count: { students: number };
   }[];
   todaySchedule: {
     id: string;
     startTime: string;
     endTime: string;
-    class: { name: string };
-    subject: { name: string; code: string };
+    class: { id: string; name: string } | null;
+    subject: { id: string; name: string; code: string };
   }[];
   recentAssessments: {
     id: string;
     title: string;
     date: string;
+    classId: string;
+    subjectId: string;
     class: { name: string };
     subject: { name: string };
     _count: { results: number };
   }[];
+  todayTasks: {
+    date: string;
+    isInstructionalDay: boolean;
+    attendancePending: { classId: string; className: string; students: number }[];
+    marksPending: {
+      assessmentId: string;
+      title: string;
+      date: string;
+      classId: string;
+      className: string;
+      subjectId: string;
+      subjectName: string;
+      recorded: number;
+      expected: number;
+    }[];
+    draftAssessments: number;
+    homeworkToGrade: {
+      assessmentId: string;
+      title: string;
+      classId: string;
+      className: string;
+      subjectId: string;
+      subjectName: string;
+      count: number;
+    }[];
+    lessonPlansMissing: { classId: string; className: string; subjectId: string; subjectName: string }[];
+  };
 }
+
+interface TodayTask {
+  key: string;
+  label: string;
+  detail: string;
+  to: string;
+}
+
+const TASKS_PER_GROUP = 5;
+
+const buildTodayTasks = (tasks: TeacherStats['todayTasks']): { title: string; items: TodayTask[]; more: number }[] => {
+  const groups = [
+    {
+      title: 'Take attendance',
+      items: tasks.attendancePending.map((item) => ({
+        key: `att-${item.classId}`,
+        label: item.className,
+        detail: `${item.students} pupils not yet marked`,
+        to: `/academics?tab=attendance&classId=${item.classId}&date=${tasks.date}`,
+      })),
+    },
+    {
+      title: 'Enter marks',
+      items: tasks.marksPending.map((item) => ({
+        key: `marks-${item.assessmentId}`,
+        label: `${item.title} - ${item.subjectName}`,
+        detail: `${item.className}: ${item.recorded} of ${item.expected} recorded`,
+        to: `/academics?tab=gradebook&classId=${item.classId}&subjectId=${item.subjectId}`,
+      })),
+    },
+    {
+      title: 'Mark homework',
+      items: tasks.homeworkToGrade.map((item) => ({
+        key: `hw-${item.assessmentId}`,
+        label: `${item.title} - ${item.subjectName}`,
+        detail: `${item.className}: ${item.count} submission${item.count === 1 ? '' : 's'} waiting`,
+        to: `/academics?tab=homework&classId=${item.classId}&assessmentId=${item.assessmentId}`,
+      })),
+    },
+    {
+      title: 'Plan this week',
+      items: tasks.lessonPlansMissing.map((item) => ({
+        key: `plan-${item.classId}-${item.subjectId}`,
+        label: `${item.subjectName} - ${item.className}`,
+        detail: 'No lesson plan for this week',
+        to: `/academics?tab=lesson-plans&classId=${item.classId}&subjectId=${item.subjectId}&view=plans`,
+      })),
+    },
+    {
+      title: 'Review drafts',
+      items: tasks.draftAssessments > 0
+        ? [{
+          key: 'drafts',
+          label: `${tasks.draftAssessments} draft assessment${tasks.draftAssessments === 1 ? '' : 's'}`,
+          detail: 'Set a weight to publish them',
+          to: '/academics?tab=assessments',
+        }]
+        : [],
+    },
+  ];
+  return groups
+    .filter((group) => group.items.length > 0)
+    .map((group) => ({ title: group.title, items: group.items.slice(0, TASKS_PER_GROUP), more: Math.max(0, group.items.length - TASKS_PER_GROUP) }));
+};
 
 interface TeacherDashboardProps {
   data: TeacherStats;
@@ -225,6 +321,9 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
   const urgentLearnersCount = studentQueue.reduce((sum, student) => sum + student.urgentCount, 0);
   const supportQueueCount = studentQueue.length;
   const totalRecentResults = data.recentAssessments.reduce((sum, assessment) => sum + assessment._count.results, 0);
+  const todayTaskGroups = buildTodayTasks(data.todayTasks);
+  const todayTaskCount = todayTaskGroups.reduce((sum, group) => sum + group.items.length + group.more, 0);
+  const firstClassId = data.myClasses[0]?.id;
   const filteredLessons = lessons.filter((lesson) => {
     const matchesStatus = lessonStatusFilter === 'ALL' || lesson.status === lessonStatusFilter;
     const searchText = lessonSearch.trim().toLowerCase();
@@ -271,6 +370,45 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                <span className="font-bold text-orange-600">{stats.todayScheduleCount}</span>
              </div>
           </div>
+        </div>
+
+        <div className="mb-6 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 p-4 md:p-5">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-base font-bold text-gray-900 dark:text-white">Today</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {todayTaskCount > 0 ? `${todayTaskCount} thing${todayTaskCount === 1 ? '' : 's'} to do. Each one opens the right class.` : 'All caught up.'}
+                {!data.todayTasks.isInstructionalDay && ' Not a school day, so no register is due.'}
+              </p>
+            </div>
+          </div>
+          {todayTaskGroups.length === 0 ? (
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <CheckCircle size={16} className="text-emerald-600" /> Registers, marks, homework and this week's plans are up to date.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {todayTaskGroups.map((group) => (
+                <div key={group.title}>
+                  <p className="text-[10px] uppercase tracking-wide font-bold text-gray-500 dark:text-gray-400 mb-2">{group.title}</p>
+                  <ul className="space-y-1.5">
+                    {group.items.map((task) => (
+                      <li key={task.key}>
+                        <Link to={task.to} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-slate-700 px-3 py-2 hover:bg-surface-hover transition-colors">
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-gray-900 dark:text-white truncate">{task.label}</span>
+                            <span className="block text-[11px] text-gray-500 dark:text-gray-400 truncate">{task.detail}</span>
+                          </span>
+                          <ChevronRight size={14} className="shrink-0 text-gray-400" />
+                        </Link>
+                      </li>
+                    ))}
+                    {group.more > 0 && <li className="text-[11px] text-gray-500 dark:text-gray-400 px-1">and {group.more} more</li>}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mb-6 grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] gap-4">
@@ -341,6 +479,16 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Continue Planning</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{readyLessonsCount} ready • {draftLessonsCount} draft</p>
               </button>
+              <Link to="/academics?tab=lesson-plans&view=plans" className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-surface-hover transition-colors">
+                <NotebookPen size={18} className="text-teal-600 dark:text-teal-400 mb-2" />
+                <p className="text-sm font-bold text-gray-900 dark:text-white">Lesson Plans</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Weekly plans and coverage</p>
+              </Link>
+              <Link to={firstClassId ? `/communication?classId=${firstClassId}` : '/communication'} className="rounded-xl border border-gray-200 dark:border-slate-700 p-3 hover:bg-surface-hover transition-colors">
+                <MessageSquare size={18} className="text-sky-600 dark:text-sky-400 mb-2" />
+                <p className="text-sm font-bold text-gray-900 dark:text-white">Message Parents</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Send a note to a class's parents</p>
+              </Link>
             </div>
           </div>
         </div>
@@ -514,7 +662,12 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                          <div className="text-sm font-bold text-blue-900 dark:text-blue-400">{period.subject?.name}</div>
                          <div className="text-xs text-gray-500">{period.class?.name}</div>
                        </div>
-                       <Link to="/academics/attendance" className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">Mark Att</Link>
+                       {period.class && (
+                         <div className="flex gap-1.5">
+                           <Link to={`/academics?tab=attendance&classId=${period.class.id}&date=${data.todayTasks.date}`} className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">Register</Link>
+                           <Link to={`/academics?tab=gradebook&classId=${period.class.id}&subjectId=${period.subject.id}`} className="px-3 py-1.5 text-xs font-medium bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100">Marks</Link>
+                         </div>
+                       )}
                      </div>
                    ))}
                  </div>
@@ -804,11 +957,11 @@ export default function TeacherDashboard({ data, user, onRefresh }: TeacherDashb
                       <p className="text-xs text-gray-500 dark:text-gray-400">{assessment.class.name} • {new Date(assessment.date).toLocaleDateString()} • {assessment._count.results} result{assessment._count.results !== 1 ? 's' : ''} recorded</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Link to="/academics/gradebook" className="inline-flex items-center gap-1 rounded-xl bg-primary text-white px-3 py-2 text-xs font-bold hover:bg-primary-hover transition-colors">
+                      <Link to={`/academics?tab=gradebook&classId=${assessment.classId}&subjectId=${assessment.subjectId}`} className="inline-flex items-center gap-1 rounded-xl bg-primary text-white px-3 py-2 text-xs font-bold hover:bg-primary-hover transition-colors">
                         <ClipboardCheck size={12} /> Grade Results
                       </Link>
-                      <Link to="/academics" className="inline-flex items-center gap-1 rounded-xl bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-3 py-2 text-xs font-bold hover:bg-surface-hover transition-colors">
-                        <Eye size={12} /> Open Academics
+                      <Link to="/academics?tab=assessments" className="inline-flex items-center gap-1 rounded-xl bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 px-3 py-2 text-xs font-bold hover:bg-surface-hover transition-colors">
+                        <Eye size={12} /> Assessments
                       </Link>
                     </div>
                   </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, Filter, AlertCircle, Check, RotateCcw, Search, X } from 'lucide-react';
 import api from '../../utils/api';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
@@ -43,6 +44,7 @@ interface GradebookData {
 const TeacherGradebook = () => {
     const { user } = useAuth();
     const { confirm } = useAppDialog();
+    const [searchParams] = useSearchParams();
     const canEdit = user?.role === 'SUPER_ADMIN' || user?.role === 'TEACHER';
     const [classes, setClasses] = useState<ClassOption[]>([]);
     const [subjects, setSubjects] = useState<SubjectOption[]>([]);
@@ -163,10 +165,13 @@ const TeacherGradebook = () => {
             setTerms(termRes.data);
 
             if (activeTerm) setSelectedTermId(activeTerm.id);
-            if (classRes.data.length > 0) setSelectedClassId(classRes.data[0].id);
-            const firstClass = classRes.data[0];
-            const firstClassSubjects = firstClass?.subjects || [];
-            if (firstClassSubjects.length > 0) setSelectedSubjectId(firstClassSubjects[0].id);
+            const firstClass = classRes.data.find((c: ClassOption) => c.id === searchParams.get('classId')) || classRes.data[0];
+            if (firstClass) setSelectedClassId(firstClass.id);
+            const firstClassSubjects: SubjectOption[] = firstClass?.subjects || [];
+            const requestedSubject = firstClassSubjects.find((s) => s.id === searchParams.get('subjectId'));
+            if (requestedSubject) setSelectedSubjectId(requestedSubject.id);
+            else if (firstClassSubjects.length > 0) setSelectedSubjectId(firstClassSubjects[0].id);
+            else if (subjectRes.data.length > 0) setSelectedSubjectId(subjectRes.data[0].id);
             else if (subjectRes.data.length > 0) setSelectedSubjectId(subjectRes.data[0].id);
 
         } catch (error) {

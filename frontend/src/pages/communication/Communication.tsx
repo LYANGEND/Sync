@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import { useSearchParams } from 'react-router-dom';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
 
 const ChatInterface = lazy(() => import('./ChatInterface'));
 const SentItems = lazy(() => import('./SentItems'));
@@ -35,6 +37,10 @@ const Communication = () => {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
+  const [classId, setClassId] = useState('');
+  const [classOptions, setClassOptions] = useState<{ id: string; name: string }[]>([]);
+  const [searchParams] = useSearchParams();
+  const { activeTerm } = useActiveTerm();
   const [sendEmail, setSendEmail] = useState(false);
   const [sendSms, setSendSms] = useState(false);
   const [sendWhatsApp, setSendWhatsApp] = useState(false);
@@ -82,6 +88,20 @@ const Communication = () => {
   const canSendAnnouncements = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER'].includes(user?.role || '');
   const canChat = ['SUPER_ADMIN', 'BURSAR', 'SECRETARY', 'TEACHER', 'PARENT', 'STUDENT'].includes(user?.role || '');
   const canViewLogs = isAdmin;
+  const isTeacher = user?.role === 'TEACHER';
+
+  useEffect(() => {
+    if (!activeTerm || !canSendAnnouncements) return;
+    api.get('/classes', { params: { academicTermId: activeTerm.id } })
+      .then(res => {
+        const options = (res.data || []).map((c: any) => ({ id: c.id, name: c.name }));
+        setClassOptions(options);
+        const requested = searchParams.get('classId');
+        if (requested && options.some((c: { id: string }) => c.id === requested)) setClassId(requested);
+        else if (isTeacher && options[0]) setClassId(options[0].id);
+      })
+      .catch(err => console.error('Failed to fetch classes', err));
+  }, [activeTerm?.id, canSendAnnouncements]);
 
   useEffect(() => {
     if (!canSendAnnouncements && canChat) {
@@ -116,6 +136,10 @@ const Communication = () => {
       setStatus({ type: 'error', message: 'Please fill in all fields' });
       return;
     }
+    if (isTeacher && !classId) {
+      setStatus({ type: 'error', message: 'Choose one of your classes' });
+      return;
+    }
 
     setSending(true);
     setStatus(null);
@@ -124,7 +148,8 @@ const Communication = () => {
       const payload: any = {
         subject,
         message,
-        targetRoles: targetRoles.length > 0 ? targetRoles : undefined,
+        targetRoles: !classId && targetRoles.length > 0 ? targetRoles : undefined,
+        classId: classId || undefined,
         sendEmail,
         sendSms,
         sendWhatsApp,
@@ -132,7 +157,7 @@ const Communication = () => {
         priority,
       };
 
-      if (scheduledAt) {
+      if (scheduledAt && !classId) {
         payload.scheduledAt = new Date(scheduledAt).toISOString();
       }
 
@@ -162,7 +187,9 @@ const Communication = () => {
       const res = await api.post('/communication/ai-compose', {
         topic: aiTopic,
         tone: aiTone,
-        audience: targetRoles.length > 0 ? targetRoles.join(', ') : undefined,
+        audience: classId
+          ? `Parents of ${classOptions.find(c => c.id === classId)?.name ?? 'the class'}`
+          : targetRoles.length > 0 ? targetRoles.join(', ') : undefined,
       });
       setSubject(res.data.subject || '');
       setMessage(res.data.message || '');
@@ -1048,6 +1075,30 @@ const Communication = () => {
 
                 {/* Target Audience */}
                 <div>
+                  <label htmlFor="announcement-class" className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users size={14} />
+                    {isTeacher ? 'Parents of class' : 'Audience'}
+                  </label>
+                  <select
+                    id="announcement-class"
+                    value={classId}
+                    onChange={(e) => setClassId(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-slate-600 rounded-xl bg-gray-50 dark:bg-slate-700/50 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500 dark:text-white outline-none"
+                  >
+                    {isTeacher
+                      ? classOptions.length === 0 && <option value="">No classes assigned this term</option>
+                      : <option value="">By role (below)</option>}
+                    {classOptions.map(c => (
+                      <option key={c.id} value={c.id}>{isTeacher ? c.name : `Parents of ${c.name}`}</option>
+                    ))}
+                  </select>
+                  {classId && (
+                    <p className="text-xs text-gray-500 mt-2">Sent now to parents of pupils enrolled in this class.</p>
+                  )}
+                </div>
+
+                {!classId && !isTeacher && (
+                <div>
                   <div className="flex items-center justify-between mb-2.5">
                     <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                       <Users size={14} />
@@ -1072,8 +1123,10 @@ const Communication = () => {
                   </div>
                   <p className="text-xs text-gray-500 mt-2">Leave all unchecked to send to EVERYONE.</p>
                 </div>
+                )}
 
                 {/* Schedule */}
+                {!classId && !isTeacher && (
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar size={14} />
@@ -1092,6 +1145,7 @@ const Communication = () => {
                     </button>
                   )}
                 </div>
+                )}
               </div>
             </div>
 

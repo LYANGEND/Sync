@@ -8,6 +8,8 @@ import { getCommunicationLogs, getCommunicationStats } from '../services/communi
 import smsService from '../services/smsService';
 import whatsappService from '../services/whatsappService';
 import { broadcastPush } from '../services/pushService';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
 
 // ============ ANNOUNCEMENTS ============
 
@@ -21,17 +23,34 @@ const sendAnnouncementSchema = z.object({
   sendNotification: z.boolean().default(true),
   priority: z.enum(['NORMAL', 'URGENT', 'EMERGENCY']).default('NORMAL'),
   scheduledAt: z.string().optional(),
+  classId: z.string().uuid().optional(),
 });
 
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
     const data = sendAnnouncementSchema.parse(req.body);
-    const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendSms: shouldSendSms, sendWhatsApp: shouldSendWhatsApp, sendNotification, priority, scheduledAt } = data;
+    const { subject, message, targetRoles, sendEmail: shouldSendEmail, sendSms: shouldSendSms, sendWhatsApp: shouldSendWhatsApp, sendNotification, priority, scheduledAt, classId } = data;
+    const isTeacher = (req as any).user?.role === 'TEACHER';
 
-    // Find target users
+    if (isTeacher && !classId) {
+      return res.status(400).json({ message: 'Choose one of your classes to message its parents' });
+    }
+    if (classId && scheduledAt) {
+      return res.status(400).json({ message: 'Class announcements are sent immediately and cannot be scheduled' });
+    }
+
+    // Find target users: parents of a class, or users by role
     const whereClause: any = { isActive: true };
-    if (targetRoles && targetRoles.length > 0) {
+    let audienceLabels = targetRoles?.map(r => r.toString()) || ['ALL'];
+    if (classId) {
+      const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId);
+      whereClause.role = 'PARENT';
+      whereClause.children = {
+        some: { status: 'ACTIVE', termEnrollments: { some: { classId, status: 'ACTIVE' } } },
+      };
+      audienceLabels = [`Parents of ${classInfo.name}`];
+    } else if (targetRoles && targetRoles.length > 0) {
       whereClause.role = { in: targetRoles };
     }
 
@@ -41,7 +60,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
     });
 
     if (users.length === 0) {
-      return res.status(404).json({ message: 'No users found for the selected roles' });
+      return res.status(404).json({ message: classId ? 'No active parent accounts found for this class' : 'No users found for the selected roles' });
     }
 
     const userIds = users.map(u => u.id);
@@ -52,7 +71,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
       data: {
         subject,
         message,
-        targetRoles: targetRoles?.map(r => r.toString()) || ['ALL'],
+        targetRoles: audienceLabels,
         sentViaEmail: shouldSendEmail,
         sentViaSms: shouldSendSms,
         sentViaWhatsApp: shouldSendWhatsApp,
@@ -124,10 +143,13 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
       })).catch(err => console.error('Background WhatsApp sending failed', err));
     }
 
-    res.json({ message: `Announcement sent to ${users.length} users`, announcementId: announcement.id });
+    res.json({ message: `Announcement sent to ${users.length} users`, announcementId: announcement.id, recipientCount: users.length });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
+    }
+    if (error instanceof AcademicScopeError) {
+      return res.status(error.status).json({ message: error.message });
     }
     console.error('Send announcement error:', error);
     res.status(500).json({ message: 'Internal server error' });

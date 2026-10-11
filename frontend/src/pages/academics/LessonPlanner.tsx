@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import api from '../../utils/api';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import syllabusService, { parseLearningObjectives } from '../../services/syllabusService';
 
@@ -93,7 +94,8 @@ interface LessonPlannerProps {
 
 const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId }) => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'SYLLABUS' | 'PLANS'>('SYLLABUS');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'SYLLABUS' | 'PLANS'>(() => searchParams.get('view') === 'plans' ? 'PLANS' : 'SYLLABUS');
 
   // Selection State
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -170,14 +172,17 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ subjectId: propSubjectId 
 
       setCurrentTerm(activeTerm);
 
-      const firstClass = classesRes.data[0];
+      const firstClass = classesRes.data.find((c: any) => c.id === searchParams.get('classId')) || classesRes.data[0];
       if (firstClass) {
         setSelectedClassId(firstClass.id);
+        const classSubjects = firstClass.subjects || [];
+        const requestedSubject = classSubjects.find((s: any) => s.id === searchParams.get('subjectId'));
         if (propSubjectId) {
           setSelectedSubjectId(propSubjectId);
+        } else if (requestedSubject) {
+          setSelectedSubjectId(requestedSubject.id);
         } else {
           // Auto-select first subject linked to this class
-          const classSubjects = firstClass.subjects || [];
           if (classSubjects.length > 0) setSelectedSubjectId(classSubjects[0].id);
         }
       } else if (propSubjectId) {

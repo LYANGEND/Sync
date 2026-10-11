@@ -63,6 +63,9 @@ export const getClasses = async (req: Request, res: Response) => {
           select: { fullName: true },
         },
         subjects: true,
+        teacherAssignments: user.role === 'TEACHER'
+          ? { where: { teacherId: user.userId }, select: { subjectId: true } }
+          : false,
         _count: {
           select: { termEnrollments: true },
         },
@@ -72,10 +75,19 @@ export const getClasses = async (req: Request, res: Response) => {
         { name: 'asc' },
       ],
     });
-    res.json(classes.map(classRecord => ({
-      ...classRecord,
-      _count: { students: classRecord._count.termEnrollments },
-    })));
+    res.json(classes.map(({ teacherAssignments, ...classRecord }) => {
+      // Subject teachers only see the subjects they are allocated in classes they do not own.
+      const allowedSubjectIds = user.role === 'TEACHER' && classRecord.teacherId !== user.userId
+        ? new Set((teacherAssignments ?? []).map((assignment) => assignment.subjectId))
+        : null;
+      return {
+        ...classRecord,
+        subjects: allowedSubjectIds
+          ? classRecord.subjects.filter((subject) => allowedSubjectIds.has(subject.id))
+          : classRecord.subjects,
+        _count: { students: classRecord._count.termEnrollments },
+      };
+    }));
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Academic term ID is required' });

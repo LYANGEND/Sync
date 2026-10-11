@@ -12,6 +12,9 @@ import AcademicCalendar from './AcademicCalendar';
 import AttendanceRegister from './AttendanceRegister';
 import TeacherGradebook from './TeacherGradebook';
 import SubjectAllocation from './SubjectAllocation';
+import LessonPlanner from './LessonPlanner';
+import HomeworkManagement from './HomeworkManagement';
+import Assessments from './Assessments';
 import TermRolloverPreparationPanel from '../../components/academics/TermRolloverPreparationPanel';
 import TermRolloverEnrollmentPanel from '../../components/academics/TermRolloverEnrollmentPanel';
 import TermRolloverReadinessPanel from '../../components/academics/TermRolloverReadinessPanel';
@@ -27,8 +30,11 @@ type AcademicGroup = typeof ACADEMIC_GROUPS[number]['id'];
 
 const ACADEMIC_TABS = [
   { id: 'gradebook', group: 'results', label: 'Gradebook', hint: 'Enter and review marks and assessments.', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY'] },
+  { id: 'assessments', group: 'results', label: 'Assessments', hint: 'Create tests and quizzes, and publish AI drafts.', roles: ['SUPER_ADMIN', 'TEACHER'] },
   { id: 'reports', group: 'results', label: 'Report Cards', hint: 'Build, review and finalise term report cards.', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
   { id: 'attendance', group: 'daily', label: 'Attendance', hint: 'Take and review daily class registers.', roles: ['SUPER_ADMIN', 'TEACHER', 'SECRETARY'] },
+  { id: 'lesson-plans', group: 'daily', label: 'Lesson Plans', hint: 'Track syllabus coverage and write weekly lesson plans.', roles: ['SUPER_ADMIN', 'TEACHER'] },
+  { id: 'homework', group: 'daily', label: 'Homework', hint: 'Set homework and mark pupil submissions.', roles: ['SUPER_ADMIN', 'TEACHER'] },
   { id: 'timetable', group: 'daily', label: 'Timetable', hint: 'View and edit class and teacher timetables.', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY', 'PARENT'] },
   { id: 'calendar', group: 'daily', label: 'Calendar', hint: 'School days, holidays and events.', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR', 'SECRETARY', 'PARENT'] },
   { id: 'classes', group: 'setup', label: 'Classes', hint: 'Classes for each term and the pupils in them.', roles: ['SUPER_ADMIN', 'SECRETARY'] },
@@ -169,6 +175,9 @@ const Academics = () => {
         {view === 'calendar' && allowedTabs.find(t => t.id === 'calendar') && <AcademicCalendar />}
         {view === 'attendance' && allowedTabs.find(t => t.id === 'attendance') && <AttendanceRegister />}
         {view === 'gradebook' && allowedTabs.find(t => t.id === 'gradebook') && <TeacherGradebook />}
+        {view === 'assessments' && allowedTabs.find(t => t.id === 'assessments') && <Assessments />}
+        {view === 'lesson-plans' && allowedTabs.find(t => t.id === 'lesson-plans') && <LessonPlanner />}
+        {view === 'homework' && allowedTabs.find(t => t.id === 'homework') && <HomeworkManagement />}
         {view === 'allocation' && allowedTabs.find(t => t.id === 'allocation') && <SubjectAllocation />}
       </div>
     </div>

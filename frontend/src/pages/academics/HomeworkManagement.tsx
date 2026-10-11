@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { useSearchParams } from 'react-router-dom';
 import {
   FileText, CheckCircle, Clock, AlertTriangle,
   ChevronRight, BookOpen, Star, MessageSquare, Sparkles, X, Loader2, Plus, Eye, Edit3
@@ -38,6 +39,8 @@ interface HomeworkManagementProps {
 
 const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: propSubjectId }) => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const pendingAssessmentId = useRef(searchParams.get('assessmentId'));
 
   const [loading, setLoading] = useState(false);
 
@@ -135,6 +138,9 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
       setClasses(classesRes.data);
       setSubjects(subjectsRes.data);
       setTerms(termsRes.data);
+      const requestedClass = classesRes.data.find((c: any) => c.id === searchParams.get('classId'));
+      const initialClass = requestedClass || classesRes.data[0];
+      if (initialClass) setSelectedClass(initialClass.id);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     }
@@ -146,7 +152,14 @@ const HomeworkManagement: React.FC<HomeworkManagementProps> = ({ subjectId: prop
       if (propSubjectId) params.subjectId = propSubjectId;
       const res = await api.get('/assessments', { params });
       // Only HOMEWORK and PROJECT types
-      setAssessments(res.data.filter((a: any) => ['HOMEWORK', 'PROJECT'].includes(a.type)));
+      const homework = res.data.filter((a: any) => ['HOMEWORK', 'PROJECT'].includes(a.type));
+      setAssessments(homework);
+      const requested = homework.find((a: any) => a.id === pendingAssessmentId.current);
+      if (requested) {
+        pendingAssessmentId.current = null;
+        setSelectedAssessment(requested);
+        fetchSubmissions(requested.id);
+      }
     } catch (error) {
       console.error('Failed to fetch assessments:', error);
     }
