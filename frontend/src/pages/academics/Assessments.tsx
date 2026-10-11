@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, FileText, Calendar, BookOpen, Users, ChevronRight, ArrowLeft, Save, Edit3, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import masterAIService from '../../services/masterAIService';
 import QuestionBuilder from '../../components/academics/QuestionBuilder';
 import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import { BarChart2, TrendingUp, Award, Calculator, Download, Upload } from 'lucide-react';
@@ -260,18 +261,24 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
     try {
       const classId = newAssessment.classId || selectedClass;
       const subjectId = newAssessment.subjectId || selectedSubject || propSubjectId;
-      const activeTerm = terms.find((t: any) => t.isActive);
-      const termId = newAssessment.termId || activeTerm?.id;
-      
-      await api.post('/master-ai/chat', {
-        message: `Generate a ${newAssessment.type || 'QUIZ'} assessment with questions for the class and subject I selected. Include 10 varied questions.`,
-        context: { classId, subjectId, termId, assessmentType: newAssessment.type || 'QUIZ' }
-      });
-      
-      // Refresh the list to show the AI-created assessment
-      fetchAssessments();
-      setView('list');
-      alert('AI assessment generated! Check your assessments list.');
+      const cls = classes.find(c => c.id === classId);
+      const subject = subjects.find(s => s.id === subjectId) || cls?.subjects?.find(s => s.id === subjectId);
+      if (!cls?.gradeLevel || !subject?.code) {
+        alert('Could not determine the grade level or subject code for this selection.');
+        return;
+      }
+      const type = ['EXAM', 'TEST', 'QUIZ'].includes(newAssessment.type) ? newAssessment.type : 'TEST';
+
+      const result = await masterAIService.executeCommand(
+        `Generate a ${type} assessment for subject ${subject.code}, grade ${cls.gradeLevel}, classId ${cls.id}, maxTopics 1.`
+      );
+      const created = result.actions.some(a => a.tool === 'generate_assessments' && a.success && !a.data?.error);
+
+      if (created) {
+        fetchAssessments();
+        setView('list');
+      }
+      alert(created ? 'AI assessment generated! Check your assessments list.' : result.message);
     } catch (error: any) {
       console.error('AI assessment generation failed:', error);
       alert(error?.response?.data?.error || 'AI generation failed. Try again.');

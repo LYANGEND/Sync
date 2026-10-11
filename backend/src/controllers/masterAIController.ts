@@ -133,7 +133,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }));
 
     // Execute via Master AI service
-    const result = await masterAIService.processCommand(message, userId, conversationHistory, imageBase64);
+    const result = await masterAIService.processCommand(message, { userId, role: req.user!.role }, conversationHistory, imageBase64);
 
     // Build assistant content for DB storage
     let assistantContent = result.message;
@@ -271,7 +271,7 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
     // Two-phase streaming execution
     const result = await masterAIService.processCommandStreaming(
       message,
-      userId,
+      { userId, role: req.user!.role },
       (phase, data) => {
         if (aborted) return;
         if (phase === 'quick') {

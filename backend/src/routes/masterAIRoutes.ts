@@ -12,6 +12,7 @@ import {
   voiceExecuteV2,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
+import { aiLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 const upload = multer({
@@ -26,16 +27,16 @@ const upload = multer({
   },
 });
 
-// All master AI routes require authentication + SUPER_ADMIN role
+// Admins get every tool; teachers get a scoped subset enforced in masterAIService (TEACHER_TOOLS).
 router.use(authenticateToken);
-router.use(authorizeRole(['SUPER_ADMIN']));
+router.use(authorizeRole(['SUPER_ADMIN', 'TEACHER']));
 
 // Audio Features
-router.post('/transcribe', upload.single('audio'), transcribeAudio);
-router.post('/speech', generateSpeech);
+router.post('/transcribe', aiLimiter, upload.single('audio'), transcribeAudio);
+router.post('/speech', aiLimiter, generateSpeech);
 
 // Voice conversation (two-phase streaming execute)
-router.post('/voice-execute-v2', voiceExecuteV2);
+router.post('/voice-execute-v2', aiLimiter, voiceExecuteV2);
 
 // Conversations (ChatGPT-style)
 router.post('/conversations', createConversation);
@@ -45,6 +46,6 @@ router.patch('/conversations/:id', updateConversation);
 router.delete('/conversations/:id', deleteConversation);
 
 // Execute a natural language command (within a conversation)
-router.post('/execute', executeCommand);
+router.post('/execute', aiLimiter, executeCommand);
 
 export default router;

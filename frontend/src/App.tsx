@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { BranchProvider } from './context/BranchContext';
@@ -42,7 +42,6 @@ import ShareTargetHandler from './pages/public/ShareTargetHandler';
 
 // New AI & Intelligence Pages
 import Analytics from './pages/analytics/Analytics';
-import AIAssistant from './pages/ai/AIAssistant';
 import AIAnalyticsDashboard from './pages/ai/AIAnalytics';
 import MasterAI from './pages/ai/MasterAI';
 import AIIntelligenceHub from './pages/ai/AIIntelligenceHub';
@@ -194,11 +193,8 @@ function App() {
                       <Analytics />
                     </RoleGuard>
                   } />
-                  <Route path="/ai-assistant" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
-                      <AIAssistant />
-                    </RoleGuard>
-                  } />
+                  {/* Teaching AI was merged into Master AI; keep old links working */}
+                  <Route path="/ai-assistant" element={<Navigate to="/master-ai" replace />} />
 
                   <Route path="/ai-analytics" element={
                     <RoleGuard allowedRoles={['SUPER_ADMIN', 'BRANCH_MANAGER']}>
@@ -206,7 +202,7 @@ function App() {
                     </RoleGuard>
                   } />
                   <Route path="/master-ai" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
                       <MasterAI />
                     </RoleGuard>
                   } />

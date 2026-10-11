@@ -2,19 +2,16 @@
  * Unified AI Conversation Service
  * ================================
  * Single source of truth for conversation CRUD across all AI modules:
- *   - teaching-assistant  (AI Teaching Assistant)
- *   - master-ai-ops       (Master AI Ops)
+ *   - master-ai-ops       (Master AI, used by admins and teachers)
  *   - financial-advisor    (AI Financial Advisor)
  *
- * Eliminates ~450 lines of duplicated Prisma queries that were
- * previously copy-pasted across aiAssistantController, masterAIController,
- * and aiFinancialController.
+ * Eliminates duplicated Prisma queries that were previously
+ * copy-pasted across the AI controllers.
  */
 
 import { prisma } from '../utils/prisma';
 
 export type ConversationContextType =
-  | 'teaching-assistant'
   | 'master-ai-ops'
   | 'financial-advisor';
 
@@ -54,26 +51,6 @@ export async function listConversations(
       _count: { select: { messages: true, artifacts: true } },
     },
     take: limit,
-  });
-}
-
-/**
- * LIST (exclude type) — used by the teaching-assistant which shows
- * everything *except* financial-advisor conversations.
- */
-export async function listConversationsExcluding(
-  userId: string,
-  excludeType: ConversationContextType,
-) {
-  return prisma.aIConversation.findMany({
-    where: {
-      userId,
-      NOT: { context: { path: ['type'], equals: excludeType } },
-    },
-    orderBy: { updatedAt: 'desc' },
-    include: {
-      _count: { select: { messages: true, artifacts: true } },
-    },
   });
 }
 

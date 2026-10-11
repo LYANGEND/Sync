@@ -12,6 +12,7 @@ import masterAIService, { MasterAIAction, MasterAIConversation } from '../../ser
 import ReactMarkdown from 'react-markdown';
 import { useVoiceConversation } from '../../hooks/useVoiceConversation';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface ChatMessage {
   id: string;
@@ -24,7 +25,7 @@ interface ChatMessage {
   isLoading?: boolean;
 }
 
-const quickCommands = [
+const adminQuickCommands = [
   {
     icon: Calendar,
     label: 'Add Zambian Holidays',
@@ -75,6 +76,68 @@ const quickCommands = [
   },
 ];
 
+const teacherQuickCommands = [
+  { icon: BookOpen, label: 'Lesson Plans', command: 'Generate lesson plans for the next topics in my subject' },
+  { icon: BarChart3, label: 'Class Insights', command: 'How is my class doing? Who needs extra support?' },
+  { icon: CheckCircle2, label: 'Create a Quiz', command: 'Create a 10-question quiz with an answer key for my class on the current topic' },
+  { icon: Pencil, label: 'Homework', command: 'Generate homework for my class for this week' },
+  { icon: MessageSquare, label: 'Report Remarks', command: 'Help me write report card remarks for a learner' },
+  { icon: Sparkles, label: 'Teaching Ideas', command: 'Give me practical, low-resource activities to teach fractions to Grade 4' },
+  { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },
+  { icon: GraduationCap, label: 'My Lesson Plans', command: 'List my recent lesson plans' },
+];
+
+interface Persona {
+  quickCommands: { icon: typeof Calendar; label: string; command: string }[];
+  title: string;
+  subtitle: (school: string) => string;
+  badge: (school: string) => string;
+  heading: (school: string) => string;
+  intro: string;
+  capabilitiesTitle: (school: string) => string;
+  capabilities: string[];
+  footer: (school: string) => string;
+}
+
+const adminPersona: Persona = {
+  quickCommands: adminQuickCommands,
+  title: 'Master AI',
+  subtitle: school => `Natural language control for ${school}`,
+  badge: school => `${school} AI Command Center`,
+  heading: school => `What would you like me to do for ${school}?`,
+  intro: 'Tell me in plain English and I\u2019ll execute it across calendar, students, classes, fees, communication, and more.',
+  capabilitiesTitle: school => `What can I help ${school} with?`,
+  capabilities: [
+    'Add public holidays by country to the academic calendar',
+    'Create classes, subjects, and fee structures',
+    'Search for students, teachers, and users',
+    'Create announcements and send notifications',
+    'Set up academic terms and assessment schedules',
+    'Record expenses and manage scholarships',
+    'View school statistics and analytics',
+  ],
+  footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Actions are executed immediately.`,
+};
+
+const teacherPersona: Persona = {
+  quickCommands: teacherQuickCommands,
+  title: 'Master AI',
+  subtitle: () => 'Your teaching assistant',
+  badge: school => `${school} Teaching Assistant`,
+  heading: () => 'How can I help with your teaching today?',
+  intro: 'Ask in plain English. I know your classes and subjects for this term.',
+  capabilitiesTitle: () => 'What I can do for you',
+  capabilities: [
+    'Generate and save lesson plans, assessments and homework for your classes',
+    'Show attendance, subject averages and learners who need support',
+    'Draft report card remarks for a learner',
+    'Explain concepts, plan lessons, and write questions with answer keys',
+    'Analyse a photo of learners\u2019 work or a textbook page',
+    'Check the school calendar and syllabus topics',
+  ],
+  footer: () => 'Master AI can look at images and listen to your voice. Lesson plans, assessments and homework it generates are saved to your classes.',
+};
+
 // ==========================================
 // HELPER: Group conversations by date
 // ==========================================
@@ -110,6 +173,8 @@ function groupConversationsByDate(conversations: MasterAIConversation[]) {
 // ==========================================
 const MasterAI = () => {
   const { settings: themeSettings } = useTheme();
+  const { user } = useAuth();
+  const persona = user?.role === 'TEACHER' ? teacherPersona : adminPersona;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -829,7 +894,7 @@ const MasterAI = () => {
             )}
             <div className="flex-1 min-w-0">
               <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5 md:gap-2 text-xs md:text-sm">
-                <span className="truncate">Master AI Ops</span>
+                <span className="truncate">{persona.title}</span>
                 <span
                   className="text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 rounded-full font-medium flex-shrink-0"
                   style={{
@@ -842,8 +907,8 @@ const MasterAI = () => {
               </h2>
               <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="hidden sm:inline">Natural language control for {schoolName}</span>
-                <span className="sm:hidden">AI Operations</span>
+                <span className="hidden sm:inline">{persona.subtitle(schoolName)}</span>
+                <span className="sm:hidden">Master AI</span>
               </p>
             </div>
             {activeConversationId && (
@@ -878,7 +943,7 @@ const MasterAI = () => {
               <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
             </div>
           ) : messages.length === 0 ? (
-            <WelcomeScreen onCommand={sendCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} />
+            <WelcomeScreen onCommand={sendCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} persona={persona} />
           ) : (
             messages.map(msg => (
               <MessageBubble
@@ -897,7 +962,7 @@ const MasterAI = () => {
         {messages.length > 0 && (
           <div className="px-3 md:px-4 pb-2 flex-shrink-0">
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-              {quickCommands.slice(0, 4).map((cmd, i) => (
+              {persona.quickCommands.slice(0, 4).map((cmd, i) => (
                 <button
                   key={i}
                   onClick={() => sendCommand(cmd.command)}
@@ -1122,8 +1187,8 @@ const MasterAI = () => {
                 </button>
               </div>
               <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
-                <span className="hidden sm:inline">Master AI can look at images, listen to your voice, and manage operations across {schoolName}. Actions are executed immediately.</span>
-                <span className="sm:hidden">AI can process images, voice, and execute actions immediately.</span>
+                <span className="hidden sm:inline">{persona.footer(schoolName)}</span>
+                <span className="sm:hidden">AI can process images and voice.</span>
               </p>
             </>
           )}
@@ -1228,7 +1293,7 @@ const ConversationItem = ({
 // ==========================================
 // WELCOME SCREEN
 // ==========================================
-const WelcomeScreen = ({ onCommand, schoolName, logoUrl }: { onCommand: (cmd: string) => void; schoolName: string; logoUrl?: string }) => (
+const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand: (cmd: string) => void; schoolName: string; logoUrl?: string; persona: Persona }) => (
   <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-4 md:px-4">
     {logoUrl ? (
       <img
@@ -1242,17 +1307,17 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl }: { onCommand: (cmd: st
       </div>
     )}
     <div className="mb-3 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
-      {schoolName} AI Command Center
+      {persona.badge(schoolName)}
     </div>
     <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center px-2">
-      What would you like me to do for {schoolName}?
+      {persona.heading(schoolName)}
     </h3>
     <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-2">
-      Tell me in plain English and I’ll execute it across calendar, students, classes, fees, communication, and more.
+      {persona.intro}
     </p>
 
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl px-2">
-      {quickCommands.map((cmd, i) => (
+      {persona.quickCommands.map((cmd, i) => (
         <button
           key={i}
           onClick={() => onCommand(cmd.command)}
@@ -1274,16 +1339,12 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl }: { onCommand: (cmd: st
     <div className="mt-6 md:mt-8 rounded-xl p-4 md:p-5 border max-w-lg w-full mx-2 shadow-sm bg-white/85 dark:bg-slate-800/80" style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, rgb(226 232 240))' }}>
       <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
         <Zap size={14} className="flex-shrink-0" style={{ color: 'var(--primary-color)' }} />
-        <span>What can I help {schoolName} with?</span>
+        <span>{persona.capabilitiesTitle(schoolName)}</span>
       </h4>
       <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1.5">
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Add public holidays by country to the academic calendar</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Create classes, subjects, and fee structures</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Search for students, teachers, and users</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Create announcements and send notifications</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Set up academic terms and assessment schedules</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>Record expenses and manage scholarships</span></li>
-        <li className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>View school statistics and analytics</span></li>
+        {persona.capabilities.map(item => (
+          <li key={item} className="flex items-start gap-2"><span className="mt-0.5 flex-shrink-0" style={{ color: 'var(--primary-color)' }}>•</span><span>{item}</span></li>
+        ))}
       </ul>
     </div>
   </div>

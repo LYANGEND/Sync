@@ -6,6 +6,9 @@ import Header from './Header';
 import BottomNav from './BottomNav';
 import { FloatingActionButton } from '../mobile';
 import GlobalVoiceCommand from '../voice/GlobalVoiceCommand';
+import { useAuth } from '../../context/AuthContext';
+
+const MASTER_AI_ROLES = ['SUPER_ADMIN', 'TEACHER'];
 
 const SIDEBAR_COLLAPSED_KEY = 'sync.sidebar.collapsed';
 
@@ -23,6 +26,7 @@ const DashboardLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const location = useLocation();
+  const { user } = useAuth();
   const shouldReduceMotion = useReducedMotion();
 
   const handleSidebarToggle = () => {
@@ -65,7 +69,8 @@ const DashboardLayout = () => {
   // Pages where FAB should not appear
   const hideFABPaths = ['/communication', '/profile', '/settings', '/data-management'];
   const showFAB = !hideFABPaths.includes(location.pathname);
-  const showGlobalVoiceCommand = !location.pathname.startsWith('/data-management');
+  const showGlobalVoiceCommand =
+    MASTER_AI_ROLES.includes(user?.role ?? '') && !location.pathname.startsWith('/data-management');
 
   return (
     <div className="min-h-screen min-h-dvh overflow-x-clip bg-gray-50/50 dark:bg-slate-900">

@@ -33,7 +33,136 @@ interface ToolDefinition {
   name: string;
   description: string;
   parameters: ToolParameter[];
-  execute: (params: Record<string, any>, userId: string) => Promise<any>;
+  execute: (params: Record<string, any>, userId: string, ctx: ToolContext) => Promise<any>;
+}
+
+export interface MasterAICaller {
+  userId: string;
+  role: string;
+}
+
+/** Active-term teaching assignments; present only for scoped (non-admin) callers. */
+interface TeachingScope {
+  termId: string | null;
+  classTeacherOf: string[];
+  allocations: { classId: string; subjectId: string }[];
+  summary: string;
+}
+
+interface ToolContext extends MasterAICaller {
+  teaching?: TeachingScope;
+}
+
+// Teachers get read-only reference tools plus content generation scoped to their own classes.
+// Everything else (admin setup, finance, messaging, student records) is SUPER_ADMIN only.
+const TEACHER_TOOLS = new Set([
+  'list_calendar_events',
+  'list_academic_terms',
+  'list_subjects',
+  'list_topics',
+  'list_classes',
+  'list_lesson_plans',
+  'get_lesson_plan_content',
+  'generate_lesson_plans',
+  'generate_assessments',
+  'generate_homework',
+  'get_class_insights',
+  'generate_report_remarks',
+]);
+
+const isUnrestrictedRole = (role: string) => role === 'SUPER_ADMIN';
+
+function canUseTool(role: string, toolName: string): boolean {
+  return isUnrestrictedRole(role) || (role === 'TEACHER' && TEACHER_TOOLS.has(toolName));
+}
+
+/** Class IDs the caller may act on (optionally for one subject). undefined = unrestricted. */
+function allowedClassIds(ctx: ToolContext, subjectId?: string): string[] | undefined {
+  if (!ctx.teaching) return undefined;
+  const { classTeacherOf, allocations } = ctx.teaching;
+  const viaAllocation = allocations.filter(a => !subjectId || a.subjectId === subjectId).map(a => a.classId);
+  return [...new Set([...classTeacherOf, ...viaAllocation])];
+}
+
+async function loadTeachingScope(userId: string): Promise<TeachingScope> {
+  const term = await getActiveTerm();
+  if (!term) return { termId: null, classTeacherOf: [], allocations: [], summary: '\nNo academic term is active, so you have no class assignments right now.' };
+
+  const [ownClasses, allocations, recentPlans] = await Promise.all([
+    prisma.class.findMany({
+      where: { teacherId: userId, academicTermId: term.id },
+      select: { id: true, name: true, gradeLevel: true, subjects: { select: { name: true } } },
+    }),
+    prisma.teacherSubject.findMany({
+      where: { teacherId: userId, class: { academicTermId: term.id } },
+      select: { classId: true, subjectId: true, subject: { select: { name: true } }, class: { select: { name: true, gradeLevel: true } } },
+    }),
+    prisma.lessonPlan.findMany({
+      where: { teacherId: userId, termId: term.id },
+      orderBy: { weekStartDate: 'desc' },
+      take: 5,
+      select: { title: true, weekStartDate: true, subject: { select: { name: true } }, class: { select: { name: true } } },
+    }),
+  ]);
+
+  const lines = new Map<string, string>();
+  for (const c of ownClasses) {
+    lines.set(c.id, `- ${c.name} (Grade ${c.gradeLevel}, class teacher): ${c.subjects.map(s => s.name).join(', ') || 'no subjects assigned'}`);
+  }
+  const bySubjectClass = new Map<string, { name: string; gradeLevel: number; subjects: string[] }>();
+  for (const a of allocations) {
+    if (lines.has(a.classId)) continue;
+    const entry = bySubjectClass.get(a.classId) || { name: a.class.name, gradeLevel: a.class.gradeLevel, subjects: [] };
+    entry.subjects.push(a.subject.name);
+    bySubjectClass.set(a.classId, entry);
+  }
+  for (const [id, c] of bySubjectClass) lines.set(id, `- ${c.name} (Grade ${c.gradeLevel}): ${c.subjects.join(', ')}`);
+
+  let summary = `\nACTIVE TERM: ${term.name}\nYOUR CLASSES:\n${lines.size ? [...lines.values()].join('\n') : '- None assigned yet. Ask an administrator to assign you to a class or subject.'}`;
+  if (recentPlans.length) {
+    summary += `\nYOUR RECENT LESSON PLANS:\n${recentPlans.map(p => `- [${new Date(p.weekStartDate).toLocaleDateString()}] ${p.subject.name} / ${p.class.name}: ${p.title}`).join('\n')}`;
+  }
+
+  return {
+    termId: term.id,
+    classTeacherOf: ownClasses.map(c => c.id),
+    allocations: allocations.map(a => ({ classId: a.classId, subjectId: a.subjectId })),
+    summary,
+  };
+}
+
+/** Teachers see their own lesson plans plus plans for classes they teach. */
+function lessonPlanScope(ctx: ToolContext): Prisma.LessonPlanWhereInput {
+  const allowed = allowedClassIds(ctx);
+  return allowed ? { OR: [{ teacherId: ctx.userId }, { classId: { in: allowed } }] } : {};
+}
+
+/** Resolve the active-term class for a content-generation tool, honouring teacher scope. */
+async function resolveContentClass(
+  requestedClassId: string | undefined,
+  subject: { id: string; name: string },
+  gradeLevel: number,
+  termId: string,
+  ctx: ToolContext,
+): Promise<{ id: string; name: string; academicTermId: string | null } | { error: string }> {
+  const allowed = allowedClassIds(ctx, subject.id);
+  const base = { academicTermId: termId, subjects: { some: { id: subject.id } } };
+  const select = { id: true, name: true, academicTermId: true } as const;
+
+  if (requestedClassId && (!allowed || allowed.includes(requestedClassId))) {
+    const found = await prisma.class.findFirst({ where: { ...base, id: requestedClassId }, select });
+    if (found) return found;
+  }
+  const found = await prisma.class.findFirst({
+    where: { ...base, gradeLevel, ...(allowed && { id: { in: allowed } }) },
+    select,
+  });
+  if (found) return found;
+  return {
+    error: allowed
+      ? `You don't teach ${subject.name} in any grade ${gradeLevel} class this term.`
+      : `No active-term class with ${subject.name} found for grade ${gradeLevel}.`,
+  };
 }
 
 // ---- Execution Result ----
@@ -177,6 +306,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 // ==========================
 // UTILITY: Validate tool params with Zod
 // ==========================
+const contentGenerationSchema = z.object({
+  subjectCode: z.string().min(1).max(20),
+  gradeLevel: z.coerce.number().int().min(-3).max(12),
+  classId: z.string().max(64).optional(),
+  maxTopics: z.coerce.number().int().min(1).max(50).optional(),
+});
+
 const toolParamSchemas: Record<string, z.ZodSchema> = {
   add_calendar_events: z.object({
     events: z.array(z.object({
@@ -273,6 +409,33 @@ const toolParamSchemas: Record<string, z.ZodSchema> = {
       date: z.string().optional(),
     })).min(1).max(100),
   }),
+  // Tools reachable by teachers: strict scalar params so model output can never become a Prisma filter object.
+  list_calendar_events: z.object({
+    startDate: z.string().max(10).optional(),
+    endDate: z.string().max(10).optional(),
+    eventType: z.string().max(30).optional(),
+  }),
+  list_classes: z.object({ academicTermId: z.string().min(1).max(64) }),
+  list_topics: z.object({
+    subjectId: z.string().max(64).optional(),
+    subjectCode: z.string().max(20).optional(),
+    gradeLevel: z.coerce.number().int().min(-3).max(12).optional(),
+  }),
+  list_lesson_plans: z.object({
+    subjectId: z.string().max(64).optional(),
+    subjectCode: z.string().max(20).optional(),
+    classId: z.string().max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+  }),
+  get_lesson_plan_content: z.object({ id: z.string().min(1).max(64) }),
+  generate_lesson_plans: contentGenerationSchema,
+  generate_assessments: contentGenerationSchema.extend({ assessmentType: z.enum(['EXAM', 'TEST', 'QUIZ']).optional() }),
+  generate_homework: contentGenerationSchema,
+  get_class_insights: z.object({
+    className: z.string().max(100).optional(),
+    classId: z.string().max(64).optional(),
+  }),
+  generate_report_remarks: z.object({ student: z.string().min(1).max(100) }),
 };
 
 function validateToolParams(toolName: string, params: Record<string, any>): { valid: boolean; error?: string; sanitized: Record<string, any> } {
@@ -293,11 +456,11 @@ function validateToolParams(toolName: string, params: Record<string, any>): { va
 // ==========================
 // UTILITY: Sanitize conversation history (strip PII/data from assistant messages)
 // ==========================
-function sanitizeConversationHistory(history: { role: string; content: string }[], maxMessages = 8): { role: string; content: string }[] {
+function sanitizeConversationHistory(history: { role: string; content: string }[], maxMessages = 8, maxAssistantChars = 300): { role: string; content: string }[] {
   return history.slice(-maxMessages).map(msg => {
     if (msg.role === 'assistant') {
       // Truncate long assistant messages — they may contain tool output data with PII
-      const content = msg.content.length > 300 ? msg.content.substring(0, 300) + '...' : msg.content;
+      const content = msg.content.length > maxAssistantChars ? msg.content.substring(0, maxAssistantChars) + '...' : msg.content;
       return { role: msg.role, content };
     }
     return msg;
@@ -305,22 +468,20 @@ function sanitizeConversationHistory(history: { role: string; content: string }[
 }
 
 // ==========================
-// UTILITY: Cached system prompt (avoid rebuilding every request)
+// UTILITY: Cached system prompt per role (avoid rebuilding every request)
 // ==========================
-let _cachedSystemPrompt: string | null = null;
-let _cachedToolDescriptions: string | null = null;
-let _cacheBuiltAt = 0;
+const _promptCache = new Map<string, { prompt: string; builtAt: number }>();
 const PROMPT_CACHE_TTL = 60_000; // 1 minute
 
-function getCachedSystemPrompt(): string {
+function getCachedSystemPrompt(role: string): string {
+  const key = isUnrestrictedRole(role) ? 'admin' : 'teacher';
+  const cached = _promptCache.get(key);
   const now = Date.now();
-  if (_cachedSystemPrompt && now - _cacheBuiltAt < PROMPT_CACHE_TTL) {
-    return _cachedSystemPrompt;
-  }
-  _cachedToolDescriptions = buildToolDescriptions();
-  _cachedSystemPrompt = buildSystemPrompt();
-  _cacheBuiltAt = now;
-  return _cachedSystemPrompt;
+  if (cached && now - cached.builtAt < PROMPT_CACHE_TTL) return cached.prompt;
+  const toolDescriptions = buildToolDescriptions(role);
+  const prompt = key === 'admin' ? buildSystemPrompt(toolDescriptions) : buildTeacherSystemPrompt(toolDescriptions);
+  _promptCache.set(key, { prompt, builtAt: now });
+  return prompt;
 }
 
 // ==========================
@@ -1467,7 +1628,7 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds a class at the given grade level.' },
       { name: 'maxTopics', type: 'number', description: 'Max topics to generate plans for (default 5). Use to limit for speed.' },
     ],
-    execute: async (params, userId) => {
+    execute: async (params, userId, ctx) => {
       // Resolve subject
       const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
       if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
@@ -1478,23 +1639,9 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
       const term = await getActiveTerm();
       if (!term) return { error: 'No active academic term found. Activate a term first.' };
 
-      // Resolve class
-      let classId = params.classId;
-      let classInfo: any = null;
-      if (classId) {
-        classInfo = await prisma.class.findFirst({
-          where: { id: classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-          select: { id: true, name: true, academicTermId: true },
-        });
-      }
-      if (!classInfo) {
-        classInfo = await prisma.class.findFirst({
-          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-          select: { id: true, name: true, academicTermId: true },
-        });
-      }
-      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
-      classId = classInfo.id;
+      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
+      if ('error' in classInfo) return classInfo;
+      const classId = classInfo.id;
 
       // Get topics with subtopics
       const topics = await prisma.topic.findMany({
@@ -1607,7 +1754,7 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
       { name: 'maxTopics', type: 'number', description: 'Max topics to generate assessments for (default 5).' },
     ],
-    execute: async (params) => {
+    execute: async (params, _userId, ctx) => {
       const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
       if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
 
@@ -1617,19 +1764,8 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
       const term = await getActiveTerm();
       if (!term) return { error: 'No active academic term found. Activate a term first.' };
 
-      let classInfo: any = params.classId
-        ? await prisma.class.findFirst({
-            where: { id: params.classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-            select: { id: true, name: true, academicTermId: true },
-          })
-        : null;
-      if (!classInfo) {
-        classInfo = await prisma.class.findFirst({
-          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-          select: { id: true, name: true, academicTermId: true },
-        });
-      }
-      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
+      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
+      if ('error' in classInfo) return classInfo;
 
       const topics = await prisma.topic.findMany({
         where: { subjectId: subject.id, gradeLevel: gl },
@@ -1782,7 +1918,7 @@ Requirements:
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
       { name: 'maxTopics', type: 'number', description: 'Max topics to generate homework for (default 5).' },
     ],
-    execute: async (params) => {
+    execute: async (params, _userId, ctx) => {
       const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
       if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
 
@@ -1791,19 +1927,8 @@ Requirements:
       const term = await getActiveTerm();
       if (!term) return { error: 'No active academic term found. Activate a term first.' };
 
-      let classInfo: any = params.classId
-        ? await prisma.class.findFirst({
-            where: { id: params.classId, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-            select: { id: true, name: true, academicTermId: true },
-          })
-        : null;
-      if (!classInfo) {
-        classInfo = await prisma.class.findFirst({
-          where: { gradeLevel: gl, academicTermId: term.id, subjects: { some: { id: subject.id } } },
-          select: { id: true, name: true, academicTermId: true },
-        });
-      }
-      if (!classInfo) return { error: `No active-term class with ${subject.name} found for grade ${gl}.` };
+      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
+      if ('error' in classInfo) return classInfo;
 
       const topics = await prisma.topic.findMany({
         where: { subjectId: subject.id, gradeLevel: gl },
@@ -1927,8 +2052,8 @@ Return the homework as structured text.`;
       { name: 'classId', type: 'string', description: 'Filter by class ID' },
       { name: 'limit', type: 'number', description: 'Max number of plans to return (default 10)' },
     ],
-    execute: async (params) => {
-      const where: any = {};
+    execute: async (params, _userId, ctx) => {
+      const where: any = { ...lessonPlanScope(ctx) };
       if (params.subjectId) where.subjectId = params.subjectId;
       if (params.classId) where.classId = params.classId;
       if (params.subjectCode) {
@@ -1964,9 +2089,9 @@ Return the homework as structured text.`;
     parameters: [
       { name: 'id', type: 'string', description: 'The lesson plan ID', required: true },
     ],
-    execute: async (params) => {
-      const plan = await prisma.lessonPlan.findUnique({
-        where: { id: params.id },
+    execute: async (params, _userId, ctx) => {
+      const plan = await prisma.lessonPlan.findFirst({
+        where: { id: params.id, ...lessonPlanScope(ctx) },
         include: {
           subject: { select: { name: true, code: true } },
           class: { select: { name: true, gradeLevel: true } },
@@ -1984,6 +2109,160 @@ Return the homework as structured text.`;
         term: (plan as any).term.name,
         date: new Date(plan.weekStartDate).toLocaleDateString(),
         content: plan.content,
+      };
+    },
+  },
+
+  // ===================== TEACHER INSIGHTS =====================
+  {
+    name: 'get_class_insights',
+    description: 'Class snapshot for the active term: enrolment, attendance over the last 30 days, subject averages, learners averaging below 40%, and recent lesson plans. Use for questions like "how is my class doing" or "who needs support".',
+    parameters: [
+      { name: 'className', type: 'string', description: 'Class name (e.g. "Grade 5A"). Optional for teachers with a single class.' },
+      { name: 'classId', type: 'string', description: 'Class ID, if known.' },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found.' };
+      const allowed = allowedClassIds(ctx);
+      const candidates = await prisma.class.findMany({
+        where: {
+          academicTermId: term.id,
+          ...(allowed && { id: { in: allowed } }),
+          ...(params.classId && { id: params.classId }),
+          ...(params.className && { name: { contains: params.className, mode: 'insensitive' as const } }),
+        },
+        select: { id: true, name: true, gradeLevel: true },
+        take: 10,
+      });
+      if (allowed && params.classId && !allowed.includes(params.classId)) return { error: 'You can only view insights for classes you teach.' };
+      if (candidates.length === 0) return { error: allowed ? 'No matching class that you teach this term.' : 'No matching class in the active term.' };
+      if (candidates.length > 1) return { error: `Which class? Matches: ${candidates.map(c => c.name).join(', ')}` };
+      const cls = candidates[0];
+
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+      const [enrolments, attendance, termResults, plans] = await Promise.all([
+        prisma.studentTermEnrollment.count({ where: { classId: cls.id, academicTermId: term.id, status: 'ACTIVE' } }),
+        prisma.attendance.groupBy({
+          by: ['status'],
+          where: { academicTermId: term.id, date: { gte: thirtyDaysAgo }, student: { termEnrollments: { some: { classId: cls.id, academicTermId: term.id, status: 'ACTIVE' } } } },
+          _count: { _all: true },
+        }),
+        prisma.termResult.findMany({
+          where: { classId: cls.id, termId: term.id },
+          select: { studentId: true, totalScore: true, subject: { select: { name: true } }, student: { select: { firstName: true, lastName: true } } },
+        }),
+        prisma.lessonPlan.findMany({
+          where: { classId: cls.id },
+          orderBy: { weekStartDate: 'desc' },
+          take: 5,
+          select: { title: true, weekStartDate: true, subject: { select: { name: true } }, teacher: { select: { fullName: true } } },
+        }),
+      ]);
+
+      const att: Record<string, number> = {};
+      for (const row of attendance) att[row.status] = row._count._all;
+      const totalAtt = Object.values(att).reduce((s, n) => s + n, 0);
+
+      const average = (rows: { totalScore: any }[]) => Math.round(rows.reduce((s, r) => s + Number(r.totalScore), 0) / rows.length * 10) / 10;
+      const groupBy = <K extends string>(keyOf: (r: typeof termResults[number]) => K) => {
+        const map = new Map<K, typeof termResults>();
+        for (const r of termResults) map.set(keyOf(r), [...(map.get(keyOf(r)) || []), r]);
+        return map;
+      };
+      const subjectAverages = [...groupBy(r => r.subject.name)].map(([subject, rows]) => ({ subject, average: average(rows) }));
+      const needingSupport = [...groupBy(r => r.studentId)]
+        .map(([, rows]) => ({ name: `${rows[0].student.firstName} ${rows[0].student.lastName}`, average: average(rows) }))
+        .filter(s => s.average < 40)
+        .sort((a, b) => a.average - b.average);
+
+      return {
+        class: cls.name,
+        gradeLevel: cls.gradeLevel,
+        term: term.name,
+        activeStudents: enrolments,
+        attendanceLast30Days: {
+          records: totalAtt,
+          present: att.PRESENT || 0,
+          late: att.LATE || 0,
+          absent: att.ABSENT || 0,
+          attendanceRate: totalAtt ? `${Math.round(((att.PRESENT || 0) / totalAtt) * 100)}%` : 'no records',
+        },
+        subjectAverages: subjectAverages.length ? subjectAverages : 'No term results recorded yet',
+        needingSupport: needingSupport.slice(0, 10),
+        recentLessonPlans: plans.map(p => `[${new Date(p.weekStartDate).toLocaleDateString()}] ${p.subject.name}: ${p.title} (${p.teacher.fullName})`),
+      };
+    },
+  },
+
+  {
+    name: 'generate_report_remarks',
+    description: 'Draft report card remarks (class teacher and principal) for ONE learner in the active term, based on their term results and attendance. Returns text for the teacher to review; nothing is saved.',
+    parameters: [
+      { name: 'student', type: 'string', description: 'Learner name or admission number', required: true },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found.' };
+      const allowed = allowedClassIds(ctx);
+      const tokens = String(params.student).trim().split(/\s+/).filter(Boolean).slice(0, 4);
+      if (tokens.length === 0) return { error: 'Tell me which learner.' };
+
+      const matches = await prisma.studentTermEnrollment.findMany({
+        where: {
+          academicTermId: term.id,
+          status: 'ACTIVE',
+          ...(allowed && { classId: { in: allowed } }),
+          student: {
+            AND: tokens.map(t => ({
+              OR: [
+                { firstName: { contains: t, mode: 'insensitive' as const } },
+                { lastName: { contains: t, mode: 'insensitive' as const } },
+                { admissionNumber: { equals: t, mode: 'insensitive' as const } },
+              ],
+            })),
+          },
+        },
+        select: { studentId: true, student: { select: { firstName: true, lastName: true } }, class: { select: { name: true } } },
+        take: 6,
+      });
+      if (matches.length === 0) return { error: allowed ? `No learner matching "${params.student}" in your classes this term.` : `No learner matching "${params.student}" this term.` };
+      if (matches.length > 1) return { error: `Several learners match: ${matches.map(m => `${m.student.firstName} ${m.student.lastName} (${m.class.name})`).join(', ')}. Which one?` };
+
+      const { studentId, student, class: cls } = matches[0];
+      const [results, attendance] = await Promise.all([
+        prisma.termResult.findMany({ where: { studentId, termId: term.id }, select: { totalScore: true, grade: true, subject: { select: { name: true } } } }),
+        prisma.attendance.groupBy({ by: ['status'], where: { studentId, academicTermId: term.id }, _count: { _all: true } }),
+      ]);
+      const totalAtt = attendance.reduce((s, r) => s + r._count._all, 0);
+      const absent = attendance.find(r => r.status === 'ABSENT')?._count._all || 0;
+      const attendanceRate = totalAtt ? Math.round(((totalAtt - absent) / totalAtt) * 100) : null;
+      const subjects = results.map(r => `${r.subject.name}: ${Number(r.totalScore)}% (${r.grade || 'N/A'})`);
+      const avg = results.length ? results.reduce((s, r) => s + Number(r.totalScore), 0) / results.length : null;
+
+      const remarks = await aiService.generateJSON<{ classTeacherRemark: string; principalRemark: string }>(
+        `Write report card remarks for this learner.
+
+Learner: ${student.firstName} ${student.lastName}
+Class: ${cls.name}
+Average score: ${avg === null ? 'no results recorded' : `${avg.toFixed(1)}%`}
+Attendance: ${attendanceRate === null ? 'no records' : `${attendanceRate}%`}
+Subjects: ${subjects.join(', ') || 'none recorded'}
+
+1. Class teacher's remark: 2-3 sentences, encouraging and specific to the performance above.
+2. Principal's remark: 1-2 sentences, formal and forward-looking.
+If no results are recorded, keep remarks general and do not invent scores.
+Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`,
+        { systemPrompt: 'You are an experienced Zambian school teacher writing report card remarks.', temperature: 0.6 },
+      );
+
+      return {
+        student: `${student.firstName} ${student.lastName}`,
+        class: cls.name,
+        averageScore: avg === null ? null : Math.round(avg * 10) / 10,
+        attendanceRate,
+        classTeacherRemark: remarks.classTeacherRemark,
+        principalRemark: remarks.principalRemark,
       };
     },
   },
@@ -2903,8 +3182,8 @@ Return the homework as structured text.`;
 // ==========================
 // BUILD TOOL DESCRIPTIONS FOR AI
 // ==========================
-function buildToolDescriptions(): string {
-  return tools.map(t => {
+function buildToolDescriptions(role: string): string {
+  return tools.filter(t => canUseTool(role, t.name)).map(t => {
     const params = t.parameters.length > 0
       ? '\n    Parameters:\n' + t.parameters.map(p =>
         `      - ${p.name} (${p.type}${p.required ? ', required' : ''}): ${p.description}${p.enum ? ` [${p.enum.join(', ')}]` : ''}`
@@ -2958,12 +3237,14 @@ const toolFriendlyNames: Record<string, string> = {
   get_student_payment_history: 'Student Payment History',
   get_student_fee_balances: 'Student Fee Balances',
   get_invoice_summary: 'Invoice Summary',
+  get_class_insights: 'Class Insights',
+  generate_report_remarks: 'Report Remarks',
 };
 
 // ==========================
 // SYSTEM PROMPT
 // ==========================
-function buildSystemPrompt(): string {
+function buildSystemPrompt(toolDescriptions: string): string {
   const currentYear = new Date().getFullYear();
   return `You are Sync Master AI — the intelligent operations assistant for a school management system called Sync.
 You can perform real actions across ALL modules: academic calendar, students, classes, subjects, subject-class assignments, syllabus/topics, fees, payment transactions, invoices, financial analytics, assessments, timetables, announcements, expenses, and more.
@@ -2980,7 +3261,7 @@ CURRENT YEAR: ${currentYear}
 - Be empathetic with errors: "Hmm, I couldn't find that class."
 
 ## YOUR CAPABILITIES (TOOLS):
-${_cachedToolDescriptions || buildToolDescriptions()}
+${toolDescriptions}
 
 ## RULES:
 1. When the user asks you to DO something (create, add, delete, etc.), you MUST respond with a JSON action plan.
@@ -3022,6 +3303,43 @@ Always respond with ONLY this JSON — nothing else:
 IMPORTANT: Respond ONLY with valid JSON. No markdown wrapping, no text outside the JSON.`;
 }
 
+// Teacher persona: pedagogy-first, long-form Markdown allowed, tools limited to TEACHER_TOOLS.
+// The per-request teaching summary (classes, recent plans) is appended at call time.
+function buildTeacherSystemPrompt(toolDescriptions: string): string {
+  return `You are Sync Master AI working for a teacher in a Zambian school. You act as a senior teacher and instructional coach: every answer should improve classroom practice, learner understanding, and the teacher's decisions.
+
+CURRENT DATE: ${new Date().toISOString().split('T')[0]}
+
+## PEDAGOGY PRINCIPLES
+- Align to the Zambian curriculum and ECZ expectations for the class, subject, grade and topic.
+- Use explicit instruction, guided practice, independent practice, retrieval practice, formative assessment and reflection.
+- Anticipate misconceptions and give diagnostic questions to surface them.
+- Give exact teacher moves: what to say, what to write on the board, what learners do, and what evidence shows mastery.
+- Differentiate without lowering expectations (support, core, extension, language scaffolds, inclusion).
+- Use local, culturally relevant examples and low-resource alternatives.
+- When an image is attached, analyse what is visible and turn it into questions, explanations and activities.
+- If information is missing, state your assumption and still give a usable draft.
+
+## TOOLS YOU CAN USE
+${toolDescriptions}
+
+## SCOPE
+- You can only act on the teacher's own classes (listed below). Generation tools pick the right class automatically.
+- You cannot manage fees, payments, students' personal records, users, announcements, SMS, timetables or school setup. If asked, say an administrator must do it.
+- Generated lesson plans, assessments and homework are SAVED to the teacher's classes. Report remarks are drafts and are not saved.
+
+## HOW TO RESPOND
+A) If the request needs a tool (save lesson plans/assessments/homework, look up class data, draft report remarks, list saved plans or topics), reply with ONLY this JSON:
+{
+  "message": "<short spoken filler, e.g. 'One moment.'>",
+  "actions": [{ "tool": "tool_name", "params": { ... } }],
+  "suggestions": ["Optional short follow-up"]
+}
+Use subject codes (e.g. MATH, ENG) and grade levels; do not call list tools just to find IDs.
+
+B) Otherwise (explaining a concept, drafting a lesson outline, questions, a marking guide, teaching ideas, feedback), reply directly in clear Markdown, NOT JSON. Use headings, numbered steps, bullets and tables where they help. For lesson plans include objectives, prior knowledge, misconceptions, timing, teacher and learner actions, questioning, assessment, differentiation, resources and homework. For assessments include marks, an answer key and a marking guide. Be practical and classroom-ready; avoid vague advice.`;
+}
+
 // ==========================
 // CLEAN UP LEAKED JSON / VERBOSE FILLER
 // ==========================
@@ -3060,8 +3378,8 @@ function cleanFinalMessage(message: string): string {
     });
   }
 
-  // Collapse extra whitespace
-  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  // Collapse extra whitespace but keep line breaks (Markdown answers rely on them)
+  cleaned = cleaned.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
   return cleaned || message;
 }
@@ -3071,31 +3389,63 @@ function cleanFinalMessage(message: string): string {
 // ==========================
 class MasterAIService {
 
+  private async buildContext(caller: MasterAICaller): Promise<ToolContext> {
+    return isUnrestrictedRole(caller.role)
+      ? { ...caller }
+      : { ...caller, teaching: await loadTeachingScope(caller.userId) };
+  }
+
+  private buildMessages(
+    ctx: ToolContext,
+    userMessage: string,
+    conversationHistory: { role: string; content: string }[] | undefined,
+    imageBase64: string | undefined,
+    maxHistory: number,
+  ) {
+    const system = getCachedSystemPrompt(ctx.role) + (ctx.teaching ? `\n${ctx.teaching.summary}` : '');
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
+      { role: 'system', content: system },
+    ];
+    // Teachers iterate on long drafts, so keep more of the previous answers in context.
+    const assistantChars = ctx.teaching ? 4000 : 300;
+    for (const msg of sanitizeConversationHistory(conversationHistory || [], maxHistory, assistantChars)) {
+      messages.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
+    }
+    messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
+    return messages;
+  }
+
+  private async logUsage(ctx: ToolContext, userMessage: string, tokensUsed: number | undefined, results: ExecutionResult[]) {
+    try {
+      await prisma.aIUsageLog.create({
+        data: {
+          userId: ctx.userId,
+          feature: 'master-ai-ops',
+          action: 'execute-command',
+          tokensUsed: tokensUsed || 0,
+          metadata: {
+            role: ctx.role,
+            userMessage,
+            toolsCalled: results.map(r => r.tool),
+            successCount: results.filter(r => r.success).length,
+            failureCount: results.filter(r => !r.success).length,
+          } as any,
+        },
+      });
+    } catch { /* non-critical */ }
+  }
+
   /**
    * Process a natural language command and execute the resulting actions
    */
-  async processCommand(userMessage: string, userId: string, conversationHistory?: { role: string; content: string }[], imageBase64?: string): Promise<MasterAIResponse> {
-    // Build messages with cached system prompt & sanitized history
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
-      { role: 'system', content: getCachedSystemPrompt() },
-    ];
+  async processCommand(userMessage: string, caller: MasterAICaller, conversationHistory?: { role: string; content: string }[], imageBase64?: string): Promise<MasterAIResponse> {
+    const ctx = await this.buildContext(caller);
+    const messages = this.buildMessages(ctx, userMessage, conversationHistory, imageBase64, 8);
 
-    // Add sanitized conversation history (truncates assistant msgs, strips PII)
-    if (conversationHistory?.length) {
-      for (const msg of sanitizeConversationHistory(conversationHistory)) {
-        messages.push({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content,
-        });
-      }
-    }
-
-    messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
-
-    // Call AI to get the action plan
+    // Call AI to get the action plan (teachers may get long-form Markdown answers)
     const aiResponse = await aiService.chat(messages, {
       temperature: 0.3,
-      maxTokens: 2000,
+      maxTokens: ctx.teaching ? 3500 : 2000,
     });
 
     // Parse the AI response
@@ -3122,7 +3472,7 @@ class MasterAIService {
     }
 
     // ---- Execute actions in parallel with validation & timeout ----
-    const results = await this.executeToolActions(plan.actions || [], userId);
+    const results = await this.executeToolActions(plan.actions || [], ctx);
 
     // ---- POST-EXECUTION: Smart summarizer (skip extra AI call when possible) ----
     let finalMessage = plan.message;
@@ -3132,29 +3482,13 @@ class MasterAIService {
     );
     if (needsSummarizer) {
       try {
-        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message, ctx);
       } catch { /* fallback */ }
     } else if (results.length > 0) {
       finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
-    // Log usage (non-critical)
-    try {
-      await prisma.aIUsageLog.create({
-        data: {
-          userId,
-          feature: 'master-ai-ops',
-          action: 'execute-command',
-          tokensUsed: aiResponse.tokensUsed || 0,
-          metadata: {
-            userMessage,
-            toolsCalled: results.map(r => r.tool),
-            successCount: successResults.length,
-            failureCount: results.filter(r => !r.success).length,
-          } as any,
-        },
-      });
-    } catch { /* non-critical */ }
+    await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, results);
 
     return {
       message: cleanFinalMessage(finalMessage),
@@ -3164,13 +3498,18 @@ class MasterAIService {
   }
 
   /**
-   * Shared tool execution engine — validates params, runs in parallel with timeouts.
+   * Shared tool execution engine — enforces role permissions, validates params, runs in parallel with timeouts.
    */
-  private async executeToolActions(actions: { tool: string; params: Record<string, any> }[], userId: string): Promise<ExecutionResult[]> {
+  private async executeToolActions(actions: { tool: string; params: Record<string, any> }[], ctx: ToolContext): Promise<ExecutionResult[]> {
     const executeOne = async (action: { tool: string; params: Record<string, any> }): Promise<ExecutionResult> => {
       const toolDef = tools.find(t => t.name === action.tool);
       if (!toolDef) {
         return { tool: action.tool, success: false, error: `Unknown tool: ${action.tool}`, summary: `Failed: unknown tool "${action.tool}"` };
+      }
+      // Server-side permission check: the prompt only advertises allowed tools, but model output is untrusted.
+      if (!canUseTool(ctx.role, toolDef.name)) {
+        const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        return { tool: action.tool, success: false, error: 'Not permitted for your role', summary: `${friendlyName} — only an administrator can do this` };
       }
 
       // Validate params with Zod
@@ -3182,7 +3521,7 @@ class MasterAIService {
 
       try {
         const timeoutMs = LONG_RUNNING_TOOLS.has(action.tool) ? TOOL_TIMEOUT_LONG_MS : TOOL_TIMEOUT_MS;
-        const data = await withTimeout(toolDef.execute(validation.sanitized, userId), timeoutMs, action.tool);
+        const data = await withTimeout(toolDef.execute(validation.sanitized, ctx.userId, ctx), timeoutMs, action.tool);
         const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
         let summaryText: string;
         if (data?.summary && typeof data.summary === 'string') {
@@ -3214,7 +3553,7 @@ class MasterAIService {
    * Build an accurate, human-readable summary from actual tool execution results.
    * Uses a lightweight AI call to turn raw data into a precise conversational answer.
    */
-  private async buildAccurateSummary(userMessage: string, results: ExecutionResult[], fallbackMessage: string): Promise<string> {
+  private async buildAccurateSummary(userMessage: string, results: ExecutionResult[], fallbackMessage: string, ctx: ToolContext): Promise<string> {
     // If no successful actions, just return the fallback
     const successResults = results.filter(r => r.success);
     if (successResults.length === 0) {
@@ -3259,14 +3598,18 @@ class MasterAIService {
     });
 
     const failedResults = results.filter(r => !r.success);
+    const forTeacher = !!ctx.teaching;
 
-    const summarizerPrompt = `You are a school management assistant. The user asked: "${userMessage}"
+    const styleRules = forTeacher
+      ? `Write a clear answer for a teacher (short Markdown allowed: bullets or a small table).
 
-Here are the ACTUAL results from the system:
-${JSON.stringify(dataSnapshot, null, 2)}
-${failedResults.length > 0 ? `\nSome actions failed: ${failedResults.map(r => r.summary).join('; ')}` : ''}
-
-Write a SHORT, PRECISE answer (2-4 sentences max) using the REAL data above.
+RULES:
+- Be SPECIFIC — use exact numbers, names, and values from the data.
+- If the data contains drafted text (such as report remarks), reproduce it in full, word for word.
+- If the data contains an "error", explain it plainly and say what the teacher can do next.
+- Do NOT narrate your process or mention tools, databases, APIs or JSON.
+- Respond with ONLY the answer.`
+      : `Write a SHORT, PRECISE answer (2-4 sentences max) using the REAL data above.
 
 RULES:
 - Be SPECIFIC — use exact numbers, names, and values from the data.
@@ -3279,16 +3622,25 @@ RULES:
 - Do NOT include any JSON in your response.
 - Respond with ONLY the answer text, nothing else.`;
 
+    const summarizerPrompt = `You are a school management assistant. The user asked: "${userMessage}"
+
+Here are the ACTUAL results from the system:
+${JSON.stringify(dataSnapshot, null, 2)}
+${failedResults.length > 0 ? `\nSome actions failed: ${failedResults.map(r => r.summary).join('; ')}` : ''}
+
+${styleRules}`;
+
+    const maxChars = forTeacher ? 6000 : 1000;
     try {
       const summaryResponse = await aiService.chat([
         { role: 'user', content: summarizerPrompt },
       ], {
         temperature: 0.2,
-        maxTokens: 150,
+        maxTokens: forTeacher ? 900 : 150,
       });
       const cleaned = summaryResponse.content.trim();
       // Sanity check: if AI returned something useful
-      if (cleaned.length > 10 && cleaned.length < 1000) {
+      if (cleaned.length > 10 && cleaned.length < maxChars) {
         return cleaned;
       }
     } catch {
@@ -3311,26 +3663,13 @@ RULES:
    */
   async processCommandStreaming(
     userMessage: string,
-    userId: string,
+    caller: MasterAICaller,
     onPhase: (phase: 'quick' | 'result', data: Partial<MasterAIResponse>) => void,
     conversationHistory?: { role: string; content: string }[],
     imageBase64?: string,
   ): Promise<MasterAIResponse> {
-    // Build messages with cached prompt & sanitized history
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string; image?: string }[] = [
-      { role: 'system', content: getCachedSystemPrompt() },
-    ];
-
-    if (conversationHistory?.length) {
-      for (const msg of sanitizeConversationHistory(conversationHistory, 6)) {
-        messages.push({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content,
-        });
-      }
-    }
-
-    messages.push({ role: 'user', content: userMessage, ...(imageBase64 && { image: imageBase64 }) });
+    const ctx = await this.buildContext(caller);
+    const messages = this.buildMessages(ctx, userMessage, conversationHistory, imageBase64, 6);
 
     // ---- Phase 1: AI planning call ----
     const aiResponse = await aiService.chat(messages, {
@@ -3372,7 +3711,7 @@ RULES:
     }
 
     // ---- Phase 2: Execute tools (parallel, validated, with timeout) ----
-    const results = await this.executeToolActions(plan.actions || [], userId);
+    const results = await this.executeToolActions(plan.actions || [], ctx);
 
     // Build accurate summary — skip the extra LLM call for simple cases
     let finalMessage = plan.message;
@@ -3382,29 +3721,13 @@ RULES:
     );
     if (needsSummarizer) {
       try {
-        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message);
+        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message, ctx);
       } catch { /* fallback */ }
     } else if (results.length > 0) {
       finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
-    // Log usage (non-critical)
-    try {
-      await prisma.aIUsageLog.create({
-        data: {
-          userId,
-          feature: 'master-ai-ops',
-          action: 'execute-command',
-          tokensUsed: aiResponse.tokensUsed || 0,
-          metadata: {
-            userMessage,
-            toolsCalled: results.map(r => r.tool),
-            successCount: successResults.length,
-            failureCount: results.filter(r => !r.success).length,
-          } as any,
-        },
-      });
-    } catch { /* non-critical */ }
+    await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, results);
 
     const fullResult: MasterAIResponse = {
       message: cleanFinalMessage(finalMessage),

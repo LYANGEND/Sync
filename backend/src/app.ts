@@ -32,7 +32,6 @@ import branchAssignmentRoutes from './routes/branchAssignmentRoutes';
 import dataManagementRoutes from './routes/dataManagementRoutes';
 // New AI & Intelligence Routes
 import analyticsRoutes from './routes/analyticsRoutes';
-import aiAssistantRoutes from './routes/aiAssistantRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
 import auditRoutes from './routes/auditRoutes';
 import aiAnalyticsRoutes from './routes/aiAnalyticsRoutes';
@@ -124,7 +123,6 @@ app.use('/api/v1/data-management', dataManagementRoutes);
 
 // AI & Intelligence Routes
 app.use('/api/v1/analytics', analyticsRoutes);
-app.use('/api/v1/ai-assistant', aiAssistantRoutes);
 app.use('/api/v1/intelligence', intelligenceRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/ai-analytics', aiAnalyticsRoutes);
