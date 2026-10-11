@@ -77,10 +77,10 @@ const adminQuickCommands = [
 ];
 
 const teacherQuickCommands = [
-  { icon: BookOpen, label: 'Lesson Plans', command: 'Generate lesson plans for the next topics in my subject' },
+  { icon: BookOpen, label: 'Lesson Plans', command: 'Generate lesson plans for the next topics my class has not covered yet' },
   { icon: BarChart3, label: 'Class Insights', command: 'How is my class doing? Who needs extra support?' },
-  { icon: CheckCircle2, label: 'Create a Quiz', command: 'Create a 10-question quiz with an answer key for my class on the current topic' },
-  { icon: Pencil, label: 'Homework', command: 'Generate homework for my class for this week' },
+  { icon: CheckCircle2, label: 'Create a Quiz', command: 'Create a 10-question quiz with an answer key on the topic my class is currently on' },
+  { icon: Pencil, label: 'Homework', command: 'Generate homework for my class on the current topic' },
   { icon: MessageSquare, label: 'Report Remarks', command: 'Help me write report card remarks for a learner' },
   { icon: Sparkles, label: 'Teaching Ideas', command: 'Give me practical, low-resource activities to teach fractions to Grade 4' },
   { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },

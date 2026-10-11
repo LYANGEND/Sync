@@ -278,7 +278,9 @@ const Assessments: React.FC<AssessmentsProps> = ({ subjectId: propSubjectId }) =
         fetchAssessments();
         setView('list');
       }
-      alert(created ? 'AI assessment generated! Check your assessments list.' : result.message);
+      alert(created
+        ? 'Draft assessment generated for the next topic in your syllabus progress. It has 0% weight: review the questions and set its weight before it counts.'
+        : result.message);
     } catch (error: any) {
       console.error('AI assessment generation failed:', error);
       alert(error?.response?.data?.error || 'AI generation failed. Try again.');

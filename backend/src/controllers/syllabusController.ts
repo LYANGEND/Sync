@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { AcademicScopeError, ensureAcademicClassAccess, ensureTopicMatchesClassGrade } from '../utils/academicScope';
 import { z } from 'zod';
 import aiService from '../services/aiService';
+import * as contentGenerator from '../services/academicContentGenerator';
 import { buildRuntimeLessonPlanFromTopic } from '../services/lessonPlanRuntimeService';
 import { ingestAllPDFs, getIngestionStatus, ingestUploadedPDF } from '../services/contentIngestionService';
 import { isDateWithinRangeByDay } from '../utils/academicValidation';
@@ -111,6 +112,47 @@ const getAuthorizedTopic = async (req: AuthRequest, topicId: string) => {
   if (!topic) throw new AcademicScopeError(404, 'Topic not found');
   await ensureSyllabusDefinitionAccess(req, topic.subjectId, topic.gradeLevel);
   return topic;
+};
+
+/** Subject, grade and topic for a page-level AI generation request, enforcing teacher scope. */
+const resolveGenerationScope = async (
+  req: AuthRequest,
+  { subjectId, topicId, assessmentId, gradeLevel }: { subjectId?: string; topicId?: string; assessmentId?: string; gradeLevel?: unknown },
+) => {
+  if (!subjectId) throw new AcademicScopeError(400, 'Subject ID is required');
+  const subject = await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true, code: true } });
+  if (!subject) throw new AcademicScopeError(404, 'Subject not found');
+
+  if (topicId) {
+    const topic = await prisma.topic.findUnique({
+      where: { id: topicId },
+      include: { subtopics: { orderBy: { orderIndex: 'asc' } } },
+    });
+    if (!topic) throw new AcademicScopeError(404, 'Topic not found');
+    if (topic.subjectId !== subjectId) throw new AcademicScopeError(400, 'Selected subject does not match the topic');
+    await ensureSyllabusDefinitionAccess(req, subjectId, topic.gradeLevel);
+    return { subject, gradeLevel: topic.gradeLevel, topic };
+  }
+
+  if (assessmentId) {
+    const assessment = await prisma.assessment.findUnique({
+      where: { id: assessmentId },
+      select: { classId: true, subjectId: true, class: { select: { gradeLevel: true } } },
+    });
+    if (!assessment) throw new AcademicScopeError(404, 'Assessment not found');
+    if (assessment.subjectId !== subjectId) throw new AcademicScopeError(400, 'Selected subject does not match the assessment');
+    await ensureAcademicClassAccess(req, assessment.classId, { subjectId });
+    return { subject, gradeLevel: assessment.class.gradeLevel, topic: null };
+  }
+
+  if (gradeLevel !== undefined && gradeLevel !== null && gradeLevel !== '') {
+    const level = Number(gradeLevel);
+    if (!Number.isInteger(level)) throw new AcademicScopeError(400, 'Grade level must be a whole number');
+    await ensureSyllabusDefinitionAccess(req, subjectId, level);
+    return { subject, gradeLevel: level, topic: null };
+  }
+
+  throw new AcademicScopeError(400, 'Provide a topic, assessment or grade level');
 };
 
 // ==========================================
@@ -493,7 +535,7 @@ export const generateLessonPlan = handler(async (req, res) => {
         where: subTopicIds?.length ? { id: { in: subTopicIds } } : undefined,
         orderBy: { orderIndex: 'asc' },
       },
-      subject: { select: { name: true } },
+      subject: { select: { name: true, code: true } },
     },
   });
 
@@ -503,10 +545,7 @@ export const generateLessonPlan = handler(async (req, res) => {
     return res.status(400).json({ message: 'Selected subject does not match the topic' });
   }
 
-  const subjectName = subjectId
-    ? (await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true } }))?.name || topic.subject.name
-    : topic.subject.name;
-
+  const subjectName = topic.subject.name;
   const duration = durationMinutes || 45;
   const runtimePlan = await buildRuntimeLessonPlanFromTopic({
     title: topic.title,
@@ -516,43 +555,17 @@ export const generateLessonPlan = handler(async (req, res) => {
     topicId,
     selectedSubTopicIds: subTopicIds,
   });
-  const subtopicList = topic.subtopics.map(st => {
-    let objectives: string[] = [];
-    try { objectives = st.learningObjectives ? JSON.parse(st.learningObjectives) : []; } catch { }
-    return {
-      title: st.title,
-      description: st.description,
-      objectives,
-      duration: st.duration,
-    };
+
+  const { content } = await contentGenerator.generateLessonPlanText({
+    subjectName,
+    subjectCode: topic.subject.code,
+    gradeLevel: topic.gradeLevel,
+    topic,
+    durationMinutes: duration,
   });
 
-  const prompt = `Generate a structured lesson plan for a teacher to use in a virtual classroom.
-
-SUBJECT: ${subjectName}
-GRADE LEVEL: ${gradeLevel || topic.gradeLevel}
-TOPIC: ${topic.title}${topic.description ? ` — ${topic.description}` : ''}
-DURATION: ${duration} minutes
-${subtopicList.length > 0 ? `
-SUBTOPICS TO COVER:
-${subtopicList.map((st, i) => `${i + 1}. ${st.title}${st.description ? ` — ${st.description}` : ''}${st.objectives.length ? `\n   Objectives: ${st.objectives.join('; ')}` : ''}`).join('\n')}
-` : ''}
-Generate a lesson plan with these sections:
-1. **Introduction** (5 min) — Hook, recap of prior knowledge, today's objectives
-2. **Teaching** — Main content broken into clear steps with examples relevant to African/Zambian context
-3. **Activity** — A hands-on exercise or group activity for students
-4. **Assessment** — 3-5 quick check questions to verify understanding
-5. **Wrap-up** — Summary of key points, homework if applicable
-
-Write in clear, teacher-friendly language. Include specific examples, teaching tips, and expected student responses.
-Format as a structured text plan that an AI tutor can follow during a live class.`;
-
-  const aiResponse = await aiService.chat([
-    { role: 'user', content: prompt },
-  ], { temperature: 0.5, maxTokens: 2000 });
-
   res.json({
-    lessonPlan: aiResponse.content,
+    lessonPlan: content,
     structuredLessonPlan: runtimePlan,
     topic: { id: topic.id, title: topic.title },
     subtopics: topic.subtopics.map(st => ({ id: st.id, title: st.title })),
@@ -567,98 +580,21 @@ Format as a structured text plan that an AI tutor can follow during a live class
  * AI-generate assessment questions for a given subject/topic
  */
 export const generateQuestions = handler(async (req, res) => {
-  const { subjectId, topicId, topicName, questionCount = 5, questionTypes = ['MULTIPLE_CHOICE'], difficulty = 'medium' } = req.body;
+  const { subjectId, topicId, assessmentId, gradeLevel, topicName, questionCount = 5, questionTypes, difficulty = 'medium' } = req.body;
+  const scope = await resolveGenerationScope(req as AuthRequest, { subjectId, topicId, assessmentId, gradeLevel });
 
-  if (!subjectId) return res.status(400).json({ message: 'Subject ID is required' });
-
-  const subject = await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true } });
-  if (!subject) return res.status(404).json({ message: 'Subject not found' });
-
-  let topicInfo = '';
-  if (topicId) {
-    const topic = await prisma.topic.findUnique({
-      where: { id: topicId },
-      include: { subtopics: { orderBy: { orderIndex: 'asc' } } },
-    });
-    if (topic) {
-      topicInfo = `\nTOPIC: ${topic.title}${topic.description ? ` — ${topic.description}` : ''}`;
-      if (topic.subtopics.length > 0) {
-        topicInfo += `\nSUBTOPICS:\n${topic.subtopics.map((st, i) => `${i + 1}. ${st.title}`).join('\n')}`;
-      }
-    }
-  } else if (topicName) {
-    topicInfo = `\nTOPIC: ${topicName}`;
-  }
-
-  const typeInstructions = questionTypes.map((t: string) => {
-    switch (t) {
-      case 'MULTIPLE_CHOICE': return 'Multiple Choice (with 4 options, exactly one correct)';
-      case 'TRUE_FALSE': return 'True/False';
-      case 'SHORT_ANSWER': return 'Short Answer';
-      default: return t;
-    }
-  }).join(', ');
-
-  const prompt = `Generate exactly ${questionCount} assessment questions.
-
-SUBJECT: ${subject.name}${topicInfo}
-DIFFICULTY: ${difficulty}
-QUESTION TYPES TO USE: ${typeInstructions}
-
-Return ONLY a valid JSON array of questions in this exact format (no markdown, no explanation):
-[
-  {
-    "text": "Question text here",
-    "type": "MULTIPLE_CHOICE",
-    "points": 2,
-    "options": [
-      {"text": "Option A", "isCorrect": true},
-      {"text": "Option B", "isCorrect": false},
-      {"text": "Option C", "isCorrect": false},
-      {"text": "Option D", "isCorrect": false}
-    ]
-  },
-  {
-    "text": "True or false statement here",
-    "type": "TRUE_FALSE",
-    "points": 1,
-    "options": [
-      {"text": "True", "isCorrect": true},
-      {"text": "False", "isCorrect": false}
-    ]
-  },
-  {
-    "text": "Short answer question here",
-    "type": "SHORT_ANSWER",
-    "points": 3,
-    "correctAnswer": "Expected answer"
-  }
-]
-
-Requirements:
-- Questions should be appropriate for Zambian students
-- Use clear, simple English language
-- For MULTIPLE_CHOICE: exactly 4 options, exactly one correct
-- For TRUE_FALSE: two options (True and False)
-- For SHORT_ANSWER: include a correctAnswer field
-- Distribute points fairly (1-5 per question)
-- Return ONLY the JSON array, no other text or markdown`;
-
-  const aiResponse = await aiService.chat([
-    { role: 'user', content: prompt },
-  ], { temperature: 0.7, maxTokens: 2500 });
-
-  let questions;
-  try {
-    const content = aiResponse.content;
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      questions = JSON.parse(jsonMatch[0]);
-    } else {
-      questions = JSON.parse(content);
-    }
-  } catch (e) {
-    return res.status(500).json({ message: 'Failed to parse AI response', raw: aiResponse.content });
+  const questions = await contentGenerator.generateQuestions({
+    subjectName: scope.subject.name,
+    subjectCode: scope.subject.code,
+    gradeLevel: scope.gradeLevel,
+    topic: scope.topic,
+    topicName: typeof topicName === 'string' ? topicName.slice(0, 200) : undefined,
+    count: Math.min(30, Math.max(1, Math.round(Number(questionCount)) || 5)),
+    types: Array.isArray(questionTypes) ? questionTypes : undefined,
+    difficulty: String(difficulty).slice(0, 20),
+  });
+  if (questions.length === 0) {
+    return res.status(502).json({ message: 'The AI response could not be turned into questions. Please try again.' });
   }
 
   res.json({ questions });
@@ -670,52 +606,20 @@ Requirements:
  */
 export const generateHomework = handler(async (req, res) => {
   const { subjectId, topicId, topicName, gradeLevel, homeworkType = 'HOMEWORK' } = req.body;
+  const scope = await resolveGenerationScope(req as AuthRequest, { subjectId, topicId, gradeLevel });
 
-  if (!subjectId) return res.status(400).json({ message: 'Subject ID is required' });
-
-  const subject = await prisma.subject.findUnique({ where: { id: subjectId }, select: { name: true } });
-  if (!subject) return res.status(404).json({ message: 'Subject not found' });
-
-  let topicInfo = '';
-  if (topicId) {
-    const topic = await prisma.topic.findUnique({
-      where: { id: topicId },
-      include: { subtopics: { orderBy: { orderIndex: 'asc' } } },
-    });
-    if (topic) {
-      topicInfo = `\nTOPIC: ${topic.title}${topic.description ? ` — ${topic.description}` : ''}`;
-      if (topic.subtopics.length > 0) {
-        topicInfo += `\nSUBTOPICS: ${topic.subtopics.map(st => st.title).join(', ')}`;
-      }
-    }
-  } else if (topicName) {
-    topicInfo = `\nTOPIC: ${topicName}`;
-  }
-
-  const typeLabel = homeworkType === 'PROJECT' ? 'project assignment' : 'homework assignment';
-
-  const prompt = `Generate a ${typeLabel} for students.
-
-SUBJECT: ${subject.name}${topicInfo}
-${gradeLevel ? `GRADE LEVEL: ${gradeLevel}` : ''}
-TYPE: ${typeLabel}
-
-Generate a structured ${typeLabel} with:
-1. **Title** — A clear, descriptive title
-2. **Description** — What the student needs to do (2-3 paragraphs)
-3. **Tasks/Questions** — 3-5 specific tasks or questions for the student to complete
-4. **Marking Guide** — How marks are allocated (suggest total marks)
-
-Write in clear, simple English appropriate for Zambian students.
-Format as a structured text document.`;
-
-  const aiResponse = await aiService.chat([
-    { role: 'user', content: prompt },
-  ], { temperature: 0.6, maxTokens: 1500 });
+  const content = await contentGenerator.generateHomeworkText({
+    subjectName: scope.subject.name,
+    subjectCode: scope.subject.code,
+    gradeLevel: scope.gradeLevel,
+    topic: scope.topic,
+    topicName: typeof topicName === 'string' ? topicName.slice(0, 200) : undefined,
+    homeworkType,
+  });
 
   res.json({
-    content: aiResponse.content,
-    subjectName: subject.name,
+    content,
+    subjectName: scope.subject.name,
     type: homeworkType,
   });
 });

@@ -3,6 +3,12 @@ import aiService from './aiService';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import curriculumService from './curriculumService';
+import {
+  extractTotalMarks,
+  generateHomeworkText,
+  generateLessonPlanText,
+  generateQuestions,
+} from './academicContentGenerator';
 import { hasValidTimeRange } from '../utils/academicValidation';
 import {
   createTerm as createLifecycleTerm,
@@ -165,6 +171,90 @@ async function resolveContentClass(
   };
 }
 
+interface GenerationTarget {
+  subject: { id: string; name: string; code: string };
+  gradeLevel: number;
+  termId: string;
+  classInfo: { id: string; name: string };
+}
+
+/** Subject, active term and class a content-generation tool writes to. */
+async function resolveGenerationTarget(params: Record<string, any>, ctx: ToolContext): Promise<GenerationTarget | { error: string }> {
+  const subject = await prisma.subject.findFirst({
+    where: { code: { equals: params.subjectCode, mode: 'insensitive' } },
+    select: { id: true, name: true, code: true },
+  });
+  if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+
+  const gradeLevel = Number(params.gradeLevel);
+  // Resolve the term before the class so an old class with the same grade cannot be selected.
+  const term = await getActiveTerm();
+  if (!term) return { error: 'No active academic term found. Activate a term first.' };
+
+  const classInfo = await resolveContentClass(params.classId, subject, gradeLevel, term.id, ctx);
+  if ('error' in classInfo) return classInfo;
+  return { subject, gradeLevel, termId: term.id, classInfo };
+}
+
+const topicInclude = { subtopics: { orderBy: { orderIndex: 'asc' } } } satisfies Prisma.TopicInclude;
+type GenerationTopic = Prisma.TopicGetPayload<{ include: typeof topicInclude }>;
+
+const hasContentFor = (existingTitles: string[], topicTitle: string) =>
+  existingTitles.some(title => title.includes(topicTitle));
+
+/**
+ * Topics to generate for. A named topic (or topicId) is used directly; otherwise the next
+ * topics from the class's syllabus progress: in-progress first, then pending in syllabus order,
+ * skipping completed topics and topics that already have this content.
+ */
+async function pickTopics(
+  target: GenerationTarget,
+  params: { topic?: string; topicId?: string; maxTopics?: number },
+  existingTitles: string[],
+): Promise<{ topics: GenerationTopic[]; selection: string } | { error: string }> {
+  const { subject, gradeLevel, classInfo } = target;
+  const base = { subjectId: subject.id, gradeLevel };
+
+  if (params.topic || params.topicId) {
+    const topics = await prisma.topic.findMany({
+      where: {
+        ...base,
+        ...(params.topicId ? { id: params.topicId } : { title: { contains: params.topic, mode: 'insensitive' } }),
+      },
+      include: topicInclude,
+      orderBy: { orderIndex: 'asc' },
+      take: params.maxTopics || 1,
+    });
+    if (topics.length) return { topics, selection: 'requested topic' };
+
+    const available = await prisma.topic.findMany({ where: base, orderBy: { orderIndex: 'asc' }, take: 20, select: { title: true } });
+    return {
+      error: `No ${subject.name} grade ${gradeLevel} topic matches "${params.topic ?? params.topicId}".`
+        + (available.length ? ` Available topics: ${available.map(t => t.title).join('; ')}` : ' Generate the syllabus first.'),
+    };
+  }
+
+  const all = await prisma.topic.findMany({
+    where: base,
+    include: { ...topicInclude, progress: { where: { classId: classInfo.id }, select: { status: true } } },
+    orderBy: { orderIndex: 'asc' },
+  });
+  if (!all.length) return { error: `No topics found for ${subject.name} at grade ${gradeLevel}. Generate the syllabus first.` };
+
+  const statusOf = (t: (typeof all)[number]) => t.progress[0]?.status ?? 'PENDING';
+  const open = all.filter(t => statusOf(t) !== 'COMPLETED' && !hasContentFor(existingTitles, t.title));
+  const ordered = [...open.filter(t => statusOf(t) === 'IN_PROGRESS'), ...open.filter(t => statusOf(t) === 'PENDING')];
+  if (!ordered.length) {
+    return { error: `Every ${subject.name} grade ${gradeLevel} topic is either completed in ${classInfo.name} or already has this content. Name a specific topic to target it.` };
+  }
+  return {
+    topics: ordered.slice(0, params.maxTopics || 3),
+    selection: `next topics from ${classInfo.name}'s syllabus progress`,
+  };
+}
+
+const AI_DRAFT_NOTE = 'Saved with 0% weight so it does not affect term results. Review it and set the weight before it counts.';
+
 // ---- Execution Result ----
 interface ExecutionResult {
   tool: string;
@@ -186,7 +276,7 @@ interface MasterAIResponse {
 const MAX_ACTIONS_PER_REQUEST = 12;
 const TOOL_TIMEOUT_MS = 60_000; // 60s per tool
 const TOOL_TIMEOUT_LONG_MS = 120_000; // 120s for AI-generation tools
-const LONG_RUNNING_TOOLS = new Set(['generate_syllabus']);
+const LONG_RUNNING_TOOLS = new Set(['generate_syllabus', 'generate_lesson_plans', 'generate_assessments', 'generate_homework']);
 
 // ==========================
 // BACKGROUND JOB: Bulk syllabus generation progress tracker
@@ -310,7 +400,9 @@ const contentGenerationSchema = z.object({
   subjectCode: z.string().min(1).max(20),
   gradeLevel: z.coerce.number().int().min(-3).max(12),
   classId: z.string().max(64).optional(),
-  maxTopics: z.coerce.number().int().min(1).max(50).optional(),
+  topic: z.string().min(1).max(200).optional(),
+  topicId: z.string().max(64).optional(),
+  maxTopics: z.coerce.number().int().min(1).max(10).optional(),
 });
 
 const toolParamSchemas: Record<string, z.ZodSchema> = {
@@ -429,7 +521,10 @@ const toolParamSchemas: Record<string, z.ZodSchema> = {
   }),
   get_lesson_plan_content: z.object({ id: z.string().min(1).max(64) }),
   generate_lesson_plans: contentGenerationSchema,
-  generate_assessments: contentGenerationSchema.extend({ assessmentType: z.enum(['EXAM', 'TEST', 'QUIZ']).optional() }),
+  generate_assessments: contentGenerationSchema.extend({
+    assessmentType: z.enum(['EXAM', 'TEST', 'QUIZ']).optional(),
+    questionCount: z.coerce.number().int().min(3).max(30).optional(),
+  }),
   generate_homework: contentGenerationSchema,
   get_class_insights: z.object({
     className: z.string().max(100).optional(),
@@ -1621,90 +1716,55 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
   // ===================== AI LESSON PLAN GENERATION =====================
   {
     name: 'generate_lesson_plans',
-    description: 'AI-generate and SAVE lesson plans for a subject\'s topics. Creates one lesson plan per topic, covering all subtopics. Requires a class (to link the plan) — auto-resolves class from gradeLevel if not provided. Great for bulk-populating lesson plans after syllabus is seeded.',
+    description: 'AI-generate and SAVE lesson plans for the teacher\'s class, grounded in the syllabus topic and the official CDC curriculum. Pass "topic" when the teacher names one; otherwise it picks the next topics from the class\'s syllabus progress (in-progress first, skipping completed topics and topics that already have a plan). Auto-resolves the class from gradeLevel if classId is not given.',
     parameters: [
       { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
       { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds a class at the given grade level.' },
-      { name: 'maxTopics', type: 'number', description: 'Max topics to generate plans for (default 5). Use to limit for speed.' },
+      { name: 'topic', type: 'string', description: 'Topic title or part of it (e.g. "fractions"). Omit to use the next topics from syllabus progress.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics (default 1 when a topic is named, otherwise 3).' },
     ],
     execute: async (params, userId, ctx) => {
-      // Resolve subject
-      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
-      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
-
-      const gl = Number(params.gradeLevel);
-
-      // Resolve term before class so an old class with the same grade cannot be selected.
-      const term = await getActiveTerm();
-      if (!term) return { error: 'No active academic term found. Activate a term first.' };
-
-      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
-      if ('error' in classInfo) return classInfo;
+      const target = await resolveGenerationTarget(params, ctx);
+      if ('error' in target) return target;
+      const { subject, gradeLevel: gl, termId, classInfo } = target;
       const classId = classInfo.id;
 
-      // Get topics with subtopics
-      const topics = await prisma.topic.findMany({
-        where: { subjectId: subject.id, gradeLevel: gl },
-        include: { subtopics: { orderBy: { orderIndex: 'asc' } } },
-        orderBy: { orderIndex: 'asc' },
-        take: params.maxTopics || 5,
+      const existingPlans = await prisma.lessonPlan.findMany({
+        where: { termId, subjectId: subject.id, classId },
+        select: { title: true },
       });
-
-      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
-
-      // Fetch official CDC curriculum content
-      let curriculumRef = '';
-      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+      const existingTitles = existingPlans.map(p => p.title);
+      const picked = await pickTopics(target, params, existingTitles);
+      if ('error' in picked) return picked;
 
       const created: string[] = [];
       const errors: string[] = [];
 
-      for (const topic of topics) {
+      for (const topic of picked.topics) {
         try {
-          // Check if lesson plan already exists for this topic
-          const existing = await prisma.lessonPlan.findFirst({
-            where: { subjectId: subject.id, classId, title: { contains: topic.title } },
+          if (hasContentFor(existingTitles, topic.title)) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const { content } = await generateLessonPlanText({
+            subjectName: subject.name,
+            subjectCode: subject.code,
+            gradeLevel: gl,
+            topic,
           });
-          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
 
-          const subtopicList = topic.subtopics.map((st, i) => {
-            let objs: string[] = [];
-            try { objs = st.learningObjectives ? JSON.parse(st.learningObjectives) : []; } catch {}
-            return `${i + 1}. ${st.title}${st.description ? ` — ${st.description}` : ''}${objs.length ? `\n   Objectives: ${objs.join('; ')}` : ''}`;
-          }).join('\n');
-
-          const duration = gl <= 0 ? 25 : gl <= 4 ? 35 : 45;
-          const prompt = `Generate a structured lesson plan for a Zambian classroom.
-SUBJECT: ${subject.name}, GRADE: ${gl <= 0 ? `ECE (${gl})` : gl}, TOPIC: ${topic.title}${topic.description ? ` — ${topic.description}` : ''}
-DURATION: ${duration} minutes
-${subtopicList ? `SUBTOPICS:\n${subtopicList}` : ''}
-${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nUse this official content to ensure lesson aligns with the Zambian CDC syllabus:\n${curriculumRef.substring(0, 6000)}\n=== END REFERENCE ===\n` : ''}
-
-Create a lesson plan with these sections:
-1. **Introduction** (5 min) — Hook, recap, today's objectives
-2. **Teaching** — Main content with examples relevant to Zambian context
-3. **Activity** — Hands-on exercise or group activity
-4. **Assessment** — 3-5 quick check questions
-5. **Wrap-up** — Summary, homework if applicable
-
-Write in clear, teacher-friendly language. Include specific examples and teaching tips.`;
-
-          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.5, maxTokens: 1500 });
-
-          const wasCreated = await runTermWriteTransaction(term.id, 'SETUP', async tx => {
+          const wasCreated = await runTermWriteTransaction(termId, 'SETUP', async tx => {
             const [currentClass, duplicate] = await Promise.all([
               tx.class.findFirst({
                 where: {
                   id: classId,
-                  academicTermId: term.id,
+                  academicTermId: termId,
                   subjects: { some: { id: subject.id } },
                 },
                 select: { id: true },
               }),
               tx.lessonPlan.findFirst({
                 where: {
-                  termId: term.id,
+                  termId,
                   subjectId: subject.id,
                   classId,
                   title: { contains: topic.title },
@@ -1717,11 +1777,11 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
             await tx.lessonPlan.create({
               data: {
                 title: `${subject.name}: ${topic.title}`,
-                content: aiResponse.content,
+                content,
                 teacherId: userId,
                 classId,
                 subjectId: subject.id,
-                termId: term.id,
+                termId,
                 weekStartDate: new Date(),
               },
             });
@@ -1733,12 +1793,15 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
         }
       }
 
+      if (!created.length && errors.length) return { error: `Could not generate lesson plans: ${errors.join('; ')}` };
+
       return {
         created,
         errors,
         subject: subject.name,
         class: classInfo.name,
-        summary: `Generated ${created.length} lesson plans for ${subject.name} (${classInfo.name}). ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+        topicSelection: picked.selection,
+        summary: `Generated ${created.length} lesson plans for ${subject.name} (${classInfo.name}) using the ${picked.selection}: ${created.join(', ')}. ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
       };
     },
   },
@@ -1746,126 +1809,63 @@ Write in clear, teacher-friendly language. Include specific examples and teachin
   // ===================== AI ASSESSMENT GENERATION =====================
   {
     name: 'generate_assessments',
-    description: 'AI-generate assessments (tests with questions) for a subject\'s topics at a grade level. Creates one assessment per topic with AI-generated questions. Auto-resolves class and term.',
+    description: 'AI-generate a QUIZ, TEST or EXAM with questions and an answer key for the teacher\'s class, grounded in the syllabus topic and the official CDC curriculum. Saved as a DRAFT with 0% weight, so it does not affect term results until the teacher reviews it and sets the weight. Pass "topic" when the teacher names one; otherwise it uses the next topics from the class\'s syllabus progress.',
     parameters: [
       { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
       { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
       { name: 'assessmentType', type: 'string', description: 'Type of assessment', enum: ['EXAM', 'TEST', 'QUIZ'], },
+      { name: 'questionCount', type: 'number', description: 'Number of questions, 3-30 (default: QUIZ 5, TEST 10, EXAM 15).' },
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
-      { name: 'maxTopics', type: 'number', description: 'Max topics to generate assessments for (default 5).' },
+      { name: 'topic', type: 'string', description: 'Topic title or part of it (e.g. "fractions"). Omit to use the next topics from syllabus progress.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics, one assessment each (default 1 when a topic is named, otherwise 3).' },
     ],
     execute: async (params, _userId, ctx) => {
-      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
-      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+      const target = await resolveGenerationTarget(params, ctx);
+      if ('error' in target) return target;
+      const { subject, gradeLevel: gl, termId, classInfo } = target;
 
-      const gl = Number(params.gradeLevel);
-      const assessmentType = params.assessmentType || 'TEST';
+      const assessmentType: 'EXAM' | 'TEST' | 'QUIZ' = params.assessmentType || 'TEST';
+      const typeLabel = assessmentType === 'QUIZ' ? 'Quiz' : assessmentType === 'EXAM' ? 'Exam' : 'Test';
+      const questionCount = params.questionCount || (assessmentType === 'QUIZ' ? 5 : assessmentType === 'EXAM' ? 15 : 10);
 
-      const term = await getActiveTerm();
-      if (!term) return { error: 'No active academic term found. Activate a term first.' };
-
-      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
-      if ('error' in classInfo) return classInfo;
-
-      const topics = await prisma.topic.findMany({
-        where: { subjectId: subject.id, gradeLevel: gl },
-        include: { subtopics: { orderBy: { orderIndex: 'asc' }, take: 5 } },
-        orderBy: { orderIndex: 'asc' },
-        take: params.maxTopics || 5,
+      const existing = await prisma.assessment.findMany({
+        where: { termId, subjectId: subject.id, classId: classInfo.id, type: assessmentType },
+        select: { title: true },
       });
-
-      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
-
-      // Fetch official CDC curriculum content
-      let curriculumRef = '';
-      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
+      const existingTitles = existing.map(a => a.title);
+      const picked = await pickTopics(target, params, existingTitles);
+      if ('error' in picked) return picked;
 
       const created: string[] = [];
       const errors: string[] = [];
 
-      for (const topic of topics) {
+      for (const topic of picked.topics) {
+        const title = `${typeLabel}: ${topic.title}`;
         try {
-          const existing = await prisma.assessment.findFirst({
-            where: { subjectId: subject.id, classId: classInfo.id, title: { contains: topic.title } },
+          if (existingTitles.includes(title)) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const questions = await generateQuestions({
+            subjectName: subject.name,
+            subjectCode: subject.code,
+            gradeLevel: gl,
+            topic,
+            count: questionCount,
           });
-          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
+          if (questions.length === 0) throw new Error('AI returned no usable questions');
+          const totalMarks = questions.reduce((sum, q) => sum + q.points, 0);
 
-          const subtopicNames = topic.subtopics.map(st => st.title).join(', ');
-          const questionCount = assessmentType === 'QUIZ' ? 5 : assessmentType === 'EXAM' ? 15 : 10;
-          const totalMarks = assessmentType === 'QUIZ' ? 20 : assessmentType === 'EXAM' ? 100 : 50;
-
-          const prompt = `Generate ${questionCount} assessment questions for Zambian students.
-SUBJECT: ${subject.name}, GRADE: ${gl}, TOPIC: ${topic.title}
-SUBTOPICS: ${subtopicNames || 'N/A'}
-TYPE: ${assessmentType}
-${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nAlign questions with the official Zambian CDC syllabus:\n${curriculumRef.substring(0, 4000)}\n=== END REFERENCE ===\n` : ''}
-
-Return ONLY valid JSON array:
-[{"question":"...","type":"MULTIPLE_CHOICE","options":["A)...","B)...","C)...","D)..."],"correctAnswer":"A","marks":${Math.round(totalMarks / questionCount)},"explanation":"Why this is correct"}]
-
-Requirements:
-- Mix question types: multiple choice, short answer, true/false
-- For short answer, omit "options" field and set type to "SHORT_ANSWER"
-- Age-appropriate for grade ${gl}, Zambian context
-- Cover the subtopics evenly
-- Return ONLY JSON array.`;
-
-          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.4, maxTokens: 2000 });
-
-          // Parse questions
-          let questions: any[] = [];
-          try {
-            const content = aiResponse.content;
-            const jsonMatch = content.match(/\[[\s\S]*\]/);
-            questions = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(content);
-          } catch {
-            questions = [];
-          }
-
-          const questionCreates = questions.map((q, index) => {
-            const type = q.type === 'SHORT_ANSWER'
-              ? 'SHORT_ANSWER'
-              : q.type === 'TRUE_FALSE'
-                ? 'TRUE_FALSE'
-                : q.type === 'ESSAY'
-                  ? 'ESSAY'
-                  : 'MULTIPLE_CHOICE';
-            const options = Array.isArray(q.options)
-              ? q.options.map((option: any) => {
-                  const text = typeof option === 'string' ? option : option.text || String(option);
-                  return {
-                    text,
-                    isCorrect: Boolean(q.correctAnswer)
-                      && (text.startsWith(q.correctAnswer) || text === q.correctAnswer),
-                  };
-                })
-              : [];
-            return {
-              text: q.question || q.questionText || `Question ${index + 1}`,
-              type: type as any,
-              points: q.marks || q.points || Math.round(totalMarks / questionCount),
-              correctAnswer: q.correctAnswer || null,
-              options: options.length > 0 ? { create: options } : undefined,
-            };
-          });
-
-          const wasCreated = await runTermWriteTransaction(term.id, 'ACADEMIC_ACTIVITY', async tx => {
+          const wasCreated = await runTermWriteTransaction(termId, 'ACADEMIC_ACTIVITY', async tx => {
             const [currentClass, duplicate] = await Promise.all([
               tx.class.findFirst({
                 where: {
                   id: classInfo.id,
-                  academicTermId: term.id,
+                  academicTermId: termId,
                   subjects: { some: { id: subject.id } },
                 },
                 select: { id: true },
               }),
               tx.assessment.findFirst({
-                where: {
-                  termId: term.id,
-                  subjectId: subject.id,
-                  classId: classInfo.id,
-                  title: { contains: topic.title },
-                },
+                where: { termId, subjectId: subject.id, classId: classInfo.id, title },
                 select: { id: true },
               }),
             ]);
@@ -1874,28 +1874,38 @@ Requirements:
 
             await tx.assessment.create({
               data: {
-                title: `${assessmentType === 'QUIZ' ? 'Quiz' : assessmentType === 'EXAM' ? 'Exam' : 'Test'}: ${topic.title}`,
-                type: assessmentType as any,
+                title,
+                type: assessmentType,
                 classId: classInfo.id,
                 subjectId: subject.id,
-                termId: term.id,
+                termId,
                 totalMarks,
-                weight: assessmentType === 'QUIZ' ? 10 : assessmentType === 'EXAM' ? 40 : 25,
+                weight: 0,
                 date: new Date(),
-                description: `AI-generated ${assessmentType.toLowerCase()} covering: ${topic.title}`,
-                questions: questionCreates.length > 0 ? { create: questionCreates } : undefined,
+                description: `Draft: AI-generated ${typeLabel.toLowerCase()} on ${topic.title}. ${AI_DRAFT_NOTE}`,
+                questions: {
+                  create: questions.map(q => ({
+                    text: q.text,
+                    type: q.type,
+                    points: q.points,
+                    correctAnswer: q.correctAnswer ?? null,
+                    options: q.options.length ? { create: q.options } : undefined,
+                  })),
+                },
               },
             });
             return true;
           });
 
           created.push(wasCreated
-            ? `${topic.title} (${questions.length} questions)`
+            ? `${topic.title} (${questions.length} questions, ${totalMarks} marks)`
             : `${topic.title} (already exists)`);
         } catch (err: any) {
           errors.push(`${topic.title}: ${(err.message || 'error').substring(0, 80)}`);
         }
       }
+
+      if (!created.length && errors.length) return { error: `Could not generate the ${typeLabel.toLowerCase()}: ${errors.join('; ')}` };
 
       return {
         created,
@@ -1903,7 +1913,9 @@ Requirements:
         subject: subject.name,
         class: classInfo.name,
         assessmentType,
-        summary: `Generated ${created.length} ${assessmentType.toLowerCase()}s for ${subject.name} (${classInfo.name}). ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+        draft: true,
+        topicSelection: picked.selection,
+        summary: `Generated ${created.length} draft ${typeLabel.toLowerCase()}(s) for ${subject.name} (${classInfo.name}) using the ${picked.selection}: ${created.join(', ')}. ${AI_DRAFT_NOTE} ${errors.length > 0 ? `${errors.length} failed: ${errors.join('; ')}` : ''}`,
       };
     },
   },
@@ -1911,91 +1923,57 @@ Requirements:
   // ===================== AI HOMEWORK GENERATION =====================
   {
     name: 'generate_homework',
-    description: 'AI-generate homework assignments for a subject\'s topics at a grade level. Creates one homework assessment per topic with structured tasks. Auto-resolves class and term.',
+    description: 'AI-generate homework for the teacher\'s class, grounded in the syllabus topic and the official CDC curriculum. Saved as a HOMEWORK assessment due in 7 days with 0% weight until the teacher sets it. Pass "topic" when the teacher names one; otherwise it uses the next topics from the class\'s syllabus progress.',
     parameters: [
       { name: 'subjectCode', type: 'string', description: 'Subject code (e.g. MATH, ENG)', required: true },
       { name: 'gradeLevel', type: 'number', description: 'Grade level', required: true },
       { name: 'classId', type: 'string', description: 'Class ID. If omitted, auto-finds class at grade level.' },
-      { name: 'maxTopics', type: 'number', description: 'Max topics to generate homework for (default 5).' },
+      { name: 'topic', type: 'string', description: 'Topic title or part of it (e.g. "fractions"). Omit to use the next topics from syllabus progress.' },
+      { name: 'maxTopics', type: 'number', description: 'Max topics, one homework each (default 1 when a topic is named, otherwise 3).' },
     ],
     execute: async (params, _userId, ctx) => {
-      const subject = await prisma.subject.findFirst({ where: { code: { equals: params.subjectCode, mode: 'insensitive' } }, select: { id: true, name: true, code: true } });
-      if (!subject) return { error: `Subject "${params.subjectCode}" not found.` };
+      const target = await resolveGenerationTarget(params, ctx);
+      if ('error' in target) return target;
+      const { subject, gradeLevel: gl, termId, classInfo } = target;
 
-      const gl = Number(params.gradeLevel);
-
-      const term = await getActiveTerm();
-      if (!term) return { error: 'No active academic term found. Activate a term first.' };
-
-      const classInfo = await resolveContentClass(params.classId, subject, gl, term.id, ctx);
-      if ('error' in classInfo) return classInfo;
-
-      const topics = await prisma.topic.findMany({
-        where: { subjectId: subject.id, gradeLevel: gl },
-        include: { subtopics: { orderBy: { orderIndex: 'asc' }, take: 5 } },
-        orderBy: { orderIndex: 'asc' },
-        take: params.maxTopics || 5,
+      const existing = await prisma.assessment.findMany({
+        where: { termId, subjectId: subject.id, classId: classInfo.id, type: 'HOMEWORK' },
+        select: { title: true },
       });
-
-      if (topics.length === 0) return { error: `No topics found for ${subject.name} at grade ${gl}. Generate syllabus first.` };
-
-      // Fetch official CDC curriculum content
-      let curriculumRef = '';
-      try { curriculumRef = await curriculumService.getCurriculumContext(subject.code, gl); } catch {}
-
-      // Build topics & subtopics listing for the response
-      const topicsListing = topics.map(t => ({
-        topic: t.title,
-        subtopics: t.subtopics.map(st => st.title),
-      }));
+      const existingTitles = existing.map(a => a.title);
+      const picked = await pickTopics(target, params, existingTitles);
+      if ('error' in picked) return picked;
 
       const created: string[] = [];
       const errors: string[] = [];
 
-      for (const topic of topics) {
+      for (const topic of picked.topics) {
         try {
-          const existing = await prisma.assessment.findFirst({
-            where: { subjectId: subject.id, classId: classInfo.id, type: 'HOMEWORK', title: { contains: topic.title } },
+          if (hasContentFor(existingTitles, topic.title)) { created.push(`${topic.title} (already exists)`); continue; }
+
+          const content = await generateHomeworkText({
+            subjectName: subject.name,
+            subjectCode: subject.code,
+            gradeLevel: gl,
+            topic,
           });
-          if (existing) { created.push(`${topic.title} (already exists)`); continue; }
 
-          const subtopicNames = topic.subtopics.map(st => st.title).join(', ');
-
-          const prompt = `Generate a homework assignment for Zambian students.
-SUBJECT: ${subject.name}, GRADE: ${gl}, TOPIC: ${topic.title}
-SUBTOPICS: ${subtopicNames || 'N/A'}
-${curriculumRef ? `\n=== OFFICIAL CDC CURRICULUM REFERENCE ===\nAlign homework with the official Zambian CDC syllabus:\n${curriculumRef.substring(0, 4000)}\n=== END REFERENCE ===\n` : ''}
-
-Create a structured homework with:
-1. A clear title
-2. Instructions (2-3 sentences)
-3. 3-5 tasks/questions appropriate for grade ${gl}
-4. Total marks allocation
-
-Write in clear simple English. Use Zambian context where relevant.
-${gl <= 0 ? 'For ECE: use drawing, coloring, matching, and simple counting activities.' : ''}
-${gl <= 4 ? 'For lower primary: keep tasks simple, concrete, and fun.' : ''}
-Return the homework as structured text.`;
-
-          const aiResponse = await aiService.chat([{ role: 'user', content: prompt }], { temperature: 0.5, maxTokens: 1000 });
-
-          // Create as a HOMEWORK assessment
           const dueDate = new Date();
-          dueDate.setDate(dueDate.getDate() + 7); // Due in 1 week
+          dueDate.setDate(dueDate.getDate() + 7);
 
-          const wasCreated = await runTermWriteTransaction(term.id, 'ACADEMIC_ACTIVITY', async tx => {
+          const wasCreated = await runTermWriteTransaction(termId, 'ACADEMIC_ACTIVITY', async tx => {
             const [currentClass, duplicate] = await Promise.all([
               tx.class.findFirst({
                 where: {
                   id: classInfo.id,
-                  academicTermId: term.id,
+                  academicTermId: termId,
                   subjects: { some: { id: subject.id } },
                 },
                 select: { id: true },
               }),
               tx.assessment.findFirst({
                 where: {
-                  termId: term.id,
+                  termId,
                   subjectId: subject.id,
                   classId: classInfo.id,
                   type: 'HOMEWORK',
@@ -2013,12 +1991,12 @@ Return the homework as structured text.`;
                 type: 'HOMEWORK',
                 classId: classInfo.id,
                 subjectId: subject.id,
-                termId: term.id,
-                totalMarks: 20,
-                weight: 5,
+                termId,
+                totalMarks: extractTotalMarks(content, 20),
+                weight: 0,
                 date: new Date(),
                 dueDate,
-                description: aiResponse.content,
+                description: content,
               },
             });
             return true;
@@ -2030,14 +2008,16 @@ Return the homework as structured text.`;
         }
       }
 
+      if (!created.length && errors.length) return { error: `Could not generate homework: ${errors.join('; ')}` };
+
       return {
         created,
         errors,
         subject: subject.name,
         gradeLevel: gl,
         class: classInfo.name,
-        topicsAndSubtopics: topicsListing,
-        summary: `Generated ${created.length} homework assignments for ${subject.name} Grade ${gl} (${classInfo.name}). Topics: ${topicsListing.map(t => `${t.topic} [${t.subtopics.length} subtopics]`).join(', ')}. ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
+        topicSelection: picked.selection,
+        summary: `Generated ${created.length} homework assignment(s) for ${subject.name} Grade ${gl} (${classInfo.name}) using the ${picked.selection}: ${created.join(', ')}. Due in 7 days. ${AI_DRAFT_NOTE} ${errors.length > 0 ? `${errors.length} failed.` : ''}`,
       };
     },
   },
@@ -3326,7 +3306,8 @@ ${toolDescriptions}
 ## SCOPE
 - You can only act on the teacher's own classes (listed below). Generation tools pick the right class automatically.
 - You cannot manage fees, payments, students' personal records, users, announcements, SMS, timetables or school setup. If asked, say an administrator must do it.
-- Generated lesson plans, assessments and homework are SAVED to the teacher's classes. Report remarks are drafts and are not saved.
+- Generated lesson plans, assessments and homework are SAVED to the teacher's classes. Assessments and homework are saved with 0% weight; tell the teacher to review them and set the weight in Assessments before they count. Report remarks are drafts and are not saved.
+- Pass "topic" to generation tools when the teacher names a topic. Without it the tools use the next topics from the class's syllabus progress, so keep that progress up to date. Pass "questionCount" when the teacher asks for a specific number of questions.
 
 ## HOW TO RESPOND
 A) If the request needs a tool (save lesson plans/assessments/homework, look up class data, draft report remarks, list saved plans or topics), reply with ONLY this JSON:

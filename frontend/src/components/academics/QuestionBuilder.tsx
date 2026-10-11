@@ -114,6 +114,7 @@ const QuestionBuilder: React.FC<QuestionBuilderProps> = ({ assessmentId, subject
     try {
       const response = await api.post('/syllabus/generate-questions', {
         subjectId,
+        assessmentId,
         topicName: aiTopicName || undefined,
         questionCount: aiQuestionCount,
         questionTypes: aiQuestionTypes,
