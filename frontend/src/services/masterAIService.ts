@@ -17,11 +17,6 @@ export interface MasterAIResponse {
   shouldEndConversation?: boolean;
 }
 
-export interface MasterAITool {
-  name: string;
-  description: string;
-}
-
 export interface MasterAIConversation {
   id: string;
   title: string;
@@ -38,52 +33,15 @@ export interface MasterAIMessage {
   createdAt: string;
 }
 
-// SSE event types from voice-execute endpoint
-export interface VoiceResponseEvent {
-  type: 'response';
-  message: string;
-  actions: MasterAIAction[];
-  suggestions?: string[];
-  conversationId: string;
-  isNewConversation?: boolean;
-  shouldEndConversation?: boolean;
-}
-
-export interface VoiceAudioEvent {
-  type: 'audio';
-  audio: string; // base64
-  sentence: string;
-  index: number;
-  isFinal: boolean;
-  contentType: string;
-}
-
-export interface VoiceDoneEvent {
-  type: 'done';
-  shouldEndConversation?: boolean;
-}
-
-export interface VoiceErrorEvent {
-  type: 'error';
-  error: string;
-}
-
-export type VoiceSSEEvent = VoiceResponseEvent | VoiceAudioEvent | VoiceDoneEvent | VoiceErrorEvent;
-
-export interface VoiceConfig {
-  provider: string;
-  voices: { id: string; name: string; provider: string }[];
-  streamingSupported: boolean;
-  farewellDetectionEnabled: boolean;
-}
+// SSE events from the voice-execute-v2 endpoint
+export type VoiceStreamEvent =
+  | { type: 'quick'; message: string }
+  | { type: 'result'; message: string; actions: MasterAIAction[]; suggestions?: string[]; conversationId: string; isNewConversation?: boolean; shouldEndConversation?: boolean }
+  | { type: 'done' }
+  | { type: 'error'; error: string };
 
 const masterAIService = {
   // ---- Conversations ----
-
-  async createConversation(): Promise<MasterAIConversation> {
-    const { data } = await api.post('/master-ai/conversations');
-    return data;
-  },
 
   async getConversations(): Promise<MasterAIConversation[]> {
     const { data } = await api.get('/master-ai/conversations');
@@ -112,7 +70,7 @@ const masterAIService = {
   },
 
   /**
-   * Two-phase streaming voice execute (ElevenLabs-inspired pipeline).
+   * Two-phase streaming voice execute.
    * Uses SSE to receive the plan filler message immediately, then the
    * full result after tools execute — so the frontend can start TTS
    * on the filler while tools run in the background.
@@ -126,7 +84,7 @@ const masterAIService = {
   voiceExecuteStream(
     message: string,
     conversationId: string | undefined,
-    onEvent: (event: VoiceSSEEvent | { type: 'quick'; message: string } | { type: 'result'; message: string; actions: MasterAIAction[]; suggestions?: string[]; conversationId: string; isNewConversation?: boolean; shouldEndConversation?: boolean }) => void,
+    onEvent: (event: VoiceStreamEvent) => void,
   ): AbortController {
     const controller = new AbortController();
     const token = localStorage.getItem('token');
@@ -183,11 +141,6 @@ const masterAIService = {
     return controller;
   },
 
-  async getTools(): Promise<MasterAITool[]> {
-    const { data } = await api.get('/master-ai/tools');
-    return data;
-  },
-
   // ---- Audio ----
 
   async transcribeAudio(audioBlob: Blob): Promise<string> {
@@ -219,87 +172,6 @@ const masterAIService = {
       console.warn('[TTS] Speech generation unavailable:', error?.response?.data || error?.message);
       return null;
     }
-  },
-
-  // ---- Voice Conversation (SSE streaming) ----
-
-  /**
-   * Execute a voice command with streaming TTS response via SSE.
-   * Returns an AbortController so the caller can interrupt the stream.
-   *
-   * The backend sends:
-   *  1. { type: 'response', message, actions, ... }  — text response
-   *  2. { type: 'audio', audio (base64), sentence, index, isFinal } — per-sentence audio
-   *  3. { type: 'done', shouldEndConversation }  — stream complete
-   */
-  voiceExecute(
-    message: string,
-    conversationId: string | undefined,
-    onEvent: (event: VoiceSSEEvent) => void,
-  ): AbortController {
-    const controller = new AbortController();
-    const token = localStorage.getItem('token');
-
-    // Use fetch for SSE (axios doesn't handle streaming well)
-    fetch('/api/v1/master-ai/voice-execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ message, conversationId }),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({ error: 'Request failed' }));
-          onEvent({ type: 'error', error: errData.error || `HTTP ${response.status}` });
-          return;
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          onEvent({ type: 'error', error: 'No response stream' });
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE events from the buffer
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // keep incomplete line
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                onEvent(data as VoiceSSEEvent);
-              } catch {
-                // skip malformed events
-              }
-            }
-          }
-        }
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          onEvent({ type: 'error', error: err.message || 'Voice execute failed' });
-        }
-      });
-
-    return controller;
-  },
-
-  async getVoiceConfig(): Promise<VoiceConfig> {
-    const { data } = await api.get('/master-ai/voice-config');
-    return data;
   },
 };
 

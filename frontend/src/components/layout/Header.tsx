@@ -4,7 +4,7 @@ import api from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { subscribeToPushNotifications } from '../../utils/push';
-import { ThemeToggle, VoiceSearchButton } from '../mobile';
+import { ThemeToggle } from '../mobile';
 import { hapticLight } from '../../utils/haptic';
 
 interface Notification {
@@ -179,7 +179,6 @@ const Header = ({ isSidebarCollapsed }: HeaderProps) => {
             placeholder="Search students, payments..."
             className="bg-transparent border-none focus:outline-none ml-3 w-full text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
           />
-          <VoiceSearchButton onResult={(text) => console.log('Voice search:', text)} size={18} />
         </div>
 
         {/* Mobile: Expandable Search */}

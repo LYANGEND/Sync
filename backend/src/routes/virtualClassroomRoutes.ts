@@ -17,7 +17,6 @@ import {
   getTutorStatus,
   recordParticipant,
   getChatHistory,
-  getAvailableVoices,
   getSessionTranscript,
 } from '../controllers/virtualClassroomController';
 
@@ -31,7 +30,6 @@ router.use(authenticateToken);
 // ==========================================
 router.post('/', authorizeRole(['SUPER_ADMIN', 'TEACHER']), createClassroom);
 router.get('/', getClassrooms);
-router.get('/voices', getAvailableVoices);
 router.get('/:id', getClassroom);
 router.put('/:id', authorizeRole(['SUPER_ADMIN', 'TEACHER']), updateClassroom);
 router.delete('/:id', authorizeRole(['SUPER_ADMIN']), deleteClassroom);

@@ -27,8 +27,5 @@ export { FloatingActionButton, SimpleFAB } from './FloatingActionButton';
 // Touch-optimized Lists
 export { TouchListItem, TouchList, EmptyState } from './TouchList';
 
-// Voice Search
-export { VoiceSearchButton, VoiceSearchOverlay, useVoiceSearch } from './VoiceSearch';
-
 // Theme Toggle
 export { ThemeToggle, ThemeSelector } from './ThemeToggle';

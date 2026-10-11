@@ -1,6 +1,5 @@
 import { prisma } from '../utils/prisma';
 import aiService from './aiService';
-import { elevenLabsService } from './elevenLabsService';
 import { Prisma } from '@prisma/client';
 import { buildRuntimeLessonPlan } from './lessonPlanRuntimeService';
 import { emitClassroomAIMessage } from './classroomRealtimeService';
@@ -518,39 +517,22 @@ function formatApprovedContentForPrompt(content: ApprovedTeachingContent): strin
 }
 
 // ================================================================
-// TEACHER TTS — Azure TTS primary, ElevenLabs fallback
+// TEACHER TTS
 // ================================================================
-// Uses Azure OpenAI TTS first (fast, cost-effective, already
-// configured for Master AI voice). Falls back to ElevenLabs if
-// Azure fails (quota, misconfigured, etc).
-// Returns null if both fail — the tutor continues with text only.
+// Uses the configured AI provider's TTS. Returns null on failure —
+// the tutor continues with text only.
 
 async function generateTeacherAudio(
   text: string,
-  voiceId?: string | null
 ): Promise<{ audioBuffer: Buffer; contentType: string } | null> {
-  // Primary: Azure OpenAI TTS
   try {
     const buffer = await aiService.generateSpeech(text);
     if (buffer && buffer.length > 0) {
       return { audioBuffer: buffer, contentType: 'audio/mpeg' };
     }
   } catch (err) {
-    console.warn('[AITutor] Azure TTS failed, trying ElevenLabs fallback:', (err as Error).message);
+    console.warn('[AITutor] TTS failed:', (err as Error).message);
   }
-
-  // Fallback: ElevenLabs (if configured)
-  try {
-    const result = await elevenLabsService.teacherSpeak(text, {
-      voiceId: voiceId || undefined,
-    });
-    if (result) {
-      return { audioBuffer: result.audioBuffer, contentType: result.contentType };
-    }
-  } catch (err) {
-    console.warn('[AITutor] ElevenLabs fallback also failed:', (err as Error).message);
-  }
-
   return null;
 }
 
@@ -755,11 +737,11 @@ class AITutorService {
     const greetingText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
 
-    // Generate voice (Azure TTS primary, ElevenLabs fallback)
+    // Generate voice
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
     if (shouldGenerateAudio) {
-      const ttsResult = await generateTeacherAudio(greetingText, classroom.aiTutorVoiceId);
+      const ttsResult = await generateTeacherAudio(greetingText);
       audioBuffer = ttsResult?.audioBuffer || null;
       audioContentType = ttsResult?.contentType || '';
     }
@@ -966,8 +948,8 @@ class AITutorService {
     // speak to the whole class but the question came via chat.
     const channel: ResponseChannel = 'VOICE_AND_CHAT';
 
-    // Generate voice (Azure TTS primary, ElevenLabs fallback)
-    const ttsResult = await generateTeacherAudio(responseText, classroom.aiTutorVoiceId);
+    // Generate voice
+    const ttsResult = await generateTeacherAudio(responseText);
     const audioBuffer = ttsResult?.audioBuffer || null;
     const audioContentType = ttsResult?.contentType || '';
 
@@ -1157,11 +1139,11 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
     const responseText = aiResponse.content;
     const shouldGenerateAudio = options.generateAudio !== false;
 
-    // Generate voice (Azure TTS primary, ElevenLabs fallback)
+    // Generate voice
     let audioBuffer: Buffer | null = null;
     let audioContentType = '';
     if (shouldGenerateAudio) {
-      const ttsResult = await generateTeacherAudio(responseText, classroom.aiTutorVoiceId);
+      const ttsResult = await generateTeacherAudio(responseText);
       audioBuffer = ttsResult?.audioBuffer || null;
       audioContentType = ttsResult?.contentType || '';
     }
@@ -1249,8 +1231,8 @@ ${memState.segmentContext?.title ? `Anchor the transition around "${memState.seg
 
     const classroom = session.classroom;
 
-    // Generate voice (Azure TTS primary, ElevenLabs fallback)
-    const ttsResult = await generateTeacherAudio(text, classroom.aiTutorVoiceId);
+    // Generate voice
+    const ttsResult = await generateTeacherAudio(text);
     const audioBuffer = ttsResult?.audioBuffer || null;
     const audioContentType = ttsResult?.contentType || '';
 
@@ -1351,8 +1333,8 @@ Only ask about facts and concepts from the approved content or what was explicit
 
     const quizText = aiResponse.content;
 
-    // Generate voice (Azure TTS primary, ElevenLabs fallback)
-    const ttsResult = await generateTeacherAudio(quizText, classroom.aiTutorVoiceId);
+    // Generate voice
+    const ttsResult = await generateTeacherAudio(quizText);
     const audioBuffer = ttsResult?.audioBuffer || null;
     const audioContentType = ttsResult?.contentType || '';
 

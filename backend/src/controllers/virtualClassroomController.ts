@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { aiTutorService } from '../services/aiTutorService';
-import { elevenLabsService, TEACHING_VOICES } from '../services/elevenLabsService';
 import { syncClassroomAttendance } from '../services/classroomAttendanceService';
 import {
   buildRuntimeLessonPlan,
@@ -1039,42 +1038,6 @@ export const getChatHistory = async (req: AuthRequest, res: Response) => {
       return res.status(error.status).json({ error: error.message });
     }
     console.error('[VirtualClassroom] Chat history error:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-/**
- * Get available ElevenLabs voices
- */
-export const getAvailableVoices = async (req: AuthRequest, res: Response) => {
-  try {
-    const isConfigured = await elevenLabsService.isConfigured();
-
-    if (!isConfigured) {
-      // Return built-in voice suggestions
-      return res.json({
-        configured: false,
-        voices: Object.entries(TEACHING_VOICES).map(([name, id]) => ({
-          voice_id: id,
-          name: name.charAt(0) + name.slice(1).toLowerCase(),
-          category: 'premade',
-        })),
-      });
-    }
-
-    const voices = await elevenLabsService.getVoices();
-    res.json({
-      configured: true,
-      voices: voices.map(v => ({
-        voice_id: v.voice_id,
-        name: v.name,
-        category: v.category,
-        labels: v.labels,
-        preview_url: v.preview_url,
-      })),
-    });
-  } catch (error: any) {
-    console.error('[VirtualClassroom] Voices error:', error);
     res.status(500).json({ error: error.message });
   }
 };

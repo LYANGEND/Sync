@@ -35,13 +35,6 @@ interface Classroom {
   };
 }
 
-interface Voice {
-  voice_id: string;
-  name: string;
-  category: string;
-  preview_url?: string;
-}
-
 interface ClassOption {
   id: string;
   name: string;
@@ -67,7 +60,6 @@ export default function VirtualClassrooms() {
   // Create modal state
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [voices, setVoices] = useState<Voice[]>([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [subjects, setSubjects] = useState<SubjectOption[]>([]);
   const [selectedAcademicTermId, setSelectedAcademicTermId] = useState('');
@@ -90,7 +82,6 @@ export default function VirtualClassrooms() {
     scheduledEnd: '',
     aiTutorEnabled: true,
     aiTutorName: 'AI Teacher',
-    aiTutorVoiceId: '',
     aiTutorPersona: '',
     lessonPlanContent: '',
     maxParticipants: 50,
@@ -120,7 +111,6 @@ export default function VirtualClassrooms() {
       if (canCreate) void fetchClasses(activeTerm.id);
     }).catch(() => setLoading(false));
     if (canCreate) {
-      void fetchVoices();
       void fetchSubjects();
     }
   }, []);
@@ -135,15 +125,6 @@ export default function VirtualClassrooms() {
       console.error('Fetch classrooms error:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchVoices = async () => {
-    try {
-      const res = await api.get('/virtual-classroom/voices');
-      setVoices(res.data.voices || []);
-    } catch (err) {
-      console.error('Fetch voices error:', err);
     }
   };
 
@@ -287,7 +268,6 @@ export default function VirtualClassrooms() {
         ...form,
         classId: form.classId || undefined,
         subjectId: form.subjectId || undefined,
-        aiTutorVoiceId: form.aiTutorVoiceId || undefined,
         aiTutorPersona: form.aiTutorPersona || undefined,
         lessonPlanContent: form.lessonPlanContent || undefined,
         topicId: selectedTopicId || undefined,
@@ -314,7 +294,6 @@ export default function VirtualClassrooms() {
       scheduledEnd: '',
       aiTutorEnabled: true,
       aiTutorName: 'AI Teacher',
-      aiTutorVoiceId: '',
       aiTutorPersona: '',
       lessonPlanContent: '',
       maxParticipants: 50,
@@ -864,32 +843,15 @@ export default function VirtualClassrooms() {
 
                 {form.aiTutorEnabled && (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">AI Teacher Name</label>
-                        <input
-                          type="text"
-                          value={form.aiTutorName}
-                          onChange={(e) => setForm({ ...form, aiTutorName: e.target.value })}
-                          placeholder="e.g. Ms. Moyo"
-                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Voice (ElevenLabs)</label>
-                        <select
-                          value={form.aiTutorVoiceId}
-                          onChange={(e) => setForm({ ...form, aiTutorVoiceId: e.target.value })}
-                          className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
-                        >
-                          <option value="">Default voice</option>
-                          {voices.map(v => (
-                            <option key={v.voice_id} value={v.voice_id}>
-                              {v.name} ({v.category})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">AI Teacher Name</label>
+                      <input
+                        type="text"
+                        value={form.aiTutorName}
+                        onChange={(e) => setForm({ ...form, aiTutorName: e.target.value })}
+                        placeholder="e.g. Ms. Moyo"
+                        className="w-full px-3 py-2 border dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
+                      />
                     </div>
 
                     <div>
@@ -944,7 +906,7 @@ export default function VirtualClassrooms() {
                     <div className="flex items-start gap-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl">
                       <Sparkles size={14} className="text-purple-500 mt-0.5 flex-shrink-0" />
                       <p className="text-xs text-purple-700 dark:text-purple-300">
-                        The AI tutor will join the class, greet students, follow the lesson plan, answer questions with natural voice (ElevenLabs),
+                        The AI tutor will join the class, greet students, follow the lesson plan, answer questions with natural voice,
                         and conduct quizzes — just like a real teacher.
                       </p>
                     </div>

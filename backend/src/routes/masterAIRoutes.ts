@@ -2,7 +2,6 @@ import { Router } from 'express';
 import multer from 'multer';
 import {
   executeCommand,
-  getTools,
   createConversation,
   getConversations,
   getConversation,
@@ -10,10 +9,7 @@ import {
   deleteConversation,
   transcribeAudio,
   generateSpeech,
-  streamSpeech,
-  voiceExecute,
   voiceExecuteV2,
-  getVoiceConfig,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 
@@ -37,12 +33,9 @@ router.use(authorizeRole(['SUPER_ADMIN']));
 // Audio Features
 router.post('/transcribe', upload.single('audio'), transcribeAudio);
 router.post('/speech', generateSpeech);
-router.post('/speech/stream', streamSpeech);
 
-// Voice Conversation (combined execute + streaming TTS)
-router.post('/voice-execute', voiceExecute);
+// Voice conversation (two-phase streaming execute)
 router.post('/voice-execute-v2', voiceExecuteV2);
-router.get('/voice-config', getVoiceConfig);
 
 // Conversations (ChatGPT-style)
 router.post('/conversations', createConversation);
@@ -53,8 +46,5 @@ router.delete('/conversations/:id', deleteConversation);
 
 // Execute a natural language command (within a conversation)
 router.post('/execute', executeCommand);
-
-// Get available tools
-router.get('/tools', getTools);
 
 export default router;

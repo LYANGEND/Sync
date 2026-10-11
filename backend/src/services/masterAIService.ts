@@ -3299,14 +3299,7 @@ RULES:
   }
 
   /**
-   * Get available tool names and descriptions (for the frontend)
-   */
-  getAvailableTools(): { name: string; description: string }[] {
-    return tools.map(t => ({ name: t.name, description: t.description }));
-  }
-
-  /**
-   * Streaming two-phase command execution (ElevenLabs-inspired pipeline).
+   * Streaming two-phase command execution.
    *
    * Phase 1 ("quick"): AI generates the plan → immediately yields the
    *   plan.message so the frontend can start TTS while tools execute.
