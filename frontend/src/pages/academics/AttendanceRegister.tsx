@@ -3,13 +3,12 @@ import {
     Calendar, Save, CheckCircle, XCircle, Clock, UserCheck,
     Search, BarChart2, Download,
     MessageSquare, Printer, Undo2, AlertTriangle, LayoutGrid,
-    List, Volume2, VolumeX, Eye, Shield, Zap, Users, Pencil,
-    X, Loader2, RefreshCw
+    List, Volume2, VolumeX, Eye, Zap, Users, Pencil,
+    X, Loader2, RefreshCw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import api from '../../utils/api';
 import { toast } from 'react-hot-toast';
 import AttendanceAnalytics from '../../components/academics/AttendanceAnalytics';
-import { AcademicFilterButton, AcademicFilterDialog } from '../../components/academics/AcademicFilterDialog';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import { pickActiveTerm } from '../../hooks/useActiveTerm';
 import NoActiveTermNotice from '../../components/academics/NoActiveTermNotice';
@@ -56,6 +55,20 @@ type ViewMode = 'daily' | 'weekly' | 'analytics';
 
 const AUTO_SAVE_KEY = 'attendance_draft';
 
+/** Latest school day on or before today, otherwise the first school day of the term. */
+const pickRegisterDate = (days: string[]) => {
+    const today = new Date().toISOString().split('T')[0];
+    return [...days].reverse().find(day => day <= today) || days[0] || '';
+};
+
+const formatSchoolDay = (day: string) => new Date(`${day}T00:00:00.000Z`).toLocaleDateString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+});
+
+const FIELD_LABEL = 'mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300';
+const FIELD = 'h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950';
+const ICON_BUTTON = 'grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-300';
+
 const AttendanceRegister = () => {
     const { confirm, notify } = useAppDialog();
     const [classes, setClasses] = useState<any[]>([]);
@@ -72,11 +85,6 @@ const AttendanceRegister = () => {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [showFilters, setShowFilters] = useState(false);
-    const [draftTermId, setDraftTermId] = useState('');
-    const [draftClassId, setDraftClassId] = useState('');
-    const [draftDate, setDraftDate] = useState('');
-    const [draftSearchQuery, setDraftSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<ViewMode>('daily');
     const [displayMode, setDisplayMode] = useState<'list' | 'photo'>('list');
 
@@ -112,16 +120,15 @@ const AttendanceRegister = () => {
         () => academicTerms.find(term => term.id === selectedTermId),
         [academicTerms, selectedTermId],
     );
-    const draftTerm = useMemo(
-        () => academicTerms.find(term => term.id === draftTermId),
-        [academicTerms, draftTermId],
-    );
-    const draftTermClasses = useMemo(
-        () => classes.filter(classOption => classOption.academicTermId === draftTermId),
-        [classes, draftTermId],
+    const termClasses = useMemo(
+        () => classes.filter(classOption => classOption.academicTermId === selectedTermId),
+        [classes, selectedTermId],
     );
     const selectedTermInstructionalDates = instructionalDates[selectedTermId] || [];
-    const draftTermInstructionalDates = instructionalDates[draftTermId] || [];
+    const dateIndex = selectedTermInstructionalDates.indexOf(date);
+    const previousSchoolDay = dateIndex > 0 ? selectedTermInstructionalDates[dateIndex - 1] : '';
+    const nextSchoolDay = dateIndex >= 0 ? (selectedTermInstructionalDates[dateIndex + 1] || '') : '';
+    const noSchoolDays = !classesLoading && !!selectedTermId && selectedTermInstructionalDates.length === 0;
 
     useEffect(() => {
         if (selectedTermId && selectedClassId && date && viewMode === 'daily') {
@@ -191,9 +198,7 @@ const AttendanceRegister = () => {
             setInstructionalDates(nextInstructionalDates);
             if (defaultTerm) {
                 setSelectedTermId(defaultTerm.id);
-                const today = new Date().toISOString().split('T')[0];
-                const termDays = nextInstructionalDates[defaultTerm.id] || [];
-                setDate(termDays.includes(today) ? today : (termDays[0] || ''));
+                setDate(pickRegisterDate(nextInstructionalDates[defaultTerm.id] || []));
             }
             if (defaultClasses.length > 0) {
                 setSelectedClassId(defaultClasses[0].id);
@@ -507,49 +512,9 @@ const AttendanceRegister = () => {
         );
     }, [students, searchQuery]);
 
-    const activeFilterCount = [selectedClassId, date, searchQuery.trim()].filter(Boolean).length;
-
-    const openFilters = () => {
-        setDraftTermId(selectedTermId);
-        setDraftClassId(selectedClassId);
-        setDraftDate(date);
-        setDraftSearchQuery(searchQuery);
-        setShowFilters(true);
-    };
-
-    const resetDraftFilters = () => {
-        const resetTerm = academicTerms[0];
-        const resetClasses = resetTerm
-            ? classes.filter(classOption => classOption.academicTermId === resetTerm.id)
-            : [];
-        const today = new Date().toISOString().split('T')[0];
-        const resetDays = resetTerm ? (instructionalDates[resetTerm.id] || []) : [];
-        setDraftTermId(resetTerm?.id || '');
-        setDraftClassId(resetClasses[0]?.id || '');
-        setDraftDate(resetDays.includes(today) ? today : (resetDays[0] || ''));
-        setDraftSearchQuery('');
-    };
-
-    const applyFilters = async (event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        if (!draftTermId || !draftClassId || !draftDate) {
-            toast.error('Select a class and register date');
-            return;
-        }
-
-        const termStart = draftTerm?.startDate.split('T')[0];
-        const termEnd = draftTerm?.endDate.split('T')[0];
-        if (!termStart || !termEnd || draftDate < termStart || draftDate > termEnd) {
-            toast.error('Register date must fall within the active term');
-            return;
-        }
-        if (!draftTermInstructionalDates.includes(draftDate)) {
-            toast.error('Select a configured instructional day for this term');
-            return;
-        }
-
-        const registerChanged = draftTermId !== selectedTermId || draftClassId !== selectedClassId || draftDate !== date;
-        if (isDirty && registerChanged) {
+    const changeRegister = async ({ classId = selectedClassId, date: nextDate = date }: { classId?: string; date?: string }) => {
+        if (!classId || !nextDate || (classId === selectedClassId && nextDate === date)) return;
+        if (isDirty) {
             const shouldChangeRegister = await confirm({
                 title: 'Change attendance register?',
                 message: 'This register has unsaved changes. A local draft has been kept, but the current marks have not been submitted.',
@@ -558,13 +523,9 @@ const AttendanceRegister = () => {
             });
             if (!shouldChangeRegister) return;
         }
-
-        setSelectedTermId(draftTermId);
-        setSelectedClassId(draftClassId);
-        setSelectedClassName(classes.find(classOption => classOption.id === draftClassId)?.name || '');
-        setDate(draftDate);
-        setSearchQuery(draftSearchQuery.trim());
-        setShowFilters(false);
+        setSelectedClassId(classId);
+        setSelectedClassName(classes.find(classOption => classOption.id === classId)?.name || '');
+        setDate(nextDate);
     };
 
     const stats = useMemo(() => {
@@ -724,12 +685,9 @@ const AttendanceRegister = () => {
         </div>
     );
 
-    const selectedDateLabel = new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-    });
+    const selectedDateLabel = date
+        ? new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+        : 'No school day selected';
     const attendanceRate = Number(stats.rate);
     const retryCurrentView = () => {
         if (!selectedClassId) {
@@ -762,201 +720,129 @@ const AttendanceRegister = () => {
     }
 
     return (
-        <div className="printable-content min-w-0 bg-slate-50/70 pb-8 dark:bg-slate-950/20 print:bg-white print:p-0">
-            {/* Workspace header */}
-            <section className="relative overflow-hidden bg-gradient-to-br from-[#003366] via-[#0047AB] to-[#0967c8] px-4 py-6 text-white print:bg-white print:text-slate-950 sm:px-6 md:px-8 md:py-8">
-                <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-white/10 blur-2xl print:hidden" />
-                <div className="pointer-events-none absolute -bottom-24 left-1/3 h-48 w-48 rounded-full bg-[#FF9933]/20 blur-3xl print:hidden" />
+        <div className="printable-content min-w-0 pb-8 print:bg-white print:p-0">
+            <div className="space-y-4 px-4 pt-3 md:px-6 print:space-y-3 print:p-0">
+                <h1 className="hidden text-lg font-bold text-slate-950 print:block">Class attendance · {selectedClassName} · {selectedDateLabel}</h1>
 
-                <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-                    <div className="max-w-2xl">
-                        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-blue-50 backdrop-blur-sm print:hidden">
-                            <Shield size={14} aria-hidden="true" /> Academic operations
-                        </div>
-                        <h1 className="flex items-center gap-3 text-2xl font-bold tracking-tight sm:text-3xl">
-                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20 print:hidden">
-                                <UserCheck size={24} aria-hidden="true" />
-                            </span>
-                            Class Attendance
-                        </h1>
-                        <p className="mt-2 max-w-xl text-sm leading-6 text-blue-100 sm:text-base print:text-slate-600">
-                            Record the daily register, follow attendance patterns, and keep every learner accounted for.
-                        </p>
-                        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-blue-50 print:text-slate-700">
-                            <span className="inline-flex items-center gap-2"><Calendar size={16} aria-hidden="true" /> {selectedDateLabel}</span>
-                            <span className="inline-flex items-center gap-2"><Users size={16} aria-hidden="true" /> {selectedClassName || 'Select a class'}</span>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3 print:hidden">
-                        <div className="inline-flex w-full rounded-xl border border-white/15 bg-[#002b57]/50 p-1 backdrop-blur-sm sm:w-auto" role="tablist" aria-label="Attendance views">
-                            {([
-                                { value: 'daily' as const, label: 'Daily', icon: UserCheck },
-                                { value: 'weekly' as const, label: 'Weekly', icon: Calendar },
-                                { value: 'analytics' as const, label: 'Analytics', icon: BarChart2 },
-                            ]).map(({ value, label, icon: Icon }) => (
-                                <button
-                                    key={value}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={viewMode === value}
-                                    onClick={() => setViewMode(value)}
-                                    className={`inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${viewMode === value ? 'bg-white text-[#003366] shadow-sm' : 'text-blue-100 hover:bg-white/10 hover:text-white'}`}
-                                >
-                                    <Icon size={16} aria-hidden="true" /> {label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {viewMode === 'daily' && (
-                            <div className="flex items-center justify-end gap-2">
-                                <div className="inline-flex rounded-lg border border-white/15 bg-[#002b57]/50 p-1" aria-label="Register layout">
-                                    <button type="button" onClick={() => setDisplayMode('list')} aria-label="Use list view" aria-pressed={displayMode === 'list'} className={`grid h-10 w-10 cursor-pointer place-items-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${displayMode === 'list' ? 'bg-white text-[#0047AB]' : 'text-blue-100 hover:bg-white/10'}`}>
-                                        <List size={18} aria-hidden="true" />
+                {/* Register controls */}
+                <section aria-label="Register controls" className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-4 print:hidden">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,13rem)_minmax(0,20rem)_minmax(0,1fr)]">
+                            <div className="min-w-0">
+                                <label htmlFor="attendance-class" className={FIELD_LABEL}>Class</label>
+                                <select id="attendance-class" value={selectedClassId} disabled={classesLoading || termClasses.length === 0} onChange={(event) => changeRegister({ classId: event.target.value })} className={`${FIELD} cursor-pointer`}>
+                                    {termClasses.length === 0 && <option value="">{classesLoading ? 'Loading classes…' : 'No classes this term'}</option>}
+                                    {termClasses.map(classOption => <option key={classOption.id} value={classOption.id}>{classOption.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="min-w-0">
+                                <label htmlFor="attendance-date" className={FIELD_LABEL}>School day</label>
+                                <div className="flex gap-1.5">
+                                    <button type="button" onClick={() => changeRegister({ date: previousSchoolDay })} disabled={!previousSchoolDay} className={ICON_BUTTON} aria-label="Previous school day" title="Previous school day">
+                                        <ChevronLeft size={18} aria-hidden="true" />
                                     </button>
-                                    <button type="button" onClick={() => setDisplayMode('photo')} aria-label="Use photo grid" aria-pressed={displayMode === 'photo'} className={`grid h-10 w-10 cursor-pointer place-items-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${displayMode === 'photo' ? 'bg-white text-[#0047AB]' : 'text-blue-100 hover:bg-white/10'}`}>
-                                        <LayoutGrid size={18} aria-hidden="true" />
+                                    <select id="attendance-date" value={date} disabled={selectedTermInstructionalDates.length === 0} onChange={(event) => changeRegister({ date: event.target.value })} className={`${FIELD} cursor-pointer`}>
+                                        {selectedTermInstructionalDates.length === 0 && <option value="">No school days set up</option>}
+                                        {selectedTermInstructionalDates.map(day => <option key={day} value={day}>{formatSchoolDay(day)}</option>)}
+                                    </select>
+                                    <button type="button" onClick={() => changeRegister({ date: nextSchoolDay })} disabled={!nextSchoolDay} className={ICON_BUTTON} aria-label="Next school day" title="Next school day">
+                                        <ChevronRight size={18} aria-hidden="true" />
                                     </button>
                                 </div>
-                                <button type="button" onClick={() => setSoundEnabled(!soundEnabled)} aria-label={soundEnabled ? 'Turn sound feedback off' : 'Turn sound feedback on'} aria-pressed={soundEnabled} className="grid h-11 w-11 cursor-pointer place-items-center rounded-lg border border-white/15 bg-[#002b57]/50 text-blue-50 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
-                                    {soundEnabled ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true" />}
-                                </button>
                             </div>
-                        )}
-                    </div>
-                </div>
-            </section>
-
-            <div className="space-y-5 p-4 sm:p-6 md:p-8">
-                {/* Register filters and utility actions */}
-                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-5 print:border-0 print:p-0 print:shadow-none" aria-labelledby="register-setup-title">
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3 print:hidden">
-                        <div>
-                            <h2 id="register-setup-title" className="text-base font-bold text-slate-900 dark:text-white">Register setup</h2>
-                            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Choose a class and date before marking attendance.</p>
+                            <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                                <label htmlFor="attendance-search" className={FIELD_LABEL}>Find a learner</label>
+                                <div className="relative">
+                                    <Search size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                                    <input id="attendance-search" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Name or admission number" className={`${FIELD} pl-10`} />
+                                </div>
+                            </div>
                         </div>
+
                         <div className="flex flex-wrap items-center gap-2">
-                            <div className={`inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold ${isDirty ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`} aria-live="polite">
-                                <span className={`h-2 w-2 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                                {isDirty ? 'Draft saved locally' : 'Register up to date'}
+                            <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900" role="tablist" aria-label="Attendance views">
+                                {([
+                                    { value: 'daily' as const, label: 'Register', icon: UserCheck },
+                                    { value: 'weekly' as const, label: 'Week', icon: Calendar },
+                                    { value: 'analytics' as const, label: 'Analytics', icon: BarChart2 },
+                                ]).map(({ value, label, icon: Icon }) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={viewMode === value}
+                                        onClick={() => setViewMode(value)}
+                                        className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${viewMode === value ? 'bg-white text-[#0047AB] shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}
+                                    >
+                                        <Icon size={15} aria-hidden="true" /> {label}
+                                    </button>
+                                ))}
                             </div>
-                            <AcademicFilterButton onClick={openFilters} activeCount={activeFilterCount} />
-                        </div>
-                    </div>
 
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-                            <span className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300">{selectedClassName || 'No class selected'}</span>
-                            <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">{selectedDateLabel}</span>
-                            {searchQuery && <span className="max-w-56 truncate rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">Search: {searchQuery}</span>}
-                        </div>
-
-                        <div className="flex items-center gap-2 print:hidden">
-                            {undoStack.length > 0 && (
-                                <button type="button" onClick={handleUndo} className="inline-flex h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 text-sm font-semibold text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300" title="Undo last change">
-                                    <Undo2 size={17} aria-hidden="true" /><span className="sr-only xl:not-sr-only">Undo</span>
-                                </button>
-                            )}
                             {viewMode === 'daily' && (
-                                <button type="button" onClick={handleExportDaily} disabled={students.length === 0} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-300" title="Export register to Excel" aria-label="Export register to Excel">
-                                    <Download size={18} aria-hidden="true" />
-                                </button>
+                                <>
+                                    <div className="inline-flex rounded-xl border border-slate-300 p-0.5 dark:border-slate-600" role="group" aria-label="Register layout">
+                                        {([
+                                            { value: 'list' as const, label: 'Use list view', icon: List },
+                                            { value: 'photo' as const, label: 'Use photo grid', icon: LayoutGrid },
+                                        ]).map(({ value, label, icon: Icon }) => (
+                                            <button key={value} type="button" onClick={() => setDisplayMode(value)} aria-label={label} title={label} aria-pressed={displayMode === value} className={`grid h-10 w-10 cursor-pointer place-items-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] ${displayMode === value ? 'bg-blue-50 text-[#0047AB] dark:bg-blue-950/60 dark:text-blue-300' : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}>
+                                                <Icon size={17} aria-hidden="true" />
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button type="button" onClick={() => setSoundEnabled(!soundEnabled)} aria-label={soundEnabled ? 'Turn sound feedback off' : 'Turn sound feedback on'} title={soundEnabled ? 'Sound on' : 'Sound off'} aria-pressed={soundEnabled} className={ICON_BUTTON}>
+                                        {soundEnabled ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true" />}
+                                    </button>
+                                    <button type="button" onClick={handleExportDaily} disabled={students.length === 0} className={ICON_BUTTON} title="Export register to Excel" aria-label="Export register to Excel">
+                                        <Download size={18} aria-hidden="true" />
+                                    </button>
+                                </>
                             )}
-                            <button type="button" onClick={() => window.print()} className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-xl border border-slate-300 text-slate-600 transition-colors hover:border-[#0047AB] hover:bg-surface-hover-accent hover:text-[#0047AB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-300" title="Print register" aria-label="Print register">
+                            <button type="button" onClick={() => window.print()} className={ICON_BUTTON} title="Print register" aria-label="Print register">
                                 <Printer size={18} aria-hidden="true" />
                             </button>
                         </div>
                     </div>
                 </section>
 
-                <AcademicFilterDialog
-                    open={showFilters}
-                    title="Filter attendance register"
-                    description="Choose a class and date, then optionally search within the register."
-                    onClose={() => setShowFilters(false)}
-                    onApply={applyFilters}
-                    onReset={resetDraftFilters}
-                    applyDisabled={!draftTermId || !draftClassId || !draftDate || classesLoading}
-                >
-                    <div>
-                        <label htmlFor="attendance-class-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Class</label>
-                        <select
-                            id="attendance-class-filter"
-                            data-filter-autofocus="true"
-                            value={draftClassId}
-                            disabled={classesLoading || draftTermClasses.length === 0}
-                            onChange={(event) => setDraftClassId(event.target.value)}
-                            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950"
-                        >
-                            {draftTermClasses.length === 0 && <option value="">{classesLoading ? 'Loading classes…' : 'No classes available for this term'}</option>}
-                            {draftTermClasses.map(classOption => <option key={classOption.id} value={classOption.id}>{classOption.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="attendance-date-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Register date</label>
-                        <select
-                            id="attendance-date-filter"
-                            value={draftDate}
-                            onChange={(event) => setDraftDate(event.target.value)}
-                            disabled={draftTermInstructionalDates.length === 0}
-                            className="h-12 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:disabled:bg-slate-800 dark:focus:border-blue-400 dark:focus:ring-blue-950"
-                        >
-                            {draftTermInstructionalDates.length === 0 && <option value="">No instructional days configured</option>}
-                            {draftTermInstructionalDates.map(day => (
-                                <option key={day} value={day}>{new Date(`${day}T00:00:00.000Z`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="attendance-student-filter" className="mb-1.5 block text-sm font-bold text-slate-800 dark:text-slate-200">Search students <span className="font-normal text-slate-400">(optional)</span></label>
-                        <div className="relative">
-                            <Search size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                            <input
-                                id="attendance-student-filter"
-                                type="search"
-                                value={draftSearchQuery}
-                                onChange={(event) => setDraftSearchQuery(event.target.value)}
-                                placeholder="Name or admission number"
-                                className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#1E40AF] focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-950"
-                            />
-                        </div>
-                    </div>
-                </AcademicFilterDialog>
+                {noSchoolDays && (
+                    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200" role="status">
+                        <p className="font-bold">No school days are set up for {selectedTerm?.name || 'this term'}.</p>
+                        <p className="mt-1">Add instructional days under Daily → Calendar, then come back to take the register.</p>
+                    </section>
+                )}
 
                 {/* Live daily summary */}
-                {viewMode === 'daily' && (
-                    <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-6 print:hidden" aria-label="Attendance summary">
-                        <div className="col-span-2 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-4 shadow-sm dark:border-blue-900 dark:from-blue-950/70 dark:to-slate-800 xl:p-5">
-                            <div className="flex items-start justify-between gap-4">
-                                <div>
-                                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#0047AB] dark:text-blue-300">Attendance rate</p>
-                                    <p className="mt-1 text-3xl font-bold tracking-tight text-[#003366] dark:text-white">{stats.rate}%</p>
-                                </div>
-                                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#0047AB] text-white shadow-sm"><Zap size={19} aria-hidden="true" /></span>
+                {viewMode === 'daily' && !noSchoolDays && (
+                    <section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center sm:gap-6 print:hidden" aria-label="Attendance summary">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline justify-between gap-3">
+                                <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Attendance rate</p>
+                                <p className="text-2xl font-bold tabular-nums text-[#003366] dark:text-white">{stats.rate}%</p>
                             </div>
-                            <div className="mt-4 h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-slate-700">
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
                                 <div className="h-full rounded-full bg-gradient-to-r from-[#0047AB] to-emerald-500 transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.min(attendanceRate, 100)}%` }} />
                             </div>
-                            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{stats.present} of {stats.total} learners marked present</p>
                         </div>
-
-                        {[
-                            { label: 'Learners', value: stats.total, icon: Users, color: 'text-slate-700 dark:text-slate-200', iconStyle: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' },
-                            { label: 'Present', value: stats.present, icon: CheckCircle, color: 'text-emerald-700 dark:text-emerald-300', iconStyle: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300' },
-                            { label: 'Absent', value: stats.absent, icon: XCircle, color: 'text-red-700 dark:text-red-300', iconStyle: 'bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-300' },
-                            { label: 'Late', value: stats.late, icon: Clock, color: 'text-orange-700 dark:text-orange-300', iconStyle: 'bg-orange-50 text-orange-600 dark:bg-orange-950/60 dark:text-orange-300' },
-                        ].map(({ label, value, icon: Icon, color, iconStyle }) => (
-                            <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                                <span className={`grid h-9 w-9 place-items-center rounded-xl ${iconStyle}`}><Icon size={17} aria-hidden="true" /></span>
-                                <p className={`mt-3 text-2xl font-bold ${color}`}>{value}</p>
-                                <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</p>
-                            </div>
-                        ))}
+                        <dl className="grid grid-cols-4 divide-x divide-slate-200 dark:divide-slate-700 sm:min-w-[22rem]">
+                            {[
+                                { label: 'Learners', value: stats.total, color: 'text-slate-900 dark:text-white' },
+                                { label: 'Present', value: stats.present, color: 'text-emerald-700 dark:text-emerald-300' },
+                                { label: 'Absent', value: stats.absent, color: 'text-red-700 dark:text-red-300' },
+                                { label: 'Late', value: stats.late, color: 'text-orange-700 dark:text-orange-300' },
+                            ].map(({ label, value, color }) => (
+                                <div key={label} className="flex flex-col-reverse px-3 text-center">
+                                    <dt className="text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</dt>
+                                    <dd className={`text-xl font-bold tabular-nums ${color}`}>{value}</dd>
+                                </div>
+                            ))}
+                        </dl>
                     </section>
                 )}
 
                 {/* Daily register */}
-                {viewMode === 'daily' && displayMode === 'list' && (
+                {viewMode === 'daily' && displayMode === 'list' && !noSchoolDays && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800" aria-labelledby="student-register-title">
                         <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center sm:justify-between sm:p-5 print:bg-white">
                             <div>
@@ -1112,7 +998,7 @@ const AttendanceRegister = () => {
                 )}
 
                 {/* Photo register */}
-                {viewMode === 'daily' && displayMode === 'photo' && (
+                {viewMode === 'daily' && displayMode === 'photo' && !noSchoolDays && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 print:hidden" aria-labelledby="photo-register-title">
                         <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                             <div>
@@ -1177,7 +1063,7 @@ const AttendanceRegister = () => {
                 )}
 
                 {/* Weekly register */}
-                {viewMode === 'weekly' && (
+                {viewMode === 'weekly' && !noSchoolDays && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800" aria-labelledby="weekly-register-title">
                         <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                             <div>
@@ -1269,22 +1155,29 @@ const AttendanceRegister = () => {
                     </section>
                 )}
 
-                {/* Stable daily save bar */}
-                {viewMode === 'daily' && (
-                    <div className="sticky bottom-3 z-20 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl shadow-slate-900/10 backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/95 sm:flex-row sm:items-center sm:justify-between sm:p-4 print:hidden">
+                {/* Save bar: only while there are unsaved changes */}
+                {viewMode === 'daily' && isDirty && (
+                    <div className="sticky bottom-3 z-20 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-white/95 p-3 shadow-xl shadow-slate-900/10 backdrop-blur-md dark:border-amber-900 dark:bg-slate-800/95 sm:flex-row sm:items-center sm:justify-between sm:p-4 print:hidden">
                         <div className="flex min-w-0 items-center gap-3">
-                            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isDirty ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300'}`}>
-                                {isDirty ? <AlertTriangle size={18} aria-hidden="true" /> : <Shield size={18} aria-hidden="true" />}
+                            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300">
+                                <AlertTriangle size={18} aria-hidden="true" />
                             </span>
                             <div className="min-w-0" aria-live="polite">
-                                <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{isDirty ? 'Attendance changes are ready to save' : 'Attendance is saved'}</p>
-                                <p className="truncate text-xs text-slate-500 dark:text-slate-400">{isDirty ? 'A local draft is kept while you work.' : `${selectedClassName || 'Selected class'} · ${selectedDateLabel}`}</p>
+                                <p className="truncate text-sm font-bold text-slate-900 dark:text-white">Unsaved attendance changes</p>
+                                <p className="truncate text-xs text-slate-500 dark:text-slate-400">{selectedClassName || 'Selected class'} · {selectedDateLabel}. A local draft is kept while you work.</p>
                             </div>
                         </div>
-                        <button type="button" onClick={handleSave} disabled={saving || loading || students.length === 0} className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-bold text-white shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-800 sm:w-auto">
-                            {saving ? <Loader2 className="animate-spin motion-reduce:animate-none" size={18} aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
-                            {saving ? 'Saving attendance…' : 'Save attendance'}
-                        </button>
+                        <div className="flex gap-2">
+                            {undoStack.length > 0 && (
+                                <button type="button" onClick={handleUndo} className="inline-flex min-h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] dark:border-slate-600 dark:text-slate-200 sm:flex-none" title="Undo last change">
+                                    <Undo2 size={17} aria-hidden="true" /> Undo
+                                </button>
+                            )}
+                            <button type="button" onClick={handleSave} disabled={saving || loading || students.length === 0} className="inline-flex min-h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-bold text-white shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0047AB] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-800 sm:flex-none">
+                                {saving ? <Loader2 className="animate-spin motion-reduce:animate-none" size={18} aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
+                                {saving ? 'Saving attendance…' : 'Save attendance'}
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
