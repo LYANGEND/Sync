@@ -2345,6 +2345,7 @@ model AIMessage {
   role           String // 'user' | 'assistant' | 'system'
   content        String         @db.Text
   tokenCount     Int?
+  metadata       Json? // Master AI: reply text, action results, suggestions, pending items for redisplay
 
   createdAt DateTime @default(now())
 

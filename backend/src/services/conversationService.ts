@@ -9,6 +9,7 @@
  * copy-pasted across the AI controllers.
  */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export type ConversationContextType =
@@ -162,9 +163,10 @@ export async function saveMessage(
   role: 'user' | 'assistant' | 'system',
   content: string,
   tokenCount?: number,
+  metadata?: Prisma.InputJsonValue,
 ) {
   const msg = await prisma.aIMessage.create({
-    data: { conversationId, role, content, tokenCount },
+    data: { conversationId, role, content, tokenCount, metadata },
   });
 
   await prisma.aIConversation.update({

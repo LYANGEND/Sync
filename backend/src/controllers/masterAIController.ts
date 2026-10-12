@@ -14,12 +14,24 @@ import { detectFarewell, detectAIFarewell } from '../services/voiceConversationS
 const CTX: convoService.ConversationContextType = 'master-ai-ops';
 const CANCELLED_MESSAGE = 'Cancelled. Nothing was changed.';
 
-/** Text stored in conversation history for an assistant reply. */
-const toStoredContent = (result: { message: string; actions?: { summary: string }[]; pendingConfirmation?: { items: string[] } }) => {
+type StoredReply = { message: string; actions?: { summary: string }[]; suggestions?: string[]; pendingConfirmation?: { items: string[] } };
+
+/** Save an assistant reply: text for the AI's history, plus metadata so a reopened chat shows the same cards. */
+const saveReply = (conversationId: string, result: StoredReply) => {
   let content = result.message;
   if (result.pendingConfirmation) content += `\n\n${result.pendingConfirmation.items.map(i => `- ${i}`).join('\n')}`;
   if (result.actions?.length) content += `\n\n---\n${result.actions.map(a => `\n${a.summary}`).join('')}`;
-  return content;
+  const hasExtras = !!(result.actions?.length || result.suggestions?.length || result.pendingConfirmation);
+  // JSON round trip drops undefined fields and turns dates into strings
+  const metadata = hasExtras
+    ? JSON.parse(JSON.stringify({
+      text: result.message,
+      actions: result.actions,
+      suggestions: result.suggestions,
+      pendingItems: result.pendingConfirmation?.items,
+    }))
+    : undefined;
+  return convoService.saveMessage(conversationId, 'assistant', content, undefined, metadata);
 };
 
 const isSpeechUnavailableError = (error: any) => {
@@ -145,7 +157,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     const result = await masterAIService.processCommand(message, { userId, role: req.user!.role, conversationId: convoId }, conversationHistory, imageBase64);
 
     // Save assistant message (shared service also touches updatedAt)
-    await convoService.saveMessage(convoId, 'assistant', toStoredContent(result));
+    await saveReply(convoId, result);
 
     res.json({
       ...result,
@@ -186,7 +198,7 @@ export const confirmAction = async (req: AuthRequest, res: Response) => {
       return res.status(410).json({ error: 'This request has expired or was already handled. Please ask again.' });
     }
     if (outcome.conversationId) {
-      await convoService.saveMessage(outcome.conversationId, 'assistant', toStoredContent(outcome.response));
+      await saveReply(outcome.conversationId, outcome.response);
     }
     res.json({ ...outcome.response, conversationId: outcome.conversationId });
   } catch (error: any) {
@@ -340,7 +352,7 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
     );
 
     // Persist assistant message
-    await convoService.saveMessage(convoId, 'assistant', toStoredContent(result));
+    await saveReply(convoId, result);
 
     if (!aborted) {
       res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

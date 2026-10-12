@@ -38,6 +38,8 @@ export interface MasterAIMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  /** Saved with assistant replies so a reopened chat shows the same cards. */
+  metadata?: { text?: string; actions?: MasterAIAction[]; suggestions?: string[]; pendingItems?: string[] } | null;
 }
 
 // SSE events from the voice-execute-v2 endpoint
