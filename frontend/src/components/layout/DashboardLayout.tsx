@@ -71,6 +71,8 @@ const DashboardLayout = () => {
   const showFAB = !hideFABPaths.includes(location.pathname);
   const showGlobalVoiceCommand =
     MASTER_AI_ROLES.includes(user?.role ?? '') && !location.pathname.startsWith('/data-management');
+  // Full-screen app pages fill the space beside the sidebar instead of sitting in the centered column
+  const isFullBleed = location.pathname === '/master-ai';
 
   return (
     <div className="min-h-screen min-h-dvh overflow-x-clip bg-gray-50/50 dark:bg-slate-900">
@@ -87,14 +89,14 @@ const DashboardLayout = () => {
 
       {/* Main Content */}
       <main
-        className={`min-h-screen min-h-dvh transition-[padding-left] duration-200 ease-out ${isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'}`}
+        className={`min-h-screen min-h-dvh transition-[padding-left] duration-200 ease-out ${isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} ${isFullBleed ? 'md:!pb-0' : ''}`}
         style={{
           paddingTop: 'calc(4rem + env(safe-area-inset-top))',
           paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))',
         }}
       >
         <div
-          className="mx-auto max-w-7xl"
+          className={isFullBleed ? undefined : 'mx-auto max-w-7xl'}
           style={{
             minHeight: 'calc(100dvh - 8rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
           }}

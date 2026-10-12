@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Sparkles, Loader2, Plus, PanelLeftClose, PanelLeft, Phone, PhoneOff, CalendarDays,
+  Sparkles, Loader2, Menu, SquarePen, Phone, PhoneOff, CalendarDays,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation, MasterAIResponse } from '../../services/masterAIService';
@@ -110,7 +110,7 @@ const MasterAI = () => {
   const { confirm } = useAppDialog();
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [loadingConversation, setLoadingConversation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -370,16 +370,9 @@ const MasterAI = () => {
     loadConversations();
   }, [loadConversations]);
 
-  // Open the sidebar on desktop and close it on mobile only when crossing the breakpoint
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
-    const onChange = (e: MediaQueryListEvent) => setSidebarOpen(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
   // Load a specific conversation's messages
   const loadConversation = async (convoId: string) => {
+    setHistoryOpen(false);
     if (convoId === activeConversationId) return;
     setLoadingConversation(true);
     try {
@@ -397,11 +390,6 @@ const MasterAI = () => {
       }));
       setMessages(chatMsgs);
       setActiveConversationId(convoId);
-      
-      // Close sidebar on mobile after selecting conversation
-      if (window.innerWidth < 768) {
-        setSidebarOpen(false);
-      }
     } catch {
       toast.error('Failed to load conversation');
     } finally {
@@ -563,35 +551,33 @@ const MasterAI = () => {
 
   return (
     <div
-      className="flex h-[calc(100dvh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden"
+      className="flex h-[calc(100dvh-8rem)] md:h-[calc(100dvh-4rem)] bg-white dark:bg-slate-900 relative overflow-hidden"
       style={{
         backgroundImage: 'radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 30%), radial-gradient(circle at bottom left, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%)',
       }}
     >
       <ConversationSidebar
-        open={sidebarOpen}
+        mobileOpen={historyOpen}
+        onMobileClose={() => setHistoryOpen(false)}
         conversations={conversations}
         activeId={activeConversationId}
         onNewChat={startNewChat}
         onSelect={loadConversation}
         onDelete={handleDeleteConversation}
         onRename={handleRenameConversation}
-        onClose={() => setSidebarOpen(false)}
       />
 
       {/* ============ MAIN CHAT AREA ============ */}
       <div className="flex-1 flex flex-col min-w-0 w-full relative">
         {/* Header */}
-        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-gray-200 dark:border-slate-700 flex-shrink-0">
-          <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-3">
+        <div className="border-b border-gray-100 dark:border-slate-800 flex-shrink-0">
+          <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5">
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-surface-hover transition-colors flex-shrink-0"
-              title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-              aria-label={sidebarOpen ? 'Close conversation list' : 'Open conversation list'}
-              aria-expanded={sidebarOpen}
+              onClick={() => setHistoryOpen(true)}
+              className="md:hidden p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-surface-hover transition-colors flex-shrink-0"
+              aria-label="Open chat history"
             >
-              {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+              <Menu size={18} />
             </button>
             {themeSettings.logoUrl ? (
               <img
@@ -618,14 +604,14 @@ const MasterAI = () => {
               <CalendarDays size={12} className="text-primary flex-shrink-0" aria-hidden="true" />
               <span className="truncate">{contextLabel}</span>
             </span>
-            {activeConversationId && !sidebarOpen && (
+            {activeConversationId && (
               <button
                 onClick={startNewChat}
-                className="p-2 rounded-lg text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
-                title="New Chat"
+                className="md:hidden p-2 rounded-lg text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
+                title="New chat"
                 aria-label="New chat"
               >
-                <Plus size={16} className="md:w-[18px] md:h-[18px]" />
+                <SquarePen size={16} />
               </button>
             )}
             <button
@@ -645,7 +631,7 @@ const MasterAI = () => {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-3 md:px-4 py-4 md:py-6 space-y-3 md:space-y-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 md:py-6">
           {loadingConversation ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
@@ -662,23 +648,25 @@ const MasterAI = () => {
                 : undefined}
             />
           ) : (
-            messages.map(msg => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                onSuggestionClick={sendCommand}
-                onTogglePlay={() => togglePlayback(msg)}
-                isSpeaking={speakingId === msg.id}
-                onResolvePending={accept => resolvePending(msg, accept)}
-                busy={isProcessing}
-              />
-            ))
+            <div className="mx-auto w-full max-w-3xl space-y-3 md:space-y-4">
+              {messages.map(msg => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onSuggestionClick={sendCommand}
+                  onTogglePlay={() => togglePlayback(msg)}
+                  isSpeaking={speakingId === msg.id}
+                  onResolvePending={accept => resolvePending(msg, accept)}
+                  busy={isProcessing}
+                />
+              ))}
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
-        <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
+        <div className="mx-auto w-full max-w-3xl px-3 md:px-6 pb-3 md:pb-4 flex-shrink-0">
           {voiceMode ? (
             <VoicePanel voice={voice} onEnd={toggleVoiceMode} />
           ) : (

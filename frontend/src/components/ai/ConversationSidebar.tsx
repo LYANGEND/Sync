@@ -1,6 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MessageSquare, MoreHorizontal, Pencil, Trash2, Check, X, Search } from 'lucide-react';
+import {
+  MessageSquare, MoreHorizontal, Pencil, Trash2, Check, X, Search, SquarePen, PanelLeft, PanelLeftClose,
+} from 'lucide-react';
 import type { MasterAIConversation } from '../../services/masterAIService';
+
+const COLLAPSED_KEY = 'sync.masterai.sidebar.collapsed';
+
+const readCollapsed = () => {
+  try { return localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch { return false; }
+};
+
+const ROW_CLASS = 'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-surface-hover transition-colors';
+const ICON_BUTTON_CLASS = 'p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-surface-hover transition-colors';
 
 function groupConversationsByDate(conversations: MasterAIConversation[]) {
   const now = new Date();
@@ -29,103 +40,147 @@ function groupConversationsByDate(conversations: MasterAIConversation[]) {
   return groups.filter(g => g.items.length > 0);
 }
 
+/**
+ * Chat history column. On desktop it is part of the page and collapses to an icon rail;
+ * on mobile it opens as a drawer over the chat.
+ */
 export const ConversationSidebar = ({
-  open,
+  mobileOpen,
+  onMobileClose,
   conversations,
   activeId,
   onNewChat,
   onSelect,
   onDelete,
   onRename,
-  onClose,
 }: {
-  open: boolean;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
   conversations: MasterAIConversation[];
   activeId: string | null;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (conversation: MasterAIConversation) => void;
   onRename: (conversation: MasterAIConversation, title: string) => void;
-  onClose: () => void;
 }) => {
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const [searchQuery, setSearchQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const filtered = searchQuery
     ? conversations.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
     : conversations;
   const groups = groupConversationsByDate(filtered);
 
-  return (
-    <>
-      <div
-        className={`${
-          open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        } ${
-          open ? 'w-72' : 'w-0 md:w-0'
-        } transition-all duration-300 flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col fixed md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none h-full`}
-      >
-        {/* Sidebar Header */}
-        <div className="p-3 flex-shrink-0">
-          <button
-            onClick={onNewChat}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-surface-hover transition-colors text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm"
-          >
-            <Plus size={18} />
-            New Chat
-          </button>
-        </div>
+  const setCollapsedSaved = (next: boolean) => {
+    setCollapsed(next);
+    try { localStorage.setItem(COLLAPSED_KEY, String(next)); } catch { /* the preference is optional */ }
+  };
 
-        {/* Search */}
-        <div className="px-3 pb-2 flex-shrink-0">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search conversations..."
-              aria-label="Search conversations"
-              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 placeholder-gray-400 outline-none transition-colors"
-              style={{ boxShadow: 'none' }}
-            />
-          </div>
-        </div>
+  const openSearch = () => {
+    setCollapsedSaved(false);
+    requestAnimationFrame(() => searchRef.current?.focus());
+  };
 
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {conversations.length === 0 ? (
-            <div className="text-center py-8 px-4">
-              <MessageSquare size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-              <p className="text-xs text-gray-400 dark:text-gray-500">No conversations yet</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Start a new chat to begin</p>
-            </div>
-          ) : (
-            groups.map(group => (
-              <div key={group.label} className="mb-3">
-                <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                  {group.label}
-                </p>
-                {group.items.map(convo => (
-                  <ConversationItem
-                    key={convo.id}
-                    conversation={convo}
-                    isActive={convo.id === activeId}
-                    onClick={() => onSelect(convo.id)}
-                    onDelete={() => onDelete(convo)}
-                    onRename={title => onRename(convo, title)}
-                  />
-                ))}
-              </div>
-            ))
-          )}
+  const panel = (closeButton: React.ReactNode, afterNewChat?: () => void, inputRef?: React.Ref<HTMLInputElement>) => (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between pl-4 pr-2 pt-2.5 pb-1 flex-shrink-0">
+        <span className="text-sm font-semibold text-gray-900 dark:text-white">Chats</span>
+        {closeButton}
+      </div>
+
+      <div className="px-2 pt-1 flex-shrink-0">
+        <button onClick={() => { onNewChat(); afterNewChat?.(); }} className={`${ROW_CLASS} font-medium`}>
+          <SquarePen size={16} className="flex-shrink-0" />
+          New chat
+        </button>
+      </div>
+
+      <div className="px-2 pt-1 pb-2 flex-shrink-0">
+        <div className="relative">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search chats"
+            aria-label="Search chats"
+            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-transparent hover:bg-surface-hover focus:bg-white dark:focus:bg-slate-700 border border-transparent focus:border-gray-200 dark:focus:border-slate-600 text-gray-700 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 outline-none transition-colors"
+            style={{ boxShadow: 'none' }}
+          />
         </div>
       </div>
 
-      {/* Mobile Overlay */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50 z-20 md:hidden"
-          onClick={onClose}
-        />
+      <nav aria-label="Chat history" className="flex-1 overflow-y-auto px-2 pb-3">
+        {conversations.length === 0 ? (
+          <div className="text-center py-8 px-4">
+            <MessageSquare size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+            <p className="text-xs text-gray-400 dark:text-gray-500">No conversations yet</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Start a new chat to begin</p>
+          </div>
+        ) : (
+          groups.map(group => (
+            <div key={group.label} className="mb-4">
+              <p className="px-2.5 pb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                {group.label}
+              </p>
+              {group.items.map(convo => (
+                <ConversationItem
+                  key={convo.id}
+                  conversation={convo}
+                  isActive={convo.id === activeId}
+                  onClick={() => onSelect(convo.id)}
+                  onDelete={() => onDelete(convo)}
+                  onRename={title => onRename(convo, title)}
+                />
+              ))}
+            </div>
+          ))
+        )}
+      </nav>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop: fixed column or icon rail */}
+      <aside
+        className={`hidden md:flex flex-col flex-shrink-0 h-full border-r border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 ${collapsed ? 'w-14' : 'w-64'}`}
+      >
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-1 py-2.5">
+            <button onClick={() => setCollapsedSaved(false)} className={ICON_BUTTON_CLASS} title="Open sidebar" aria-label="Open sidebar">
+              <PanelLeft size={18} />
+            </button>
+            <button onClick={onNewChat} className={ICON_BUTTON_CLASS} title="New chat" aria-label="New chat">
+              <SquarePen size={18} />
+            </button>
+            <button onClick={openSearch} className={ICON_BUTTON_CLASS} title="Search chats" aria-label="Search chats">
+              <Search size={18} />
+            </button>
+          </div>
+        ) : panel(
+          <button onClick={() => setCollapsedSaved(true)} className={ICON_BUTTON_CLASS} title="Close sidebar" aria-label="Close sidebar">
+            <PanelLeftClose size={18} />
+          </button>,
+          undefined,
+          searchRef,
+        )}
+      </aside>
+
+      {/* Mobile: drawer over the chat */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-[60]">
+          <div className="absolute inset-0 bg-black/50" onClick={onMobileClose} />
+          <aside className="relative h-full w-72 max-w-[85%] bg-gray-50 dark:bg-slate-800 shadow-xl" aria-label="Chat history">
+            {panel(
+              <button onClick={onMobileClose} className={ICON_BUTTON_CLASS} aria-label="Close chat history">
+                <X size={18} />
+              </button>,
+              onMobileClose,
+            )}
+          </aside>
+        </div>
       )}
     </>
   );
@@ -206,7 +261,7 @@ const ConversationItem = ({
         </div>
       ) : (
         <>
-          <span className="flex-1 text-xs truncate">{conversation.title}</span>
+          <span className="flex-1 text-sm truncate">{conversation.title}</span>
           <div className={`flex items-center gap-0.5 ${isActive || showMenu ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'} transition-opacity`}>
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
