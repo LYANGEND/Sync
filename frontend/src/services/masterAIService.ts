@@ -64,8 +64,8 @@ const masterAIService = {
 
   // ---- Execute ----
 
-  async executeCommand(message: string, conversationId?: string, imageBase64?: string): Promise<MasterAIResponse> {
-    const { data } = await api.post('/master-ai/execute', { message, conversationId, imageBase64 });
+  async executeCommand(message: string, conversationId?: string, imageBase64?: string, signal?: AbortSignal): Promise<MasterAIResponse> {
+    const { data } = await api.post('/master-ai/execute', { message, conversationId, imageBase64 }, { signal });
     return data;
   },
 

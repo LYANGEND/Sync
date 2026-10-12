@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Sparkles, Send, Loader2, CheckCircle2, XCircle, ChevronRight,
   Calendar, BookOpen, GraduationCap,
-  CreditCard, Bell, BarChart3, ArrowRight, Zap, Terminal,
+  CreditCard, Bell, BarChart3, ArrowRight, Zap,
   Copy, Trash2, ChevronDown, Plus, MessageSquare, MoreHorizontal,
   Pencil, Check, X, Search, PanelLeftClose, PanelLeft,
-  Mic, MicOff, ImagePlus, Volume2, Phone, PhoneOff
+  Mic, MicOff, ImagePlus, Volume2, Phone, PhoneOff, Square,
+  Users, Building2, Wallet, CalendarDays, RefreshCw, Info, AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
@@ -13,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import { useVoiceConversation } from '../../hooks/useVoiceConversation';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useAppDialog } from '../../components/ui/AppDialogProvider';
 
 interface ChatMessage {
   id: string;
@@ -23,57 +25,34 @@ interface ChatMessage {
   suggestions?: string[];
   timestamp: Date;
   isLoading?: boolean;
+  errorDetail?: string;
 }
 
+const IMAGE_ONLY_PROMPT = 'Please look at this image and tell me what you see.';
+
+/** Turn a failed request into a message a school user can act on. */
+function describeError(error: any): { message: string; detail?: string } {
+  const status = error?.response?.status;
+  const detail = error?.response?.data?.error || error?.message;
+  if (!error?.response) return { message: 'I could not reach the server. Check your connection and try again.', detail };
+  if (status === 400 && error.response.data?.error) return { message: error.response.data.error };
+  if (status === 401 || status === 403) return { message: 'You do not have permission to do that.', detail };
+  if (status === 429) return { message: 'Too many requests right now. Please wait a moment and try again.', detail };
+  return { message: 'Something went wrong while processing your request. Please try again.', detail };
+}
+
+const year = new Date().getFullYear();
+
+// Starters are placed in the input for review; [bracketed] parts are selected so they can be typed over.
 const adminQuickCommands = [
-  {
-    icon: Calendar,
-    label: 'Add Zambian Holidays',
-    command: 'Add all public holidays for Zambia for 2025 to the academic calendar',
-    color: 'blue',
-  },
-  {
-    icon: Calendar,
-    label: 'Add Zimbabwe Holidays',
-    command: 'Add all public holidays for Zimbabwe for 2025 to the academic calendar',
-    color: 'emerald',
-  },
-  {
-    icon: Calendar,
-    label: 'Add SA Holidays',
-    command: 'Add all public holidays for South Africa for 2025 to the academic calendar',
-    color: 'amber',
-  },
-  {
-    icon: BookOpen,
-    label: 'Create Subjects',
-    command: 'Create standard primary school subjects: Mathematics, English, Science, Social Studies, Physical Education, Art, Music, Computer Studies',
-    color: 'purple',
-  },
-  {
-    icon: GraduationCap,
-    label: 'Setup Classes',
-    command: 'Create classes for a primary school from Grade 1 to Grade 7 with capacity 40 each',
-    color: 'pink',
-  },
-  {
-    icon: CreditCard,
-    label: 'Setup Fee Structure',
-    command: 'Create fee templates: Tuition Fee (500 per term), Transport Fee (100 per month), Computer Lab Fee (50 per term), Uniform Fee (150 once off)',
-    color: 'cyan',
-  },
-  {
-    icon: BarChart3,
-    label: 'School Statistics',
-    command: 'Show me the current school statistics - how many students, teachers, classes, etc.',
-    color: 'orange',
-  },
-  {
-    icon: Bell,
-    label: 'Create Announcement',
-    command: 'Create a high priority announcement for all teachers and parents: "School will be closed next Friday for staff development day"',
-    color: 'red',
-  },
+  { icon: Calendar, label: 'Add Zambian Holidays', command: `Add all public holidays for Zambia for ${year} to the academic calendar` },
+  { icon: Calendar, label: 'Add Zimbabwe Holidays', command: `Add all public holidays for Zimbabwe for ${year} to the academic calendar` },
+  { icon: Calendar, label: 'Add SA Holidays', command: `Add all public holidays for South Africa for ${year} to the academic calendar` },
+  { icon: BookOpen, label: 'Create Subjects', command: 'Create standard primary school subjects: Mathematics, English, Science, Social Studies, Physical Education, Art, Music, Computer Studies' },
+  { icon: GraduationCap, label: 'Setup Classes', command: 'Create classes for a primary school from Grade 1 to Grade 7 with capacity [40] each' },
+  { icon: CreditCard, label: 'Setup Fee Structure', command: 'Create fee templates: Tuition Fee ([amount] per term), Transport Fee ([amount] per month)' },
+  { icon: BarChart3, label: 'School Statistics', command: 'Show me the current school statistics - how many students, teachers, classes, etc.' },
+  { icon: Bell, label: 'Create Announcement', command: 'Create a high priority announcement for all teachers and parents: "[message]"' },
 ];
 
 const teacherQuickCommands = [
@@ -82,7 +61,7 @@ const teacherQuickCommands = [
   { icon: CheckCircle2, label: 'Create a Quiz', command: 'Create a 10-question quiz with an answer key on the topic my class is currently on' },
   { icon: Pencil, label: 'Homework', command: 'Generate homework for my class on the current topic' },
   { icon: MessageSquare, label: 'Report Remarks', command: 'Help me write report card remarks for a learner' },
-  { icon: Sparkles, label: 'Teaching Ideas', command: 'Give me practical, low-resource activities to teach fractions to Grade 4' },
+  { icon: Sparkles, label: 'Teaching Ideas', command: 'Give me practical, low-resource activities to teach [topic] to my class' },
   { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },
   { icon: GraduationCap, label: 'My Lesson Plans', command: 'List my recent lesson plans' },
 ];
@@ -116,7 +95,7 @@ const adminPersona: Persona = {
     'Record expenses and manage scholarships',
     'View school statistics and analytics',
   ],
-  footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Actions are executed immediately.`,
+  footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Changes are saved as soon as Master AI runs them, so review your request before sending.`,
 };
 
 const teacherPersona: Persona = {
@@ -180,17 +159,17 @@ const MasterAI = () => {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [isAISpeaking, setIsAISpeaking] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playTokenRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const errorCountRef = useRef<number>(0);
+  const { confirm } = useAppDialog();
   const [conversations, setConversations] = useState<MasterAIConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
@@ -258,34 +237,66 @@ const MasterAI = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play response audio when new assistant message arrives (TTS)
-  const playResponseAudio = async (text: string) => {
-    try {
-      setIsAISpeaking(true);
-      const blob = await masterAIService.generateSpeech(text);
-      if (!blob) { setIsAISpeaking(false); return; }
-      const url = URL.createObjectURL(blob);
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-      }
-      const audio = new Audio(url);
-      currentAudioRef.current = audio;
-      
-      audio.onended = () => {
-        setIsAISpeaking(false);
-        // In voice mode, automatically start listening again after AI finishes speaking
-        if (voiceMode && !isProcessing) {
-          setTimeout(() => startListening(), 500);
-        }
-      };
-      
-      await audio.play();
-    } catch (e) {
-      console.error('Failed to play TTS', e);
-      setIsAISpeaking(false);
-    }
+  // Grow the input with its content (capped by max-h-32)
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  }, [input]);
+
+  // Release mic, audio and pending request when leaving the page
+  useEffect(() => () => {
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    audioContextRef.current?.close();
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    currentAudioRef.current?.pause();
+    abortRef.current?.abort();
+  }, []);
+
+  const stopAudio = () => {
+    playTokenRef.current += 1;
+    currentAudioRef.current?.pause();
+    currentAudioRef.current = null;
+    setSpeakingId(null);
   };
 
+  // Read a reply aloud on request; pressing again stops it
+  const togglePlayback = async (msg: ChatMessage) => {
+    if (speakingId === msg.id) { stopAudio(); return; }
+    stopAudio();
+    const token = playTokenRef.current;
+    setSpeakingId(msg.id);
+    const blob = await masterAIService.generateSpeech(msg.content);
+    if (token !== playTokenRef.current) return;
+    if (!blob) {
+      setSpeakingId(null);
+      toast.error('Read aloud is not available right now');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudioRef.current = audio;
+    const finish = () => {
+      URL.revokeObjectURL(url);
+      if (currentAudioRef.current === audio) {
+        currentAudioRef.current = null;
+        setSpeakingId(null);
+      }
+    };
+    audio.onended = finish;
+    audio.onerror = finish;
+    try { await audio.play(); } catch { finish(); }
+  };
+
+  const releaseMic = () => {
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  };
+
+  // Dictation: records speech and appends the transcript to the input
   const startListening = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -348,86 +359,6 @@ const MasterAI = () => {
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      // Set up audio analysis for silence detection in voice mode
-      if (voiceMode) {
-        const analyser = audioContext.createAnalyser();
-        analyserRef.current = analyser;
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.3;
-        // Connect analyser between compressor and gain for accurate silence detection
-        speechComp.disconnect(outputGain);
-        speechComp.connect(analyser);
-        analyser.connect(outputGain);
-
-        // Monitor audio levels with speech-aware silence detection
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        let speechDetected = false;
-        let silenceStart: number | null = null;
-        let debugCounter = 0;
-        const recordStart = Date.now();
-        const SILENCE_THRESHOLD = 15;        // RMS from time-domain data
-        const SILENCE_AFTER_SPEECH = 1000;  // 1s — snappy turn-taking
-        const MAX_WAIT_FOR_SPEECH = 4000;   // 4s — give user time to start talking
-        const MAX_RECORDING = 15000;        // 15s hard cap — voice commands are short
-
-        // Safety net: hard max recording
-        const maxRecordTimer = setTimeout(() => {
-          console.log('[MasterAI] Max recording reached (15s), stopping');
-          stopListening();
-        }, MAX_RECORDING);
-
-        const checkAudioLevel = () => {
-          if (!analyserRef.current || !isListening) {
-            clearTimeout(maxRecordTimer);
-            return;
-          }
-          
-          // Use TIME-DOMAIN data for silence detection
-          analyser.getByteTimeDomainData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            const v = (dataArray[i] - 128) / 128; // Normalize to -1..1
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / bufferLength) * 100; // Scale to 0-100 range
-          const now = Date.now();
-
-          // Debug: log RMS every ~0.5s
-          if (++debugCounter % 30 === 0) {
-            console.log(`[MasterAI] RMS: ${rms.toFixed(1)}, speech: ${speechDetected}, threshold: ${SILENCE_THRESHOLD}`);
-          }
-
-          if (rms > SILENCE_THRESHOLD) {
-            // Sound detected
-            speechDetected = true;
-            silenceStart = null;
-          } else {
-            if (speechDetected) {
-              // Silence after speech — wait SILENCE_AFTER_SPEECH before stopping
-              if (silenceStart === null) {
-                silenceStart = now;
-              } else if (now - silenceStart > SILENCE_AFTER_SPEECH) {
-                console.log('[MasterAI] Silence after speech detected, stopping');
-                clearTimeout(maxRecordTimer);
-                stopListening();
-                return;
-              }
-            } else if (now - recordStart > MAX_WAIT_FOR_SPEECH) {
-              // No speech detected for MAX_WAIT period
-              console.log('[MasterAI] No speech detected, stopping');
-              clearTimeout(maxRecordTimer);
-              stopListening();
-              return;
-            }
-          }
-
-          requestAnimationFrame(checkAudioLevel);
-        };
-
-        checkAudioLevel();
-      }
-
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
@@ -436,114 +367,43 @@ const MasterAI = () => {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        // Clean up audio context
-        if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
-        }
-        
-        // Stop all tracks
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        
-        // Only process if we have meaningful audio (> 0.5 seconds)
-        if (audioBlob.size < 5000) {
-          // Too short, probably just noise
-          if (voiceMode && !isProcessing && errorCountRef.current < 3) {
-            setTimeout(() => startListening(), 500);
-          }
-          return;
-        }
-        
+        releaseMic();
+        // Ignore very short clips (likely noise)
+        if (audioBlob.size < 5000) return;
         try {
           const transcribedText = await masterAIService.transcribeAudio(audioBlob);
-          
-          // Reset error count on success
-          errorCountRef.current = 0;
-          
-          if (voiceMode) {
-            // In voice mode, automatically send the command
-            if (transcribedText.trim()) {
-              await sendCommand(transcribedText);
-            } else {
-              // Empty transcription, restart listening
-              if (errorCountRef.current < 3) {
-                setTimeout(() => startListening(), 500);
-              }
-            }
-          } else {
-            // In normal mode, just populate the input field
-            setInput(prev => (prev + ' ' + transcribedText).trim());
-          }
-        } catch (e) {
-          console.error('Transcription error:', e);
-          errorCountRef.current += 1;
-          
-          // After 3 consecutive errors, exit voice mode
-          if (errorCountRef.current >= 3) {
-            toast.error('Audio service unavailable. Exiting voice mode.');
-            setVoiceMode(false);
-            setIsListening(false);
-            return;
-          }
-          
-          toast.error('Failed to transcribe audio');
-          
-          if (voiceMode && !isProcessing) {
-            // Restart listening with exponential backoff
-            const backoffDelay = Math.min(1000 * Math.pow(2, errorCountRef.current - 1), 5000);
-            setTimeout(() => startListening(), backoffDelay);
-          }
+          setInput(prev => (prev + ' ' + transcribedText).trim());
+        } catch {
+          toast.error('Could not transcribe audio. Please try again.');
         }
       };
 
       mediaRecorder.start();
       setIsListening(true);
-    } catch (err) {
-      console.error('Microphone error:', err);
+    } catch {
       toast.error('Microphone access denied or not available');
+      releaseMic();
       setIsListening(false);
-      if (voiceMode) {
-        setVoiceMode(false); // Exit voice mode if mic fails
-      }
     }
   };
 
   const stopListening = () => {
-    if (mediaRecorderRef.current && isListening) {
-      mediaRecorderRef.current.stop();
-      setIsListening(false);
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop(); // onstop releases the mic
+    } else {
+      releaseMic();
     }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
+    setIsListening(false);
   };
 
   const toggleVoiceMode = async () => {
+    stopAudio();
     if (voiceMode || voice.isActive) {
-      // Exit voice mode
       voice.stopVoiceMode();
-      stopListening();
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-      }
       setVoiceMode(false);
-      setIsAISpeaking(false);
-      errorCountRef.current = 0;
     } else {
-      // Enter smooth voice mode
+      if (isListening) stopListening();
       setVoiceMode(true);
-      errorCountRef.current = 0;
 
       // Add greeting message to chat
       const greetingMsg: ChatMessage = {
@@ -594,18 +454,12 @@ const MasterAI = () => {
     loadConversations();
   }, [loadConversations]);
 
-  // Close sidebar on mobile when clicking outside or after selecting conversation
+  // Open the sidebar on desktop and close it on mobile only when crossing the breakpoint
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 768) {
-        setSidebarOpen(true);
-      } else {
-        setSidebarOpen(false);
-      }
-    };
-    
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e: MediaQueryListEvent) => setSidebarOpen(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
   }, []);
 
   // Load a specific conversation's messages
@@ -642,13 +496,32 @@ const MasterAI = () => {
     inputRef.current?.focus();
   };
 
+  // Put a starter in the input for review; select the first [placeholder] so it can be typed over
+  const prefillCommand = (command: string) => {
+    setInput(command);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const start = command.indexOf('[');
+      const end = command.indexOf(']', start);
+      if (start >= 0 && end > start) el.setSelectionRange(start, end + 1);
+      else el.setSelectionRange(command.length, command.length);
+    });
+  };
+
   // Delete a conversation
-  const handleDeleteConversation = async (convoId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteConversation = async (convo: MasterAIConversation) => {
+    const accepted = await confirm({
+      title: 'Delete conversation?',
+      message: `"${convo.title}" will be permanently deleted.`,
+      confirmText: 'Delete',
+    });
+    if (!accepted) return;
     try {
-      await masterAIService.deleteConversation(convoId);
-      setConversations(prev => prev.filter(c => c.id !== convoId));
-      if (activeConversationId === convoId) {
+      await masterAIService.deleteConversation(convo.id);
+      setConversations(prev => prev.filter(c => c.id !== convo.id));
+      if (activeConversationId === convo.id) {
         startNewChat();
       }
       toast.success('Conversation deleted');
@@ -659,11 +532,10 @@ const MasterAI = () => {
 
   // Send command
   const sendCommand = async (command?: string) => {
-    const text = command || input.trim();
+    const currentImage = imageBase64;
+    const text = command || input.trim() || (currentImage ? IMAGE_ONLY_PROMPT : '');
     if (!text || isProcessing) return;
 
-    const currentImage = imageBase64;
-    
     // Clear early so user feels responsive
     setInput('');
     setImageBase64(null);
@@ -679,16 +551,18 @@ const MasterAI = () => {
     const loadingMsg: ChatMessage = {
       id: `loading-${Date.now()}`,
       role: 'assistant',
-      content: 'Processing your command...',
+      content: 'Working on it...',
       timestamp: new Date(),
       isLoading: true,
     };
 
     setMessages(prev => [...prev, userMsg, loadingMsg]);
     setIsProcessing(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
-      const result = await masterAIService.executeCommand(text, activeConversationId || undefined, currentImage || undefined);
+      const result = await masterAIService.executeCommand(text, activeConversationId || undefined, currentImage || undefined, controller.signal);
 
       // If a new conversation was created, update state
       if (result.isNewConversation || !activeConversationId) {
@@ -706,7 +580,6 @@ const MasterAI = () => {
       };
 
       setMessages(prev => [...prev.filter(m => !m.isLoading), assistantMsg]);
-      playResponseAudio(result.message);
 
       // Update the conversation's updatedAt in the sidebar
       setConversations(prev => {
@@ -726,15 +599,21 @@ const MasterAI = () => {
       if (successCount > 0) toast.success(`${successCount} action(s) completed successfully`);
       if (failCount > 0) toast.error(`${failCount} action(s) failed`);
     } catch (error: any) {
+      const cancelled = error?.code === 'ERR_CANCELED';
+      const { message, detail } = cancelled
+        ? { message: 'Stopped. Anything already started on the server may still finish.', detail: undefined }
+        : describeError(error);
       const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: error.response?.data?.error || 'Failed to process command. Please try again.',
+        content: message,
+        errorDetail: detail,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev.filter(m => !m.isLoading), errorMsg]);
-      toast.error('Command failed');
+      if (!cancelled) toast.error('Request failed');
     } finally {
+      abortRef.current = null;
       setIsProcessing(false);
     }
   };
@@ -753,11 +632,10 @@ const MasterAI = () => {
 
   const groupedConversations = groupConversationsByDate(filteredConversations);
   const schoolName = themeSettings.schoolName || 'Your School';
-  const schoolInitial = schoolName.charAt(0).toUpperCase();
 
   return (
     <div
-      className="flex h-[calc(100vh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden"
+      className="flex h-[calc(100dvh-4rem)] bg-gray-50 dark:bg-slate-900 relative overflow-hidden"
       style={{
         backgroundImage: 'radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 30%), radial-gradient(circle at bottom left, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%)',
       }}
@@ -771,30 +649,7 @@ const MasterAI = () => {
         } transition-all duration-300 flex-shrink-0 border-r border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col fixed md:relative inset-y-0 left-0 z-30 md:z-auto shadow-xl md:shadow-none h-full`}
       >
         {/* Sidebar Header */}
-        <div className="p-3 flex-shrink-0 space-y-3 border-b border-gray-100 dark:border-slate-700/80">
-          <div className="rounded-2xl border border-gray-200 dark:border-slate-700 bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 p-3 shadow-sm">
-            <div className="flex items-center gap-3">
-              {themeSettings.logoUrl ? (
-                <img
-                  src={themeSettings.logoUrl}
-                  alt={schoolName}
-                  className="w-11 h-11 rounded-2xl object-contain bg-white dark:bg-slate-800 p-1 shadow-sm"
-                />
-              ) : (
-                <div
-                  className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold shadow-sm"
-                  style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}
-                >
-                  {schoolInitial}
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">AI Workspace</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{schoolName}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Operational command center</p>
-              </div>
-            </div>
-          </div>
+        <div className="p-3 flex-shrink-0">
           <button
             onClick={startNewChat}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 hover:bg-surface-hover transition-colors text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm"
@@ -813,6 +668,7 @@ const MasterAI = () => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search conversations..."
+              aria-label="Search conversations"
               className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-700 dark:text-gray-200 placeholder-gray-400 outline-none transition-colors"
               style={{ boxShadow: 'none' }}
             />
@@ -825,12 +681,12 @@ const MasterAI = () => {
             <div className="text-center py-8 px-4">
               <MessageSquare size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
               <p className="text-xs text-gray-400 dark:text-gray-500">No conversations yet</p>
-              <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-1">Start a new chat to begin</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Start a new chat to begin</p>
             </div>
           ) : (
             groupedConversations.map(group => (
               <div key={group.label} className="mb-3">
-                <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                   {group.label}
                 </p>
                 {group.items.map(convo => (
@@ -839,7 +695,7 @@ const MasterAI = () => {
                     conversation={convo}
                     isActive={convo.id === activeConversationId}
                     onClick={() => loadConversation(convo.id)}
-                    onDelete={(e) => handleDeleteConversation(convo.id, e)}
+                    onDelete={() => handleDeleteConversation(convo)}
                     onRename={async (newTitle) => {
                       try {
                         await masterAIService.updateConversation(convo.id, newTitle);
@@ -875,6 +731,8 @@ const MasterAI = () => {
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-surface-hover transition-colors flex-shrink-0"
               title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+              aria-label={sidebarOpen ? 'Close conversation list' : 'Open conversation list'}
+              aria-expanded={sidebarOpen}
             >
               {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
             </button>
@@ -893,43 +751,29 @@ const MasterAI = () => {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5 md:gap-2 text-xs md:text-sm">
-                <span className="truncate">{persona.title}</span>
-                <span
-                  className="text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-                  style={{
-                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, transparent)',
-                    color: 'var(--primary-color)',
-                  }}
-                >
-                  BETA
-                </span>
-              </h2>
-              <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="hidden sm:inline">{persona.subtitle(schoolName)}</span>
-                <span className="sm:hidden">Master AI</span>
-              </p>
+              <h2 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{persona.title}</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{persona.subtitle(schoolName)}</p>
             </div>
-            {activeConversationId && (
+            {activeConversationId && !sidebarOpen && (
               <button
                 onClick={startNewChat}
-                className="p-2 rounded-lg text-gray-400 transition-colors flex-shrink-0"
-                style={{ color: activeConversationId ? 'var(--primary-color)' : undefined }}
+                className="p-2 rounded-lg text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
                 title="New Chat"
+                aria-label="New chat"
               >
                 <Plus size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
             )}
             <button
               onClick={toggleVoiceMode}
-              className={`p-2 rounded-lg transition-all flex-shrink-0 ${
+              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
                 voiceMode
-                  ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/30 animate-pulse'
-                    : 'text-gray-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                  ? 'bg-red-500 text-white hover:bg-red-600'
+                  : 'text-primary hover:bg-surface-hover'
               }`}
-                  style={!voiceMode ? { color: 'var(--primary-color)' } : undefined}
               title={voiceMode ? 'End Voice Call' : 'Start Voice Call'}
+              aria-label={voiceMode ? 'End voice call' : 'Start voice call'}
+              aria-pressed={voiceMode}
             >
               {voiceMode ? <PhoneOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Phone size={16} className="md:w-[18px] md:h-[18px]" />}
             </button>
@@ -940,50 +784,29 @@ const MasterAI = () => {
         <div className="flex-1 overflow-y-auto px-3 md:px-4 py-4 md:py-6 space-y-3 md:space-y-4">
           {loadingConversation ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
           ) : messages.length === 0 ? (
-            <WelcomeScreen onCommand={sendCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} persona={persona} />
+            <WelcomeScreen onCommand={prefillCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} persona={persona} />
           ) : (
             messages.map(msg => (
               <MessageBubble
                 key={msg.id}
                 message={msg}
                 onSuggestionClick={sendCommand}
-                onPlayAudio={playResponseAudio}
-                schoolName={schoolName}
+                onTogglePlay={() => togglePlayback(msg)}
+                isSpeaking={speakingId === msg.id}
               />
             ))
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Commands Strip */}
-        {messages.length > 0 && (
-          <div className="px-3 md:px-4 pb-2 flex-shrink-0">
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-              {persona.quickCommands.slice(0, 4).map((cmd, i) => (
-                <button
-                  key={i}
-                  onClick={() => sendCommand(cmd.command)}
-                  disabled={isProcessing}
-                  className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-full text-[11px] md:text-xs font-medium whitespace-nowrap bg-white/90 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 transition-colors disabled:opacity-50 flex-shrink-0"
-                  style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, rgb(229 231 235))' }}
-                >
-                  <cmd.icon size={12} className="flex-shrink-0" />
-                  <span className="hidden sm:inline">{cmd.label}</span>
-                  <span className="sm:hidden">{cmd.label.split(' ')[0]}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Input Area */}
         <div className="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
           {/* Compact floating voice panel — keeps page visible */}
           {voiceMode && voice.isActive && (
-            <div className="mb-3 relative rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-purple-500/10 overflow-hidden">
+            <div className="mb-3 relative rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/20 overflow-hidden">
               {/* Ambient glow inside card */}
               <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
                 <div
@@ -1100,7 +923,7 @@ const MasterAI = () => {
 
               {/* Footer — end button */}
               <div className="relative z-10 px-4 pb-3 pt-1 flex items-center justify-between">
-                <p className="text-[10px] text-white/20">
+                <p className="text-xs text-white/40">
                   Say "goodbye" to end
                 </p>
                 <button
@@ -1116,9 +939,9 @@ const MasterAI = () => {
 
           {/* Inline voice mode panel (when hook is not yet started but voiceMode toggled) */}
           {voiceMode && !voice.isActive && (
-            <div className="mb-3 p-6 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800/30">
+            <div className="mb-3 p-6 rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
               <div className="flex flex-col items-center gap-4">
-                <Loader2 size={40} className="text-purple-600 animate-spin" />
+                <Loader2 size={40} className="text-primary animate-spin" />
                 <span className="text-base font-medium text-gray-900 dark:text-white">Starting voice mode...</span>
               </div>
             </div>
@@ -1127,10 +950,11 @@ const MasterAI = () => {
             <>
               {imageBase64 && (
                 <div className="relative inline-block mb-2 md:mb-3">
-                  <img src={imageBase64} alt="Upload preview" className="h-16 w-16 md:h-20 md:w-20 object-cover rounded-lg border border-purple-200 shadow-sm" />
+                  <img src={imageBase64} alt="Upload preview" className="h-16 w-16 md:h-20 md:w-20 object-cover rounded-lg border border-gray-200 dark:border-slate-600 shadow-sm" />
                   <button 
                     onClick={() => setImageBase64(null)}
                     className="absolute -top-1.5 -right-1.5 md:-top-2 md:-right-2 p-1 bg-white rounded-full shadow border text-gray-500 hover:text-red-500"
+                    aria-label="Remove image"
                   >
                     <X size={12} />
                   </button>
@@ -1152,17 +976,18 @@ const MasterAI = () => {
                 />
                 <button 
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-1.5 md:p-2 mb-1 rounded-xl text-gray-400 hover:bg-purple-50 transition-colors flex-shrink-0"
-                  style={{ color: 'var(--primary-color)' }}
+                  className="p-1.5 md:p-2 mb-1 rounded-xl text-primary hover:bg-surface-hover transition-colors flex-shrink-0"
                   title="Add Image"
+                  aria-label="Add image"
                 >
                   <ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />
                 </button>
                 <button 
                   onClick={toggleListening}
-                  className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:bg-purple-50'}`}
-                  style={!isListening ? { color: 'var(--primary-color)' } : undefined}
+                  className={`p-1.5 md:p-2 mb-1 rounded-xl transition-colors flex-shrink-0 ${isListening ? 'text-red-500 bg-red-50 hover:bg-red-100 dark:bg-red-900/20' : 'text-primary hover:bg-surface-hover'}`}
                   title={isListening ? "Stop listening" : "Start speaking"}
+                  aria-label={isListening ? 'Stop dictation' : 'Dictate message'}
+                  aria-pressed={isListening}
                 >
                   {isListening ? <MicOff size={16} className="md:w-[18px] md:h-[18px]" /> : <Mic size={16} className="md:w-[18px] md:h-[18px]" />}
                 </button>
@@ -1172,23 +997,36 @@ const MasterAI = () => {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={isListening ? 'Listening...' : 'Tell me what to do...'}
-                  className="flex-1 resize-none bg-transparent text-xs md:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-1.5 md:px-2 py-2 md:py-2.5 max-h-32"
+                  aria-label="Message Master AI"
+                  className="flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none px-1.5 md:px-2 py-2 md:py-2.5 max-h-32 overflow-y-auto"
                   rows={1}
                   style={{ minHeight: '36px' }}
                   disabled={isProcessing}
                 />
-                <button
-                  onClick={() => sendCommand()}
-                  disabled={(!input.trim() && !imageBase64) || isProcessing}
-                  className="p-2 md:p-2.5 mb-0.5 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-                  style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}
-                >
-                  {isProcessing ? <Loader2 size={16} className="md:w-[18px] md:h-[18px] animate-spin" /> : <Send size={16} className="md:w-[18px] md:h-[18px]" />}
-                </button>
+                {isProcessing ? (
+                  <button
+                    onClick={() => abortRef.current?.abort()}
+                    className="p-2 md:p-2.5 mb-0.5 rounded-xl border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-200 hover:bg-surface-hover transition-colors flex-shrink-0"
+                    title="Stop"
+                    aria-label="Stop waiting for reply"
+                  >
+                    <Square size={16} className="md:w-[18px] md:h-[18px]" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => sendCommand()}
+                    disabled={!input.trim() && !imageBase64}
+                    className="p-2 md:p-2.5 mb-0.5 text-white rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                    title="Send"
+                    aria-label="Send message"
+                  >
+                    <Send size={16} className="md:w-[18px] md:h-[18px]" />
+                  </button>
+                )}
               </div>
-              <p className="text-[9px] md:text-[10px] text-gray-400 text-center mt-1.5 md:mt-2 px-2">
+              <p className="text-xs text-gray-400 text-center mt-1.5 md:mt-2 px-2">
                 <span className="hidden sm:inline">{persona.footer(schoolName)}</span>
-                <span className="sm:hidden">AI can process images and voice.</span>
+                <span className="sm:hidden">Review your request before sending.</span>
               </p>
             </>
           )}
@@ -1211,17 +1049,33 @@ const ConversationItem = ({
   conversation: MasterAIConversation;
   isActive: boolean;
   onClick: () => void;
-  onDelete: (e: React.MouseEvent) => void;
+  onDelete: () => void;
   onRename: (title: string) => void;
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(conversation.title);
   const renameRef = useRef<HTMLInputElement>(null);
+  const itemRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isRenaming) renameRef.current?.focus();
   }, [isRenaming]);
+
+  // Close the menu on outside click or Escape
+  useEffect(() => {
+    if (!showMenu) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!itemRef.current?.contains(e.target as Node)) setShowMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMenu(false); };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showMenu]);
 
   const handleRenameSubmit = () => {
     if (renameValue.trim() && renameValue !== conversation.title) {
@@ -1233,12 +1087,14 @@ const ConversationItem = ({
 
   return (
     <div
+      ref={itemRef}
       onClick={isRenaming ? undefined : onClick}
       className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
         isActive
-          ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300'
+          ? 'text-primary font-medium'
           : 'text-gray-700 dark:text-gray-300 hover:bg-surface-hover'
       }`}
+      style={isActive ? { backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, transparent)' } : undefined}
     >
       <MessageSquare size={14} className="flex-shrink-0 opacity-50" />
 
@@ -1249,19 +1105,23 @@ const ConversationItem = ({
             value={renameValue}
             onChange={e => setRenameValue(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') { setIsRenaming(false); setShowMenu(false); } }}
-            className="flex-1 text-xs bg-white dark:bg-slate-600 border border-purple-300 dark:border-purple-600 rounded px-2 py-1 outline-none text-gray-900 dark:text-white min-w-0"
+            className="flex-1 text-xs bg-white dark:bg-slate-600 border border-gray-300 dark:border-slate-500 focus:border-primary rounded px-2 py-1 outline-none text-gray-900 dark:text-white min-w-0"
+            aria-label="Conversation name"
             onClick={e => e.stopPropagation()}
           />
-          <button onClick={(e) => { e.stopPropagation(); handleRenameSubmit(); }} className="p-0.5 text-green-600 hover:text-green-700"><Check size={14} /></button>
-          <button onClick={(e) => { e.stopPropagation(); setIsRenaming(false); setShowMenu(false); }} className="p-0.5 text-gray-400 hover:text-gray-600"><X size={14} /></button>
+          <button onClick={(e) => { e.stopPropagation(); handleRenameSubmit(); }} className="p-0.5 text-green-600 hover:text-green-700" aria-label="Save name"><Check size={14} /></button>
+          <button onClick={(e) => { e.stopPropagation(); setIsRenaming(false); setShowMenu(false); }} className="p-0.5 text-gray-400 hover:text-gray-600" aria-label="Cancel rename"><X size={14} /></button>
         </div>
       ) : (
         <>
           <span className="flex-1 text-xs truncate">{conversation.title}</span>
-          <div className={`flex items-center gap-0.5 ${isActive || showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+          <div className={`flex items-center gap-0.5 ${isActive || showMenu ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'} transition-opacity`}>
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
               className="p-1 rounded hover:bg-surface-hover transition-colors"
+              aria-label={`Options for ${conversation.title}`}
+              aria-haspopup="menu"
+              aria-expanded={showMenu}
             >
               <MoreHorizontal size={14} />
             </button>
@@ -1271,15 +1131,17 @@ const ConversationItem = ({
 
       {/* Dropdown menu */}
       {showMenu && !isRenaming && (
-        <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-700 rounded-lg shadow-lg border border-gray-200 dark:border-slate-600 py-1 min-w-[120px]">
+        <div role="menu" className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-700 rounded-lg shadow-lg border border-gray-200 dark:border-slate-600 py-1 min-w-[120px]">
           <button
+            role="menuitem"
             onClick={(e) => { e.stopPropagation(); setIsRenaming(true); setRenameValue(conversation.title); }}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-surface-hover"
           >
             <Pencil size={12} /> Rename
           </button>
           <button
-            onClick={(e) => { setShowMenu(false); onDelete(e); }}
+            role="menuitem"
+            onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete(); }}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-surface-hover-danger"
           >
             <Trash2 size={12} /> Delete
@@ -1306,14 +1168,17 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand:
         <Sparkles className="w-8 h-8 md:w-10 md:h-10" />
       </div>
     )}
-    <div className="mb-3 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+    <div className="mb-3 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
       {persona.badge(schoolName)}
     </div>
     <h3 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-white mb-2 text-center px-2">
       {persona.heading(schoolName)}
     </h3>
-    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-6 md:mb-8 text-center max-w-md px-2">
+    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-2 text-center max-w-md px-2">
       {persona.intro}
+    </p>
+    <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 md:mb-8 text-center px-2">
+      Pick a starter to edit it before sending.
     </p>
 
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl px-2">
@@ -1329,7 +1194,7 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand:
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs md:text-sm font-medium text-gray-900 dark:text-white">{cmd.label}</p>
-            <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.command}</p>
           </div>
           <ArrowRight size={12} className="md:w-[14px] md:h-[14px] text-gray-300 dark:text-gray-600 flex-shrink-0 transition-colors" style={{ color: 'var(--primary-color)' }} />
         </button>
@@ -1356,34 +1221,27 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand:
 const MessageBubble = ({
   message,
   onSuggestionClick,
-  onPlayAudio,
-  schoolName,
+  onTogglePlay,
+  isSpeaking,
 }: {
   message: ChatMessage;
   onSuggestionClick: (cmd: string) => void;
-  onPlayAudio: (text: string) => void;
-  schoolName: string;
+  onTogglePlay: () => void;
+  isSpeaking: boolean;
 }) => {
   const isUser = message.role === 'user';
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  const handlePlayClick = async () => {
-    setIsPlaying(true);
-    await onPlayAudio(message.content);
-    // Ideally we track when audio finishes, but we can just use a timeout or assume done
-    setTimeout(() => setIsPlaying(false), 2000); 
-  };
+  const time = message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   if (message.isLoading) {
     return (
-      <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0">
-          <Sparkles size={16} className="text-purple-600 dark:text-purple-400" />
+      <div className="flex gap-3" role="status">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}>
+          <Sparkles size={16} className="text-primary" />
         </div>
         <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-200 dark:border-slate-700">
           <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            <Loader2 size={14} className="animate-spin text-purple-500" />
-            Processing your command...
+            <Loader2 size={14} className="animate-spin text-primary" />
+            {message.content}
           </div>
         </div>
       </div>
@@ -1393,16 +1251,14 @@ const MessageBubble = ({
   if (isUser) {
     return (
       <div className="flex gap-2 md:gap-3 justify-end">
-        <div className="max-w-[90%] md:max-w-[85%] text-white rounded-2xl rounded-br-md px-3 md:px-4 py-2.5 md:py-3 shadow-sm" style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))' }}>
+        <div className="max-w-[90%] md:max-w-[85%] text-white bg-primary rounded-2xl rounded-br-md px-3 md:px-4 py-2.5 md:py-3 shadow-sm">
           {message.image && (
-            <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-48 md:max-h-60 object-cover border border-purple-400" />
+            <img src={message.image} alt="User upload" className="rounded-lg mb-2 max-w-full max-h-48 md:max-h-60 object-cover border border-white/30" />
           )}
           {message.content && (
-            <p className="text-xs md:text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
           )}
-          <p className="text-[9px] md:text-[10px] text-purple-200 mt-1">
-            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </p>
+          <p className="text-xs text-white/70 mt-1">{time}</p>
         </div>
       </div>
     );
@@ -1411,35 +1267,40 @@ const MessageBubble = ({
   return (
     <div className="flex gap-2 md:gap-3">
       <div className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1" style={{ backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, transparent)' }}>
-        <Sparkles size={14} className="md:w-4 md:h-4" style={{ color: 'var(--primary-color)' }} />
+        <Sparkles size={14} className="md:w-4 md:h-4 text-primary" />
       </div>
       <div className="flex-1 min-w-0 space-y-2 md:space-y-3">
         {/* Message Text */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-bl-md px-3 md:px-4 py-2.5 md:py-3 border border-gray-200 dark:border-slate-700 inline-block max-w-[90%] md:max-w-[85%]">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">{schoolName} AI</div>
-          <div className="prose prose-sm dark:prose-invert max-w-none text-xs md:text-sm text-gray-900 dark:text-white leading-relaxed">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-gray-900 dark:text-white leading-relaxed">
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
-          <div className="flex items-center gap-1.5 md:gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700 flex-wrap">
+          {message.errorDetail && (
+            <details className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              <summary className="cursor-pointer select-none">Details</summary>
+              <p className="mt-1 break-words">{message.errorDetail}</p>
+            </details>
+          )}
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-slate-700 flex-wrap text-xs text-gray-400">
             <button
-              onClick={handlePlayClick}
-              disabled={isPlaying}
-              className="flex items-center gap-1 text-[9px] md:text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50"
+              onClick={onTogglePlay}
+              className="flex items-center gap-1 hover:text-primary transition-colors"
+              aria-label={isSpeaking ? 'Stop reading aloud' : 'Read aloud'}
+              aria-pressed={isSpeaking}
             >
-              {isPlaying ? <Loader2 size={10} className="animate-spin" /> : <Volume2 size={10} />}
-              {isPlaying ? 'Playing' : 'Play'}
+              {isSpeaking ? <Square size={12} /> : <Volume2 size={12} />}
+              {isSpeaking ? 'Stop' : 'Read aloud'}
             </button>
-            <span className="text-[9px] md:text-[10px] text-gray-300 dark:text-gray-600">•</span>
+            <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">•</span>
             <button
-              onClick={() => { navigator.clipboard.writeText(message.content); toast.success('Copied!'); }}
-              className="flex items-center gap-1 text-[9px] md:text-[10px] text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+              onClick={() => { navigator.clipboard.writeText(message.content); toast.success('Copied'); }}
+              className="flex items-center gap-1 hover:text-primary transition-colors"
+              aria-label="Copy reply"
             >
-              <Copy size={10} /> Copy
+              <Copy size={12} /> Copy
             </button>
-            <span className="text-[9px] md:text-[10px] text-gray-300 dark:text-gray-600">•</span>
-            <span className="text-[9px] md:text-[10px] text-gray-400">
-              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">•</span>
+            <span>{time}</span>
           </div>
         </div>
 
@@ -1459,10 +1320,11 @@ const MessageBubble = ({
               <button
                 key={i}
                 onClick={() => onSuggestionClick(suggestion)}
-                className="text-[10px] md:text-xs px-2.5 md:px-3 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-600 transition-colors flex items-center gap-1"
+                title={suggestion}
+                className="text-xs px-2.5 md:px-3 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:text-primary hover:border-primary transition-colors flex items-center gap-1"
               >
-                <ChevronRight size={10} />
-                <span className="truncate max-w-[200px]">{suggestion}</span>
+                <ChevronRight size={12} className="flex-shrink-0" />
+                <span className="truncate max-w-[240px] md:max-w-[320px]">{suggestion}</span>
               </button>
             ))}
           </div>
@@ -1485,13 +1347,13 @@ const formatDate = (d: string) => {
 
 /** Format currency */
 const formatCurrency = (n: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat('en-ZM', { style: 'currency', currency: 'ZMW', minimumFractionDigits: 0 }).format(n);
 
 /** Render a key-value stat row */
-const StatRow = ({ label, value, icon }: { label: string; value: string | number; icon?: string }) => (
+const StatRow = ({ label, value, icon }: { label: string; value: string | number; icon?: React.ReactNode }) => (
   <div className="flex items-center justify-between py-1.5 md:py-2 px-2 md:px-3 rounded-lg bg-white/60 dark:bg-slate-800/60">
-    <span className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 md:gap-2 truncate">
-      {icon && <span className="flex-shrink-0">{icon}</span>}
+    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 md:gap-2 truncate">
+      {icon && <span className="flex-shrink-0 text-primary">{icon}</span>}
       <span className="truncate">{label}</span>
     </span>
     <span className="text-xs md:text-sm font-semibold text-gray-900 dark:text-white flex-shrink-0 ml-2">{value}</span>
@@ -1533,18 +1395,20 @@ const humanizeKey = (key: string): string => {
 };
 
 /** Stat icon by key */
-const statIcon = (key: string): string => {
-  const map: Record<string, string> = {
-    activeStudents: '👨‍🎓',
-    activeTeachers: '👩‍🏫',
-    totalClasses: '🏫',
-    totalSubjects: '📚',
-    totalTerms: '📅',
-    totalCalendarEvents: '🗓️',
-    totalRevenue: '💰',
-    attendanceRate: '📊',
-  };
-  return map[key] || '📌';
+const STAT_ICONS: Record<string, typeof Calendar> = {
+  activeStudents: GraduationCap,
+  activeTeachers: Users,
+  totalClasses: Building2,
+  totalSubjects: BookOpen,
+  totalTerms: Calendar,
+  totalCalendarEvents: CalendarDays,
+  totalRevenue: Wallet,
+  attendanceRate: BarChart3,
+};
+
+const statIcon = (key: string): React.ReactNode => {
+  const Icon = STAT_ICONS[key];
+  return Icon ? <Icon size={14} aria-hidden="true" /> : null;
 };
 
 /** Render statistics object as a nice grid */
@@ -1666,7 +1530,7 @@ const ItemListDisplay = ({ items, toolName }: { items: any[]; toolName: string }
       {/* Header row */}
       <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1 md:py-1.5 min-w-max">
         {fields.map(f => (
-          <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-[9px] md:text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider truncate">
+          <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider truncate">
             {f.label}
           </span>
         ))}
@@ -1675,14 +1539,14 @@ const ItemListDisplay = ({ items, toolName }: { items: any[]; toolName: string }
       {displayItems.map((item, idx) => (
         <div key={item.id || idx} className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60 hover:bg-white dark:hover:bg-slate-800 transition-colors min-w-max">
           {fields.map(f => (
-            <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-[10px] md:text-xs text-gray-700 dark:text-gray-300 truncate">
+            <span key={f.key} className="flex-1 min-w-[80px] md:min-w-[100px] text-xs text-gray-700 dark:text-gray-300 truncate">
               {formatValue(item, f.key)}
             </span>
           ))}
         </div>
       ))}
       {hasMore && (
-        <p className="text-[9px] md:text-[10px] text-gray-400 dark:text-gray-500 text-center pt-1">
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center pt-1">
           ... and {items.length - 20} more items
         </p>
       )}
@@ -1701,29 +1565,29 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
 
   // Resilient format: { created: [], updated?: [], existing?: [], errors: [], summary: string }
   if (data.created || data.updated || data.existing) {
-    const sections: { label: string; emoji: string; items: any[] }[] = [];
-    if (data.created?.length) sections.push({ label: 'Newly Created', emoji: '✨', items: data.created });
-    if (data.updated?.length) sections.push({ label: 'Updated', emoji: '🔄', items: data.updated });
-    if (data.existing?.length) sections.push({ label: 'Already Existed', emoji: 'ℹ️', items: data.existing });
+    const sections: { label: string; Icon: typeof Calendar; items: any[] }[] = [];
+    if (data.created?.length) sections.push({ label: 'Newly Created', Icon: Sparkles, items: data.created });
+    if (data.updated?.length) sections.push({ label: 'Updated', Icon: RefreshCw, items: data.updated });
+    if (data.existing?.length) sections.push({ label: 'Already Existed', Icon: Info, items: data.existing });
 
     return (
       <div className="space-y-2 md:space-y-3">
         {sections.map(sec => (
           <div key={sec.label}>
-            <p className="text-[9px] md:text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
-              <span>{sec.emoji}</span> {sec.label} ({sec.items.length})
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
+              <sec.Icon size={12} aria-hidden="true" /> {sec.label} ({sec.items.length})
             </p>
             <ItemListDisplay items={sec.items} toolName={toolName} />
           </div>
         ))}
         {data.errors?.length > 0 && (
           <div>
-            <p className="text-[9px] md:text-[10px] font-semibold text-red-500 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
-              <span>⚠️</span> Issues ({data.errors.length})
+            <p className="text-xs font-semibold text-red-500 uppercase tracking-wider px-1.5 md:px-2 mb-1 flex items-center gap-1.5">
+              <AlertTriangle size={12} aria-hidden="true" /> Issues ({data.errors.length})
             </p>
             <div className="space-y-1">
               {data.errors.map((err: string, i: number) => (
-                <p key={i} className="text-[10px] md:text-xs text-red-500 dark:text-red-400 px-2 md:px-3 py-1.5 rounded-lg bg-red-50/50 dark:bg-red-900/10">
+                <p key={i} className="text-xs text-red-500 dark:text-red-400 px-2 md:px-3 py-1.5 rounded-lg bg-red-50/50 dark:bg-red-900/10">
                   {err}
                 </p>
               ))}
@@ -1743,8 +1607,8 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
   if (typeof data?.deleted === 'number') {
     return (
       <div className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
-        <p className="text-[10px] md:text-xs text-gray-700 dark:text-gray-300">
-          🗑️ {data.deleted} item{data.deleted !== 1 ? 's' : ''} removed successfully
+        <p className="text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+          <Trash2 size={12} aria-hidden="true" /> {data.deleted} item{data.deleted !== 1 ? 's' : ''} removed
         </p>
       </div>
     );
@@ -1761,7 +1625,7 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
   // Last resort — formatted text (not raw JSON)
   return (
     <div className="px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
-      <p className="text-[10px] md:text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
+      <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
         {typeof data === 'string' ? data : JSON.stringify(data, null, 2)}
       </p>
     </div>
@@ -1773,6 +1637,7 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
 // ==========================================
 const ActionResult = ({ action }: { action: MasterAIAction }) => {
   const [expanded, setExpanded] = useState(false); // Collapsed by default — message is the hero
+  const hasData = !!action.data;
 
   return (
     <div
@@ -1783,8 +1648,11 @@ const ActionResult = ({ action }: { action: MasterAIAction }) => {
       }`}
     >
       {/* Header */}
-      <div
-        className="flex items-center justify-between px-2.5 md:px-3 py-2 md:py-2.5 cursor-pointer hover:bg-white/30 dark:hover:bg-slate-800/30 transition-colors gap-2"
+      <button
+        type="button"
+        disabled={!hasData}
+        aria-expanded={hasData ? expanded : undefined}
+        className="w-full text-left flex items-center justify-between px-2.5 md:px-3 py-2 md:py-2.5 enabled:cursor-pointer enabled:hover:bg-white/30 dark:enabled:hover:bg-slate-800/30 transition-colors gap-2"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-1.5 md:gap-2 min-w-0 flex-1">
@@ -1793,16 +1661,16 @@ const ActionResult = ({ action }: { action: MasterAIAction }) => {
           ) : (
             <XCircle size={14} className="md:w-4 md:h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
           )}
-          <span className="text-xs md:text-sm font-medium text-gray-900 dark:text-white truncate">{action.summary}</span>
+          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{action.summary}</span>
         </div>
-        {action.data && (
-          <ChevronDown size={12} className="md:w-[14px] md:h-[14px] text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}" />
+        {hasData && (
+          <ChevronDown size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
         )}
-      </div>
+      </button>
 
       {/* Error */}
       {action.error && !action.success && (
-        <p className="text-[10px] md:text-xs text-red-600 dark:text-red-400 px-2.5 md:px-3 pb-2 ml-5 md:ml-6">
+        <p className="text-xs text-red-600 dark:text-red-400 px-2.5 md:px-3 pb-2 ml-5 md:ml-6">
           {action.error}
         </p>
       )}
