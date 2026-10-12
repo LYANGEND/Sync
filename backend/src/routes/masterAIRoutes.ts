@@ -10,6 +10,8 @@ import {
   transcribeAudio,
   generateSpeech,
   voiceExecuteV2,
+  confirmAction,
+  cancelAction,
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { aiLimiter } from '../middleware/rateLimiter';
@@ -47,5 +49,9 @@ router.delete('/conversations/:id', deleteConversation);
 
 // Execute a natural language command (within a conversation)
 router.post('/execute', aiLimiter, executeCommand);
+
+// Confirm or cancel a plan held for confirmation (deletes, messages, announcements)
+router.post('/confirm', aiLimiter, confirmAction);
+router.post('/cancel', cancelAction);
 
 export default router;

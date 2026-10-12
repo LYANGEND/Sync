@@ -8,6 +8,12 @@ export interface MasterAIAction {
   summary: string;
 }
 
+export interface PendingConfirmation {
+  token: string;
+  items: string[];
+  expiresAt: string;
+}
+
 export interface MasterAIResponse {
   message: string;
   actions: MasterAIAction[];
@@ -15,6 +21,7 @@ export interface MasterAIResponse {
   conversationId: string;
   isNewConversation?: boolean;
   shouldEndConversation?: boolean;
+  pendingConfirmation?: PendingConfirmation;
 }
 
 export interface MasterAIConversation {
@@ -67,6 +74,16 @@ const masterAIService = {
   async executeCommand(message: string, conversationId?: string, imageBase64?: string, signal?: AbortSignal): Promise<MasterAIResponse> {
     const { data } = await api.post('/master-ai/execute', { message, conversationId, imageBase64 }, { signal });
     return data;
+  },
+
+  /** Run a plan the server held for confirmation. */
+  async confirmAction(token: string): Promise<MasterAIResponse> {
+    const { data } = await api.post('/master-ai/confirm', { token });
+    return data;
+  },
+
+  async cancelAction(token: string): Promise<void> {
+    await api.post('/master-ai/cancel', { token });
   },
 
   /**

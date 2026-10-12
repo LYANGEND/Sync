@@ -9,12 +9,17 @@ import {
   Users, Building2, Wallet, CalendarDays, RefreshCw, Info, AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import masterAIService, { MasterAIAction, MasterAIConversation } from '../../services/masterAIService';
+import { Link } from 'react-router-dom';
+import masterAIService, { MasterAIAction, MasterAIConversation, MasterAIResponse, PendingConfirmation } from '../../services/masterAIService';
 import ReactMarkdown from 'react-markdown';
 import { useVoiceConversation } from '../../hooks/useVoiceConversation';
+import { useActiveTerm } from '../../hooks/useActiveTerm';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
+import api from '../../utils/api';
+
+type PendingState = 'open' | 'running' | 'done' | 'cancelled' | 'failed';
 
 interface ChatMessage {
   id: string;
@@ -26,7 +31,16 @@ interface ChatMessage {
   timestamp: Date;
   isLoading?: boolean;
   errorDetail?: string;
+  pending?: PendingConfirmation;
+  pendingState?: PendingState;
 }
+
+const PENDING_STATE_TEXT: Record<Exclude<PendingState, 'open'>, string> = {
+  running: 'Running...',
+  done: 'Confirmed.',
+  cancelled: 'Cancelled. Nothing was changed.',
+  failed: 'Not completed. See the message below.',
+};
 
 const IMAGE_ONLY_PROMPT = 'Please look at this image and tell me what you see.';
 
@@ -35,11 +49,37 @@ function describeError(error: any): { message: string; detail?: string } {
   const status = error?.response?.status;
   const detail = error?.response?.data?.error || error?.message;
   if (!error?.response) return { message: 'I could not reach the server. Check your connection and try again.', detail };
-  if (status === 400 && error.response.data?.error) return { message: error.response.data.error };
+  if ((status === 400 || status === 410) && error.response.data?.error) return { message: error.response.data.error };
   if (status === 401 || status === 403) return { message: 'You do not have permission to do that.', detail };
   if (status === 429) return { message: 'Too many requests right now. Please wait a moment and try again.', detail };
   return { message: 'Something went wrong while processing your request. Please try again.', detail };
 }
+
+const toAssistantMessage = (result: MasterAIResponse): ChatMessage => ({
+  id: `assistant-${Date.now()}`,
+  role: 'assistant',
+  content: result.message,
+  actions: result.actions,
+  suggestions: result.suggestions,
+  pending: result.pendingConfirmation,
+  pendingState: result.pendingConfirmation ? 'open' : undefined,
+  timestamp: new Date(),
+});
+
+const toErrorMessage = ({ message, detail }: { message: string; detail?: string }): ChatMessage => ({
+  id: `error-${Date.now()}`,
+  role: 'assistant',
+  content: message,
+  errorDetail: detail,
+  timestamp: new Date(),
+});
+
+const toastActionCounts = (actions?: MasterAIAction[]) => {
+  const successCount = actions?.filter(a => a.success).length || 0;
+  const failCount = actions?.filter(a => !a.success).length || 0;
+  if (successCount > 0) toast.success(`${successCount} action(s) completed successfully`);
+  if (failCount > 0) toast.error(`${failCount} action(s) failed`);
+};
 
 const year = new Date().getFullYear();
 
@@ -55,19 +95,35 @@ const adminQuickCommands = [
   { icon: Bell, label: 'Create Announcement', command: 'Create a high priority announcement for all teachers and parents: "[message]"' },
 ];
 
-const teacherQuickCommands = [
-  { icon: BookOpen, label: 'Lesson Plans', command: 'Generate lesson plans for the next topics my class has not covered yet' },
-  { icon: BarChart3, label: 'Class Insights', command: 'How is my class doing? Who needs extra support?' },
-  { icon: CheckCircle2, label: 'Create a Quiz', command: 'Create a 10-question quiz with an answer key on the topic my class is currently on' },
-  { icon: Pencil, label: 'Homework', command: 'Generate homework for my class on the current topic' },
-  { icon: MessageSquare, label: 'Report Remarks', command: 'Help me write report card remarks for a learner' },
-  { icon: Sparkles, label: 'Teaching Ideas', command: 'Give me practical, low-resource activities to teach [topic] to my class' },
-  { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },
-  { icon: GraduationCap, label: 'My Lesson Plans', command: 'List my recent lesson plans' },
-];
+type QuickCommand = { icon: typeof Calendar; label: string; command: string };
+
+/** A class from GET /classes; for teachers, subjects are limited to the ones they teach there. */
+interface TeacherClass {
+  id: string;
+  name: string;
+  subjects: { name: string }[];
+}
+
+// One subject is named directly; several become a [placeholder] listing the options.
+const subjectSlot = (cls: TeacherClass) =>
+  cls.subjects.length === 1 ? cls.subjects[0].name : `[${cls.subjects.map(s => s.name).join(' / ') || 'subject'}]`;
+
+const teacherQuickCommands = (cls?: TeacherClass): QuickCommand[] => {
+  const where = cls ? cls.name : 'my class';
+  const subject = cls ? `${subjectSlot(cls)} in ` : '';
+  return [
+    { icon: BookOpen, label: 'Lesson Plans', command: `Generate lesson plans for ${subject}${where} for the next topics not covered yet` },
+    { icon: BarChart3, label: 'Class Insights', command: `How is ${where} doing? Who needs extra support?` },
+    { icon: CheckCircle2, label: 'Create a Quiz', command: `Create a 10-question quiz with an answer key for ${subject}${where} on the current topic` },
+    { icon: Pencil, label: 'Homework', command: `Generate homework for ${subject}${where} on the current topic` },
+    { icon: MessageSquare, label: 'Report Remarks', command: `Help me write report card remarks for [learner name] in ${where}` },
+    { icon: Sparkles, label: 'Teaching Ideas', command: `Give me practical, low-resource activities to teach [topic] to ${where}` },
+    { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },
+    { icon: GraduationCap, label: 'My Lesson Plans', command: 'List my recent lesson plans' },
+  ];
+};
 
 interface Persona {
-  quickCommands: { icon: typeof Calendar; label: string; command: string }[];
   title: string;
   subtitle: (school: string) => string;
   badge: (school: string) => string;
@@ -79,7 +135,6 @@ interface Persona {
 }
 
 const adminPersona: Persona = {
-  quickCommands: adminQuickCommands,
   title: 'Master AI',
   subtitle: school => `Natural language control for ${school}`,
   badge: school => `${school} AI Command Center`,
@@ -95,11 +150,10 @@ const adminPersona: Persona = {
     'Record expenses and manage scholarships',
     'View school statistics and analytics',
   ],
-  footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Changes are saved as soon as Master AI runs them, so review your request before sending.`,
+  footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Deleting data and sending messages always ask for your confirmation first.`,
 };
 
 const teacherPersona: Persona = {
-  quickCommands: teacherQuickCommands,
   title: 'Master AI',
   subtitle: () => 'Your teaching assistant',
   badge: school => `${school} Teaching Assistant`,
@@ -153,7 +207,36 @@ function groupConversationsByDate(conversations: MasterAIConversation[]) {
 const MasterAI = () => {
   const { settings: themeSettings } = useTheme();
   const { user } = useAuth();
-  const persona = user?.role === 'TEACHER' ? teacherPersona : adminPersona;
+  const isTeacher = user?.role === 'TEACHER';
+  const persona = isTeacher ? teacherPersona : adminPersona;
+  const { activeTerm } = useActiveTerm();
+  const [teacherClasses, setTeacherClasses] = useState<TeacherClass[]>([]);
+  const [focusClassId, setFocusClassId] = useState('');
+  const focusClass = teacherClasses.find(c => c.id === focusClassId);
+  const quickCommands = isTeacher ? teacherQuickCommands(focusClass) : adminQuickCommands;
+
+  useEffect(() => {
+    if (!isTeacher || !activeTerm) return;
+    let cancelled = false;
+    api.get<TeacherClass[]>('/classes', { params: { academicTermId: activeTerm.id } })
+      .then(res => {
+        if (cancelled) return;
+        setTeacherClasses(res.data);
+        setFocusClassId(res.data[0]?.id ?? '');
+      })
+      .catch(() => { /* starters fall back to generic wording */ });
+    return () => { cancelled = true; };
+  }, [isTeacher, activeTerm]);
+
+  // What the assistant is working with, shown in the header
+  const contextLabel = !activeTerm
+    ? 'No active term'
+    : isTeacher
+      ? `${activeTerm.name} · ${teacherClasses.length} class${teacherClasses.length === 1 ? '' : 'es'}`
+      : activeTerm.name;
+  const contextTitle = isTeacher && teacherClasses.length
+    ? `Master AI knows your classes this term: ${teacherClasses.map(c => c.subjects.length ? `${c.name} (${c.subjects.map(s => s.name).join(', ')})` : c.name).join('; ')}`
+    : `Current term: ${activeTerm?.name ?? 'none'}`;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -570,16 +653,7 @@ const MasterAI = () => {
         loadConversations(); // Refresh sidebar
       }
 
-      const assistantMsg: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: result.message,
-        actions: result.actions,
-        suggestions: result.suggestions,
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev.filter(m => !m.isLoading), assistantMsg]);
+      setMessages(prev => [...prev.filter(m => !m.isLoading), toAssistantMessage(result)]);
 
       // Update the conversation's updatedAt in the sidebar
       setConversations(prev => {
@@ -593,27 +667,45 @@ const MasterAI = () => {
         return prev;
       });
       loadConversations();
-
-      const successCount = result.actions?.filter(a => a.success).length || 0;
-      const failCount = result.actions?.filter(a => !a.success).length || 0;
-      if (successCount > 0) toast.success(`${successCount} action(s) completed successfully`);
-      if (failCount > 0) toast.error(`${failCount} action(s) failed`);
+      toastActionCounts(result.actions);
     } catch (error: any) {
       const cancelled = error?.code === 'ERR_CANCELED';
-      const { message, detail } = cancelled
-        ? { message: 'Stopped. Anything already started on the server may still finish.', detail: undefined }
-        : describeError(error);
-      const errorMsg: ChatMessage = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: message,
-        errorDetail: detail,
-        timestamp: new Date(),
-      };
+      const errorMsg = toErrorMessage(cancelled
+        ? { message: 'Stopped. Anything already started on the server may still finish.' }
+        : describeError(error));
       setMessages(prev => [...prev.filter(m => !m.isLoading), errorMsg]);
       if (!cancelled) toast.error('Request failed');
     } finally {
       abortRef.current = null;
+      setIsProcessing(false);
+    }
+  };
+
+  const setPendingState = (id: string, pendingState: PendingState) =>
+    setMessages(prev => prev.map(m => (m.id === id ? { ...m, pendingState } : m)));
+
+  // Run or drop a plan the server is holding for confirmation
+  const resolvePending = async (msg: ChatMessage, accept: boolean) => {
+    if (!msg.pending || msg.pendingState !== 'open' || isProcessing) return;
+    const { token } = msg.pending;
+    if (!accept) {
+      setPendingState(msg.id, 'cancelled');
+      masterAIService.cancelAction(token).catch(() => { /* the plan expires on its own */ });
+      return;
+    }
+    setPendingState(msg.id, 'running');
+    setIsProcessing(true);
+    try {
+      const result = await masterAIService.confirmAction(token);
+      setPendingState(msg.id, 'done');
+      setMessages(prev => [...prev, toAssistantMessage(result)]);
+      toastActionCounts(result.actions);
+      loadConversations();
+    } catch (error) {
+      setPendingState(msg.id, 'failed');
+      setMessages(prev => [...prev, toErrorMessage(describeError(error))]);
+      toast.error('Request failed');
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -754,6 +846,13 @@ const MasterAI = () => {
               <h2 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{persona.title}</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{persona.subtitle(schoolName)}</p>
             </div>
+            <span
+              title={contextTitle}
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800 flex-shrink-0 max-w-[40%]"
+            >
+              <CalendarDays size={12} className="text-primary flex-shrink-0" aria-hidden="true" />
+              <span className="truncate">{contextLabel}</span>
+            </span>
             {activeConversationId && !sidebarOpen && (
               <button
                 onClick={startNewChat}
@@ -787,7 +886,16 @@ const MasterAI = () => {
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
           ) : messages.length === 0 ? (
-            <WelcomeScreen onCommand={prefillCommand} schoolName={schoolName} logoUrl={themeSettings.logoUrl} persona={persona} />
+            <WelcomeScreen
+              onCommand={prefillCommand}
+              schoolName={schoolName}
+              logoUrl={themeSettings.logoUrl}
+              persona={persona}
+              quickCommands={quickCommands}
+              classPicker={isTeacher && teacherClasses.length > 0
+                ? { classes: teacherClasses, value: focusClassId, onChange: setFocusClassId }
+                : undefined}
+            />
           ) : (
             messages.map(msg => (
               <MessageBubble
@@ -796,6 +904,8 @@ const MasterAI = () => {
                 onSuggestionClick={sendCommand}
                 onTogglePlay={() => togglePlayback(msg)}
                 isSpeaking={speakingId === msg.id}
+                onResolvePending={accept => resolvePending(msg, accept)}
+                busy={isProcessing}
               />
             ))
           )}
@@ -1155,7 +1265,14 @@ const ConversationItem = ({
 // ==========================================
 // WELCOME SCREEN
 // ==========================================
-const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand: (cmd: string) => void; schoolName: string; logoUrl?: string; persona: Persona }) => (
+const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona, quickCommands, classPicker }: {
+  onCommand: (cmd: string) => void;
+  schoolName: string;
+  logoUrl?: string;
+  persona: Persona;
+  quickCommands: QuickCommand[];
+  classPicker?: { classes: TeacherClass[]; value: string; onChange: (id: string) => void };
+}) => (
   <div className="flex flex-col items-center justify-center min-h-full py-6 md:py-8 px-4 md:px-4">
     {logoUrl ? (
       <img
@@ -1177,12 +1294,26 @@ const WelcomeScreen = ({ onCommand, schoolName, logoUrl, persona }: { onCommand:
     <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mb-2 text-center max-w-md px-2">
       {persona.intro}
     </p>
-    <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 md:mb-8 text-center px-2">
+    <p className="text-xs text-gray-400 dark:text-gray-500 mb-4 md:mb-6 text-center px-2">
       Pick a starter to edit it before sending.
     </p>
 
+    {classPicker && (
+      <label className="mb-4 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        Starters for
+        <select
+          value={classPicker.value}
+          onChange={e => classPicker.onChange(e.target.value)}
+          className="rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs text-gray-900 dark:text-white"
+        >
+          {classPicker.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <option value="">Any class</option>
+        </select>
+      </label>
+    )}
+
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 w-full max-w-2xl px-2">
-      {persona.quickCommands.map((cmd, i) => (
+      {quickCommands.map((cmd, i) => (
         <button
           key={i}
           onClick={() => onCommand(cmd.command)}
@@ -1223,11 +1354,15 @@ const MessageBubble = ({
   onSuggestionClick,
   onTogglePlay,
   isSpeaking,
+  onResolvePending,
+  busy,
 }: {
   message: ChatMessage;
   onSuggestionClick: (cmd: string) => void;
   onTogglePlay: () => void;
   isSpeaking: boolean;
+  onResolvePending: (accept: boolean) => void;
+  busy: boolean;
 }) => {
   const isUser = message.role === 'user';
   const time = message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1303,6 +1438,41 @@ const MessageBubble = ({
             <span>{time}</span>
           </div>
         </div>
+
+        {/* Confirmation */}
+        {message.pending && (
+          <div className="max-w-[90%] md:max-w-[85%] rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/60 dark:bg-amber-900/10 p-3 space-y-2">
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+              <AlertTriangle size={14} aria-hidden="true" /> Needs your confirmation
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-sm text-gray-800 dark:text-gray-200">
+              {message.pending.items.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+            {message.pendingState === 'open' ? (
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => onResolvePending(true)}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => onResolvePending(false)}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-slate-600 hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : message.pendingState && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5" role="status">
+                {message.pendingState === 'running' && <Loader2 size={12} className="animate-spin text-primary" />}
+                {PENDING_STATE_TEXT[message.pendingState]}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Action Results */}
         {message.actions && message.actions.length > 0 && (
@@ -1635,9 +1805,31 @@ const SmartDataDisplay = ({ data, toolName }: { data: any; toolName: string }) =
 // ==========================================
 // ACTION RESULT CARD
 // ==========================================
+
+// Where to see the result of each tool in the app
+const ACTION_LINK_GROUPS: [to: string, label: string, tools: string[]][] = [
+  ['/academics?tab=calendar', 'Calendar', ['add_calendar_events', 'list_calendar_events', 'delete_calendar_events']],
+  ['/students', 'Students', ['create_students', 'search_students']],
+  ['/classes', 'Classes', ['create_classes', 'list_classes', 'assign_subjects_to_classes', 'cleanup_class_subjects']],
+  ['/subjects', 'Subjects', ['create_subjects', 'list_subjects', 'list_topics', 'generate_syllabus', 'populate_all_syllabi', 'cleanup_invalid_syllabi', 'create_topics', 'delete_topics']],
+  ['/academics?tab=lesson-plans&view=plans', 'Lesson plans', ['generate_lesson_plans', 'list_lesson_plans', 'get_lesson_plan_content']],
+  ['/academics?tab=lesson-plans', 'Syllabus coverage', ['check_syllabus_progress']],
+  ['/academics?tab=assessments', 'Assessments', ['generate_assessments', 'create_assessments']],
+  ['/academics?tab=homework', 'Homework', ['generate_homework']],
+  ['/academics/gradebook', 'Gradebook', ['get_class_insights']],
+  ['/academics?tab=reports', 'Report cards', ['generate_report_remarks']],
+  ['/academics?tab=terms', 'Terms', ['create_academic_terms']],
+  ['/academics?tab=timetable', 'Timetable', ['create_timetable_periods']],
+  ['/finance', 'Finance', ['create_fee_templates', 'list_fee_templates', 'create_scholarships', 'create_expenses', 'search_payments', 'get_payment_analytics', 'get_student_payment_history', 'get_student_fee_balances', 'get_invoice_summary']],
+  ['/users', 'Users', ['list_users']],
+  ['/communication', 'Communication', ['create_announcements', 'send_notifications', 'send_sms']],
+];
+const ACTION_LINKS = new Map(ACTION_LINK_GROUPS.flatMap(([to, label, tools]) => tools.map(tool => [tool, { to, label }] as const)));
+
 const ActionResult = ({ action }: { action: MasterAIAction }) => {
   const [expanded, setExpanded] = useState(false); // Collapsed by default — message is the hero
   const hasData = !!action.data;
+  const link = action.success ? ACTION_LINKS.get(action.tool) : undefined;
 
   return (
     <div
@@ -1648,25 +1840,36 @@ const ActionResult = ({ action }: { action: MasterAIAction }) => {
       }`}
     >
       {/* Header */}
-      <button
-        type="button"
-        disabled={!hasData}
-        aria-expanded={hasData ? expanded : undefined}
-        className="w-full text-left flex items-center justify-between px-2.5 md:px-3 py-2 md:py-2.5 enabled:cursor-pointer enabled:hover:bg-white/30 dark:enabled:hover:bg-slate-800/30 transition-colors gap-2"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-1.5 md:gap-2 min-w-0 flex-1">
-          {action.success ? (
-            <CheckCircle2 size={14} className="md:w-4 md:h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-          ) : (
-            <XCircle size={14} className="md:w-4 md:h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+      <div className="flex items-center">
+        <button
+          type="button"
+          disabled={!hasData}
+          aria-expanded={hasData ? expanded : undefined}
+          className="flex-1 min-w-0 text-left flex items-center justify-between px-2.5 md:px-3 py-2 md:py-2.5 enabled:cursor-pointer enabled:hover:bg-white/30 dark:enabled:hover:bg-slate-800/30 transition-colors gap-2"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-1.5 md:gap-2 min-w-0 flex-1">
+            {action.success ? (
+              <CheckCircle2 size={14} className="md:w-4 md:h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+            ) : (
+              <XCircle size={14} className="md:w-4 md:h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+            )}
+            <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{action.summary}</span>
+          </div>
+          {hasData && (
+            <ChevronDown size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
           )}
-          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{action.summary}</span>
-        </div>
-        {hasData && (
-          <ChevronDown size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+        {link && (
+          <Link
+            to={link.to}
+            className="flex-shrink-0 inline-flex items-center gap-0.5 px-2.5 md:px-3 py-2 text-xs font-medium text-primary hover:underline"
+            aria-label={`Open ${link.label}`}
+          >
+            {link.label} <ArrowRight size={12} aria-hidden="true" />
+          </Link>
         )}
-      </button>
+      </div>
 
       {/* Error */}
       {action.error && !action.success && (

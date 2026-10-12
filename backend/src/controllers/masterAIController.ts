@@ -12,6 +12,15 @@ import { detectFarewell, detectAIFarewell } from '../services/voiceConversationS
 // Uses shared conversationService for CRUD operations.
 
 const CTX: convoService.ConversationContextType = 'master-ai-ops';
+const CANCELLED_MESSAGE = 'Cancelled. Nothing was changed.';
+
+/** Text stored in conversation history for an assistant reply. */
+const toStoredContent = (result: { message: string; actions?: { summary: string }[]; pendingConfirmation?: { items: string[] } }) => {
+  let content = result.message;
+  if (result.pendingConfirmation) content += `\n\n${result.pendingConfirmation.items.map(i => `- ${i}`).join('\n')}`;
+  if (result.actions?.length) content += `\n\n---\n${result.actions.map(a => `\n${a.summary}`).join('')}`;
+  return content;
+};
 
 const isSpeechUnavailableError = (error: any) => {
   const message = String(error?.message || '');
@@ -133,19 +142,10 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }));
 
     // Execute via Master AI service
-    const result = await masterAIService.processCommand(message, { userId, role: req.user!.role }, conversationHistory, imageBase64);
-
-    // Build assistant content for DB storage
-    let assistantContent = result.message;
-    if (result.actions?.length) {
-      assistantContent += '\n\n---\n';
-      for (const action of result.actions) {
-        assistantContent += `\n${action.summary}`;
-      }
-    }
+    const result = await masterAIService.processCommand(message, { userId, role: req.user!.role, conversationId: convoId }, conversationHistory, imageBase64);
 
     // Save assistant message (shared service also touches updatedAt)
-    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+    await convoService.saveMessage(convoId, 'assistant', toStoredContent(result));
 
     res.json({
       ...result,
@@ -167,6 +167,51 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
       });
     }
     res.status(500).json({ error: 'Failed to process command', details: msg });
+  }
+};
+
+/**
+ * POST /api/v1/master-ai/confirm
+ * Run a plan that was held for confirmation (deletes, messages, announcements).
+ */
+export const confirmAction = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Confirmation token is required' });
+
+    const outcome = await masterAIService.confirmPending(token, { userId, role: req.user!.role });
+    if (!outcome) {
+      return res.status(410).json({ error: 'This request has expired or was already handled. Please ask again.' });
+    }
+    if (outcome.conversationId) {
+      await convoService.saveMessage(outcome.conversationId, 'assistant', toStoredContent(outcome.response));
+    }
+    res.json({ ...outcome.response, conversationId: outcome.conversationId });
+  } catch (error: any) {
+    console.error('Master AI confirm error:', error);
+    res.status(500).json({ error: 'Failed to run the confirmed request', details: error.message });
+  }
+};
+
+/**
+ * POST /api/v1/master-ai/cancel
+ * Discard a plan that was held for confirmation.
+ */
+export const cancelAction = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Confirmation token is required' });
+
+    const outcome = masterAIService.cancelPending(token, userId);
+    if (outcome?.conversationId) await convoService.saveMessage(outcome.conversationId, 'assistant', CANCELLED_MESSAGE);
+    res.json({ message: CANCELLED_MESSAGE });
+  } catch (error: any) {
+    console.error('Master AI cancel error:', error);
+    res.status(500).json({ error: 'Failed to cancel' });
   }
 };
 
@@ -295,12 +340,7 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
     );
 
     // Persist assistant message
-    let assistantContent = result.message;
-    if (result.actions?.length) {
-      assistantContent += '\n\n---\n';
-      for (const action of result.actions) assistantContent += `\n${action.summary}`;
-    }
-    await convoService.saveMessage(convoId, 'assistant', assistantContent);
+    await convoService.saveMessage(convoId, 'assistant', toStoredContent(result));
 
     if (!aborted) {
       res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

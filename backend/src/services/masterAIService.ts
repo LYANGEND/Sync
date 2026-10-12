@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma';
+import { randomUUID } from 'crypto';
 import aiService from './aiService';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -45,6 +46,8 @@ interface ToolDefinition {
 export interface MasterAICaller {
   userId: string;
   role: string;
+  /** Conversation the request belongs to; stored with plans awaiting confirmation. */
+  conversationId?: string;
 }
 
 /** Active-term teaching assignments; present only for scoped (non-admin) callers. */
@@ -264,11 +267,21 @@ interface ExecutionResult {
   summary: string;
 }
 
+interface PendingConfirmation {
+  token: string;
+  items: string[];
+  expiresAt: string;
+}
+
 interface MasterAIResponse {
   message: string;
   actions: ExecutionResult[];
   suggestions?: string[];
+  pendingConfirmation?: PendingConfirmation;
 }
+
+type PlannedAction = { tool: string; params: Record<string, any> };
+type AIPlan = { message: string; actions: PlannedAction[]; suggestions?: string[] };
 
 // ==========================
 // CONSTANTS & GUARDS
@@ -277,6 +290,106 @@ const MAX_ACTIONS_PER_REQUEST = 12;
 const TOOL_TIMEOUT_MS = 60_000; // 60s per tool
 const TOOL_TIMEOUT_LONG_MS = 120_000; // 120s for AI-generation tools
 const LONG_RUNNING_TOOLS = new Set(['generate_syllabus', 'generate_lesson_plans', 'generate_assessments', 'generate_homework']);
+
+// ==========================
+// CONFIRMATION: tools that delete data or reach other people run only after the user confirms
+// ==========================
+const CONFIRM_TOOLS = new Set([
+  'delete_calendar_events',
+  'delete_topics',
+  'send_notifications',
+  'send_sms',
+  'create_announcements',
+  'cleanup_class_subjects',
+  'cleanup_invalid_syllabi',
+]);
+const CONFIRM_TTL_MS = 10 * 60_000;
+const CONFIRM_MESSAGE = 'Please check the steps below and confirm. Nothing has been changed yet.';
+const VOICE_CONFIRM_MESSAGE = 'For safety, deleting data and sending messages need to be confirmed on screen. Please type that request in the chat. Nothing has been changed.';
+
+function needsConfirmation(action: PlannedAction, role: string): boolean {
+  if (!CONFIRM_TOOLS.has(action.tool) || !canUseTool(role, action.tool)) return false;
+  // Cleanup tools only preview unless dryRun is explicitly "false" (mirrors the tool's own check).
+  return !action.tool.startsWith('cleanup_') || action.params?.dryRun === 'false';
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const quoted = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  return `"${text.length > 80 ? `${text.slice(0, 77)}...` : text}"`;
+};
+const audience = (roles: unknown) => {
+  const list = Array.isArray(roles) && roles.length ? roles : ['SUPER_ADMIN', 'TEACHER', 'PARENT'];
+  return list.map(r => `${String(r).toLowerCase().replace(/_/g, ' ')}s`).join(', ');
+};
+
+/** Plain-language description of a risky step, using live data where it helps the user check it. */
+async function describeAction({ tool, params = {} }: PlannedAction): Promise<string> {
+  const list = (key: string): any[] => (Array.isArray(params[key]) ? params[key] : []);
+  switch (tool) {
+    case 'delete_calendar_events': {
+      const where = list('ids').length ? { id: { in: list('ids').map(String) } } : params.eventType ? { eventType: params.eventType } : null;
+      if (!where) return 'Delete calendar events (none selected)';
+      const [count, sample] = await Promise.all([
+        prisma.academicEvent.count({ where }),
+        prisma.academicEvent.findMany({ where, select: { title: true }, orderBy: { startDate: 'asc' }, take: 5 }),
+      ]);
+      const names = sample.map(e => e.title).join(', ');
+      return `Delete ${plural(count, 'calendar event')}${names ? `: ${names}${count > sample.length ? ', ...' : ''}` : ''}`;
+    }
+    case 'delete_topics': {
+      const gradeLevel = Number(params.gradeLevel);
+      const subject = params.subjectId
+        ? await prisma.subject.findUnique({ where: { id: String(params.subjectId) }, select: { id: true, name: true } })
+        : params.subjectCode
+          ? await prisma.subject.findFirst({ where: { code: { equals: String(params.subjectCode), mode: 'insensitive' } }, select: { id: true, name: true } })
+          : null;
+      if (!subject || Number.isNaN(gradeLevel)) return 'Delete syllabus topics (subject or grade not recognised)';
+      const count = await prisma.topic.count({ where: { subjectId: subject.id, gradeLevel } });
+      return `Delete ${plural(count, 'syllabus topic')} and their subtopics for ${subject.name}, grade ${gradeLevel}`;
+    }
+    case 'send_sms': {
+      const recipients = list('recipients');
+      return `Send an SMS to ${plural(recipients.length, 'phone number')}: ${quoted(recipients[0]?.message)}`;
+    }
+    case 'send_notifications': {
+      const notifications = list('notifications');
+      return `Send ${plural(notifications.length, 'notification')}: ${quoted(notifications[0]?.title)}`;
+    }
+    case 'create_announcements':
+      return list('announcements')
+        .map(a => `Post announcement ${quoted(a?.subject || a?.title)} to ${audience(a?.targetRoles)}`)
+        .join('\n') || 'Post announcements';
+    case 'cleanup_class_subjects':
+      return 'Remove subjects from classes where the curriculum says they do not belong';
+    case 'cleanup_invalid_syllabi':
+      return 'Delete syllabus topics created for grades where the subject is not taught';
+    default:
+      return toolFriendlyNames[tool] || tool;
+  }
+}
+
+interface PendingPlan {
+  userId: string;
+  conversationId?: string;
+  userMessage: string;
+  plan: AIPlan;
+  expiresAt: number;
+}
+const pendingPlans = new Map<string, PendingPlan>();
+
+function prunePendingPlans() {
+  const now = Date.now();
+  for (const [token, entry] of pendingPlans) if (entry.expiresAt < now) pendingPlans.delete(token);
+}
+
+/** Remove and return a pending plan if it belongs to this user and has not expired. Single use. */
+function takePendingPlan(token: string, userId: string): PendingPlan | null {
+  const entry = pendingPlans.get(token);
+  if (!entry || entry.userId !== userId) return null;
+  pendingPlans.delete(token);
+  return entry.expiresAt >= Date.now() ? entry : null;
+}
 
 // ==========================
 // BACKGROUND JOB: Bulk syllabus generation progress tracker
@@ -3430,7 +3543,7 @@ class MasterAIService {
     });
 
     // Parse the AI response
-    let plan: { message: string; actions: { tool: string; params: Record<string, any> }[]; suggestions?: string[] };
+    let plan: AIPlan;
 
     try {
       let cleaned = aiResponse.content.trim();
@@ -3452,10 +3565,48 @@ class MasterAIService {
       };
     }
 
+    // ---- GUARD: Hold plans that delete data or message people until the user confirms ----
+    const risky = (plan.actions || []).filter(a => needsConfirmation(a, ctx.role));
+    if (risky.length) {
+      prunePendingPlans();
+      const token = randomUUID();
+      const expiresAt = Date.now() + CONFIRM_TTL_MS;
+      pendingPlans.set(token, { userId: ctx.userId, conversationId: caller.conversationId, userMessage, plan, expiresAt });
+      const items = (await Promise.all(risky.map(describeAction))).flatMap(d => d.split('\n'));
+      const others = plan.actions.length - risky.length;
+      if (others > 0) items.push(`Plus ${plural(others, 'other step')} that only read or add data`);
+      await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, []);
+      return {
+        message: CONFIRM_MESSAGE,
+        actions: [],
+        pendingConfirmation: { token, items, expiresAt: new Date(expiresAt).toISOString() },
+      };
+    }
+
     // ---- Execute actions in parallel with validation & timeout ----
     const results = await this.executeToolActions(plan.actions || [], ctx);
+    return this.finish(userMessage, plan, results, ctx, aiResponse.tokensUsed);
+  }
 
-    // ---- POST-EXECUTION: Smart summarizer (skip extra AI call when possible) ----
+  /** Run a plan the user confirmed. Returns null if the token is unknown, expired, used, or not theirs. */
+  async confirmPending(token: string, caller: MasterAICaller): Promise<{ response: MasterAIResponse; conversationId?: string } | null> {
+    const entry = takePendingPlan(token, caller.userId);
+    if (!entry) return null;
+    // Rebuild context so the caller's current role and scope apply, not the ones at proposal time.
+    const ctx = await this.buildContext(caller);
+    const results = await this.executeToolActions(entry.plan.actions || [], ctx);
+    const response = await this.finish(entry.userMessage, entry.plan, results, ctx, 0);
+    return { response, conversationId: entry.conversationId };
+  }
+
+  /** Discard a pending plan. Returns its conversation ID when one was cancelled. */
+  cancelPending(token: string, userId: string): { conversationId?: string } | null {
+    const entry = takePendingPlan(token, userId);
+    return entry ? { conversationId: entry.conversationId } : null;
+  }
+
+  /** Turn tool results into the final reply and log usage. */
+  private async finish(userMessage: string, plan: AIPlan, results: ExecutionResult[], ctx: ToolContext, tokensUsed: number | undefined): Promise<MasterAIResponse> {
     let finalMessage = plan.message;
     const successResults = results.filter(r => r.success);
     const needsSummarizer = successResults.length > 0 && (
@@ -3469,7 +3620,7 @@ class MasterAIService {
       finalMessage = results.map(r => r.summary).join('. ') + '.';
     }
 
-    await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, results);
+    await this.logUsage(ctx, userMessage, tokensUsed, results);
 
     return {
       message: cleanFinalMessage(finalMessage),
@@ -3658,7 +3809,7 @@ ${styleRules}`;
       maxTokens: 800,
     });
 
-    let plan: { message: string; actions: { tool: string; params: Record<string, any> }[]; suggestions?: string[] };
+    let plan: AIPlan;
 
     try {
       let cleaned = aiResponse.content.trim();
@@ -3686,6 +3837,14 @@ ${styleRules}`;
       return result;
     }
 
+    // Voice has no confirm button, so risky plans are refused rather than held.
+    if ((plan.actions || []).some(a => needsConfirmation(a, ctx.role))) {
+      await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, []);
+      const result: MasterAIResponse = { message: VOICE_CONFIRM_MESSAGE, actions: [], suggestions: [] };
+      onPhase('result', result);
+      return result;
+    }
+
     // Send spoken filler immediately while tools execute
     if (hasActions && plan.message) {
       onPhase('quick', { message: cleanFinalMessage(plan.message) });
@@ -3693,28 +3852,7 @@ ${styleRules}`;
 
     // ---- Phase 2: Execute tools (parallel, validated, with timeout) ----
     const results = await this.executeToolActions(plan.actions || [], ctx);
-
-    // Build accurate summary — skip the extra LLM call for simple cases
-    let finalMessage = plan.message;
-    const successResults = results.filter(r => r.success);
-    const needsSummarizer = successResults.length > 0 && (
-      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
-    );
-    if (needsSummarizer) {
-      try {
-        finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message, ctx);
-      } catch { /* fallback */ }
-    } else if (results.length > 0) {
-      finalMessage = results.map(r => r.summary).join('. ') + '.';
-    }
-
-    await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, results);
-
-    const fullResult: MasterAIResponse = {
-      message: cleanFinalMessage(finalMessage),
-      actions: results,
-      suggestions: plan.suggestions,
-    };
+    const fullResult = await this.finish(userMessage, plan, results, ctx, aiResponse.tokensUsed);
 
     onPhase('result', fullResult);
     return fullResult;
