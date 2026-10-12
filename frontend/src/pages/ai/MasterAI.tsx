@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useAppDialog } from '../../components/ui/AppDialogProvider';
 import api from '../../utils/api';
 import type { ChatMessage, PendingState } from '../../components/ai/masterAITypes';
-import { adminPersona, adminQuickCommands, teacherPersona, teacherQuickCommands, TeacherClass } from '../../components/ai/masterAIPersonas';
+import { adminPersona, adminQuickCommands, bursarPersona, bursarQuickCommands, teacherPersona, teacherQuickCommands, TeacherClass } from '../../components/ai/masterAIPersonas';
 import { ConversationSidebar } from '../../components/ai/ConversationSidebar';
 import { WelcomeScreen } from '../../components/ai/WelcomeScreen';
 import { MessageBubble } from '../../components/ai/MessageBubble';
@@ -64,12 +64,13 @@ const MasterAI = () => {
   const { settings: themeSettings } = useTheme();
   const { user } = useAuth();
   const isTeacher = user?.role === 'TEACHER';
-  const persona = isTeacher ? teacherPersona : adminPersona;
+  const isBursar = user?.role === 'BURSAR';
+  const persona = isTeacher ? teacherPersona : isBursar ? bursarPersona : adminPersona;
   const { activeTerm } = useActiveTerm();
   const [teacherClasses, setTeacherClasses] = useState<TeacherClass[]>([]);
   const [focusClassId, setFocusClassId] = useState('');
   const focusClass = teacherClasses.find(c => c.id === focusClassId);
-  const quickCommands = isTeacher ? teacherQuickCommands(focusClass) : adminQuickCommands;
+  const quickCommands = isTeacher ? teacherQuickCommands(focusClass) : isBursar ? bursarQuickCommands : adminQuickCommands;
 
   useEffect(() => {
     if (!isTeacher || !activeTerm) return;

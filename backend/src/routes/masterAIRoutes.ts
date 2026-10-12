@@ -15,6 +15,7 @@ import {
 } from '../controllers/masterAIController';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware';
 import { aiLimiter } from '../middleware/rateLimiter';
+import { MASTER_AI_ROLES } from '../services/masterAIPolicy';
 
 const router = Router();
 const upload = multer({
@@ -29,9 +30,9 @@ const upload = multer({
   },
 });
 
-// Admins get every tool; teachers get a scoped subset enforced in masterAIService (TEACHER_TOOLS).
+// Admins get every tool; teachers and bursars get the subsets in masterAIPolicy.
 router.use(authenticateToken);
-router.use(authorizeRole(['SUPER_ADMIN', 'TEACHER']));
+router.use(authorizeRole([...MASTER_AI_ROLES]));
 
 // Audio Features
 router.post('/transcribe', aiLimiter, upload.single('audio'), transcribeAudio);

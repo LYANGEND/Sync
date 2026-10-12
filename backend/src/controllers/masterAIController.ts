@@ -154,7 +154,7 @@ export const executeCommand = async (req: AuthRequest, res: Response) => {
     }));
 
     // Execute via Master AI service
-    const result = await masterAIService.processCommand(message, { userId, role: req.user!.role, conversationId: convoId }, conversationHistory, imageBase64);
+    const result = await masterAIService.processCommand(message, { userId, role: req.user!.role, branchId: req.user!.branchId, conversationId: convoId }, conversationHistory, imageBase64);
 
     // Save assistant message (shared service also touches updatedAt)
     await saveReply(convoId, result);
@@ -193,7 +193,7 @@ export const confirmAction = async (req: AuthRequest, res: Response) => {
     const { token } = req.body;
     if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Confirmation token is required' });
 
-    const outcome = await masterAIService.confirmPending(token, { userId, role: req.user!.role });
+    const outcome = await masterAIService.confirmPending(token, { userId, role: req.user!.role, branchId: req.user!.branchId });
     if (!outcome) {
       return res.status(410).json({ error: 'This request has expired or was already handled. Please ask again.' });
     }
@@ -218,7 +218,7 @@ export const cancelAction = async (req: AuthRequest, res: Response) => {
     const { token } = req.body;
     if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Confirmation token is required' });
 
-    const outcome = masterAIService.cancelPending(token, userId);
+    const outcome = await masterAIService.cancelPending(token, userId);
     if (outcome?.conversationId) await convoService.saveMessage(outcome.conversationId, 'assistant', CANCELLED_MESSAGE);
     res.json({ message: CANCELLED_MESSAGE });
   } catch (error: any) {
@@ -328,7 +328,7 @@ export const voiceExecuteV2 = async (req: AuthRequest, res: Response) => {
     // Two-phase streaming execution
     const result = await masterAIService.processCommandStreaming(
       message,
-      { userId, role: req.user!.role },
+      { userId, role: req.user!.role, branchId: req.user!.branchId },
       (phase, data) => {
         if (aborted) return;
         if (phase === 'quick') {

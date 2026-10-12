@@ -17,6 +17,16 @@ export const adminQuickCommands: QuickCommand[] = [
   { icon: CreditCard, label: 'Setup Fee Structure', command: 'Create fee templates: Tuition Fee ([amount] per term), Transport Fee ([amount] per month)' },
   { icon: BarChart3, label: 'School Statistics', command: 'Show me the current school statistics - how many students, teachers, classes, etc.' },
   { icon: Bell, label: 'Create Announcement', command: 'Create a high priority announcement for all teachers and parents: "[message]"' },
+  { icon: GraduationCap, label: 'At-Risk Learners', command: 'Which learners are at high risk of falling behind this term?' },
+  { icon: CheckCircle2, label: 'Term Rollover', command: 'Is the term rollover ready? What is blocking it?' },
+];
+
+export const bursarQuickCommands: QuickCommand[] = [
+  { icon: CreditCard, label: 'Fee Balances', command: 'Show learners with outstanding fee balances this term' },
+  { icon: BarChart3, label: 'Payments This Week', command: 'How much have we collected this week, by payment method?' },
+  { icon: Bell, label: 'Remind Debtors', command: 'Send SMS fee reminders to parents who are more than [30] days overdue' },
+  { icon: Pencil, label: 'Invoice Summary', command: 'Give me a summary of invoices this term, including overdue ones' },
+  { icon: GraduationCap, label: 'Learner Payments', command: 'Show the payment history for [learner name]' },
 ];
 
 /** A class from GET /classes; for teachers, subjects are limited to the ones they teach there. */
@@ -34,6 +44,10 @@ export const teacherQuickCommands = (cls?: TeacherClass): QuickCommand[] => {
   const where = cls ? cls.name : 'my class';
   const subject = cls ? `${subjectSlot(cls)} in ` : '';
   return [
+    { icon: CheckCircle2, label: 'Mark Attendance', command: `Mark attendance for ${where} today. Absent: [names]. Late: [names]` },
+    { icon: Pencil, label: 'Enter Marks', command: `Enter marks for [assessment] in ${where}: [name] [score], [name] [score]` },
+    { icon: BookOpen, label: 'Missing Homework', command: `Who hasn't handed in the latest homework in ${where}?` },
+    { icon: BarChart3, label: 'At-Risk Learners', command: `Which learners in ${where} are at risk of falling behind?` },
     { icon: BookOpen, label: 'Lesson Plans', command: `Generate lesson plans for ${subject}${where} for the next topics not covered yet` },
     { icon: BarChart3, label: 'Class Insights', command: `How is ${where} doing? Who needs extra support?` },
     { icon: CheckCircle2, label: 'Create a Quiz', command: `Create a 10-question quiz with an answer key for ${subject}${where} on the current topic` },
@@ -41,7 +55,6 @@ export const teacherQuickCommands = (cls?: TeacherClass): QuickCommand[] => {
     { icon: MessageSquare, label: 'Report Remarks', command: `Help me write report card remarks for [learner name] in ${where}` },
     { icon: Sparkles, label: 'Teaching Ideas', command: `Give me practical, low-resource activities to teach [topic] to ${where}` },
     { icon: Calendar, label: 'Upcoming Events', command: 'What events are on the school calendar this month?' },
-    { icon: GraduationCap, label: 'My Lesson Plans', command: 'List my recent lesson plans' },
   ];
 };
 
@@ -71,6 +84,8 @@ export const adminPersona: Persona = {
     'Set up academic terms and assessment schedules',
     'Record expenses and manage scholarships',
     'View school statistics and analytics',
+    'Mark attendance, enter marks and find learners at risk',
+    'Send fee reminders and check term rollover readiness',
   ],
   footer: school => `Master AI can look at images, listen to your voice, and manage operations across ${school}. Deleting data and sending messages always ask for your confirmation first.`,
 };
@@ -83,12 +98,31 @@ export const teacherPersona: Persona = {
   intro: 'Ask in plain English. I know your classes and subjects for this term.',
   capabilitiesTitle: () => 'What I can do for you',
   capabilities: [
+    'Mark the register and enter marks by typing or speaking names',
+    'See who has not handed in homework and which learners are at risk',
     'Generate and save lesson plans, assessments and homework for your classes',
     'Show attendance, subject averages and learners who need support',
-    'Draft report card remarks for a learner',
+    'Draft and save report card remarks for a learner',
     'Explain concepts, plan lessons, and write questions with answer keys',
     'Analyse a photo of learners\u2019 work or a textbook page',
     'Check the school calendar and syllabus topics',
   ],
-  footer: () => 'Master AI can look at images and listen to your voice. Lesson plans, assessments and homework it generates are saved to your classes.',
+  footer: () => 'Master AI can look at images and listen to your voice. Attendance and marks are only saved after you confirm them.',
+};
+
+export const bursarPersona: Persona = {
+  title: 'Master AI',
+  subtitle: () => 'Your finance assistant',
+  badge: school => `${school} Finance Assistant`,
+  heading: () => 'What do you need on fees today?',
+  intro: 'Ask in plain English about payments, balances and invoices.',
+  capabilitiesTitle: () => 'What I can do for you',
+  capabilities: [
+    'Show fee balances by class or learner',
+    'Search payments and summarise collections by day, week or month',
+    'Look up a learner\u2019s payment history',
+    'Summarise invoices, including overdue ones',
+    'Send fee reminders to parents who owe',
+  ],
+  footer: () => 'Fee reminders are only sent after you confirm who will receive them.',
 };

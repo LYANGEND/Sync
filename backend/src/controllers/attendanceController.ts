@@ -2,9 +2,9 @@ import { Request, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { createNotification } from '../services/notificationService';
 import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
-import { AcademicScopeError, ensureAcademicClassAccess, ensureStudentsBelongToClass } from '../utils/academicScope';
+import { AcademicScopeError, ensureAcademicClassAccess } from '../utils/academicScope';
+import { notifyParentsOfAttendance, recordClassAttendance } from '../services/academicRecordService';
 import { hasDuplicateValues, hasValidDateRange, isDateWithinRangeByDay } from '../utils/academicValidation';
 import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
 import {
@@ -40,131 +40,9 @@ export const recordAttendance = async (req: Request, res: Response) => {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const classInfo = await ensureAcademicClassAccess(req as AuthRequest, classId, { academicTermId });
-    if (!isDateWithinRangeByDay(date, classInfo.academicTerm.startDate, classInfo.academicTerm.endDate)) {
-      return res.status(400).json({ message: 'Attendance date must fall within the selected academic term' });
-    }
-
-    const attendanceDate = new Date(date);
-    const nextDay = new Date(attendanceDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-
-    const result = await runTermWriteTransaction(academicTermId, 'ACADEMIC_ACTIVITY', async (tx) => {
-      const instructionalDay = await tx.termInstructionalDay.findFirst({
-        where: {
-          academicTermId,
-          isInstructional: true,
-          date: { gte: attendanceDate, lt: nextDay },
-        },
-        select: { id: true },
-      });
-      if (!instructionalDay) {
-        throw new AcademicScopeError(
-          400,
-          'Attendance can only be recorded on an instructional day configured for this term',
-        );
-      }
-
-      await ensureStudentsBelongToClass(
-        classId,
-        academicTermId,
-        records.map((record) => record.studentId),
-        { client: tx },
-      );
-
-      await tx.attendance.deleteMany({
-        where: { classId, date: { gte: attendanceDate, lt: nextDay } },
-      });
-
-      const created = await Promise.all(
-        records.map((record) =>
-          tx.attendance.create({
-            data: {
-              classId,
-              academicTermId,
-              date: attendanceDate,
-              studentId: record.studentId,
-              status: record.status,
-              reason: record.reason || null,
-              lateMinutes: record.status === 'LATE' ? (record.lateMinutes || null) : null,
-              notes: record.notes || null,
-              recordedByUserId: userId,
-            },
-          })
-        )
-      );
-
-      for (const record of records) {
-        if (record.status !== 'ABSENT') continue;
-        const recentAbsences = await tx.attendance.count({
-          where: {
-            studentId: record.studentId,
-            academicTermId,
-            status: 'ABSENT',
-            date: { gte: new Date(attendanceDate.getTime() - 14 * 86400000), lte: attendanceDate },
-          },
-        });
-
-        if (recentAbsences >= 3) {
-          const existingAlert = await tx.attendanceAlert.findFirst({
-            where: {
-              studentId: record.studentId,
-              academicTermId,
-              isResolved: false,
-              type: 'CONSECUTIVE_ABSENCE',
-            },
-          });
-          if (!existingAlert) {
-            await tx.attendanceAlert.create({
-              data: {
-                studentId: record.studentId,
-                academicTermId,
-                type: 'CONSECUTIVE_ABSENCE',
-                message: `Student has been absent ${recentAbsences} times in the last 14 days.`,
-                details: { count: recentAbsences },
-              },
-            });
-          }
-        }
-      }
-
-      return created;
-    });
-
-    res.status(201).json({ message: 'Attendance recorded successfully', count: result.length });
-
-    // Auto-notify parents + create alerts (fire and forget)
-    (async () => {
-      try {
-        const absentOrLate = records.filter(r => r.status === 'ABSENT' || r.status === 'LATE');
-        if (absentOrLate.length === 0) return;
-
-        const students = await prisma.student.findMany({
-          where: { id: { in: absentOrLate.map(r => r.studentId) } },
-          include: { parent: { select: { id: true } } },
-        });
-
-        const classInfo = await prisma.class.findUnique({ where: { id: classId }, select: { name: true } });
-        const className = classInfo?.name || 'their class';
-        const dateStr = attendanceDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-        for (const student of students) {
-          const record = absentOrLate.find(r => r.studentId === student.id);
-          if (!record || !student.parentId) continue;
-
-          const statusLabel = record.status === 'ABSENT' ? 'absent from' : 'late to';
-          const studentName = `${student.firstName} ${student.lastName}`;
-          let msg = `${studentName} was ${statusLabel} ${className} on ${dateStr}.`;
-          if (record.reason) msg += ` Reason: ${record.reason}`;
-          if (record.status === 'LATE' && record.lateMinutes) msg += ` (${record.lateMinutes} min late)`;
-
-          await createNotification(student.parentId, `Attendance Alert: ${studentName}`, msg, 'WARNING');
-        }
-
-      } catch (err) {
-        console.error('Auto attendance notification error:', err);
-      }
-    })();
+    const result = await recordClassAttendance(req as AuthRequest, { classId, academicTermId, date, records });
+    res.status(201).json({ message: 'Attendance recorded successfully', count: result.count });
+    notifyParentsOfAttendance(classId, result.attendanceDate, records);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ errors: error.errors });
     if (error instanceof AcademicScopeError) return res.status(error.status).json({ message: error.message });

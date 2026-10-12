@@ -2417,6 +2417,20 @@ model AIUsageLog {
   @@map("ai_usage_logs")
 }
 
+// Master AI plans that delete data or message people, held until the user confirms (single use).
+model AIPendingAction {
+  id             String   @id // confirmation token
+  userId         String
+  conversationId String?
+  userMessage    String   @db.Text
+  plan           Json
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("ai_pending_actions")
+}
+
 model AIProactiveAlert {
   id       String  @id @default(uuid())
   branchId String?

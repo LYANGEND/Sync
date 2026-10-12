@@ -17,6 +17,7 @@ import {
   StudentPlacementError,
 } from '../services/studentPlacementService';
 import { verifyReportSnapshotIntegrity } from '../utils/reportSnapshotIntegrity';
+import { saveDraftReportRemarks } from '../services/academicRecordService';
 
 type ReportClient = Prisma.TransactionClient | typeof prisma;
 
@@ -523,49 +524,15 @@ export const generateSingleStudentReport = async (
 
 export const updateReportRemarks = async (req: Request, res: Response) => {
   try {
-    const { studentId, termId, classTeacherRemark, principalRemark } = reportRemarksSchema.parse(req.body);
-    await ensureStudentRecordAccess(req as AuthRequest, studentId, { academicTermId: termId });
-    const user = (req as AuthRequest).user;
-    if (principalRemark !== undefined && user?.role !== 'SUPER_ADMIN') {
-      return res.status(403).json({ error: 'Only a super administrator can update the head teacher remark' });
-    }
-
-    const currentReport = await prisma.studentTermReport.findUnique({
-      where: { studentId_termId: { studentId, termId } },
-      select: { status: true },
-    });
-    if (!currentReport) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-    if (currentReport.status !== 'DRAFT') {
-      return res.status(409).json({
-        error: 'Finalized and published report remarks can only change through an approved amendment',
-        code: 'REPORT_LOCKED',
-      });
-    }
-
-    const report = await runTermWriteTransaction(termId, 'FINALIZATION', tx => (
-      tx.studentTermReport.update({
-        where: {
-          studentId_termId: {
-            studentId,
-            termId
-          }
-        },
-        data: {
-          classTeacherRemark,
-          ...(principalRemark !== undefined ? { principalRemark } : {}),
-        }
-      })
-    ));
-
+    const input = reportRemarksSchema.parse(req.body);
+    const report = await saveDraftReportRemarks(req as AuthRequest, input);
     res.json(report);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
     if (error instanceof AcademicScopeError) {
-      return res.status(error.status).json({ error: error.message });
+      return res.status(error.status).json({ error: error.message, ...(error.status === 409 ? { code: 'REPORT_LOCKED' } : {}) });
     }
     if (error instanceof TermLifecycleError) return sendTermLifecycleError(res, error);
     console.error('Update remarks error:', error);

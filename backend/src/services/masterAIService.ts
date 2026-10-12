@@ -15,8 +15,16 @@ import {
   createTerm as createLifecycleTerm,
   getActiveTerm,
   runTermWriteTransaction,
+  TermLifecycleError,
 } from './termLifecycleService';
 import { upsertStudentPlacement } from './studentPlacementService';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { AcademicScopeError } from '../utils/academicScope';
+import { canUseTool, isUnrestrictedRole, matchLearners, needsConfirmation, type PlannedAction, type RosterLearner } from './masterAIPolicy';
+import { notifyParentsOfAttendance, recordClassAttendance, saveAssessmentResults, saveDraftReportRemarks } from './academicRecordService';
+import studentRiskService from './studentRiskService';
+import { segmentDebtors, sendQuickReminders } from './debtCollectionService';
+import type { ReadinessIssue } from './termRolloverReadinessService';
 
 // ==========================================
 // MASTER AI OPS SERVICE
@@ -46,6 +54,7 @@ interface ToolDefinition {
 export interface MasterAICaller {
   userId: string;
   role: string;
+  branchId?: string;
   /** Conversation the request belongs to; stored with plans awaiting confirmation. */
   conversationId?: string;
 }
@@ -60,29 +69,6 @@ interface TeachingScope {
 
 interface ToolContext extends MasterAICaller {
   teaching?: TeachingScope;
-}
-
-// Teachers get read-only reference tools plus content generation scoped to their own classes.
-// Everything else (admin setup, finance, messaging, student records) is SUPER_ADMIN only.
-const TEACHER_TOOLS = new Set([
-  'list_calendar_events',
-  'list_academic_terms',
-  'list_subjects',
-  'list_topics',
-  'list_classes',
-  'list_lesson_plans',
-  'get_lesson_plan_content',
-  'generate_lesson_plans',
-  'generate_assessments',
-  'generate_homework',
-  'get_class_insights',
-  'generate_report_remarks',
-]);
-
-const isUnrestrictedRole = (role: string) => role === 'SUPER_ADMIN';
-
-function canUseTool(role: string, toolName: string): boolean {
-  return isUnrestrictedRole(role) || (role === 'TEACHER' && TEACHER_TOOLS.has(toolName));
 }
 
 /** Class IDs the caller may act on (optionally for one subject). undefined = unrestricted. */
@@ -144,6 +130,171 @@ async function loadTeachingScope(userId: string): Promise<TeachingScope> {
 function lessonPlanScope(ctx: ToolContext): Prisma.LessonPlanWhereInput {
   const allowed = allowedClassIds(ctx);
   return allowed ? { OR: [{ teacherId: ctx.userId }, { classId: { in: allowed } }] } : {};
+}
+
+/** Lets Master AI reuse services that check access from an HTTP request. */
+const scopeRequest = (ctx: ToolContext) =>
+  ({ user: { userId: ctx.userId, role: ctx.role, branchId: ctx.branchId } }) as unknown as AuthRequest;
+
+const todayISO = () => new Date().toISOString().split('T')[0];
+const learnerName = (l: { firstName: string; lastName: string }) => `${l.firstName} ${l.lastName}`;
+
+/** Access and term-lock refusals from shared services become a plain error the summary can explain. */
+function asToolError(err: unknown): { error: string } {
+  if (err instanceof AcademicScopeError || err instanceof TermLifecycleError) return { error: err.message };
+  throw err;
+}
+
+type ScopedClass = { id: string; name: string; gradeLevel: number };
+
+/** The one active-term class the request refers to, limited to the teacher's classes. */
+async function resolveScopedClass(params: { className?: string; classId?: string }, ctx: ToolContext, termId: string): Promise<ScopedClass | { error: string }> {
+  const allowed = allowedClassIds(ctx);
+  if (allowed && params.classId && !allowed.includes(params.classId)) return { error: 'You can only work with classes you teach.' };
+  const candidates = await prisma.class.findMany({
+    where: {
+      academicTermId: termId,
+      ...(allowed && { id: { in: allowed } }),
+      ...(params.classId && { id: params.classId }),
+      ...(params.className && { name: { contains: params.className, mode: 'insensitive' as const } }),
+    },
+    select: { id: true, name: true, gradeLevel: true },
+    take: 10,
+  });
+  if (candidates.length === 0) return { error: allowed ? 'No matching class that you teach this term.' : 'No matching class in the active term.' };
+  if (candidates.length > 1) {
+    const exact = params.className && candidates.find(c => c.name.toLowerCase() === params.className!.toLowerCase());
+    return exact || { error: `Which class? Matches: ${candidates.map(c => c.name).join(', ')}` };
+  }
+  return candidates[0];
+}
+
+/** One active-term learner matching a name or admission number, within the teacher's classes. */
+async function findScopedLearner(query: string, ctx: ToolContext, termId: string) {
+  const allowed = allowedClassIds(ctx);
+  const tokens = String(query).trim().split(/\s+/).filter(Boolean).slice(0, 4);
+  if (tokens.length === 0) return { error: 'Tell me which learner.' };
+  const matches = await prisma.studentTermEnrollment.findMany({
+    where: {
+      academicTermId: termId,
+      status: 'ACTIVE',
+      ...(allowed && { classId: { in: allowed } }),
+      student: {
+        AND: tokens.map(t => ({
+          OR: [
+            { firstName: { contains: t, mode: 'insensitive' as const } },
+            { lastName: { contains: t, mode: 'insensitive' as const } },
+            { admissionNumber: { equals: t, mode: 'insensitive' as const } },
+          ],
+        })),
+      },
+    },
+    select: { studentId: true, student: { select: { firstName: true, lastName: true } }, class: { select: { name: true } } },
+    take: 6,
+  });
+  if (matches.length === 0) return { error: allowed ? `No learner matching "${query}" in your classes this term.` : `No learner matching "${query}" this term.` };
+  if (matches.length > 1) return { error: `Several learners match: ${matches.map(m => `${learnerName(m.student)} (${m.class.name})`).join(', ')}. Which one?` };
+  return matches[0];
+}
+
+async function classRoster(classId: string, termId: string): Promise<RosterLearner[]> {
+  const rows = await prisma.studentTermEnrollment.findMany({
+    where: { classId, academicTermId: termId, status: 'ACTIVE' },
+    select: { student: { select: { id: true, firstName: true, lastName: true, admissionNumber: true } } },
+  });
+  return rows.map(r => r.student).sort((a, b) => learnerName(a).localeCompare(learnerName(b)));
+}
+
+/** Resolve a record_attendance request into full-class records. Used for the confirmation text and the save. */
+async function prepareAttendance(params: Record<string, any>, ctx: ToolContext) {
+  const term = await getActiveTerm();
+  if (!term) return { error: 'No active academic term found.' };
+  const cls = await resolveScopedClass(params, ctx, term.id);
+  if ('error' in cls) return cls;
+  const roster = await classRoster(cls.id, term.id);
+  if (!roster.length) return { error: `${cls.name} has no active learners this term.` };
+
+  const absent = matchLearners(params.absent || [], roster);
+  const late = matchLearners(params.late || [], roster);
+  const lateIds = new Set(late.matched.map(l => l.id));
+  const both = absent.matched.filter(l => lateIds.has(l.id));
+  const problems = [...absent.problems, ...late.problems];
+  if (both.length) problems.push(`${both.map(learnerName).join(', ')} listed as both absent and late`);
+  if (problems.length) return { error: `Attendance was not saved. ${problems.join('. ')}.` };
+
+  const absentIds = new Set(absent.matched.map(l => l.id));
+  const records = roster.map(l => ({
+    studentId: l.id,
+    status: (absentIds.has(l.id) ? 'ABSENT' : lateIds.has(l.id) ? 'LATE' : 'PRESENT') as 'ABSENT' | 'LATE' | 'PRESENT',
+  }));
+  return { cls, termId: term.id, date: params.date || todayISO(), records, absent: absent.matched, late: late.matched };
+}
+
+/** Resolve a record_marks request: one assessment in the teacher's classes and a score per named learner. */
+async function prepareMarks(params: Record<string, any>, ctx: ToolContext) {
+  const term = await getActiveTerm();
+  if (!term) return { error: 'No active academic term found.' };
+  let classId: string | undefined;
+  if (params.className) {
+    const cls = await resolveScopedClass(params, ctx, term.id);
+    if ('error' in cls) return cls;
+    classId = cls.id;
+  }
+  const allowed = allowedClassIds(ctx);
+  const assessments = await prisma.assessment.findMany({
+    where: {
+      termId: term.id,
+      title: { contains: params.assessment, mode: 'insensitive' },
+      ...(classId ? { classId } : allowed && { classId: { in: allowed } }),
+    },
+    select: { id: true, title: true, totalMarks: true, classId: true, subjectId: true, class: { select: { name: true } }, subject: { select: { name: true } } },
+    take: 6,
+  });
+  // A teacher may share a class with other subject teachers; only their own subjects count.
+  const usable = assessments.filter(a => {
+    const forSubject = allowedClassIds(ctx, a.subjectId);
+    return !forSubject || forSubject.includes(a.classId);
+  });
+  if (!usable.length) return { error: `No assessment called "${params.assessment}" in ${classId ? 'that class' : allowed ? 'your classes' : 'the active term'}.` };
+  const exact = usable.filter(a => a.title.toLowerCase() === String(params.assessment).toLowerCase());
+  const picked = exact.length === 1 ? exact : usable;
+  if (picked.length > 1) return { error: `Which assessment? Matches: ${picked.map(a => `${a.title} (${a.subject.name}, ${a.class.name})`).join('; ')}` };
+  const assessment = picked[0];
+
+  const roster = await classRoster(assessment.classId, term.id);
+  const totalMarks = Number(assessment.totalMarks);
+  const problems: string[] = [];
+  const results = new Map<string, { learner: RosterLearner; score: number }>();
+  for (const entry of params.scores as { student: string; score: number }[]) {
+    const { matched, problems: found } = matchLearners([entry.student], roster);
+    if (found.length) { problems.push(...found); continue; }
+    if (entry.score > totalMarks) { problems.push(`${learnerName(matched[0])}'s score ${entry.score} is above the maximum of ${totalMarks}`); continue; }
+    if (results.has(matched[0].id)) { problems.push(`${learnerName(matched[0])} is listed more than once`); continue; }
+    results.set(matched[0].id, { learner: matched[0], score: entry.score });
+  }
+  if (problems.length) return { error: `Marks were not saved. ${problems.join('. ')}.` };
+  return { assessment, totalMarks, results: [...results.values()], rosterSize: roster.length };
+}
+
+/** Debtors a send_fee_reminders request would reach on the chosen channel. */
+async function selectDebtors(params: Record<string, any>) {
+  const term = await getActiveTerm();
+  if (!term) return { error: 'No active academic term found.' };
+  const channel: 'SMS' | 'EMAIL' | 'WHATSAPP' = params.channel || 'SMS';
+  const debtors = (await segmentDebtors({
+    academicTermId: term.id,
+    minAmount: params.minAmount,
+    minDaysOverdue: params.minDaysOverdue,
+    gradeLevels: params.gradeLevel === undefined ? undefined : [params.gradeLevel],
+  })).filter(d => !params.segment || d.segment === params.segment);
+  const reachable = debtors.filter(d => (channel === 'EMAIL' ? d.parentEmail : d.parentPhone));
+  return {
+    termId: term.id,
+    channel,
+    recipients: reachable,
+    unreachable: debtors.length - reachable.length,
+    totalOwed: Math.round(reachable.reduce((s, d) => s + d.amountOwed, 0) * 100) / 100,
+  };
 }
 
 /** Resolve the active-term class for a content-generation tool, honouring teacher scope. */
@@ -280,7 +431,6 @@ interface MasterAIResponse {
   pendingConfirmation?: PendingConfirmation;
 }
 
-type PlannedAction = { tool: string; params: Record<string, any> };
 type AIPlan = { message: string; actions: PlannedAction[]; suggestions?: string[] };
 
 // ==========================
@@ -289,29 +439,14 @@ type AIPlan = { message: string; actions: PlannedAction[]; suggestions?: string[
 const MAX_ACTIONS_PER_REQUEST = 12;
 const TOOL_TIMEOUT_MS = 60_000; // 60s per tool
 const TOOL_TIMEOUT_LONG_MS = 120_000; // 120s for AI-generation tools
-const LONG_RUNNING_TOOLS = new Set(['generate_syllabus', 'generate_lesson_plans', 'generate_assessments', 'generate_homework']);
+const LONG_RUNNING_TOOLS = new Set(['generate_syllabus', 'generate_lesson_plans', 'generate_assessments', 'generate_homework', 'get_at_risk_learners']);
 
 // ==========================
-// CONFIRMATION: tools that delete data or reach other people run only after the user confirms
+// CONFIRMATION: risky steps (see CONFIRM_TOOLS in masterAIPolicy) run only after the user confirms
 // ==========================
-const CONFIRM_TOOLS = new Set([
-  'delete_calendar_events',
-  'delete_topics',
-  'send_notifications',
-  'send_sms',
-  'create_announcements',
-  'cleanup_class_subjects',
-  'cleanup_invalid_syllabi',
-]);
 const CONFIRM_TTL_MS = 10 * 60_000;
 const CONFIRM_MESSAGE = 'Please check the steps below and confirm. Nothing has been changed yet.';
-const VOICE_CONFIRM_MESSAGE = 'For safety, deleting data and sending messages need to be confirmed on screen. Please type that request in the chat. Nothing has been changed.';
-
-function needsConfirmation(action: PlannedAction, role: string): boolean {
-  if (!CONFIRM_TOOLS.has(action.tool) || !canUseTool(role, action.tool)) return false;
-  // Cleanup tools only preview unless dryRun is explicitly "false" (mirrors the tool's own check).
-  return !action.tool.startsWith('cleanup_') || action.params?.dryRun === 'false';
-}
+const VOICE_CONFIRM_MESSAGE = 'For safety, saving records, deleting data and sending messages need to be confirmed on screen. Please type that request in the chat. Nothing has been changed.';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const quoted = (value: unknown) => {
@@ -324,7 +459,7 @@ const audience = (roles: unknown) => {
 };
 
 /** Plain-language description of a risky step, using live data where it helps the user check it. */
-async function describeAction({ tool, params = {} }: PlannedAction): Promise<string> {
+async function describeAction({ tool, params = {} }: PlannedAction, ctx: ToolContext): Promise<string> {
   const list = (key: string): any[] => (Array.isArray(params[key]) ? params[key] : []);
   switch (tool) {
     case 'delete_calendar_events': {
@@ -364,6 +499,29 @@ async function describeAction({ tool, params = {} }: PlannedAction): Promise<str
       return 'Remove subjects from classes where the curriculum says they do not belong';
     case 'cleanup_invalid_syllabi':
       return 'Delete syllabus topics created for grades where the subject is not taught';
+    case 'record_attendance': {
+      const prepared = await prepareAttendance(params, ctx);
+      if ('error' in prepared) return `Mark attendance: ${prepared.error}`;
+      const names = (list: RosterLearner[]) => (list.length ? list.map(learnerName).join(', ') : 'none');
+      return [
+        `Replace ${prepared.cls.name}'s attendance for ${prepared.date} and notify parents of absent and late learners`,
+        `Absent: ${names(prepared.absent)}`,
+        `Late: ${names(prepared.late)}`,
+        `Present: ${prepared.records.length - prepared.absent.length - prepared.late.length} other learners`,
+      ].join('\n');
+    }
+    case 'record_marks': {
+      const prepared = await prepareMarks(params, ctx);
+      if ('error' in prepared) return `Enter marks: ${prepared.error}`;
+      const { assessment, totalMarks, results, rosterSize } = prepared;
+      const shown = results.slice(0, 8).map(r => `${learnerName(r.learner)} ${r.score}`).join(', ');
+      return `Save ${plural(results.length, 'mark')} out of ${totalMarks} for ${assessment.title} (${assessment.subject.name}, ${assessment.class.name}, ${rosterSize} learners): ${shown}${results.length > 8 ? ', ...' : ''}`;
+    }
+    case 'send_fee_reminders': {
+      const selected = await selectDebtors(params);
+      if ('error' in selected) return `Send fee reminders: ${selected.error}`;
+      return `Send ${selected.channel} fee reminders to the parents of ${plural(selected.recipients.length, 'learner')} owing K${selected.totalOwed.toLocaleString()} in total`;
+    }
     default:
       return toolFriendlyNames[tool] || tool;
   }
@@ -376,19 +534,38 @@ interface PendingPlan {
   plan: AIPlan;
   expiresAt: number;
 }
-const pendingPlans = new Map<string, PendingPlan>();
 
-function prunePendingPlans() {
-  const now = Date.now();
-  for (const [token, entry] of pendingPlans) if (entry.expiresAt < now) pendingPlans.delete(token);
+/** Hold a plan until the user confirms. Stored in the database so it survives restarts and works across instances. */
+async function storePendingPlan(entry: PendingPlan): Promise<string> {
+  const token = randomUUID();
+  await prisma.aIPendingAction.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  await prisma.aIPendingAction.create({
+    data: {
+      id: token,
+      userId: entry.userId,
+      conversationId: entry.conversationId ?? null,
+      userMessage: entry.userMessage,
+      plan: entry.plan as unknown as Prisma.InputJsonValue,
+      expiresAt: new Date(entry.expiresAt),
+    },
+  });
+  return token;
 }
 
 /** Remove and return a pending plan if it belongs to this user and has not expired. Single use. */
-function takePendingPlan(token: string, userId: string): PendingPlan | null {
-  const entry = pendingPlans.get(token);
-  if (!entry || entry.userId !== userId) return null;
-  pendingPlans.delete(token);
-  return entry.expiresAt >= Date.now() ? entry : null;
+async function takePendingPlan(token: string, userId: string): Promise<PendingPlan | null> {
+  const row = await prisma.aIPendingAction.findFirst({ where: { id: token, userId } });
+  if (!row) return null;
+  // deleteMany's count makes the take atomic: only one concurrent confirm wins.
+  const { count } = await prisma.aIPendingAction.deleteMany({ where: { id: token, userId } });
+  if (count !== 1 || row.expiresAt.getTime() < Date.now()) return null;
+  return {
+    userId: row.userId,
+    conversationId: row.conversationId ?? undefined,
+    userMessage: row.userMessage,
+    plan: row.plan as unknown as AIPlan,
+    expiresAt: row.expiresAt.getTime(),
+  };
 }
 
 // ==========================
@@ -518,6 +695,10 @@ const contentGenerationSchema = z.object({
   maxTopics: z.coerce.number().int().min(1).max(10).optional(),
 });
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const paymentStatus = z.enum(['PENDING', 'COMPLETED', 'FAILED', 'VOIDED']);
+const boolString = z.preprocess(v => (typeof v === 'boolean' ? String(v) : v), z.enum(['true', 'false']));
+
 const toolParamSchemas: Record<string, z.ZodSchema> = {
   add_calendar_events: z.object({
     events: z.array(z.object({
@@ -644,6 +825,89 @@ const toolParamSchemas: Record<string, z.ZodSchema> = {
     classId: z.string().max(64).optional(),
   }),
   generate_report_remarks: z.object({ student: z.string().min(1).max(100) }),
+  save_report_remarks: z.object({
+    student: z.string().min(1).max(100),
+    classTeacherRemark: z.string().min(1).max(2000).optional(),
+    principalRemark: z.string().min(1).max(2000).optional(),
+  }).refine(p => p.classTeacherRemark || p.principalRemark, { message: 'A remark is required' }),
+  record_attendance: z.object({
+    className: z.string().max(100).optional(),
+    classId: z.string().max(64).optional(),
+    date: isoDate.optional(),
+    absent: z.array(z.string().min(1).max(100)).max(100).optional(),
+    late: z.array(z.string().min(1).max(100)).max(100).optional(),
+  }),
+  record_marks: z.object({
+    assessment: z.string().min(1).max(200),
+    className: z.string().max(100).optional(),
+    scores: z.array(z.object({
+      student: z.string().min(1).max(100),
+      score: z.coerce.number().min(0),
+    })).min(1).max(200),
+  }),
+  get_homework_status: z.object({
+    className: z.string().max(100).optional(),
+    assessment: z.string().max(200).optional(),
+  }),
+  get_at_risk_learners: z.object({
+    className: z.string().max(100).optional(),
+    minLevel: z.enum(['MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  }),
+  // Finance tools (admin and bursar)
+  list_academic_terms: z.object({}),
+  list_fee_templates: z.object({}),
+  search_payments: z.object({
+    status: paymentStatus.optional(),
+    method: z.enum(['CASH', 'MOBILE_MONEY', 'BANK_DEPOSIT']).optional(),
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    studentQuery: z.string().max(100).optional(),
+    minAmount: z.coerce.number().min(0).optional(),
+    maxAmount: z.coerce.number().min(0).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  }),
+  get_payment_analytics: z.object({
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    groupBy: z.enum(['day', 'week', 'month']).optional(),
+  }),
+  get_student_payment_history: z.object({
+    studentQuery: z.string().min(1).max(100),
+    status: paymentStatus.optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  }),
+  get_student_fee_balances: z.object({
+    academicTermId: z.string().min(1).max(64),
+    classId: z.string().max(64).optional(),
+    className: z.string().max(100).optional(),
+    onlyWithBalance: boolString.optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  }),
+  get_invoice_summary: z.object({
+    academicTermId: z.string().min(1).max(64),
+    status: z.enum(['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED', 'CREDITED']).optional(),
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    studentQuery: z.string().max(100).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  }),
+  send_fee_reminders: z.object({
+    segment: z.enum(['WILL_PAY', 'NEEDS_NUDGE', 'AT_RISK', 'HARDSHIP']).optional(),
+    minDaysOverdue: z.coerce.number().int().min(0).optional(),
+    minAmount: z.coerce.number().min(0).optional(),
+    gradeLevel: z.coerce.number().int().min(-3).max(12).optional(),
+    channel: z.enum(['SMS', 'EMAIL', 'WHATSAPP']).optional(),
+  }),
+  get_term_rollover_status: z.object({}),
+  assign_subjects_to_classes: z.object({
+    assignAll: boolString.optional(),
+    assignments: z.array(z.object({
+      className: z.string().max(100).optional(),
+      classId: z.string().max(64).optional(),
+      subjectCodes: z.array(z.string().max(20)).max(30).optional(),
+      subjectIds: z.array(z.string().max(64)).max(30).optional(),
+    })).max(100).optional(),
+  }),
 };
 
 function validateToolParams(toolName: string, params: Record<string, any>): { valid: boolean; error?: string; sanitized: Record<string, any> } {
@@ -682,12 +946,12 @@ const _promptCache = new Map<string, { prompt: string; builtAt: number }>();
 const PROMPT_CACHE_TTL = 60_000; // 1 minute
 
 function getCachedSystemPrompt(role: string): string {
-  const key = isUnrestrictedRole(role) ? 'admin' : 'teacher';
+  const key = isUnrestrictedRole(role) ? 'admin' : role === 'BURSAR' ? 'bursar' : 'teacher';
   const cached = _promptCache.get(key);
   const now = Date.now();
   if (cached && now - cached.builtAt < PROMPT_CACHE_TTL) return cached.prompt;
   const toolDescriptions = buildToolDescriptions(role);
-  const prompt = key === 'admin' ? buildSystemPrompt(toolDescriptions) : buildTeacherSystemPrompt(toolDescriptions);
+  const prompt = key === 'teacher' ? buildTeacherSystemPrompt(toolDescriptions) : buildSystemPrompt(toolDescriptions, role);
   _promptCache.set(key, { prompt, builtAt: now });
   return prompt;
 }
@@ -1131,7 +1395,18 @@ const tools: ToolDefinition[] = [
           // Resolve subjects
           const subjectIds: string[] = [];
           if (a.subjectIds?.length) {
-            subjectIds.push(...a.subjectIds);
+            // IDs come from model output: only connect subjects that exist and fit the class's grade.
+            const requested: string[] = [...new Set<string>(a.subjectIds.map(String))];
+            const found = await prisma.subject.findMany({ where: { id: { in: requested } }, select: { id: true, code: true } });
+            const foundIds = new Set(found.map(s => s.id));
+            for (const id of requested) if (!foundIds.has(id)) errors.push(`Subject ID "${id}" not found`);
+            for (const sub of found) {
+              if (!isSubjectValidForGrade(sub.code, cls.gradeLevel)) {
+                skippedCurriculum.push(`${cls.name}: ${sub.code} not in curriculum for Grade ${cls.gradeLevel}`);
+                continue;
+              }
+              subjectIds.push(sub.id);
+            }
           }
           if (a.subjectCodes?.length) {
             for (const code of a.subjectCodes) {
@@ -2217,21 +2492,8 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
     execute: async (params, _userId, ctx) => {
       const term = await getActiveTerm();
       if (!term) return { error: 'No active academic term found.' };
-      const allowed = allowedClassIds(ctx);
-      const candidates = await prisma.class.findMany({
-        where: {
-          academicTermId: term.id,
-          ...(allowed && { id: { in: allowed } }),
-          ...(params.classId && { id: params.classId }),
-          ...(params.className && { name: { contains: params.className, mode: 'insensitive' as const } }),
-        },
-        select: { id: true, name: true, gradeLevel: true },
-        take: 10,
-      });
-      if (allowed && params.classId && !allowed.includes(params.classId)) return { error: 'You can only view insights for classes you teach.' };
-      if (candidates.length === 0) return { error: allowed ? 'No matching class that you teach this term.' : 'No matching class in the active term.' };
-      if (candidates.length > 1) return { error: `Which class? Matches: ${candidates.map(c => c.name).join(', ')}` };
-      const cls = candidates[0];
+      const cls = await resolveScopedClass(params, ctx, term.id);
+      if ('error' in cls) return cls;
 
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
       const [enrolments, attendance, termResults, plans] = await Promise.all([
@@ -2290,39 +2552,17 @@ Requirements: 6-12 topics, 2-5 subtopics each, Zambian CDC curriculum, duration 
 
   {
     name: 'generate_report_remarks',
-    description: 'Draft report card remarks (class teacher and principal) for ONE learner in the active term, based on their term results and attendance. Returns text for the teacher to review; nothing is saved.',
+    description: 'Draft report card remarks (class teacher and principal) for ONE learner in the active term, based on their term results and attendance. Returns text for the teacher to review; nothing is saved (use save_report_remarks after approval).',
     parameters: [
       { name: 'student', type: 'string', description: 'Learner name or admission number', required: true },
     ],
     execute: async (params, _userId, ctx) => {
       const term = await getActiveTerm();
       if (!term) return { error: 'No active academic term found.' };
-      const allowed = allowedClassIds(ctx);
-      const tokens = String(params.student).trim().split(/\s+/).filter(Boolean).slice(0, 4);
-      if (tokens.length === 0) return { error: 'Tell me which learner.' };
+      const match = await findScopedLearner(params.student, ctx, term.id);
+      if ('error' in match) return match;
 
-      const matches = await prisma.studentTermEnrollment.findMany({
-        where: {
-          academicTermId: term.id,
-          status: 'ACTIVE',
-          ...(allowed && { classId: { in: allowed } }),
-          student: {
-            AND: tokens.map(t => ({
-              OR: [
-                { firstName: { contains: t, mode: 'insensitive' as const } },
-                { lastName: { contains: t, mode: 'insensitive' as const } },
-                { admissionNumber: { equals: t, mode: 'insensitive' as const } },
-              ],
-            })),
-          },
-        },
-        select: { studentId: true, student: { select: { firstName: true, lastName: true } }, class: { select: { name: true } } },
-        take: 6,
-      });
-      if (matches.length === 0) return { error: allowed ? `No learner matching "${params.student}" in your classes this term.` : `No learner matching "${params.student}" this term.` };
-      if (matches.length > 1) return { error: `Several learners match: ${matches.map(m => `${m.student.firstName} ${m.student.lastName} (${m.class.name})`).join(', ')}. Which one?` };
-
-      const { studentId, student, class: cls } = matches[0];
+      const { studentId, student, class: cls } = match;
       const [results, attendance] = await Promise.all([
         prisma.termResult.findMany({ where: { studentId, termId: term.id }, select: { totalScore: true, grade: true, subject: { select: { name: true } } } }),
         prisma.attendance.groupBy({ by: ['status'], where: { studentId, academicTermId: term.id }, _count: { _all: true } }),
@@ -2356,6 +2596,207 @@ Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`,
         attendanceRate,
         classTeacherRemark: remarks.classTeacherRemark,
         principalRemark: remarks.principalRemark,
+      };
+    },
+  },
+
+  {
+    name: 'save_report_remarks',
+    description: 'Save remarks to ONE learner\'s draft report card for the active term. Only use after the teacher has approved the exact wording. Finalised reports cannot be changed here.',
+    parameters: [
+      { name: 'student', type: 'string', description: 'Learner name or admission number', required: true },
+      { name: 'classTeacherRemark', type: 'string', description: 'Class teacher remark, exactly as approved' },
+      { name: 'principalRemark', type: 'string', description: 'Head teacher remark (administrators only)' },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found.' };
+      if (params.principalRemark !== undefined && !isUnrestrictedRole(ctx.role)) {
+        return { error: 'Only an administrator can save the head teacher remark.' };
+      }
+      const match = await findScopedLearner(params.student, ctx, term.id);
+      if ('error' in match) return match;
+      try {
+        await saveDraftReportRemarks(scopeRequest(ctx), {
+          studentId: match.studentId,
+          termId: term.id,
+          classTeacherRemark: params.classTeacherRemark,
+          principalRemark: params.principalRemark,
+        });
+      } catch (err) {
+        return asToolError(err);
+      }
+      const name = learnerName(match.student);
+      return { student: name, class: match.class.name, saved: true, summary: `Saved report remarks for ${name}` };
+    },
+  },
+
+  // ===================== DAILY CLASS WORK =====================
+  {
+    name: 'record_attendance',
+    description: 'Mark a class register for one day. List only the absent and late learners; everyone else in the class is marked present. Replaces any attendance already saved for that class and day, and notifies parents of absent and late learners. The teacher confirms on screen before it is saved.',
+    parameters: [
+      { name: 'className', type: 'string', description: 'Class name (e.g. "Grade 5A"). Optional for teachers with a single class.' },
+      { name: 'date', type: 'string', description: 'Date (YYYY-MM-DD). Defaults to today.' },
+      { name: 'absent', type: 'array', description: 'Names or admission numbers of absent learners' },
+      { name: 'late', type: 'array', description: 'Names or admission numbers of late learners' },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const prepared = await prepareAttendance(params, ctx);
+      if ('error' in prepared) return prepared;
+      const { cls, termId, date, records, absent, late } = prepared;
+      try {
+        const result = await recordClassAttendance(scopeRequest(ctx), { classId: cls.id, academicTermId: termId, date, records });
+        notifyParentsOfAttendance(cls.id, result.attendanceDate, records);
+        return {
+          class: cls.name,
+          date,
+          present: records.length - absent.length - late.length,
+          absent: absent.map(learnerName),
+          late: late.map(learnerName),
+          summary: `Saved attendance for ${plural(result.count, 'learner')} in ${cls.name} on ${date}`,
+        };
+      } catch (err) {
+        return asToolError(err);
+      }
+    },
+  },
+
+  {
+    name: 'record_marks',
+    description: 'Enter marks for an existing assessment, homework or test in the active term. Only the learners listed are updated. The teacher confirms on screen before marks are saved.',
+    parameters: [
+      { name: 'assessment', type: 'string', description: 'Assessment title (or part of it)', required: true },
+      { name: 'className', type: 'string', description: 'Class name, to tell apart assessments with the same title' },
+      { name: 'scores', type: 'array', description: 'Array of { student (name or admission number), score (number) }', required: true },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const prepared = await prepareMarks(params, ctx);
+      if ('error' in prepared) return prepared;
+      const { assessment, totalMarks, results } = prepared;
+      try {
+        const saved = await saveAssessmentResults(scopeRequest(ctx), [{
+          assessmentId: assessment.id,
+          results: results.map(r => ({ studentId: r.learner.id, score: r.score })),
+        }]);
+        return {
+          assessment: assessment.title,
+          subject: assessment.subject.name,
+          class: assessment.class.name,
+          outOf: totalMarks,
+          summary: `Saved ${plural(saved.resultCount, 'mark')} for ${assessment.title}`,
+        };
+      } catch (err) {
+        return asToolError(err);
+      }
+    },
+  },
+
+  {
+    name: 'get_homework_status',
+    description: 'Show which learners have not handed in recent homework (up to the 3 latest homework tasks in the active term).',
+    parameters: [
+      { name: 'className', type: 'string', description: 'Class name. Optional.' },
+      { name: 'assessment', type: 'string', description: 'Homework title (or part of it). Optional; defaults to the latest homework.' },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found.' };
+      let classId: string | undefined;
+      if (params.className) {
+        const cls = await resolveScopedClass(params, ctx, term.id);
+        if ('error' in cls) return cls;
+        classId = cls.id;
+      }
+      const allowed = allowedClassIds(ctx);
+      const candidates = await prisma.assessment.findMany({
+        where: {
+          termId: term.id,
+          type: 'HOMEWORK',
+          ...(params.assessment && { title: { contains: params.assessment, mode: 'insensitive' as const } }),
+          ...(classId ? { classId } : allowed && { classId: { in: allowed } }),
+        },
+        orderBy: { date: 'desc' },
+        take: 10,
+        select: {
+          title: true, dueDate: true, classId: true, subjectId: true,
+          class: { select: { name: true } },
+          subject: { select: { name: true } },
+          homeworkSubmissions: { where: { status: { in: ['SUBMITTED', 'LATE_SUBMITTED', 'GRADED', 'RETURNED'] } }, select: { studentId: true } },
+        },
+      });
+      // Subject teachers only see homework for the subjects they teach.
+      const homework = candidates.filter(h => {
+        const forSubject = allowedClassIds(ctx, h.subjectId);
+        return !forSubject || forSubject.includes(h.classId);
+      }).slice(0, 3);
+      if (!homework.length) return { error: 'No matching homework found in the active term.' };
+
+      const rosters = new Map<string, RosterLearner[]>();
+      const items = [];
+      for (const hw of homework) {
+        if (!rosters.has(hw.classId)) rosters.set(hw.classId, await classRoster(hw.classId, term.id));
+        const roster = rosters.get(hw.classId)!;
+        const handedIn = new Set(hw.homeworkSubmissions.map(s => s.studentId));
+        const missing = roster.filter(l => !handedIn.has(l.id)).map(learnerName);
+        items.push({
+          homework: hw.title,
+          subject: hw.subject.name,
+          class: hw.class.name,
+          dueDate: hw.dueDate ? hw.dueDate.toISOString().split('T')[0] : null,
+          handedIn: roster.length - missing.length,
+          classSize: roster.length,
+          notHandedIn: missing,
+        });
+      }
+      return { homework: items };
+    },
+  },
+
+  {
+    name: 'get_at_risk_learners',
+    description: 'List learners at risk of falling behind, using marks, attendance and recent trends, with the main concerns and suggested next steps. Teachers must name a class unless they have only one.',
+    parameters: [
+      { name: 'className', type: 'string', description: 'Class name. Optional for administrators (whole school) and teachers with one class.' },
+      { name: 'minLevel', type: 'string', description: 'Lowest risk level to include (default MEDIUM)', enum: ['MEDIUM', 'HIGH', 'CRITICAL'] },
+    ],
+    execute: async (params, _userId, ctx) => {
+      const term = await getActiveTerm();
+      if (!term) return { error: 'No active academic term found.' };
+      const levels = ['MEDIUM', 'HIGH', 'CRITICAL'];
+      const minIndex = levels.indexOf(params.minLevel || 'MEDIUM');
+      // Fee status is not a teacher's business, so teachers do not see the financial factor.
+      const showFinance = ctx.role !== 'TEACHER';
+      const concerns = (factors: any) => Object.entries(factors || {})
+        .filter(([key, f]: [string, any]) => (showFinance || key !== 'financial') && Number(f?.score) >= 50)
+        .map(([key, f]: [string, any]) => `${key}: ${f.details}`);
+      const nextSteps = (recs: unknown) => (Array.isArray(recs) ? recs : [])
+        .filter((r: string) => showFinance || !/fee|payment|financ/i.test(r))
+        .slice(0, 3);
+
+      if (params.className || ctx.teaching) {
+        const cls = await resolveScopedClass(params, ctx, term.id);
+        if ('error' in cls) return cls;
+        const assessed = await studentRiskService.assessClass(cls.id, term.id);
+        const learners = assessed
+          .filter(a => levels.indexOf(a.riskLevel) >= minIndex)
+          .map(a => ({ name: a.studentName, class: cls.name, riskLevel: a.riskLevel, riskScore: a.riskScore, concerns: concerns(a.factors), nextSteps: nextSteps(a.recommendations) }));
+        return { class: cls.name, term: term.name, learnersChecked: assessed.length, atRisk: learners.length, learners: learners.slice(0, 25) };
+      }
+
+      const rows = await studentRiskService.getAtRiskStudents(term.id, levels[minIndex]);
+      return {
+        term: term.name,
+        atRisk: rows.length,
+        note: rows.length ? undefined : 'No saved risk checks match. Name a class to run a fresh check.',
+        learners: rows.slice(0, 25).map(r => ({
+          name: r.student ? learnerName(r.student) : 'Unknown learner',
+          class: r.student?.class?.name ?? 'Not placed',
+          riskLevel: r.riskLevel,
+          riskScore: r.riskScore,
+          concerns: concerns(r.factors),
+          nextSteps: nextSteps(r.recommendations),
+        })),
       };
     },
   },
@@ -3270,6 +3711,80 @@ Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`,
       };
     },
   },
+
+  {
+    name: 'send_fee_reminders',
+    description: 'Send fee reminders to parents of learners who owe fees this term. Filter by segment, days overdue, amount or grade. The user confirms on screen before anything is sent.',
+    parameters: [
+      { name: 'segment', type: 'string', description: 'Debtor group (optional)', enum: ['WILL_PAY', 'NEEDS_NUDGE', 'AT_RISK', 'HARDSHIP'] },
+      { name: 'minDaysOverdue', type: 'number', description: 'Only learners at least this many days overdue' },
+      { name: 'minAmount', type: 'number', description: 'Only learners owing at least this amount' },
+      { name: 'gradeLevel', type: 'number', description: 'Only this grade' },
+      { name: 'channel', type: 'string', description: 'How to send (default SMS)', enum: ['SMS', 'EMAIL', 'WHATSAPP'] },
+    ],
+    execute: async (params, userId) => {
+      const selected = await selectDebtors(params);
+      if ('error' in selected) return selected;
+      const { termId, channel, recipients, unreachable, totalOwed } = selected;
+      // sendQuickReminders treats an empty list as "every debtor", so never call it without recipients.
+      if (!recipients.length) return { error: 'No parents with outstanding fees match, so no reminders were sent.' };
+      void sendQuickReminders({
+        academicTermId: termId,
+        studentIds: recipients.map(d => d.studentId),
+        channels: [channel],
+        sentById: userId,
+      }).catch(err => console.error('[MasterAI] Fee reminders failed:', err));
+      return {
+        recipients: recipients.length,
+        channel,
+        totalOwed,
+        skippedNoContact: unreachable,
+        summary: `Sending ${channel} fee reminders to ${plural(recipients.length, 'parent')}`,
+      };
+    },
+  },
+
+  {
+    name: 'get_term_rollover_status',
+    description: 'Show the latest end-of-term rollover: its status and what is blocking it, from the last readiness check.',
+    parameters: [],
+    execute: async () => {
+      const rollover = await prisma.termRollover.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true, status: true, transitionType: true, preflightGeneratedAt: true, preflightSnapshot: true, failureMessage: true,
+          sourceTerm: { select: { name: true } },
+          targetTerm: { select: { name: true } },
+        },
+      });
+      if (!rollover) return { error: 'No term rollover has been started yet. Start one from Academics, Rollover Readiness.' };
+
+      const snapshot = rollover.preflightSnapshot as { summary?: { blockerCount: number; warningCount: number }; issues?: ReadinessIssue[] } | null;
+      const groups = new Map<string, { severity: string; count: number; example: string }>();
+      for (const issue of snapshot?.issues ?? []) {
+        const affected = issue.affectedRecords?.length || 1;
+        const group = groups.get(issue.code);
+        if (group) group.count += affected;
+        else groups.set(issue.code, { severity: issue.severity, count: affected, example: issue.message });
+      }
+      const issues = [...groups.values()]
+        .sort((a, b) => (a.severity === b.severity ? b.count - a.count : a.severity === 'BLOCKER' ? -1 : 1))
+        .slice(0, 10);
+
+      return {
+        from: rollover.sourceTerm.name,
+        to: rollover.targetTerm.name,
+        status: rollover.status,
+        transitionType: rollover.transitionType,
+        lastChecked: rollover.preflightGeneratedAt?.toISOString() ?? 'Not checked yet',
+        blockers: snapshot?.summary?.blockerCount ?? null,
+        warnings: snapshot?.summary?.warningCount ?? null,
+        issues,
+        failure: rollover.failureMessage ?? undefined,
+        link: `/academics?tab=rollover-readiness&rolloverId=${rollover.id}`,
+      };
+    },
+  },
 ];
 
 // ==========================
@@ -3332,15 +3847,25 @@ const toolFriendlyNames: Record<string, string> = {
   get_invoice_summary: 'Invoice Summary',
   get_class_insights: 'Class Insights',
   generate_report_remarks: 'Report Remarks',
+  save_report_remarks: 'Report Remarks',
+  record_attendance: 'Attendance',
+  record_marks: 'Marks',
+  get_homework_status: 'Homework Status',
+  get_at_risk_learners: 'At-Risk Learners',
+  send_fee_reminders: 'Fee Reminders',
+  get_term_rollover_status: 'Term Rollover',
 };
 
 // ==========================
 // SYSTEM PROMPT
 // ==========================
-function buildSystemPrompt(toolDescriptions: string): string {
+function buildSystemPrompt(toolDescriptions: string, role: string): string {
   const currentYear = new Date().getFullYear();
+  const capabilities = role === 'BURSAR'
+    ? 'You are working for the bursar. You can look up fees, payments, invoices and balances, and send fee reminders to parents of learners who owe fees. Anything else (academics, students, classes, announcements, school setup) needs an administrator; say so if asked.'
+    : 'You can perform real actions across ALL modules: academic calendar, students, classes, subjects, subject-class assignments, syllabus/topics, fees, payment transactions, invoices, financial analytics, assessments, attendance, marks, at-risk learners, fee reminders, term rollover, timetables, announcements, expenses, and more.';
   return `You are Sync Master AI — the intelligent operations assistant for a school management system called Sync.
-You can perform real actions across ALL modules: academic calendar, students, classes, subjects, subject-class assignments, syllabus/topics, fees, payment transactions, invoices, financial analytics, assessments, timetables, announcements, expenses, and more.
+${capabilities}
 
 CURRENT DATE: ${new Date().toISOString().split('T')[0]}
 CURRENT YEAR: ${currentYear}
@@ -3419,11 +3944,14 @@ ${toolDescriptions}
 ## SCOPE
 - You can only act on the teacher's own classes (listed below). Generation tools pick the right class automatically.
 - You cannot manage fees, payments, students' personal records, users, announcements, SMS, timetables or school setup. If asked, say an administrator must do it.
-- Generated lesson plans, assessments and homework are SAVED to the teacher's classes. Assessments and homework are saved with 0% weight; tell the teacher to review them and set the weight in Assessments before they count. Report remarks are drafts and are not saved.
+- Generated lesson plans, assessments and homework are SAVED to the teacher's classes. Assessments and homework are saved with 0% weight; tell the teacher to review them and set the weight in Assessments before they count.
+- generate_report_remarks only drafts remarks. Use save_report_remarks to save a remark to the learner's draft report, and only after the teacher has approved the wording.
+- record_attendance and record_marks are shown to the teacher for confirmation on screen before anything is saved. For attendance, list only the absent and late learners; everyone else in the class is marked present. For marks, pass the assessment title and each learner's score.
+- Use get_homework_status for "who hasn't handed in homework" and get_at_risk_learners for "which learners are struggling or at risk".
 - Pass "topic" to generation tools when the teacher names a topic. Without it the tools use the next topics from the class's syllabus progress, so keep that progress up to date. Pass "questionCount" when the teacher asks for a specific number of questions.
 
 ## HOW TO RESPOND
-A) If the request needs a tool (save lesson plans/assessments/homework, look up class data, draft report remarks, list saved plans or topics), reply with ONLY this JSON:
+A) If the request needs a tool (save lesson plans/assessments/homework, mark attendance, enter marks, check homework, find at-risk learners, look up class data, draft or save report remarks, list saved plans or topics), reply with ONLY this JSON:
 {
   "message": "<short spoken filler, e.g. 'One moment.'>",
   "actions": [{ "tool": "tool_name", "params": { ... } }],
@@ -3484,9 +4012,9 @@ function cleanFinalMessage(message: string): string {
 class MasterAIService {
 
   private async buildContext(caller: MasterAICaller): Promise<ToolContext> {
-    return isUnrestrictedRole(caller.role)
-      ? { ...caller }
-      : { ...caller, teaching: await loadTeachingScope(caller.userId) };
+    return caller.role === 'TEACHER'
+      ? { ...caller, teaching: await loadTeachingScope(caller.userId) }
+      : { ...caller };
   }
 
   private buildMessages(
@@ -3568,11 +4096,14 @@ class MasterAIService {
     // ---- GUARD: Hold plans that delete data or message people until the user confirms ----
     const risky = (plan.actions || []).filter(a => needsConfirmation(a, ctx.role));
     if (risky.length) {
-      prunePendingPlans();
-      const token = randomUUID();
       const expiresAt = Date.now() + CONFIRM_TTL_MS;
-      pendingPlans.set(token, { userId: ctx.userId, conversationId: caller.conversationId, userMessage, plan, expiresAt });
-      const items = (await Promise.all(risky.map(describeAction))).flatMap(d => d.split('\n'));
+      const token = await storePendingPlan({ userId: ctx.userId, conversationId: caller.conversationId, userMessage, plan, expiresAt });
+      const items = (await Promise.all(risky.map(a => {
+        const validation = validateToolParams(a.tool, a.params || {});
+        return validation.valid
+          ? describeAction({ ...a, params: validation.sanitized }, ctx)
+          : `${toolFriendlyNames[a.tool] || a.tool}: ${validation.error}`;
+      }))).flatMap(d => d.split('\n'));
       const others = plan.actions.length - risky.length;
       if (others > 0) items.push(`Plus ${plural(others, 'other step')} that only read or add data`);
       await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, []);
@@ -3590,7 +4121,7 @@ class MasterAIService {
 
   /** Run a plan the user confirmed. Returns null if the token is unknown, expired, used, or not theirs. */
   async confirmPending(token: string, caller: MasterAICaller): Promise<{ response: MasterAIResponse; conversationId?: string } | null> {
-    const entry = takePendingPlan(token, caller.userId);
+    const entry = await takePendingPlan(token, caller.userId);
     if (!entry) return null;
     // Rebuild context so the caller's current role and scope apply, not the ones at proposal time.
     const ctx = await this.buildContext(caller);
@@ -3600,8 +4131,8 @@ class MasterAIService {
   }
 
   /** Discard a pending plan. Returns its conversation ID when one was cancelled. */
-  cancelPending(token: string, userId: string): { conversationId?: string } | null {
-    const entry = takePendingPlan(token, userId);
+  async cancelPending(token: string, userId: string): Promise<{ conversationId?: string } | null> {
+    const entry = await takePendingPlan(token, userId);
     return entry ? { conversationId: entry.conversationId } : null;
   }
 

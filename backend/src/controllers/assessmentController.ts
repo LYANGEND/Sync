@@ -11,6 +11,7 @@ import {
 import { isDateWithinRangeByDay } from '../utils/academicValidation';
 import { runTermWriteTransaction, TermLifecycleError } from '../services/termLifecycleService';
 import { sendTermLifecycleError } from '../utils/termLifecycleHttp';
+import { saveAssessmentResults } from '../services/academicRecordService';
 import {
   getClassEnrollmentsForTerm,
   StudentPlacementError,
@@ -61,63 +62,6 @@ const bulkRecordResultsSchema = z.object({
     });
   }
 });
-
-type AssessmentResultsUpdate = z.infer<typeof assessmentResultsSchema>;
-
-const buildResultWrites = async (
-  req: AuthRequest,
-  userId: string,
-  updates: AssessmentResultsUpdate[],
-) => {
-  const assessmentIds = updates.map((update) => update.assessmentId);
-  const assessments = await prisma.assessment.findMany({
-    where: { id: { in: assessmentIds } },
-    select: { id: true, classId: true, subjectId: true, termId: true, totalMarks: true },
-  });
-
-  if (assessments.length !== assessmentIds.length) {
-    throw new AcademicScopeError(404, 'One or more assessments were not found');
-  }
-
-  const assessmentMap = new Map(assessments.map((assessment) => [assessment.id, assessment]));
-  const termIds = new Set(assessments.map((assessment) => assessment.termId));
-  if (termIds.size !== 1) {
-    throw new AcademicScopeError(400, 'Assessment results can only be saved for one academic term at a time');
-  }
-
-  for (const update of updates) {
-    const assessment = assessmentMap.get(update.assessmentId)!;
-    await ensureAcademicClassAccess(req, assessment.classId, {
-      subjectId: assessment.subjectId,
-      academicTermId: assessment.termId,
-    });
-    await ensureStudentsBelongToClass(
-      assessment.classId,
-      assessment.termId,
-      update.results.map((result) => result.studentId),
-    );
-
-    const invalidScore = update.results.find((result) => result.score > Number(assessment.totalMarks));
-    if (invalidScore) {
-      throw new AcademicScopeError(
-        400,
-        `A score exceeds the maximum marks for assessment ${assessment.id}`,
-      );
-    }
-  }
-
-  return {
-    academicTermId: [...termIds][0],
-    assessmentIds,
-    writes: updates.flatMap((update) => update.results.map((result) => ({
-      assessmentId: update.assessmentId,
-      studentId: result.studentId,
-      score: result.score,
-      remarks: result.remarks,
-      gradedByUserId: userId,
-    }))),
-  };
-};
 
 export const createAssessment = async (req: Request, res: Response) => {
   try {
@@ -373,34 +317,7 @@ export const recordResults = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const prepared = await buildResultWrites(
-      req as AuthRequest,
-      userId,
-      [{ assessmentId, results }],
-    );
-
-    await runTermWriteTransaction(prepared.academicTermId, 'FINALIZATION', async tx => {
-      const assessmentCount = await tx.assessment.count({
-        where: { id: { in: prepared.assessmentIds }, termId: prepared.academicTermId },
-      });
-      if (assessmentCount !== prepared.assessmentIds.length) {
-        throw new AcademicScopeError(409, 'Assessment term ownership changed while results were being saved');
-      }
-      await Promise.all(prepared.writes.map((write) => tx.assessmentResult.upsert({
-        where: {
-          assessmentId_studentId: {
-            assessmentId: write.assessmentId,
-            studentId: write.studentId,
-          },
-        },
-        update: {
-          score: write.score,
-          remarks: write.remarks,
-          gradedByUserId: write.gradedByUserId,
-        },
-        create: write,
-      })));
-    });
+    await saveAssessmentResults(req as AuthRequest, [{ assessmentId, results }]);
 
     res.json({ message: 'Results recorded successfully' });
   } catch (error) {
@@ -425,34 +342,12 @@ export const bulkRecordResults = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const prepared = await buildResultWrites(req as AuthRequest, userId, updates);
-    await runTermWriteTransaction(prepared.academicTermId, 'FINALIZATION', async tx => {
-      const assessmentCount = await tx.assessment.count({
-        where: { id: { in: prepared.assessmentIds }, termId: prepared.academicTermId },
-      });
-      if (assessmentCount !== prepared.assessmentIds.length) {
-        throw new AcademicScopeError(409, 'Assessment term ownership changed while results were being saved');
-      }
-      await Promise.all(prepared.writes.map((write) => tx.assessmentResult.upsert({
-        where: {
-          assessmentId_studentId: {
-            assessmentId: write.assessmentId,
-            studentId: write.studentId,
-          },
-        },
-        update: {
-          score: write.score,
-          remarks: write.remarks,
-          gradedByUserId: write.gradedByUserId,
-        },
-        create: write,
-      })));
-    });
+    const saved = await saveAssessmentResults(req as AuthRequest, updates);
 
     res.json({
       message: 'Results recorded successfully',
       assessmentCount: updates.length,
-      resultCount: prepared.writes.length,
+      resultCount: saved.resultCount,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

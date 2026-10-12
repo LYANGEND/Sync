@@ -10,7 +10,7 @@
     "migrate:dev": "prisma migrate dev",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
-    "test": "npm run build && node --test tests/schoolDataArchiveService.test.js tests/academicValidation.test.js dist/tests/termLifecycleRules.test.js dist/tests/termBackfillPlanner.test.js dist/tests/termRolloverReadiness.test.js dist/tests/termRolloverAzureBlobBackupStore.test.js dist/tests/studentDuplicateService.test.js",
+    "test": "npm run build && node --test tests/schoolDataArchiveService.test.js tests/academicValidation.test.js dist/tests/termLifecycleRules.test.js dist/tests/termBackfillPlanner.test.js dist/tests/termRolloverReadiness.test.js dist/tests/termRolloverAzureBlobBackupStore.test.js dist/tests/studentDuplicateService.test.js dist/tests/masterAIPolicy.test.js",
     "test:term-lifecycle:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termLifecycleService.integration.test.js",
     "test:term-backfill:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/termBackfillDataSource.integration.test.js",
     "test:student-placement:integration": "npm run build && node --require ./tests/testEnvironment.js --test dist/tests/studentPlacement.integration.test.js",

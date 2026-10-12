@@ -61,7 +61,7 @@ const Sidebar = ({ isOpen = false, onClose, isCollapsed, onToggleCollapse }: Sid
         { icon: Brain, label: 'Intelligence Hub', path: '/ai-intelligence', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER'] },
         { icon: Cpu, label: 'Command Center', path: '/ai-analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER'] },
         { icon: BarChart3, label: 'Analytics', path: '/analytics', roles: ['SUPER_ADMIN', 'BRANCH_MANAGER', 'BURSAR', 'TEACHER'] },
-        { icon: Sparkles, label: 'Master AI', path: '/master-ai', roles: ['SUPER_ADMIN', 'TEACHER'] },
+        { icon: Sparkles, label: 'Master AI', path: '/master-ai', roles: ['SUPER_ADMIN', 'TEACHER', 'BURSAR'] },
       ]
     },
     {

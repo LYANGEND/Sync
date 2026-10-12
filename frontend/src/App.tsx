@@ -202,7 +202,7 @@ function App() {
                     </RoleGuard>
                   } />
                   <Route path="/master-ai" element={
-                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER']}>
+                    <RoleGuard allowedRoles={['SUPER_ADMIN', 'TEACHER', 'BURSAR']}>
                       <MasterAI />
                     </RoleGuard>
                   } />
