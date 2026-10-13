@@ -288,6 +288,8 @@ async function selectDebtors(params: Record<string, any>) {
     gradeLevels: params.gradeLevel === undefined ? undefined : [params.gradeLevel],
   })).filter(d => !params.segment || d.segment === params.segment);
   const reachable = debtors.filter(d => (channel === 'EMAIL' ? d.parentEmail : d.parentPhone));
+  // sendQuickReminders treats an empty list as "every debtor", so never proceed without recipients.
+  if (!reachable.length) return { error: 'No parents with outstanding fees match, so no reminders were sent.' };
   return {
     termId: term.id,
     channel,
@@ -458,8 +460,11 @@ const audience = (roles: unknown) => {
   return list.map(r => `${String(r).toLowerCase().replace(/_/g, ' ')}s`).join(', ');
 };
 
-/** Plain-language description of a risky step, using live data where it helps the user check it. */
-async function describeAction({ tool, params = {} }: PlannedAction, ctx: ToolContext): Promise<string> {
+/**
+ * Plain-language description of a risky step, using live data where it helps the user check it.
+ * Returns an error instead when the step cannot run, so there is nothing to confirm.
+ */
+async function describeAction({ tool, params = {} }: PlannedAction, ctx: ToolContext): Promise<string | { error: string }> {
   const list = (key: string): any[] => (Array.isArray(params[key]) ? params[key] : []);
   switch (tool) {
     case 'delete_calendar_events': {
@@ -501,7 +506,7 @@ async function describeAction({ tool, params = {} }: PlannedAction, ctx: ToolCon
       return 'Delete syllabus topics created for grades where the subject is not taught';
     case 'record_attendance': {
       const prepared = await prepareAttendance(params, ctx);
-      if ('error' in prepared) return `Mark attendance: ${prepared.error}`;
+      if ('error' in prepared) return { error: prepared.error };
       const names = (list: RosterLearner[]) => (list.length ? list.map(learnerName).join(', ') : 'none');
       return [
         `Replace ${prepared.cls.name}'s attendance for ${prepared.date} and notify parents of absent and late learners`,
@@ -512,14 +517,14 @@ async function describeAction({ tool, params = {} }: PlannedAction, ctx: ToolCon
     }
     case 'record_marks': {
       const prepared = await prepareMarks(params, ctx);
-      if ('error' in prepared) return `Enter marks: ${prepared.error}`;
+      if ('error' in prepared) return { error: prepared.error };
       const { assessment, totalMarks, results, rosterSize } = prepared;
       const shown = results.slice(0, 8).map(r => `${learnerName(r.learner)} ${r.score}`).join(', ');
       return `Save ${plural(results.length, 'mark')} out of ${totalMarks} for ${assessment.title} (${assessment.subject.name}, ${assessment.class.name}, ${rosterSize} learners): ${shown}${results.length > 8 ? ', ...' : ''}`;
     }
     case 'send_fee_reminders': {
       const selected = await selectDebtors(params);
-      if ('error' in selected) return `Send fee reminders: ${selected.error}`;
+      if ('error' in selected) return selected as { error: string };
       return `Send ${selected.channel} fee reminders to the parents of ${plural(selected.recipients.length, 'learner')} owing K${selected.totalOwed.toLocaleString()} in total`;
     }
     default:
@@ -3726,8 +3731,6 @@ Respond with JSON: { "classTeacherRemark": "...", "principalRemark": "..." }`,
       const selected = await selectDebtors(params);
       if ('error' in selected) return selected;
       const { termId, channel, recipients, unreachable, totalOwed } = selected;
-      // sendQuickReminders treats an empty list as "every debtor", so never call it without recipients.
-      if (!recipients.length) return { error: 'No parents with outstanding fees match, so no reminders were sent.' };
       void sendQuickReminders({
         academicTermId: termId,
         studentIds: recipients.map(d => d.studentId),
@@ -4096,14 +4099,27 @@ class MasterAIService {
     // ---- GUARD: Hold plans that delete data or message people until the user confirms ----
     const risky = (plan.actions || []).filter(a => needsConfirmation(a, ctx.role));
     if (risky.length) {
-      const expiresAt = Date.now() + CONFIRM_TTL_MS;
-      const token = await storePendingPlan({ userId: ctx.userId, conversationId: caller.conversationId, userMessage, plan, expiresAt });
-      const items = (await Promise.all(risky.map(a => {
+      const checks = await Promise.all(risky.map(a => {
         const validation = validateToolParams(a.tool, a.params || {});
         return validation.valid
           ? describeAction({ ...a, params: validation.sanitized }, ctx)
-          : `${toolFriendlyNames[a.tool] || a.tool}: ${validation.error}`;
-      }))).flatMap(d => d.split('\n'));
+          : { error: validation.error || 'Invalid request' };
+      }));
+      const friendly = (tool: string) => toolFriendlyNames[tool] || tool;
+      // No risky step can run, so there is nothing to confirm: report why and run only the safe steps.
+      if (checks.every(c => typeof c !== 'string')) {
+        const blocked: ExecutionResult[] = risky.map((a, i) => {
+          const error = (checks[i] as { error: string }).error;
+          return { tool: a.tool, success: false, error, summary: `${friendly(a.tool)} — ${error.replace(/\.$/, '')}` };
+        });
+        const results = [...await this.executeToolActions(plan.actions.filter(a => !risky.includes(a)), ctx), ...blocked];
+        return this.finish(userMessage, plan, results, ctx, aiResponse.tokensUsed);
+      }
+      const expiresAt = Date.now() + CONFIRM_TTL_MS;
+      const token = await storePendingPlan({ userId: ctx.userId, conversationId: caller.conversationId, userMessage, plan, expiresAt });
+      const items = checks
+        .map((c, i) => (typeof c === 'string' ? c : `${friendly(risky[i].tool)}: ${c.error}`))
+        .flatMap(d => d.split('\n'));
       const others = plan.actions.length - risky.length;
       if (others > 0) items.push(`Plus ${plural(others, 'other step')} that only read or add data`);
       await this.logUsage(ctx, userMessage, aiResponse.tokensUsed, []);
@@ -4140,9 +4156,10 @@ class MasterAIService {
   private async finish(userMessage: string, plan: AIPlan, results: ExecutionResult[], ctx: ToolContext, tokensUsed: number | undefined): Promise<MasterAIResponse> {
     let finalMessage = plan.message;
     const successResults = results.filter(r => r.success);
-    const needsSummarizer = successResults.length > 0 && (
-      successResults.some(r => r.data && (Array.isArray(r.data) ? r.data.length > 0 : Object.keys(r.data || {}).length > 2))
-    );
+    const hasContent = (data: any) => Array.isArray(data)
+      ? data.length > 0
+      : Object.keys(data || {}).length > 2 || Object.values(data || {}).some(v => Array.isArray(v) && v.length > 0);
+    const needsSummarizer = successResults.some(r => r.data && hasContent(r.data));
     if (needsSummarizer) {
       try {
         finalMessage = await this.buildAccurateSummary(userMessage, results, plan.message, ctx);
@@ -4186,6 +4203,9 @@ class MasterAIService {
         const timeoutMs = LONG_RUNNING_TOOLS.has(action.tool) ? TOOL_TIMEOUT_LONG_MS : TOOL_TIMEOUT_MS;
         const data = await withTimeout(toolDef.execute(validation.sanitized, ctx.userId, ctx), timeoutMs, action.tool);
         const friendlyName = toolFriendlyNames[toolDef.name] || toolDef.name;
+        if (typeof data?.error === 'string') {
+          return { tool: action.tool, success: false, error: data.error, summary: `${friendlyName} — ${data.error.replace(/\.$/, '')}` };
+        }
         let summaryText: string;
         if (data?.summary && typeof data.summary === 'string') {
           const hasErrors = data.errors?.length > 0;
